@@ -61,12 +61,12 @@ int main(int argc, char** argv)
         material.sliceCount = 9; material.heightMeters = {0.5f, 0, 2, 0};
         material.Validate();
         TerrainPaint::Config varied = material;
-        varied.farScale = {5, 40, 250, 0.6f}; varied.macro = {260, 0.12f, 0.15f};
+        varied.farScale = {5, 40, 250, 0.6f}; varied.macro = {260, 0.12f, 0.15f, 0.35f};
         varied.craters = {6, 0.2f, 0.5f, 3}; varied.craterLayers = {1, 0, 1, 0};
         varied.Validate();
         check(std::abs(varied.CraterMeters() - 0.75f * 0.2f * 2 * 0.42f * (6 + 0.75f * 18 + 0.5f * 54)) < 1e-4f &&
             material.CraterMeters() == 0, "crater displacement bound wrong");
-        for (int bad = 0; bad < 11; ++bad)
+        for (int bad = 0; bad < 12; ++bad)
         {
             TerrainPaint::Config broken = bad == 2 ? config : bad >= 4 ? varied : material;
             if (bad == 0) broken.sliceCount = 7;
@@ -80,6 +80,7 @@ int main(int argc, char** argv)
             if (bad == 8) broken.craterLayers = {};
             if (bad == 9) broken.sliceCount = 5, broken.heightMeters = {};
             if (bad == 10) broken.craters = {};
+            if (bad == 11) broken.macro[3] = 2;
             bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
             check(rejected, "invalid paint material accepted");
         }

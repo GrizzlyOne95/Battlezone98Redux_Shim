@@ -133,6 +133,26 @@ class AutoPaintTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "slope"):
             auto.validate_recipe(recipe)
 
+    def test_shape_reweights_hollows_and_ridges(self):
+        cells = np.zeros((32, 32), dtype=np.uint16)
+        plane = np.full((128, 128), 1000, dtype=np.uint16)
+        plane[28:36, 28:36] = 800                                   # 20 m pit
+        plane[92:100, 92:100] = 1200                                # 20 m mound
+        shape = {"radiusMeters": 60, "rangeMeters": 6, "amount": 1, "hollow": [0, 1, 0, 0], "ridge": [0, 0, 1, 0]}
+        recipe = dict(self.recipe, shape=shape)
+        auto.validate_recipe(recipe)
+        field = auto.cell_field(cells, plane, recipe, seed=0)
+        np.testing.assert_allclose(field[8, 8], (0, 1, 0, 0), atol=1e-6)
+        np.testing.assert_allclose(field[23, 23], (0, 0, 1, 0), atol=1e-6)
+        np.testing.assert_allclose(field[4, 24], (1, 0, 0, 0), atol=1e-6)  # flat ground away from both
+        np.testing.assert_allclose(field.sum(axis=2), 1)
+        typed = auto.cell_field(cells, plane, dict(recipe, shape=dict(shape, types=[1])), seed=0)
+        self.assertTrue(np.all(typed[..., 0] == 1), "unlisted types keep their weights")
+        for bad in (dict(shape, radiusMeters=5), dict(shape, types=[9]),
+                    {k: v for k, v in shape.items() if k not in ("hollow", "ridge")}):
+            with self.assertRaisesRegex(ValueError, "shape"):
+                auto.validate_recipe(dict(self.recipe, shape=bad))
+
     def test_multi_map_manifest_shares_identical_controls(self):
         files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
         maps = [auto.load_map(name, files, self.recipe, None, 64) for name in ("alpha", "beta")]
@@ -213,10 +233,13 @@ class AutoPaintTests(unittest.TestCase):
         paint = auto.build_pack(maps, varied, self.root, self.root / "out3", size, "test_auto", False)["materials"]["TERRAIN"]["paint"]
         self.assertEqual((paint["far"], paint["macro"]), ([5, 40, 250, 0.6], [260, 0.12, 0.15]))
         self.assertEqual((paint["craters"], paint["craterLayers"]), ([6, 0.2, 0.5, 3], [1, 0, 0, 0]))
+        hued = auto.build_pack(maps, dict(varied, macro=dict(varied["macro"], hue=0.35)), self.root, self.root / "out6", size, "test_auto", False)
+        self.assertEqual(hued["materials"]["TERRAIN"]["paint"]["macro"], [260, 0.12, 0.15, 0.35])
         self.assertEqual(auto.build_pack(maps, dict(varied, layers=[dict(varied["layers"][0], proceduralCraters=0.5)] + self.recipe["layers"][1:]),
                          self.root, self.root / "out4", size, "test_auto", False)["materials"]["TERRAIN"]["paint"]["craterLayers"], [0.5, 0, 0, 0])
         for bad, message in ((dict(varied, far={"scale": 1, "startMeters": 0, "endMeters": 1, "amount": 1}), "far"),
                              (dict(varied, macro={"meters": 5, "brightness": 0.1, "saturation": 0.1}), "macro"),
+                             (dict(varied, macro=dict(varied["macro"], hue=2)), "macro"),
                              (dict(varied, craters=dict(varied["craters"], octaves=4)), "craters"),
                              (dict(detiled, layers=varied["layers"]), "proceduralCraters")):
             with self.assertRaisesRegex(ValueError, message):

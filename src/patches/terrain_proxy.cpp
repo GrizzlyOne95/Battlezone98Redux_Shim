@@ -1188,7 +1188,13 @@ namespace BZROpenShim
                         if (paint.contains("far"))
                             binding.paint.farScale = paint.at("far").get<std::array<float, 4>>();
                         if (paint.contains("macro"))
-                            binding.paint.macro = paint.at("macro").get<std::array<float, 3>>();
+                        {
+                            // Three numbers, or four with the hue turn.
+                            const auto macro = paint.at("macro").get<std::vector<float>>();
+                            if (macro.size() != 3 && macro.size() != 4)
+                                throw std::runtime_error("paint macro needs three or four numbers");
+                            std::copy(macro.begin(), macro.end(), binding.paint.macro.begin());
+                        }
                         if (paint.contains("craters"))
                         {
                             binding.paint.craters = paint.at("craters").get<std::array<float, 4>>();

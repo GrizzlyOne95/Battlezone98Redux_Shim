@@ -33,8 +33,8 @@ namespace BZROpenShim::TerrainPaint
         // larger, so the repeat stops reading at range. Scale 0 is off.
         std::array<float, 4> farScale = {};
         // Large-scale variation: noise metres, brightness and saturation
-        // swing (fractions). Metres 0 is off.
-        std::array<float, 3> macro = {};
+        // swing (fractions), hue turn in radians inside patches. Metres 0 is off.
+        std::array<float, 4> macro = {};
         // Procedural world-space craters: cell metres, depth to diameter,
         // coverage, octaves (each triples the cell). Cell 0 is off.
         // craterLayers (0..1 per layer) says how strongly each layer carries them.
@@ -87,8 +87,8 @@ namespace BZROpenShim::TerrainPaint
             for (float v : macro) if (!std::isfinite(v))
                 throw std::runtime_error("paint macro must be finite");
             if (macro[0] != 0 && (macro[0] < 10 || macro[0] > 10000 || macro[1] < 0 || macro[1] > 0.5f ||
-                macro[2] < 0 || macro[2] > 1))
-                throw std::runtime_error("paint macro needs 10..10000 metres, brightness 0..0.5 and saturation 0..1");
+                macro[2] < 0 || macro[2] > 1 || macro[3] < -1 || macro[3] > 1))
+                throw std::runtime_error("paint macro needs 10..10000 metres, brightness 0..0.5, saturation 0..1 and hue -1..1");
             for (float v : craters) if (!std::isfinite(v))
                 throw std::runtime_error("paint craters must be finite");
             for (float v : craterLayers) if (!(v >= 0 && v <= 1))
@@ -378,6 +378,16 @@ float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, OpenShim
         float sat = OpenShimDetileNoise(m * 0.8 + 41.0) * 1.3 + OpenShimDetileNoise(m * 2.3 + 73.0) * 0.7 - 1.0;
         float luma = dot(colour, float3(0.299, 0.587, 0.114));
         colour = max(lerp(luma, colour, 1.0 + sat * openShimPaintMacro.z) * (1.0 + bright * openShimPaintMacro.y), 0.0);
+        if (openShimPaintMacro.w != 0)
+        {
+            // Patches (about half the ground) turn the chroma in YIQ; positive turns green toward yellow.
+            float patch = saturate(OpenShimDetileNoise(m * 0.7 + 113.0) * 1.3 + OpenShimDetileNoise(m * 1.9 + 151.0) * 0.7 - 1.0);
+            float angle = patch * openShimPaintMacro.w, c = cos(angle), s = sin(angle);
+            float y = dot(colour, float3(0.299, 0.587, 0.114));
+            float2 iq = float2(dot(colour, float3(0.596, -0.274, -0.322)), dot(colour, float3(0.211, -0.523, 0.312)));
+            iq = float2(iq.x * c - iq.y * s, iq.x * s + iq.y * c);
+            colour = max(y + float3(0.956 * iq.x + 0.621 * iq.y, -0.272 * iq.x - 0.647 * iq.y, -1.106 * iq.x + 1.703 * iq.y), 0.0);
+        }
     }
     return float4(colour, 1);
 }
@@ -493,7 +503,7 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
                 for (int i = 0; i < n; ++i) constants << (i ? "," : "") << v[i];
                 constants << ");\n"; };
             vector("openShimPaintFar", config.farScale.data(), 4);
-            vector("openShimPaintMacro", config.macro.data(), 3);
+            vector("openShimPaintMacro", config.macro.data(), 4);
             vector("openShimPaintCraters", config.craters.data(), 4);
             vector("openShimPaintCraterLayers", config.craterLayers.data(), 4);
             constants << "static const float4 openShimPaintBounds = float4(";

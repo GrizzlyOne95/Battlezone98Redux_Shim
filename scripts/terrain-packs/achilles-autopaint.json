@@ -83,14 +83,34 @@
       ]
     }
   },
+  "shape": {
+    "radiusMeters": 120,
+    "rangeMeters": 6,
+    "amount": 0.5,
+    "types": [
+      0
+    ],
+    "hollow": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "ridge": [
+      0.5,
+      0,
+      0.1,
+      0.4
+    ]
+  },
   "slope": {
     "weights": [
       0,
       0,
-      1,
-      0
+      0.85,
+      0.15
     ],
-    "startDegrees": 24,
+    "startDegrees": 22,
     "fullDegrees": 38
   },
   "layers": [
@@ -101,7 +121,7 @@
       "archive": "clover_patches_on_grass_sgmkajak_8k.zip",
       "member": "Clover_Patches_on_Grass_sgmkajak_8K_BaseColor.jpg",
       "matchMean": "crhd_achilles_ac00sa0_d.dds",
-      "heightMeters": 0.35
+      "heightMeters": 0.6
     },
     {
       "name": "Forest floor",
@@ -122,13 +142,14 @@
       "heightMeters": 1.2
     },
     {
-      "name": "River gravel",
+      "name": "Bare earth",
       "detile": true,
       "repeatMeters": 18,
-      "archive": "beach_gravel_with_pebbles_uifndiulw_8k.zip",
-      "member": "Beach_Gravel_With_Pebbles_uifndiulw_8K_BaseColor.jpg",
+      "archive": "military_trenches_ground_dirt_fine_04_ydyjcgrs_8k.zip",
+      "member": "ydyjcgrs_8K_Basecolor.jpg",
       "matchMean": "crhd_achilles_ac55sa0_d.dds",
-      "heightMeters": 0.5
+      "heightMeters": 0.4,
+      "derivedReliefMeters": 0.4
     }
   ],
   "heightBlend": 0.5,
@@ -141,6 +162,7 @@
   "macro": {
     "meters": 260,
     "brightness": 0.12,
-    "saturation": 0.15
+    "saturation": 0.15,
+    "hue": 0.35
   }
 }

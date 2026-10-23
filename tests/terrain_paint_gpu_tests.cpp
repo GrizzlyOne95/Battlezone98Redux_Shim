@@ -270,7 +270,7 @@ RWStructuredBuffer<float4> testResults : register(u0);
         // Distance scale, macro variation and craters: every pixel variant
         // and the domain shader compile; crater slopes match their heights.
         TerrainPaint::Config varied = detiled;
-        varied.farScale = {5, 40, 250, 0.6f}; varied.macro = {260, 0.12f, 0.15f};
+        varied.farScale = {5, 40, 250, 0.6f}; varied.macro = {260, 0.12f, 0.15f, 0.35f};
         varied.craters = {6, 0.2f, 0.5f, 3}; varied.craterLayers = {1, 0, 0, 0};
         // Triplanar with IBL, and the top-projection material path.
         const std::pair<std::string, const char*> variants[] = {

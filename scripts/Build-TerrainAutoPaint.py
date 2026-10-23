@@ -224,6 +224,15 @@ def cell_slope_degrees(plane, cell_shape):
     return degrees[:rows * CELL_SAMPLES, :cols * CELL_SAMPLES].reshape(rows, CELL_SAMPLES, cols, CELL_SAMPLES).mean(axis=(1, 3))
 
 
+def cell_relief_meters(plane, cell_shape, radius_meters):
+    """Each MAT cell's mean height minus its surroundings about `radius_meters` across:
+    negative in hollows and valleys, positive on ridges and hilltops."""
+    heights = plane.astype(np.float64) * HEIGHT_UNIT_METERS
+    rows, cols = cell_shape
+    cells = heights[:rows * CELL_SAMPLES, :cols * CELL_SAMPLES].reshape(rows, CELL_SAMPLES, cols, CELL_SAMPLES).mean(axis=(1, 3))
+    return cells - blur(cells, radius_meters / (CELL_SAMPLES * SAMPLE_METERS))
+
+
 def variation_noise(cell_shape, meters, seed):
     """Smooth 0..1 patch field on the MAT cell grid; deterministic per seed."""
     noise = np.random.default_rng(seed).random(cell_shape)
@@ -238,6 +247,10 @@ def cell_field(cells, plane, recipe, seed):
     variation: {"meters", "amount", "types": {type: weights}} blends each listed
     type toward its alternate weights inside noise patches about `meters` wide,
     so a map painted almost entirely with one type does not repeat one tile.
+    shape: {"radiusMeters", "rangeMeters", "amount", "types", "hollow", "ridge"}
+    blends cells of the listed types (all when omitted) toward `hollow` where the
+    ground sits below its surroundings and toward `ridge` where it stands above,
+    reaching `amount` at `rangeMeters` of difference: lush valleys, dry crests.
     slope: {"weights", "startDegrees", "fullDegrees"} blends steep cells toward
     a rock layer whatever their MAT type.
     """
@@ -252,6 +265,14 @@ def cell_field(cells, plane, recipe, seed):
             alternate[int(index)] = [(1 - amount) * a + amount * b for a, b in zip(types[int(index)], vector)]
         patches = variation_noise(cells.shape, variation.get("meters", 150), seed)[..., None]
         weights = weights * (1 - patches) + cell_weights(cells, alternate, recipe["transition"], fallback) * patches
+    shape = recipe.get("shape")
+    if shape and plane is not None:
+        relief = cell_relief_meters(plane, cells.shape, shape["radiusMeters"])
+        mask = np.isin((cells >> 12) & 15, shape["types"]) if "types" in shape else np.ones(cells.shape, dtype=bool)
+        for key, sign in (("hollow", -1), ("ridge", 1)):
+            if key in shape:
+                t = (shape.get("amount", 0.5) * smoothstep(0, shape["rangeMeters"], sign * relief) * mask)[..., None]
+                weights = weights * (1 - t) + np.asarray(shape[key], dtype=np.float64) * t
     slope = recipe.get("slope")
     if slope and plane is not None:
         steep = smoothstep(slope["startDegrees"], slope["fullDegrees"], cell_slope_degrees(plane, cells.shape))[..., None]
@@ -332,8 +353,8 @@ def validate_recipe(recipe):
     if "macro" in recipe:
         macro = recipe["macro"]
         if not (10 <= macro.get("meters", 0) <= 10000 and 0 <= macro.get("brightness", -1) <= 0.5
-                and 0 <= macro.get("saturation", -1) <= 1):
-            raise ValueError("macro needs meters 10..10000, brightness 0..0.5 and saturation 0..1")
+                and 0 <= macro.get("saturation", -1) <= 1 and -1 <= macro.get("hue", 0) <= 1):
+            raise ValueError("macro needs meters 10..10000, brightness 0..0.5, saturation 0..1 and hue -1..1")
     crater_layers = [layer.get("proceduralCraters", False) for layer in recipe["layers"]]
     if "craters" in recipe:
         craters = recipe["craters"]
@@ -348,6 +369,15 @@ def validate_recipe(recipe):
         slope = recipe["slope"]
         if not weight_vector(slope.get("weights")) or not 0 <= slope.get("startDegrees", -1) < slope.get("fullDegrees", -1) <= 90:
             raise ValueError("slope needs four weights and 0 <= startDegrees < fullDegrees <= 90")
+    if "shape" in recipe:
+        shape = recipe["shape"]
+        known = {int(k) for k in recipe["typeWeights"]}
+        if not (20 <= shape.get("radiusMeters", 0) <= 1000 and 0 < shape.get("rangeMeters", 0) <= 100
+                and 0 < shape.get("amount", 0.5) <= 1 and ("hollow" in shape or "ridge" in shape)
+                and all(weight_vector(shape[k]) for k in ("hollow", "ridge") if k in shape)
+                and all(isinstance(t, int) and t in known for t in shape.get("types", []))):
+            raise ValueError("shape needs radiusMeters 20..1000, rangeMeters (0,100], amount (0,1], "
+                             "hollow and/or ridge weights and mapped types")
 
 
 def load_map(name, files, recipe, capture_path, weight_size, trust_capture=False):
@@ -698,7 +728,7 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
         paint["far"] = [far["scale"], far["startMeters"], far["endMeters"], far["amount"]]
     if "macro" in recipe:
         macro = recipe["macro"]
-        paint["macro"] = [macro["meters"], macro["brightness"], macro["saturation"]]
+        paint["macro"] = [macro["meters"], macro["brightness"], macro["saturation"]] + ([macro["hue"]] if macro.get("hue") else [])
     if material:
         paint["heightBlend"] = recipe.get("heightBlend", 0.5)
         paint["heightMeters"] = [layer.get("heightMeters", 0) for layer in recipe["layers"]]

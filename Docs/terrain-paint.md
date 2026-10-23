@@ -233,10 +233,12 @@ Three recipe-level settings vary the ground past what one tile can show:
   beyond pay for the second set of taps. The height-aware blend and the
   displacement stay at the normal scale. Passes without view depth (the
   glow pass) keep the normal scale. Written as `paint.far`, four numbers.
-- `macro` (`meters`, `brightness`, `saturation`) multiplies the final colour
-  by soft two-octave noise about `meters` across: brightness swings by up to
-  `brightness` (0 to 0.5) and saturation by up to `saturation` (0 to 1).
-  Written as `paint.macro`, three numbers.
+- `macro` (`meters`, `brightness`, `saturation`, optional `hue`) multiplies the
+  final colour by soft two-octave noise about `meters` across: brightness swings
+  by up to `brightness` (0 to 0.5) and saturation by up to `saturation` (0 to 1).
+  `hue` (-1 to 1 radians) turns the chroma in YIQ inside separate noise patches
+  covering about half the ground; positive turns green toward yellow, for dry
+  meadow next to lush. Written as `paint.macro`, three numbers, or four with hue.
 - `craters` (`cellMeters`, `depth`, `coverage`, `octaves`) adds a procedural
   impact field in world space, so it never repeats with the layer tile. Each
   jittered cell holds at most one crater (`coverage` is the share that do),
@@ -269,6 +271,11 @@ mission on it. Mars uses the older `mars-autopaint.json` form.
 - `variation`: low-frequency noise that swaps a type's weight to its partner
   layer, so a world-sized patch of one type is not one layer.
 - `slope`: steep cells go to a rock layer.
+- `shape` (`radiusMeters`, `rangeMeters`, `amount`, optional `types`, `hollow`,
+  `ridge`): each cell's height against its surroundings, about `radiusMeters`
+  across, blends cells of the listed types toward `hollow` where the ground
+  sits lower and `ridge` where it stands higher, reaching `amount` at
+  `rangeMeters` of difference. Applied after `variation` and before `slope`.
 - `layers`: four layers with art, `repeatMeters`, `matchMean` (the stock tile
   whose mean colour the layer is matched to), height and specular.
 - `heightBlend`, `far`, `macro` and (Moon only) `craters`.
@@ -278,6 +285,17 @@ All six worlds use detile on every layer, plus `far` {5, 40, 250, 0.6} and
 `proceduralCraters` (0.6 on Dust, 1 on Cratered dust), with `craters` set to
 cell 8 m, depth 0.2, coverage 0.35 and three octaves. The first setting
 (cell 6 m, coverage 0.5) was too busy and the rims too sharp.
+
+Achilles (Earth-like) adds the shape rule and hue. Grass that sits above
+its surroundings by 6 m within about 120 m turns half to bare earth and a
+little rock. Grass in hollows stays grass rather than becoming forest floor.
+Slopes start turning to mossy rock with some earth at 22 degrees. `macro.hue`
+is 0.35, which gives straw-coloured patches in the green. The fourth layer is
+bare earth (fine dirt matched to the stock river tile) rather than river gravel:
+the CR Achilles maps paint almost no river cells, so the layer now serves the
+crests, banks and variation patches. A first try with `amount` 0.7, shape on
+forest too and 40% earth on slopes turned misn18's hillsides tan; the control
+map preview (each channel tinted) catches that before a game run.
 
 **Build.**
 
