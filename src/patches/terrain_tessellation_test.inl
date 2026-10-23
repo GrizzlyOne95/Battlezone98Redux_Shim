@@ -259,15 +259,48 @@ bool InstallNativeTerrainTessellationTest()
         }
         g_activeTerrainReliefAmplitude = g_config.microReliefTest ?
             TerrainHdMaterial::ScaledMicroReliefAmplitude(g_config.microReliefAmplitude, reliefScale) : 0.0f;
+        // Full-material paint packs replace the noise with their own layer
+        // heights, in metres. The relief slider scales them (0.25 = authored).
+        // Craters can reach CraterMeters below or above on top of the layers,
+        // and the erosion detail DetailMeters either way.
+        const float paintHeightMeters = g_HdPaint.enabled && g_HdPaint.Material() ?
+            *std::max_element(g_HdPaint.heightMeters.begin(), g_HdPaint.heightMeters.end()) +
+            2.0f * g_HdPaint.CraterMeters() + 2.0f * g_HdPaint.DetailMeters() : 0.0f;
+        const bool paintHeight = g_activeTerrainReliefAmplitude > 0.0f && paintHeightMeters > 0.0f;
+        const float paintHeightScale = g_config.microReliefAmplitude / 0.25f;
+        if (paintHeight) g_activeTerrainReliefAmplitude = 0.5f * paintHeightMeters * paintHeightScale;
         if (g_activeTerrainReliefAmplitude > 0.0f)
             source = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE " +
                 std::to_string(g_activeTerrainReliefAmplitude) + "\n" + source;
-        const bool textureHeight = g_activeTerrainReliefAmplitude > 0.0f && hdBinding && !hdBinding->heightTexture.empty();
+        const bool textureHeight = !paintHeight && g_activeTerrainReliefAmplitude > 0.0f && hdBinding && !hdBinding->heightTexture.empty();
         if (textureHeight)
         {
             PrepareTerrainHeightTexture(buffer, hdBinding->heightTexture);
             source = "#define OPENSHIM_HEIGHT_TEST 1\n#define OPENSHIM_HEIGHT_NORMALIZED 1\n" + source;
         }
+        if (paintHeight)
+        {
+            PrepareTerrainPaintHeightTexture(g_hdDiffuseNativeTexture);
+            std::ostringstream defines; defines.imbue(std::locale::classic()); defines << std::setprecision(9) << std::scientific;
+            const auto vector = [&](const char* name, const std::array<float, 4>& v) {
+                defines << "#define " << name << " float4(" << v[0] << "," << v[1] << "," << v[2] << "," << v[3] << ")\n"; };
+            defines << "#define OPENSHIM_PAINT_HEIGHT 1\n";
+            vector("OPENSHIM_PAINT_BOUNDS", g_HdPaint.bounds);
+            if (g_HdPaint.craters[0] > 0)
+                vector("OPENSHIM_PAINT_CRATERS", g_HdPaint.craters);
+            if (g_HdPaint.detail[0] > 0)
+                vector("OPENSHIM_PAINT_DETAIL", g_HdPaint.detail);
+            defines << "#define OPENSHIM_PAINT_HEIGHT_SCALE " << paintHeightScale << "\n";
+            // Per-layer displacement span, for the adaptive hull's relief scale.
+            defines << "static const float openShimPaintReliefMeters[" << g_HdPaint.Layers() << "] = {";
+            for (std::size_t i = 0; i < g_HdPaint.Layers(); ++i)
+                defines << (i ? "," : "") << g_HdPaint.heightMeters[i] + 2.0f * g_HdPaint.CraterMeters() * g_HdPaint.craterLayers[i] +
+                    2.0f * g_HdPaint.DetailMeters() * g_HdPaint.detailLayers[i];
+            defines << "};\n";
+            source = defines.str() + TerrainPaint::LayerHlsl(g_HdPaint) + TerrainPaint::DetileHlsl() +
+                TerrainPaint::CraterHlsl() + source;
+        }
+        const bool domainTexture = textureHeight || paintHeight;
         void* materialManager = g_ogre.getMaterialManager();
         void* programManager = g_ogre.getHighLevelProgramManager();
         if (!materialManager || !programManager)
@@ -346,7 +379,7 @@ bool InstallNativeTerrainTessellationTest()
                         g_ogre.loadResource(program.rep, true);
                         if (!g_ogre.programSupported(program.rep))
                             throw std::runtime_error("shader compilation unsupported");
-                        if (textureHeight && stage == 1) RegisterTerrainHeightDomain(program.rep);
+                        if (domainTexture && stage == 1) RegisterTerrainHeightDomain(program.rep);
                         const std::string actualInput = TerrainProgramSignature(program.rep, "ISGN", stage == 1);
                         const std::string actualOutput = TerrainProgramSignature(program.rep, "OSGN", stage == 0);
                         if (expected != actualInput || expected != actualOutput)

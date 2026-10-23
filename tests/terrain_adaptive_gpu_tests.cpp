@@ -40,8 +40,8 @@ StructuredBuffer<EdgeTest> edges : register(t0);
 RWStructuredBuffer<float4> results : register(u0);
 [numthreads(1,1,1)] void TestEdges(uint3 id:SV_DispatchThreadID) {
     EdgeTest e=edges[id.x];
-    results[id.x]=float4(TerrainAdaptiveEdge(e.a,e.b,e.viewport.xy),
-        TerrainAdaptiveEdge(e.b,e.a,e.viewport.xy),0,0);
+    results[id.x]=float4(TerrainAdaptiveEdge(e.a,e.b,e.viewport.xy,1),
+        TerrainAdaptiveEdge(e.b,e.a,e.viewport.xy,1),TerrainAdaptiveEdge(e.a,e.b,e.viewport.xy,.4),0);
 }
 TerrainTessVertex TestVertex(uint id:SV_VertexID) {
     const float2 points[6]={float2(-.25,-.25),float2(-.25,.25),float2(.25,.25),
@@ -102,6 +102,8 @@ float4 TestPixel(TerrainTessVertex v):SV_Target { return float4(1,1,1,1); }
         for(size_t i=3;i<=10;++i) check(values[i].x==4,"unsafe edge did not retain conservative cap");
         check(values[11].x==2,"degenerate edge was culled");
         check(values[13].x>values[12].x&&values[13].x-values[12].x<.001f,"factor request snapped under small view change");
+        // Flat paint relief scales the request down, still floored at two.
+        check(values[0].z==2&&std::abs(values[2].z-64.0f/12.0f*.4f)<1e-5f&&values[3].z==4,"relief scale response wrong");
         context->Unmap(staging.Get(),0);
 
         code=compile(source,"TestVertex","vs_5_0"); ComPtr<ID3D11VertexShader> vertex;

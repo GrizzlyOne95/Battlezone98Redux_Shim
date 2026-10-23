@@ -1,0 +1,149 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "material": "VE_DETAIL_ATLAS",
+  "diffuseResource": "venus_atlas_d.dds",
+  "typeNames": {
+    "0": "Sulphur Deposits",
+    "1": "Liquid Sulphur",
+    "2": "Base",
+    "3": "Hardened Sulphur",
+    "4": "Geyser"
+  },
+  "typeWeights": {
+    "0": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "1": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "2": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "3": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "4": [
+      0,
+      0,
+      1,
+      0
+    ]
+  },
+  "transition": {
+    "cap": 0.3,
+    "diagonal": 0.5
+  },
+  "blurMeters": 14,
+  "outsideWeights": [
+    1,
+    0,
+    0,
+    0
+  ],
+  "variation": {
+    "meters": 200,
+    "amount": 0.45,
+    "types": {
+      "0": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "3": [
+        1,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "erosion": {
+    "talus": {
+      "weights": [
+        0,
+        0,
+        0.5,
+        0.5
+      ],
+      "amount": 0.5,
+      "coverage": 0.05,
+      "types": [
+        0,
+        2,
+        3,
+        4
+      ]
+    }
+  },
+  "slope": {
+    "weights": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "startDegrees": 24,
+    "fullDegrees": 38
+  },
+  "layers": [
+    {
+      "name": "Sulphur deposits",
+      "detile": true,
+      "repeatMeters": 18,
+      "archive": "sulphur_rock_vmijee1g_8k.zip",
+      "member": "Sulphur_Rock_vmijee1g_8K_BaseColor.jpg",
+      "matchMean": "crhd_venus_ve00sa0_d.dds",
+      "heightMeters": 0.8
+    },
+    {
+      "name": "Liquid sulphur",
+      "detile": true,
+      "repeatMeters": 16,
+      "file": "crhd_venus_ve11sa0_d.dds",
+      "heightMeters": 0.15
+    },
+    {
+      "name": "Hardened sulphur",
+      "detile": true,
+      "repeatMeters": 20,
+      "archive": "muddy_rock_ubkmfang_8k.zip",
+      "member": "Muddy_Rock_ubkmfang_8K_BaseColor.jpg",
+      "matchMean": "crhd_venus_ve33sa0_d.dds",
+      "heightMeters": 0.6
+    },
+    {
+      "name": "Crag",
+      "detile": true,
+      "repeatMeters": 40,
+      "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
+      "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
+      "matchMean": "crhd_venus_ve33sa0_d.dds",
+      "heightMeters": 1.8
+    }
+  ],
+  "heightBlend": 0.5,
+  "far": {
+    "scale": 5,
+    "startMeters": 40,
+    "endMeters": 250,
+    "amount": 0.6
+  },
+  "macro": {
+    "meters": 260,
+    "brightness": 0.12,
+    "saturation": 0.15
+  }
+}

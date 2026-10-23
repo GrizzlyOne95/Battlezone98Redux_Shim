@@ -9,16 +9,29 @@
 #ifndef OPENSHIM_TESS_TARGET_PIXELS
 #define OPENSHIM_TESS_TARGET_PIXELS 12
 #endif
+// Paint relief scales the adaptive request: layers that displace less than
+// RELIEF_FULL metres get proportionally fewer segments, down to RELIEF_FLAT.
+#ifndef OPENSHIM_TESS_RELIEF_FLAT
+#define OPENSHIM_TESS_RELIEF_FLAT 0.4
+#endif
+#ifndef OPENSHIM_TESS_RELIEF_FULL
+#define OPENSHIM_TESS_RELIEF_FULL 1.5
+#endif
 #if defined(OPENSHIM_HEIGHT_TEST) && (!defined(OPENSHIM_RELIEF_TEST) || defined(VERTEX_LIGHTING))
 #error Texture height needs the qualified per-pixel relief interface
+#endif
+#if defined(OPENSHIM_PAINT_HEIGHT) && (!defined(OPENSHIM_RELIEF_TEST) || !defined(OPENSHIM_TERRAIN_HD) || \
+    defined(OPENSHIM_HEIGHT_TEST) || defined(VERTEX_LIGHTING))
+#error Paint height needs the paint-mode HD interface and owns the domain texture slot
 #endif
 
 #if defined(OPENSHIM_TESS_ADAPTIVE)
 // Ogre ACT_VIEWPORT_SIZE supplies width/height and their reciprocals per pass.
 float4 tessViewport;
 // Only shared endpoints and viewport affect an edge. Material UVs, normals
-// and the triangle's third vertex must not change its subdivision request.
-float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport)
+// and the triangle's third vertex must not change its subdivision request;
+// relief is the larger of the two endpoints' own paint relief scales.
+float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport, float relief)
 {
     if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(viewport)) ||
         any(viewport <= 0.0) || any(viewport > 16384.0) || min(a.w,b.w) <= 0.0001)
@@ -28,7 +41,7 @@ float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport)
     if (!isfinite(extent)) return OPENSHIM_TESS_FACTOR;
     // Fractional-even retains at least two segments and moves new samples
     // continuously between 2 and the configured cap. Never cull invalid edges.
-    return clamp(extent / OPENSHIM_TESS_TARGET_PIXELS, 2.0, OPENSHIM_TESS_FACTOR);
+    return clamp(extent / OPENSHIM_TESS_TARGET_PIXELS * relief, 2.0, OPENSHIM_TESS_FACTOR);
 }
 #endif
 
@@ -139,6 +152,109 @@ float3 TerrainHeightRelief(float2 uv, float2 xz0, float2 xz1, float2 xz2,
     return all(isfinite(result)) ? result : 0.0;
 }
 #endif
+
+#if defined(OPENSHIM_PAINT_HEIGHT)
+// Full-material paint array: control in slice 4, layer heights in the alpha
+// of normal slices 5-8. hdUV carries native world XZ in paint mode. Heights
+// are a pure function of world XZ at a fixed mip per layer, so the two
+// patches on a shared edge displace it identically and no cracks open.
+Texture2DArray<float4> terrainPaintArray : register(t127);
+
+float4 TerrainPaintBilinear(float2 uv, uint slice, uint mip, bool wrap)
+{
+    uint width, height, elements, levels;
+    terrainPaintArray.GetDimensions(mip, width, height, elements, levels);
+    int2 size = int2(width, height);
+    float2 pixel = (wrap ? frac(uv) : uv) * float2(size) - 0.5;
+    if (!wrap) pixel = clamp(pixel, 0.0, float2(size - 1));
+    int2 lo = int2(floor(pixel));
+    float2 f = pixel - float2(lo);
+    int2 hi = min(lo + 1, size - 1);
+    if (wrap) { hi = lo + 1 >= size ? 0 : lo + 1; lo = lo < 0 ? size - 1 : lo; }
+    float4 a = terrainPaintArray.Load(int4(lo, slice, mip));
+    float4 b = terrainPaintArray.Load(int4(hi.x, lo.y, slice, mip));
+    float4 c = terrainPaintArray.Load(int4(lo.x, hi.y, slice, mip));
+    float4 d = terrainPaintArray.Load(int4(hi, slice, mip));
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+
+uint TerrainPaintMip(float repeat)
+{
+    uint width, height, elements, levels;
+    terrainPaintArray.GetDimensions(0, width, height, elements, levels);
+    // Sample at roughly the finest tessellated vertex spacing (5 m native
+    // grid / factor); finer texels would only alias between vertices.
+    float spacing = 5.0 / OPENSHIM_TESS_FACTOR;
+    return uint(clamp(ceil(log2(max(spacing * width / repeat, 1.0))), 0.0, float(levels - 1)));
+}
+
+float TerrainPaintLayerHeight(float2 worldXZ, float repeat, uint slice, bool detile)
+{
+    float2 uv = worldXZ / repeat;
+    uint mip = TerrainPaintMip(repeat);
+    if (!detile) return TerrainPaintBilinear(uv, slice, mip, true).a;
+    // Same offsets as the pixel shader's top projection.
+    OpenShimDetile d = OpenShimDetileAt(uv);
+    return lerp(TerrainPaintBilinear(uv + d.a, slice, mip, true).a, TerrainPaintBilinear(uv + d.b, slice, mip, true).a, d.t);
+}
+
+float TerrainPaintHeight(float2 worldXZ)
+{
+    if (!all(isfinite(worldXZ))) return 0.0;
+    float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / (OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy);
+    float4 banks[OPENSHIM_PAINT_LAYERS / 4];
+    [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
+        banks[b] = TerrainPaintBilinear(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
+    OpenShimPaintMix weights = OpenShimPaintNormalize(banks);
+    float heights[OPENSHIM_PAINT_LAYERS];
+    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+    {
+        heights[i] = 0.5;
+        [branch] if (OpenShimPaintPresent(weights, i))
+            heights[i] = TerrainPaintLayerHeight(worldXZ, openShimPaintRepeats[i], uint(OpenShimPaintSlice(i, 5)), openShimPaintDetile[i] > 0);
+    }
+    // Same height-aware selection as the pixel shader.
+    weights = OpenShimPaintSelect(weights, heights);
+    float value = 0;
+    [unroll] for (int j = 0; j < OPENSHIM_PAINT_LAYERS; ++j)
+        value += weights.w[j] * (heights[j] - 0.5) * openShimPaintHeightMeters[j];
+    value *= OPENSHIM_PAINT_HEIGHT_SCALE;
+#if defined(OPENSHIM_PAINT_CRATERS)
+    // The pixel shader's crater field, faded at the vertex spacing.
+    value += OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR).h *
+        OpenShimPaintDot(weights, openShimPaintCraterLayers) * OPENSHIM_PAINT_HEIGHT_SCALE;
+#endif
+#if defined(OPENSHIM_PAINT_DETAIL)
+    value += OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, 5.0 / OPENSHIM_TESS_FACTOR).h *
+        OpenShimPaintDot(weights, openShimPaintDetailLayers) * OPENSHIM_PAINT_HEIGHT_SCALE;
+#endif
+    return isfinite(value) ? clamp(value, -OPENSHIM_RELIEF_AMPLITUDE, OPENSHIM_RELIEF_AMPLITUDE) : 0.0;
+}
+
+float3 TerrainPaintRelief(float2 worldXZ)
+{
+    const float e = 0.5 * 5.0 / OPENSHIM_TESS_FACTOR;
+    float h = TerrainPaintHeight(worldXZ);
+    float dx = TerrainPaintHeight(worldXZ + float2(e, 0)) - TerrainPaintHeight(worldXZ - float2(e, 0));
+    float dz = TerrainPaintHeight(worldXZ + float2(0, e)) - TerrainPaintHeight(worldXZ - float2(0, e));
+    return float3(h, float2(dx, dz) / (2.0 * e));
+}
+
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+// Hull side: how far a vertex's layer mix can displace, from the control
+// maps alone, as a 0..1 tessellation scale. A pure function of world XZ.
+float TerrainPaintReliefScale(float2 worldXZ)
+{
+    if (!all(isfinite(worldXZ))) return 1.0;
+    float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / (OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy);
+    float4 banks[OPENSHIM_PAINT_LAYERS / 4];
+    [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
+        banks[b] = TerrainPaintBilinear(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
+    float span = OpenShimPaintDot(OpenShimPaintNormalize(banks), openShimPaintReliefMeters) * OPENSHIM_PAINT_HEIGHT_SCALE;
+    return isfinite(span) ? lerp(OPENSHIM_TESS_RELIEF_FLAT, 1.0, saturate(span / OPENSHIM_TESS_RELIEF_FULL)) : 1.0;
+}
+#endif
+#endif
 #endif
 
 struct TerrainTessVertex
@@ -183,9 +299,13 @@ TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
 {
     TerrainTessFactors f;
 #if defined(OPENSHIM_TESS_ADAPTIVE)
-    f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy);
-    f.edge[1] = TerrainAdaptiveEdge(p[2].position,p[0].position,tessViewport.xy);
-    f.edge[2] = TerrainAdaptiveEdge(p[0].position,p[1].position,tessViewport.xy);
+    float relief[3] = { 1.0, 1.0, 1.0 };
+#if defined(OPENSHIM_PAINT_HEIGHT)
+    [unroll] for (int i = 0; i < 3; ++i) relief[i] = TerrainPaintReliefScale(p[i].hdUV);
+#endif
+    f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy,max(relief[1],relief[2]));
+    f.edge[1] = TerrainAdaptiveEdge(p[2].position,p[0].position,tessViewport.xy,max(relief[2],relief[0]));
+    f.edge[2] = TerrainAdaptiveEdge(p[0].position,p[1].position,tessViewport.xy,max(relief[0],relief[1]));
     f.inside = max(f.edge[0],max(f.edge[1],f.edge[2]));
 #else
     f.edge[0] = f.edge[1] = f.edge[2] = OPENSHIM_TESS_FACTOR;
@@ -245,7 +365,11 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
 // Recover native object position with inverse WORLD-view, which remains
 // valid when Ogre subtracts the camera origin from world/view transforms.
 #if defined(OPENSHIM_RELIEF_TEST)
-#if defined(OPENSHIM_HEIGHT_TEST)
+#if defined(OPENSHIM_PAINT_HEIGHT)
+    // hdUV is world XZ and object XZ differs only by translation, so the
+    // world-space gradient is already the object-space one.
+    float3 relief = TerrainPaintRelief(o.hdUV);
+#elif defined(OPENSHIM_HEIGHT_TEST)
     float3 relief = TerrainHeightRelief(o.uv,
         TerrainReliefObjectXZ(p[0].viewPosition, reliefInverseWorldView),
         TerrainReliefObjectXZ(p[1].viewPosition, reliefInverseWorldView),

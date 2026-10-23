@@ -1,0 +1,147 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "TI_DETAIL_ATLAS": {
+      "sliceCount": 9,
+      "diffuseResource": "titan_atlas_d.dds",
+      "fallback": "openshim_titan_auto_layer0.png",
+      "tiles": {
+        "0": "openshim_titan_auto_layer0.png",
+        "1": "openshim_titan_auto_layer1.png",
+        "2": "openshim_titan_auto_layer2.png",
+        "3": "openshim_titan_auto_layer3.png",
+        "4": "openshim_titan_auto_misn14_control.png",
+        "5": "openshim_titan_auto_layer0_n.png",
+        "6": "openshim_titan_auto_layer1_n.png",
+        "7": "openshim_titan_auto_layer2_n.png",
+        "8": "openshim_titan_auto_layer3_n.png"
+      },
+      "paint": {
+        "schema": "bzr-openshim-terrain-paint-v1",
+        "rowZero": "minZ",
+        "repeatMeters": [
+          20,
+          20,
+          40,
+          36
+        ],
+        "maps": [
+          {
+            "terrainFingerprint": "378e49d25c33ac43",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn14_control.png"
+          },
+          {
+            "terrainFingerprint": "bdce4fb1e689b169",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn14_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "092514bdd5a255c9",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn15_control.png"
+          },
+          {
+            "terrainFingerprint": "9e1f4d6b9543cb1d",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn15_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "1d1e0af4edb38b16",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn16_control.png"
+          },
+          {
+            "terrainFingerprint": "08adc2abf76fd176",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn16_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "787e1d63d79eeb3e",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn15b_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "a7edee74b712cfd6",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn16b_control.png"
+          },
+          {
+            "terrainFingerprint": "deee6ea8f9e3aa7e",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misn16b_stock_control.png"
+          }
+        ],
+        "detile": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "far": [
+          5,
+          40,
+          250,
+          0.6
+        ],
+        "macro": [
+          260,
+          0.12,
+          0.15
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.35,
+          1.4,
+          0.8,
+          1.2
+        ]
+      }
+    }
+  }
+}

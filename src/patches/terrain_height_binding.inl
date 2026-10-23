@@ -49,6 +49,24 @@ void PrepareTerrainHeightTexture(ID3D11Buffer* source, const std::string& relati
     LogShimA(LogLevel::Info, "terrain-height", "[TERRAIN-HEIGHT] texture ready path=\"%s\" size=%ux%u format=R32_FLOAT signed-unit mip=0", path.string().c_str(), image.width, image.height);
 }
 
+// Full-material paint packs displace from the live paint array itself: a
+// second view of the owned Ogre texture, released with the binding.
+void PrepareTerrainPaintHeightTexture(ID3D11Texture2D* paintArray)
+{
+    if (!g_heightHookReady.load()) throw std::runtime_error("domain texture lifetime hook unavailable");
+    if (!paintArray) throw std::runtime_error("paint array texture unavailable");
+    D3D11_TEXTURE2D_DESC desc{}; paintArray->GetDesc(&desc);
+    if ((desc.ArraySize != 9 && desc.ArraySize != 18) || !(desc.BindFlags & D3D11_BIND_SHADER_RESOURCE))
+        throw std::runtime_error("paint array is not a 9- or 18-slice shader resource");
+    ComPtr<ID3D11Device> device; paintArray->GetDevice(&device);
+    ComPtr<ID3D11ShaderResourceView> view;
+    if (!device || FAILED(device->CreateShaderResourceView(paintArray, nullptr, &view)))
+        throw std::runtime_error("paint height view creation failed");
+    std::lock_guard<std::mutex> lock(g_heightMutex);
+    g_heightBinding.view = view;
+    LogShimA(LogLevel::Info, "terrain-height", "[TERRAIN-HEIGHT] paint array view ready size=%ux%u slices=%u mips=%u format=%d", desc.Width, desc.Height, desc.ArraySize, desc.MipLevels, int(desc.Format));
+}
+
 void RegisterTerrainHeightDomain(void* program)
 {
     using Getter = ID3D11DomainShader* (__thiscall*)(void*);

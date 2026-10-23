@@ -1,0 +1,117 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "IO_DETAIL_ATLAS": {
+      "sliceCount": 9,
+      "diffuseResource": "io_atlas_d.dds",
+      "fallback": "openshim_io_auto_layer0.png",
+      "tiles": {
+        "0": "openshim_io_auto_layer0.png",
+        "1": "openshim_io_auto_layer1.png",
+        "2": "openshim_io_auto_layer2.png",
+        "3": "openshim_io_auto_layer3.png",
+        "4": "openshim_io_auto_misn10_control.png",
+        "5": "openshim_io_auto_layer0_n.png",
+        "6": "openshim_io_auto_layer1_n.png",
+        "7": "openshim_io_auto_layer2_n.png",
+        "8": "openshim_io_auto_layer3_n.png"
+      },
+      "paint": {
+        "schema": "bzr-openshim-terrain-paint-v1",
+        "rowZero": "minZ",
+        "repeatMeters": [
+          20,
+          18,
+          18,
+          20
+        ],
+        "maps": [
+          {
+            "terrainFingerprint": "1763fbe0b3233ffb",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_io_auto_misn10_control.png"
+          },
+          {
+            "terrainFingerprint": "064a152ebc9da197",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_io_auto_misn10_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "13d07782c2f02faf",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_io_auto_misn11_control.png"
+          },
+          {
+            "terrainFingerprint": "6f3bd72a26e5959b",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_io_auto_misn11_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "d6e25d9d88429904",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_io_auto_misns4_control.png"
+          },
+          {
+            "terrainFingerprint": "5956950c3c9623f6",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_io_auto_misns4_stock_control.png"
+          }
+        ],
+        "detile": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "far": [
+          5,
+          40,
+          250,
+          0.6
+        ],
+        "macro": [
+          260,
+          0.12,
+          0.15
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.8,
+          0.15,
+          0.8,
+          1.0
+        ]
+      }
+    }
+  }
+}

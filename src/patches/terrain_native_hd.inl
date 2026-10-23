@@ -15,7 +15,6 @@ std::string g_HdSourceMaterial, g_HdBackupMaterial;
 bool g_HdActive = false, g_HdDeclined = false;
 bool g_HdProfileSuspended = false;
 std::array<bool, 256> g_HdTileMapped{};
-TerrainPaint::Config g_HdPaint;
 std::array<uint8_t, 256> g_HdSliceRemap = TerrainHdMaterial::IdentityRemap();
 std::array<bool, 3> g_HdChannelEnabled{};
 void ResetNativeTerrainHd() { g_HdDeclined = false; g_HdProfileSuspended = false; }
@@ -253,15 +252,19 @@ void UpdateNativeHdZone(void* zone, bool dirty)
         const auto audit = TerrainSemantic::ValidatePackedUv(vertices, bytes.data(), 4, 0);
         if (audit.checked != TerrainSemantic::kVertexCount || audit.mismatches)
             throw std::runtime_error("native HD packed UV parity failed");
-        std::vector<uint8_t> positions;
+        std::vector<uint8_t> positions, heights;
         Vector3 translation = {};
         if (g_HdPaint.enabled)
         {
-            void* buffer = nullptr;
+            void* buffer = nullptr; void* heightBuffer = nullptr;
             const auto* p = g_ogre.getNodePosition(candidate.node);
             if (!p || !GetVertexBuffer(operation, 0, buffer) || g_ogre.getVertexSize(buffer) != 16 ||
                 !ReadD3D11VertexBuffer(buffer, uint32_t(TerrainSemantic::kVertexCount * 16), positions))
                 throw std::runtime_error("paint native position stream unavailable");
+            // The released terrain VS replaces object Y with this stream.
+            if (!GetVertexBuffer(operation, 2, heightBuffer) || g_ogre.getVertexSize(heightBuffer) != 4 ||
+                !ReadD3D11VertexBuffer(heightBuffer, uint32_t(TerrainSemantic::kVertexCount * 4), heights))
+                throw std::runtime_error("paint native height stream unavailable");
             translation = *p;
         }
         std::vector<TerrainSemantic::GpuVertex> upload;
@@ -273,10 +276,15 @@ void UpdateNativeHdZone(void* zone, bool dirty)
             {
                 // Copy actual native POSITION.xz, not tile UV or camera-relative
                 // positions. This preserves duplicated seams and native spacing.
-                float x = 0, z = 0;
+                // The atlas rect is unused here; its x carries world Y (the
+                // native height stream) for the triplanar side projections.
+                float x = 0, y = 0, z = 0;
                 memcpy(&x, positions.data() + i*16, 4); memcpy(&z, positions.data() + i*16+8, 4);
+                memcpy(&y, heights.data() + i*4, 4);
+                if (!std::isfinite(y) || std::abs(y) > 1000000) throw std::runtime_error("paint native height invalid");
                 const auto world = TerrainPaint::WorldXZ(x, z, translation.x, translation.z);
                 gpu.localU = world[0]; gpu.localV = world[1]; gpu.tileIndex = 0;
+                gpu.atlasU = y + translation.y;
             }
             else if (!g_HdTileMapped[gpu.tileIndex] ||
                 !TerrainHdMaterial::Remap(g_HdSliceRemap, gpu.tileIndex, g_proxy.hdSliceCount, gpu.tileIndex))
@@ -398,7 +406,7 @@ bool InstallNativeTerrainHd()
             if (!binding->paint.maps.empty())
             {
                 // Multi-map pack: take the entry matching this mission and bind
-                // its control image as slice 4; no match declines the whole pack.
+                // its control images as slices 4 and 13; no match declines the whole pack.
                 const auto* entry = TerrainPaint::SelectMap(binding->paint,
                     map.at("terrainFingerprint").get<std::string>(),
                     map.at("boundsMeters").get<std::array<float, 4>>());
@@ -406,6 +414,7 @@ bool InstallNativeTerrainHd()
                     throw std::runtime_error("paint pack has no map entry for this mission: actual=" + map.dump());
                 selectedBinding = *binding;
                 selectedBinding->tiles[4] = entry->control;
+                if (!entry->control2.empty()) selectedBinding->tiles[13] = entry->control2;
                 selectedBinding->paint.fingerprint = entry->fingerprint;
                 selectedBinding->paint.bounds = entry->bounds;
                 selectedBinding->paint.maps.clear();
