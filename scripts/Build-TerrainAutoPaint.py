@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Generate four-material terrain paint weights from each map's own MAT layout.
+"""Generate four- or eight-material terrain paint weights from each map's own MAT layout.
 
 The hand-painted prototype (Build-TerrainPaintPack.py) needs an artist and a
 live game capture per map. This script derives both from the map files:
 
-* the RGBA control map comes from the per-cell material words in <map>.mat,
-  mapped to the four paint layers per world by the recipe, then blurred;
+* the RGBA control map (two for eight layers) comes from the per-cell material
+  words in <map>.mat, mapped to the paint layers per world by the recipe, then blurred;
 * the terrain fingerprint and world bounds come from <map>.hg2 alone, with
   the same hash the runtime computes (see Docs/terrain-paint.md), so no game
   launch is needed. An export capture can override or cross-check them.
@@ -177,8 +177,33 @@ def terrain_bounds(zx, zz):
 
 # ------------------------------------------------------------- weight map
 
-def cell_weights(cells, type_weights, transition, fallback=(0, 1, 0, 0)):
-    """Per-cell RGBA layer weights from MAT words.
+def unit_weights(n, index):
+    return [1.0 if i == index else 0 for i in range(n)]
+
+
+def normalize(pixel):
+    """Scale a weight vector to sum to 255 (largest remainders); _paint.normalize for any length."""
+    total = sum(pixel)
+    if total == 0:
+        return tuple(255 if i == 0 else 0 for i in range(len(pixel)))
+    values = [v * 255 / total for v in pixel]
+    result = [math.floor(v) for v in values]
+    for i in sorted(range(len(pixel)), key=lambda i: (values[i] - result[i], -i), reverse=True)[:255 - sum(result)]:
+        result[i] += 1
+    return tuple(result)
+
+
+def weight_images(weights):
+    """The RGBA images behind a map's weights: one for four layers, a pair for eight."""
+    return list(weights) if isinstance(weights, tuple) else [weights]
+
+
+def weights_key(weights):
+    return b"".join(image.tobytes() for image in weight_images(weights))
+
+
+def cell_weights(cells, type_weights, transition, fallback=None):
+    """Per-cell layer weights from MAT words.
 
     Word bits: 15-12 base type, 11-8 next type, bit 7 cap(0)/diagonal(1).
     A cell whose two types match is solid. Otherwise it blends the base with
@@ -187,6 +212,8 @@ def cell_weights(cells, type_weights, transition, fallback=(0, 1, 0, 0)):
     base = (cells >> 12) & 15
     other = (cells >> 8) & 15
     diagonal = (cells >> 7) & 1
+    if fallback is None:
+        fallback = (0, 1, 0, 0)
     table = np.tile(np.asarray(fallback, dtype=np.float64), (16, 1))
     for index, vector in type_weights.items():
         table[index] = vector
@@ -361,7 +388,7 @@ def variation_noise(cell_shape, meters, seed):
 
 
 def cell_field(cells, plane, recipe, seed):
-    """Per-cell RGBA weights: MAT types, then optional variation patches and slope.
+    """Per-cell layer weights (one per recipe layer): MAT types, then optional variation patches and slope.
 
     variation: {"meters", "amount", "types": {type: weights}} blends each listed
     type toward its alternate weights inside noise patches about `meters` wide,
@@ -379,7 +406,7 @@ def cell_field(cells, plane, recipe, seed):
     a rock layer whatever their MAT type.
     """
     types = {int(k): v for k, v in recipe["typeWeights"].items()}
-    fallback = recipe.get("undefinedTypeWeights", [0, 1, 0, 0])
+    fallback = recipe.get("undefinedTypeWeights", unit_weights(len(recipe["layers"]), 1))
     weights = cell_weights(cells, types, recipe["transition"], fallback)
     variation = recipe.get("variation")
     if variation:
@@ -414,7 +441,8 @@ def cell_field(cells, plane, recipe, seed):
 
 
 def rasterize(cells, zx, zz, bounds, size, recipe, plane=None, seed=0):
-    """Weight map (size x size RGBA uint8), row 0 at minimum Z, normalised to 255."""
+    """Weight map (size x size RGBA uint8; a pair of them for eight layers), row 0 at minimum Z, normalised to 255."""
+    n = len(recipe["layers"])
     weights = cell_field(cells, plane, recipe, seed)
     px = (np.arange(size) + 0.5) / size
     world_x = bounds[0] + px * (bounds[2] - bounds[0])
@@ -430,23 +458,29 @@ def rasterize(cells, zx, zz, bounds, size, recipe, plane=None, seed=0):
     # side. Those skirt cells carry no authored material, so use one neutral
     # layer there instead of smearing the edge cells outward in streaks.
     outside = ((raw_x < 0) | (raw_x >= cells.shape[1]))[None, :] | ((raw_z < 0) | (raw_z >= cells.shape[0]))[:, None]
-    field[outside] = np.asarray(recipe.get("outsideWeights", [0, 1, 0, 0]), dtype=np.float64)
+    field[outside] = np.asarray(recipe.get("outsideWeights", unit_weights(n, 1)), dtype=np.float64)
     meters_per_pixel = (bounds[2] - bounds[0]) / size
     field = blur(field, recipe.get("blurMeters", 12) / meters_per_pixel)
     field = np.clip(field, 0, None)
     total = field.sum(axis=2, keepdims=True)
-    field = np.where(total > 1e-9, field / np.maximum(total, 1e-9), np.array([1.0, 0, 0, 0]))
-    image = Image.new("RGBA", (size, size))
-    image.putdata([_paint.normalize(tuple(np.clip(np.rint(p * 255), 0, 255).astype(int)))
-                   for p in field.reshape(-1, 4)])
-    return image
+    field = np.where(total > 1e-9, field / np.maximum(total, 1e-9), np.array(unit_weights(n, 0)))
+    pixels = [normalize(tuple(np.clip(np.rint(p * 255), 0, 255).astype(int))) for p in field.reshape(-1, n)]
+    if n == 4:
+        image = Image.new("RGBA", (size, size))
+        image.putdata(pixels)
+        return image
+    packed = np.array(pixels, dtype=np.uint8).reshape(size, size, n)
+    return tuple(Image.fromarray(packed[..., k:k + 4], "RGBA") for k in range(0, n, 4))
 
 
 # ------------------------------------------------------------------- packs
 
 def validate_recipe(recipe):
-    if recipe.get("schema") != "bzr-openshim-terrain-autopaint-v1" or len(recipe.get("layers", [])) != 4:
-        raise ValueError("recipe needs schema bzr-openshim-terrain-autopaint-v1 and exactly four layers")
+    if recipe.get("schema") != "bzr-openshim-terrain-autopaint-v1" or len(recipe.get("layers", [])) not in (4, 8):
+        raise ValueError("recipe needs schema bzr-openshim-terrain-autopaint-v1 and four or eight layers")
+    n = len(recipe["layers"])
+    if n == 8 and recipe.get("diffuseOnly", False):
+        raise ValueError("eight layers need the full material form, not diffuseOnly")
     for key in ("typeWeights", "typeNames", "transition"):
         if key not in recipe:
             raise ValueError(f"recipe is missing {key}")
@@ -454,20 +488,23 @@ def validate_recipe(recipe):
         if not (isinstance(names, str) or (isinstance(names, list) and names and all(isinstance(n, str) for n in names))):
             raise ValueError(f"typeNames[{index}] must be a name or a non-empty list of names")
     for index, vector in recipe["typeWeights"].items():
-        if not (0 <= int(index) <= 15) or len(vector) != 4 or any(v < 0 for v in vector) or sum(vector) <= 0:
-            raise ValueError(f"typeWeights[{index}] needs four non-negative weights with a positive sum")
+        if not (0 <= int(index) <= 15) or len(vector) != n or any(v < 0 for v in vector) or sum(vector) <= 0:
+            raise ValueError(f"typeWeights[{index}] needs {n} non-negative weights with a positive sum")
     for key in ("cap", "diagonal"):
         if not 0 <= recipe["transition"].get(key, -1) <= 1:
             raise ValueError("transition cap/diagonal must be 0..1")
     def weight_vector(vector):
-        return isinstance(vector, list) and len(vector) == 4 and all(v >= 0 for v in vector) and sum(vector) > 0
+        return isinstance(vector, list) and len(vector) == n and all(v >= 0 for v in vector) and sum(vector) > 0
+    for key in ("undefinedTypeWeights", "outsideWeights"):
+        if key in recipe and not weight_vector(recipe[key]):
+            raise ValueError(f"{key} needs {n} non-negative weights with a positive sum")
     if "variation" in recipe:
         variation = recipe["variation"]
         if not 0 < variation.get("amount", 0.5) <= 1 or not 20 <= variation.get("meters", 150) <= 2000:
             raise ValueError("variation needs amount in (0,1] and meters from 20 to 2000")
         for index, vector in variation.get("types", {}).items():
             if index not in recipe["typeWeights"] or not weight_vector(vector):
-                raise ValueError(f"variation.types[{index}] needs a mapped type and four weights")
+                raise ValueError(f"variation.types[{index}] needs a mapped type and {n} weights")
     if not 0 <= recipe.get("heightBlend", 0.5) <= 4:
         raise ValueError("heightBlend must be 0..4")
     for layer in recipe["layers"]:
@@ -478,6 +515,9 @@ def validate_recipe(recipe):
         strength = layer.get("proceduralCraters", False)
         if type(strength) not in (bool, int, float) or not 0 <= strength <= 1:
             raise ValueError(f"layer {layer.get('name')} proceduralCraters must be true, false or 0..1")
+        strength = layer.get("proceduralDetail", False)
+        if type(strength) not in (bool, int, float) or not 0 <= strength <= 1:
+            raise ValueError(f"layer {layer.get('name')} proceduralDetail must be true, false or 0..1")
     if "far" in recipe:
         far = recipe["far"]
         if not (2 <= far.get("scale", 0) <= 16 and 0 <= far.get("startMeters", -1) < far.get("endMeters", -1) <= 100000
@@ -498,10 +538,22 @@ def validate_recipe(recipe):
             raise ValueError("craters needs at least one layer with proceduralCraters")
     elif any(crater_layers):
         raise ValueError("proceduralCraters needs the recipe's craters settings")
+    detail_layers = [layer.get("proceduralDetail", False) for layer in recipe["layers"]]
+    if "detail" in recipe:
+        detail = recipe["detail"]
+        if not (2 <= detail.get("waveMeters", 0) <= 1000 and 0 < detail.get("heightMeters", 0) <= 4
+                and detail.get("octaves", 0) in (1, 2, 3, 4, 5) and 0 <= detail.get("damping", 1) <= 4):
+            raise ValueError("detail needs waveMeters 2..1000, heightMeters (0,4], octaves 1..5 and damping 0..4")
+        if not any(detail_layers):
+            raise ValueError("detail needs at least one layer with proceduralDetail")
+        if recipe.get("diffuseOnly", False):
+            raise ValueError("detail needs the full material form, not diffuseOnly")
+    elif any(detail_layers):
+        raise ValueError("proceduralDetail needs the recipe's detail settings")
     if "slope" in recipe:
         slope = recipe["slope"]
         if not weight_vector(slope.get("weights")) or not 0 <= slope.get("startDegrees", -1) < slope.get("fullDegrees", -1) <= 90:
-            raise ValueError("slope needs four weights and 0 <= startDegrees < fullDegrees <= 90")
+            raise ValueError(f"slope needs {n} weights and 0 <= startDegrees < fullDegrees <= 90")
     known = {int(k) for k in recipe["typeWeights"]}
     def mapped_types(rule):
         return all(isinstance(t, int) and t in known for t in rule.get("types", []))
@@ -519,7 +571,7 @@ def validate_recipe(recipe):
             raise ValueError(f"erosion needs one or more of {', '.join(EROSION_RULES)}")
         for key, rule in erosion.items():
             if not (weight_vector(rule.get("weights")) and 0 < rule.get("amount", 0.5) <= 1 and mapped_types(rule)):
-                raise ValueError(f"erosion.{key} needs four weights, amount (0,1] and mapped types")
+                raise ValueError(f"erosion.{key} needs {n} weights, amount (0,1] and mapped types")
         channel = erosion.get("channel", {"startHectares": 1, "fullHectares": 2})
         if not 0 < channel.get("startHectares", 0) < channel.get("fullHectares", 0) <= 100000:
             raise ValueError("erosion.channel needs 0 < startHectares < fullHectares <= 100000")
@@ -795,8 +847,11 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
         raise ValueError("output is non-empty; use --force")
     root = Path(source_root).resolve()
     layers, identities, repeats, normals = [], [], [], []
-    # Full material (9 slices) unless the recipe asks for diffuse only.
+    # Full material (9 slices per four layers) unless the recipe asks for diffuse only.
     material = not recipe.get("diffuseOnly", False)
+    n = len(recipe["layers"])
+    if n not in (4, 8) or (n == 8 and not material):
+        raise ValueError("a pack needs four layers, or eight with the full material form")
     for layer in recipe["layers"]:
         repeat = layer.get("repeatMeters")
         if type(repeat) not in (int, float) or not 1 <= repeat <= 4096 or not layer.get("name"):
@@ -837,18 +892,19 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
         repeats.append(repeat)
     capture_material = recipe.get("material", "MA_DETAIL_ATLAS")
     output.mkdir(parents=True, exist_ok=True)
-    resources = [f"{prefix}_layer{i}.png" for i in range(4)]
-    normal_resources = [f"{prefix}_layer{i}_n.png" for i in range(4)] if material else []
+    resources = [f"{prefix}_layer{i}.png" for i in range(n)]
+    normal_resources = [f"{prefix}_layer{i}_n.png" for i in range(n)] if material else []
     for resource, image in zip(resources + normal_resources, layers + normals):
         image.save(output / resource)
     entries, summary, controls, terrains = [], [], {}, {}
     for info in maps:
         weights = info["weights"]
+        key = weights_key(weights)
         # The runtime tells maps apart only by terrain, so two missions sharing
         # one (CR misn15 and misn15b) need one entry and identical paint.
         terrain = (info["fingerprint"], tuple(info["bounds"]))
         if terrain in terrains:
-            if terrains[terrain]["weights"].tobytes() != weights.tobytes():
+            if weights_key(terrains[terrain]["weights"]) != key:
                 raise ValueError(f"{info['name']} and {terrains[terrain]['name']} share terrain {info['fingerprint']} "
                                  "but paint differently; the runtime cannot tell them apart")
             summary.append(dict({k: info[k] for k in ("name", "fingerprint", "bounds", "source", "histogram")},
@@ -857,19 +913,29 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
         terrains[terrain] = info
         # Maps with identical layouts (for example the stock and Campaign
         # Reimagined copies of one mission) share a single control image.
-        key = weights.tobytes()
+        suffixes = ["control", "control2"][:n // 4]
         if key not in controls:
-            control = Image.merge("RGBA", tuple(c.resize((size, size), Image.Resampling.BILINEAR) for c in weights.split()))
-            control.putdata([_paint.normalize(p) for p in control.getdata()])
-            controls[key] = f"{prefix}_{info['name']}_control.png"
-            control.save(output / controls[key])
-        control_name = controls[key]
-        weights.save(output / f"{prefix}_{info['name']}_weights.png")
-        entries.append({"terrainFingerprint": info["fingerprint"], "boundsMeters": info["bounds"], "control": control_name})
+            # Eight layers normalise jointly across both images.
+            channels = [np.asarray(c.resize((size, size), Image.Resampling.BILINEAR)) for image in weight_images(weights) for c in image.split()]
+            stacked = np.stack(channels, axis=-1).reshape(-1, n)
+            packed = np.array([normalize(tuple(p)) for p in stacked.tolist()], dtype=np.uint8).reshape(size, size, n)
+            names = [f"{prefix}_{info['name']}_{suffix}.png" for suffix in suffixes]
+            for k, name in enumerate(names):
+                Image.fromarray(packed[..., 4 * k:4 * k + 4], "RGBA").save(output / name)
+            controls[key] = names
+        for k, image in enumerate(weight_images(weights)):
+            image.save(output / f"{prefix}_{info['name']}_weights{k + 1 if k else ''}.png")
+        entry = {"terrainFingerprint": info["fingerprint"], "boundsMeters": info["bounds"], "control": controls[key][0]}
+        if n == 8:
+            entry["control2"] = controls[key][1]
+        entries.append(entry)
         summary.append({k: info[k] for k in ("name", "fingerprint", "bounds", "source", "histogram")})
-    tiles = {str(i): name for i, name in enumerate(resources)}
+    # Each bank of four layers is nine slices: diffuse 0-3, control 4, normal+height 5-8.
+    tiles = {str(i // 4 * 9 + i % 4): name for i, name in enumerate(resources)}
     tiles["4"] = entries[0]["control"]
-    tiles.update({str(5 + i): name for i, name in enumerate(normal_resources)})
+    if n == 8:
+        tiles["13"] = entries[0]["control2"]
+    tiles.update({str(i // 4 * 9 + 5 + i % 4): name for i, name in enumerate(normal_resources)})
     paint = {"schema": "bzr-openshim-terrain-paint-v1", "rowZero": "minZ", "repeatMeters": repeats, "maps": entries}
     if any(layer.get("detile") for layer in recipe["layers"]):
         paint["detile"] = [1 if layer.get("detile") else 0 for layer in recipe["layers"]]
@@ -886,14 +952,21 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
             craters = recipe["craters"]
             paint["craters"] = [craters["cellMeters"], craters["depth"], craters["coverage"], craters["octaves"]]
             paint["craterLayers"] = [float(layer.get("proceduralCraters", 0)) for layer in recipe["layers"]]
+        if "detail" in recipe:
+            detail = recipe["detail"]
+            paint["detail"] = [detail["waveMeters"], detail["heightMeters"], detail["octaves"], detail.get("damping", 1)]
+            paint["detailLayers"] = [float(layer.get("proceduralDetail", 0)) for layer in recipe["layers"]]
     manifest = {"schema": "bzr-openshim-terrain-hd-v1", "materials": {capture_material: {
-        "sliceCount": 9 if material else 5, "diffuseResource": recipe["diffuseResource"], "fallback": resources[0],
+        "sliceCount": 9 * (n // 4) if material else 5, "diffuseResource": recipe["diffuseResource"], "fallback": resources[0],
         "tiles": tiles, "paint": paint}}}
     (output / f"{prefix}.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     project = {"schema": "bzr-openshim-terrain-autopaint-project-v1", "prefix": prefix, "materialSize": size,
                "layers": recipe["layers"], "sources": identities, "maps": summary}
     (output / f"{prefix}_project.json").write_text(json.dumps(project, indent=2) + "\n", encoding="utf-8")
-    write_editors(maps, recipe, layers, repeats, identities, output, prefix, size)
+    if n == 4:
+        write_editors(maps, recipe, layers, repeats, identities, output, prefix, size)
+    else:
+        print("Eight-layer pack: the weight editor only handles four layers, so none was written")
     return manifest
 
 

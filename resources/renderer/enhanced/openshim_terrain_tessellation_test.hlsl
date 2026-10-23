@@ -215,6 +215,10 @@ float TerrainPaintHeight(float2 worldXZ)
     value += OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR).h *
         OpenShimPaintDot(weights, openShimPaintCraterLayers) * OPENSHIM_PAINT_HEIGHT_SCALE;
 #endif
+#if defined(OPENSHIM_PAINT_DETAIL)
+    value += OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, 5.0 / OPENSHIM_TESS_FACTOR).h *
+        OpenShimPaintDot(weights, openShimPaintDetailLayers) * OPENSHIM_PAINT_HEIGHT_SCALE;
+#endif
     return isfinite(value) ? clamp(value, -OPENSHIM_RELIEF_AMPLITUDE, OPENSHIM_RELIEF_AMPLITUDE) : 0.0;
 }
 

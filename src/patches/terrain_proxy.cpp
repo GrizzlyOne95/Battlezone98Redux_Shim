@@ -1204,6 +1204,11 @@ namespace BZROpenShim
                             binding.paint.craters = paint.at("craters").get<std::array<float, 4>>();
                             layers("craterLayers", binding.paint.craterLayers);
                         }
+                        if (paint.contains("detail"))
+                        {
+                            binding.paint.detail = paint.at("detail").get<std::array<float, 4>>();
+                            layers("detailLayers", binding.paint.detailLayers);
+                        }
                         if (paint.contains("maps"))
                         {
                             // Multi-map form: one entry per terrain shape sharing this

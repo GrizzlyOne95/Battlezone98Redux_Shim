@@ -275,11 +275,13 @@ class AutoPaintTests(unittest.TestCase):
         varied = dict(detiled, far={"scale": 5, "startMeters": 40, "endMeters": 250, "amount": 0.6},
                       macro={"meters": 260, "brightness": 0.12, "saturation": 0.15},
                       craters={"cellMeters": 6, "depth": 0.2, "coverage": 0.5, "octaves": 3},
-                      layers=[dict(detiled["layers"][0], proceduralCraters=True)] + self.recipe["layers"][1:])
+                      detail={"waveMeters": 60, "heightMeters": 1.5, "octaves": 4},
+                      layers=[dict(detiled["layers"][0], proceduralCraters=True, proceduralDetail=0.5)] + self.recipe["layers"][1:])
         auto.validate_recipe(varied)
         paint = auto.build_pack(maps, varied, self.root, self.root / "out3", size, "test_auto", False)["materials"]["TERRAIN"]["paint"]
         self.assertEqual((paint["far"], paint["macro"]), ([5, 40, 250, 0.6], [260, 0.12, 0.15]))
         self.assertEqual((paint["craters"], paint["craterLayers"]), ([6, 0.2, 0.5, 3], [1, 0, 0, 0]))
+        self.assertEqual((paint["detail"], paint["detailLayers"]), ([60, 1.5, 4, 1], [0.5, 0, 0, 0]))
         hued = auto.build_pack(maps, dict(varied, macro=dict(varied["macro"], hue=0.35)), self.root, self.root / "out6", size, "test_auto", False)
         self.assertEqual(hued["materials"]["TERRAIN"]["paint"]["macro"], [260, 0.12, 0.15, 0.35])
         self.assertEqual(auto.build_pack(maps, dict(varied, layers=[dict(varied["layers"][0], proceduralCraters=0.5)] + self.recipe["layers"][1:]),
@@ -288,6 +290,9 @@ class AutoPaintTests(unittest.TestCase):
                              (dict(varied, macro={"meters": 5, "brightness": 0.1, "saturation": 0.1}), "macro"),
                              (dict(varied, macro=dict(varied["macro"], hue=2)), "macro"),
                              (dict(varied, craters=dict(varied["craters"], octaves=4)), "craters"),
+                             (dict(varied, detail=dict(varied["detail"], heightMeters=6)), "detail"),
+                             (dict(varied, diffuseOnly=True), "detail"),
+                             (dict({k: v for k, v in varied.items() if k != "detail"}), "proceduralDetail"),
                              (dict(detiled, layers=varied["layers"]), "proceduralCraters")):
             with self.assertRaisesRegex(ValueError, message):
                 auto.validate_recipe(bad)
@@ -299,6 +304,60 @@ class AutoPaintTests(unittest.TestCase):
         self.assertNotIn("heightMeters", diffuse_only["materials"]["TERRAIN"]["paint"])
         with self.assertRaisesRegex(ValueError, "heightMeters"):
             auto.validate_recipe(dict(recipe, layers=[dict(layer, heightMeters=40)] + self.recipe["layers"][1:]))
+
+    def eight_layer_recipe(self):
+        wide = lambda *w: list(w) + [0] * (8 - len(w))
+        return dict(self.recipe, typeWeights={"0": wide(1), "1": wide(0, 0, 0, 0, 0, 1)},
+                    undefinedTypeWeights=wide(0, 1), outsideWeights=wide(0, 1),
+                    layers=[{"name": f"L{i}", "file": f"art{i % 4}.png", "repeatMeters": 16 + i, "heightMeters": i} for i in range(8)])
+
+    def test_eight_layer_recipe_needs_eight_weights_everywhere(self):
+        recipe = self.eight_layer_recipe()
+        auto.validate_recipe(recipe)
+        four, eight = [1, 0, 0, 0], [1, 0, 0, 0, 0, 0, 0, 0]
+        for bad in (dict(recipe, typeWeights={"0": four}), dict(recipe, undefinedTypeWeights=four),
+                    dict(recipe, slope={"weights": four, "startDegrees": 25, "fullDegrees": 40}),
+                    dict(recipe, shape={"radiusMeters": 60, "rangeMeters": 6, "hollow": four}),
+                    dict(recipe, erosion={"scour": {"weights": four, "coverage": 0.1}}),
+                    dict(recipe, variation={"types": {"0": four}}),
+                    dict(self.recipe, typeWeights={"0": eight}), dict(self.recipe, slope={"weights": eight, "startDegrees": 25, "fullDegrees": 40})):
+            with self.assertRaises(ValueError):
+                auto.validate_recipe(bad)
+        with self.assertRaises(ValueError):
+            auto.validate_recipe(dict(recipe, layers=recipe["layers"][:6]))
+        with self.assertRaisesRegex(ValueError, "diffuseOnly"):
+            auto.validate_recipe(dict(recipe, diffuseOnly=True))
+
+    def test_eight_layer_pack_has_two_banks_and_joint_controls(self):
+        recipe = self.eight_layer_recipe()
+        files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
+        maps = [auto.load_map(name, files, recipe, None, 64) for name in ("alpha", "beta")]
+        maps[1]["fingerprint"] = "0123456789abcdef"
+        self.assertEqual(len(maps[0]["weights"]), 2)
+        out = self.root / "out8"
+        binding = auto.build_pack(maps, recipe, self.root, out, 64, "test_auto", False)["materials"]["TERRAIN"]
+        self.assertEqual(binding["sliceCount"], 18)
+        tiles = binding["tiles"]
+        self.assertEqual(sorted(tiles, key=int), [str(i) for i in range(18)])
+        entries = binding["paint"]["maps"]
+        self.assertEqual(entries[0]["control"], entries[1]["control"])
+        self.assertEqual(entries[0]["control2"], entries[1]["control2"])
+        self.assertNotEqual(entries[0]["control"], entries[0]["control2"])
+        self.assertEqual((tiles["4"], tiles["13"]), (entries[0]["control"], entries[0]["control2"]))
+        for i in range(8):
+            self.assertEqual(tiles[str(i // 4 * 9 + i % 4)], f"test_auto_layer{i}.png")
+            self.assertEqual(tiles[str(i // 4 * 9 + 5 + i % 4)], f"test_auto_layer{i}_n.png")
+        paint = binding["paint"]
+        self.assertEqual(paint["repeatMeters"], [16 + i for i in range(8)])
+        self.assertEqual(paint["heightMeters"], list(range(8)))
+        with Image.open(out / entries[0]["control"]) as c1, Image.open(out / entries[0]["control2"]) as c2:
+            joint = np.asarray(c1, dtype=int).sum(axis=2) + np.asarray(c2, dtype=int).sum(axis=2)
+            self.assertTrue(np.all(joint == 255))
+            self.assertEqual((np.asarray(c1)[..., 0].max(), np.asarray(c2)[..., 1].max()), (255, 255), "layers 0 and 5 land in their images")
+        self.assertTrue((out / "test_auto_alpha_weights.png").exists() and (out / "test_auto_alpha_weights2.png").exists())
+        self.assertEqual(len(list(out.glob("*_control2.png"))), 1)
+        with self.assertRaisesRegex(ValueError, "diffuseOnly|material"):
+            auto.build_pack(maps, dict(recipe, diffuseOnly=True), self.root, self.root / "out8d", 64, "test_auto", False)
 
 
 if __name__ == "__main__":

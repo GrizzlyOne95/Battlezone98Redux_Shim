@@ -43,6 +43,14 @@ namespace BZROpenShim::TerrainPaint
         // craterLayers (0..1 per layer) says how strongly each layer carries them.
         std::array<float, 4> craters = {};
         std::array<float, 8> craterLayers = {};
+        // Procedural erosion detail height: longest wavelength metres, height
+        // metres, octaves (each halves the wavelength) and slope damping
+        // (0 plain fbm; higher keeps smooth valleys between sharper ridges).
+        // Wavelength 0 is off. detailLayers (0..1) weight it per layer.
+        std::array<float, 4> detail = {};
+        std::array<float, 8> detailLayers = {};
+        // The field is normalised to its height, so this bounds it either way.
+        float DetailMeters() const { return detail[0] > 0 ? detail[1] : 0.0f; }
         bool Material() const { return sliceCount != 5; }
         unsigned Layers() const { return sliceCount == 18 ? 8 : 4; }
         // Deepest a crater stack can reach, for the displacement clamp.
@@ -80,7 +88,7 @@ namespace BZROpenShim::TerrainPaint
                 const bool used = i < Layers();
                 if (used ? !std::isfinite(repeatMeters[i]) || repeatMeters[i] < 1 || repeatMeters[i] > 4096 : repeatMeters[i] != 0)
                     throw std::runtime_error("paint material repeats must be 1..4096 metres");
-                if (!used && (heightMeters[i] != 0 || detile[i] != 0 || craterLayers[i] != 0))
+                if (!used && (heightMeters[i] != 0 || detile[i] != 0 || craterLayers[i] != 0 || detailLayers[i] != 0))
                     throw std::runtime_error("paint per-layer values must match the layer count");
             }
             if (!std::isfinite(heightBlend) || heightBlend < 0 || heightBlend > 4)
@@ -118,6 +126,22 @@ namespace BZROpenShim::TerrainPaint
             }
             else if (craters != std::array<float, 4>{} || anyCraterLayer)
                 throw std::runtime_error("paint craters are off; leave every crater value 0");
+            for (float v : detail) if (!std::isfinite(v))
+                throw std::runtime_error("paint detail must be finite");
+            for (float v : detailLayers) if (!(v >= 0 && v <= 1))
+                throw std::runtime_error("paint detailLayers must be 0..1 per layer");
+            if (detail[0] != 0)
+            {
+                if (detail[0] < 2 || detail[0] > 1000 || detail[1] <= 0 || detail[1] > 4 ||
+                    detail[2] < 1 || detail[2] > 5 || detail[2] != std::floor(detail[2]) || detail[3] < 0 || detail[3] > 4)
+                    throw std::runtime_error("paint detail needs 2..1000 metre waves, height 0..4 metres, 1..5 octaves and damping 0..4");
+                if (!Material())
+                    throw std::runtime_error("paint detail needs the material form");
+                if (detailLayers == std::array<float, 8>{})
+                    throw std::runtime_error("paint detail needs at least one detail layer");
+            }
+            else if (detail != std::array<float, 4>{} || detailLayers != std::array<float, 8>{})
+                throw std::runtime_error("paint detail is off; leave every detail value 0");
             for (std::size_t i = 0; i < maps.size(); ++i)
             {
                 const auto& map = maps[i];
@@ -243,6 +267,40 @@ OpenShimCrater OpenShimCraterField(float2 p, float4 params, float foot)
     }
     return c;
 }
+// Value noise in -1..1 with its analytic gradient (Quilez).
+float3 OpenShimNoiseGrad(float2 p)
+{
+    float2 i = floor(p), f = p - i;
+    float2 u = f * f * (3.0 - 2.0 * f), du = 6.0 * f * (1.0 - f);
+    float a = OpenShimDetileHash(i), b = OpenShimDetileHash(i + float2(1, 0));
+    float c = OpenShimDetileHash(i + float2(0, 1)), d = OpenShimDetileHash(i + float2(1, 1));
+    float k = a - b - c + d;
+    return 2.0 * float3(a + (b - a) * u.x + (c - a) * u.y + k * u.x * u.y - 0.5,
+        du * (float2(b - a, c - a) + k * u.yx));
+}
+// Erosion detail: fbm whose octaves are damped where the octaves above are
+// steep, so ridges stay crisp and valleys smooth. Normalised to params.y
+// metres; octaves too fine for foot fade out. The slope leaves out the
+// damping term's own derivative, close enough for a normal. Shares OpenShimCrater.
+OpenShimCrater OpenShimDetailField(float2 p, float4 params, float foot)
+{
+    OpenShimCrater r = (OpenShimCrater)0;
+    float wave = params.x, amp = 1.0, norm = 0.0;
+    float2 steep = 0;
+    [unroll] for (int o = 0; o < 5; ++o)
+    {
+        if (o >= params.z) break;
+        float3 n = OpenShimNoiseGrad(p / wave + 31.7 * o);
+        steep += n.yz * amp;
+        float k = amp * (1.0 - smoothstep(0.25, 0.5, foot / wave)) / (1.0 + params.w * dot(steep, steep));
+        r.h += n.x * k;
+        r.slope += n.yz / wave * k;
+        norm += amp; amp *= 0.5; wave *= 0.5;
+    }
+    r.h *= params.y / norm;
+    r.slope *= params.y / norm;
+    return r;
+}
 )HLSL";
     }
     // Per-layer constants and the height-aware layer selection, shared by
@@ -260,6 +318,7 @@ OpenShimCrater OpenShimCraterField(float2 p, float4 params, float foot)
         list("openShimPaintHeightMeters", config.heightMeters);
         list("openShimPaintDetile", config.detile);
         list("openShimPaintCraterLayers", config.craterLayers);
+        list("openShimPaintDetailLayers", config.detailLayers);
         out << "static const float openShimPaintHeightBlend = " << config.heightBlend << ";\n";
         return out.str() + R"HLSL(
 struct OpenShimPaintMix { float w[OPENSHIM_PAINT_LAYERS]; };
@@ -512,6 +571,9 @@ float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, Op
 #if OPENSHIM_PAINT_CRATERS
     slope = OpenShimCraterField(g.pos.xz, openShimPaintCraters, g.foot).slope * OpenShimPaintDot(weights, openShimPaintCraterLayers);
 #endif
+#if OPENSHIM_PAINT_DETAIL
+    slope += OpenShimDetailField(g.pos.xz, openShimPaintDetail, g.foot).slope * OpenShimPaintDot(weights, openShimPaintDetailLayers);
+#endif
 #if OPENSHIM_PAINT_TRIPLANAR
     float3 world = 0;
     [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
@@ -520,7 +582,7 @@ float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, Op
                 OpenShimPaintSlice(i, 5), openShimPaintDetile[i] > 0), g) * weights.w[i];
     world.xz -= world.y * slope;
     return float4(mul(OpenShimPaintWorldFrame(g.n), normalize(world)) * 0.5 + 0.5, 1);
-#elif OPENSHIM_PAINT_CRATERS
+#elif OPENSHIM_PAINT_CRATERS || OPENSHIM_PAINT_DETAIL
     float3 n = OpenShimPaintLayers(tex, sam, g, weights, 5).rgb * 2 - 1;
     n.xy -= n.z * slope;
     return float4(normalize(n) * 0.5 + 0.5, 1);
@@ -581,6 +643,7 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             constants << "#define OPENSHIM_PAINT_VIEW_DEPTH " <<
                 (source.find("in float vDepth") != std::string::npos ? "vDepth" : "0.0") << "\n";
             constants << "#define OPENSHIM_PAINT_CRATERS " << (config.craters[0] > 0 ? 1 : 0) << "\n";
+            constants << "#define OPENSHIM_PAINT_DETAIL " << (config.detail[0] > 0 ? 1 : 0) << "\n";
             const auto vector = [&](const char* name, const float* v, int n) {
                 constants << "static const float" << n << " " << name << " = float" << n << "(";
                 for (int i = 0; i < n; ++i) constants << (i ? "," : "") << v[i];
@@ -588,6 +651,7 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             vector("openShimPaintFar", config.farScale.data(), 4);
             vector("openShimPaintMacro", config.macro.data(), 4);
             vector("openShimPaintCraters", config.craters.data(), 4);
+            vector("openShimPaintDetail", config.detail.data(), 4);
             vector("openShimPaintBounds", config.bounds.data(), 4);
             source.insert(0, constants.str() + LayerHlsl(config) + DetileHlsl() + CraterHlsl() + BlendHlsl());
         }

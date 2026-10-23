@@ -272,6 +272,7 @@ RWStructuredBuffer<float4> testResults : register(u0);
         TerrainPaint::Config varied = detiled;
         varied.farScale = {5, 40, 250, 0.6f}; varied.macro = {260, 0.12f, 0.15f, 0.35f};
         varied.craters = {6, 0.2f, 0.5f, 3}; varied.craterLayers = {1, 0, 0, 0};
+        varied.detail = {40, 1, 4, 1}; varied.detailLayers = {0.5f, 0, 0, 0};
         // Triplanar with IBL, and the top-projection material path.
         const std::pair<std::string, const char*> variants[] = {
             {triplanarRaw, "#define IBL_ENABLED\n#define ENHANCED_MODE\n"}, {materialRaw, ""}};
@@ -315,9 +316,40 @@ RWStructuredBuffer<float4> results : register(u0);
         }
         context->Unmap(staging.Get(),0);
         check(cratered,"crater field left the ground flat");
+        // Erosion detail: undamped, the analytic slope matches its height (the
+        // damping term is left out of the slope on purpose); it stays within
+        // its metres, and octaves finer than the footprint fade out.
+        std::string detailSource = std::string(TerrainPaint::DetileHlsl()) + TerrainPaint::CraterHlsl() + R"(
+RWStructuredBuffer<float4> results : register(u0);
+[numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
+{ float2 p = float2(3.7 + 13.1 * id.x, 1.9 + 7.7 * id.x); const float e = 0.002;
+  float4 params = float4(20, 1.5, 5, 0);
+  OpenShimCrater c = OpenShimDetailField(p, params, 0);
+  float dx = (OpenShimDetailField(p + float2(e, 0), params, 0).h - OpenShimDetailField(p - float2(e, 0), params, 0).h) / (2 * e);
+  float dz = (OpenShimDetailField(p + float2(0, e), params, 0).h - OpenShimDetailField(p - float2(0, e), params, 0).h) / (2 * e);
+  results[id.x] = float4(c.h, c.slope - float2(dx, dz), OpenShimDetailField(p, params, 100).h); }
+)";
+        compiled = D3DCompile(detailSource.data(),detailSource.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> detailShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&detailShader));
+        context->CSSetShader(detailShader.Get(),nullptr,0);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+        bool rough=false;
+        for(UINT i=0;i<count;++i)
+        {
+            check(std::abs(values[i].g)<0.01f&&std::abs(values[i].b)<0.01f,"detail slope differs from its height");
+            check(std::abs(values[i].r)<=1.5f&&values[i].a==0,"detail height escaped its bound or did not fade");
+            rough = rough || std::abs(values[i].r)>0.05f;
+        }
+        context->Unmap(staging.Get(),0);
+        check(rough,"detail field left the ground flat");
         TerrainPaint::Config craterHeight = material; craterHeight.heightMeters = {1, 0, 0, 0};
         craterHeight.craters = {6, 0.2f, 0.5f, 3}; craterHeight.craterLayers = {1, 0, 0, 0};
-        std::string craterTess = tessDefines + "#define OPENSHIM_PAINT_CRATERS float4(6,0.2,0.5,3)\n" +
+        craterHeight.detail = {40, 1, 4, 1}; craterHeight.detailLayers = {0.5f, 0, 0, 0};
+        std::string craterTess = tessDefines + "#define OPENSHIM_PAINT_CRATERS float4(6,0.2,0.5,3)\n"
+            "#define OPENSHIM_PAINT_DETAIL float4(40,1,4,1)\n" +
             TerrainPaint::LayerHlsl(craterHeight) + TerrainPaint::DetileHlsl() + TerrainPaint::CraterHlsl() + tessRaw + R"(
 RWStructuredBuffer<float4> testResults : register(u0);
 [numthreads(1,1,1)] void TestCraters(uint3 id : SV_DispatchThreadID)
@@ -377,7 +409,7 @@ RWStructuredBuffer<float4> testResults : register(u0);
         compiled = D3DCompile(eightTess.data(),eightTess.size(),nullptr,nullptr,nullptr,"TestEight","cs_5_0",0,0,&code,&errors);
         if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
         ok(compiled);
-        std::cout<<"PASS: eight-layer banks, distance scale, macro variation and crater variants, crater slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        std::cout<<"PASS: eight-layer banks, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
