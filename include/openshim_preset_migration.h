@@ -69,6 +69,13 @@
 //              Redux chosen after this revision is stamped, is kept. Enhanced
 //              still resolves to Redux off DX11 or without a verified set.
 //
+//   Revision 7: HD terrain tiles became a default at the user's request on
+//              2026-10-22:
+//                 Terrain/TerrainHdEnabled        = 1  (was 0)
+//              Only a file still at the old shipped 0 moves. The tiles only
+//              draw on DX11 Enhanced with a pack found (Campaign Reimagined
+//              ships one); everywhere else the stock atlas stays.
+//
 // Migration policy is implemented here so it works for:
 //   - Campaign Reimagined Workshop users
 //   - standalone OpenShim releases
@@ -83,7 +90,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 6;
+    constexpr int kCurrentPresetRevision = 7;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset as a Windows checkout

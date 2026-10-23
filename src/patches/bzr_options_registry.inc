@@ -320,7 +320,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Contribution-ranked per-object local-light ordering. DX11 only. Restart required." },
     { "HD Terrain Tiles", "Terrain", "TerrainHdEnabled", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Full-resolution authored terrain tiles, with optional normal/specular maps. "
       "Requires a compatible pack and DX11 Enhanced; other profiles keep the original atlas. Restart required." },

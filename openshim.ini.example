@@ -928,7 +928,8 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; resources fail soft to the stock atlas.
 ; Native full-resolution diffuse tile replacement (DX11). Requires a texture
 ; pack manifest; existing tile placement, orientation and gameplay stay intact.
-TerrainHdEnabled = 0
+; Default on: other profiles, DX9 and installs without a pack keep the stock atlas.
+TerrainHdEnabled = 1
 
 ; HD tile manifest. Accepted: auto, or a path string.
 ; auto (or empty): find the separately installed HD terrain pack, searching the
