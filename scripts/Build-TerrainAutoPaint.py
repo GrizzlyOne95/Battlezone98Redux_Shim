@@ -27,7 +27,7 @@ import sys
 import zipfile
 
 import numpy as np
-from PIL import Image, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter
 
 _here = Path(__file__).parent
 
@@ -384,7 +384,7 @@ def make_seamless(image):
 _SIBLINGS = {"normal": ("Normal", "normal", "nor_gl", "nor_dx"),
              "height": ("Displacement", "height", "disp"),
              "roughness": ("Roughness", "roughness", "rough")}
-_COLOR_SUFFIXES = ("BaseColor", "Albedo", "albedo", "diff", "diffuse")
+_COLOR_SUFFIXES = ("BaseColor", "Basecolor", "Albedo", "albedo", "diff", "diffuse")
 
 
 def _sibling_names(name, kind):
@@ -598,6 +598,13 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
             raise ValueError("each layer needs a name and repeatMeters from 1 to 4096")
         art, identity = _hd.load_art(root, layer)
         art = art.resize((size, size), Image.Resampling.LANCZOS)
+        if "saturation" in layer:
+            # Mute off-world tints (rust, moss) before the mean match recolours.
+            saturation = layer["saturation"]
+            if type(saturation) not in (int, float) or not 0 <= saturation <= 2:
+                raise ValueError("layer saturation must be from 0 to 2")
+            art = ImageEnhance.Color(art.convert("RGB")).enhance(saturation)
+            identity = dict(identity, saturation=saturation)
         if layer.get("matchMean"):
             reference, reference_identity = _hd.load_art(root, {"file": layer["matchMean"]})
             art = match_mean(art, reference)

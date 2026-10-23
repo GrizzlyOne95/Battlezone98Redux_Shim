@@ -214,6 +214,8 @@ Layer recipe fields:
 - Missing maps are derived: height from the colour's high-passed luminance, the
   normal from that height (`derivedReliefMeters`, default 0.25), and specular as
   0.5.
+- `saturation` (0 to 2) scales colour saturation before `matchMean`, to mute
+  off-world tints such as rust or moss in a scanned source.
 - `seamless` wrap-blends the normal, height and specular too.
 
 Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory.

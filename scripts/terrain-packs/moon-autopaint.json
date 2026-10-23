@@ -99,7 +99,8 @@
     {
       "name": "Dust",
       "repeatMeters": 24,
-      "file": "moon_dusted_01_diff_2k.png",
+      "archive": "military_trenches_ground_dirt_fine_03_yd0jchk_8k.zip",
+      "member": "yd0jchk_8K_Basecolor.jpg",
       "matchMean": "crhd_moon_mn00sa0_d.dds",
       "gain": [
         0.9,
@@ -128,7 +129,9 @@
     {
       "name": "Cratered dust",
       "repeatMeters": 40,
-      "file": "moon_meteor_02_diff_2k.png",
+      "archive": "dark_rock_detail_texture_sexhdi0f0_4k.zip",
+      "member": "Dark_Rock_Detail_Texture_sexhdi0f0_4K_BaseColor.jpg",
+      "saturation": 0.15,
       "matchMean": "crhd_moon_mn00sa0_d.dds",
       "gain": [
         0.9,
