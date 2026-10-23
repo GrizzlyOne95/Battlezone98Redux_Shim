@@ -321,6 +321,29 @@ def validate_recipe(recipe):
             raise ValueError(f"layer {layer.get('name')} needs heightMeters 0..32 and specularScale in (0,4]")
         if type(layer.get("detile", False)) is not bool:
             raise ValueError(f"layer {layer.get('name')} detile must be true or false")
+        strength = layer.get("proceduralCraters", False)
+        if type(strength) not in (bool, int, float) or not 0 <= strength <= 1:
+            raise ValueError(f"layer {layer.get('name')} proceduralCraters must be true, false or 0..1")
+    if "far" in recipe:
+        far = recipe["far"]
+        if not (2 <= far.get("scale", 0) <= 16 and 0 <= far.get("startMeters", -1) < far.get("endMeters", -1) <= 100000
+                and 0 <= far.get("amount", -1) <= 1):
+            raise ValueError("far needs scale 2..16, 0 <= startMeters < endMeters and amount 0..1")
+    if "macro" in recipe:
+        macro = recipe["macro"]
+        if not (10 <= macro.get("meters", 0) <= 10000 and 0 <= macro.get("brightness", -1) <= 0.5
+                and 0 <= macro.get("saturation", -1) <= 1):
+            raise ValueError("macro needs meters 10..10000, brightness 0..0.5 and saturation 0..1")
+    crater_layers = [layer.get("proceduralCraters", False) for layer in recipe["layers"]]
+    if "craters" in recipe:
+        craters = recipe["craters"]
+        if not (1 <= craters.get("cellMeters", 0) <= 1000 and 0 < craters.get("depth", 0) <= 0.5
+                and 0 < craters.get("coverage", 0) <= 1 and craters.get("octaves", 0) in (1, 2, 3)):
+            raise ValueError("craters needs cellMeters 1..1000, depth (0,0.5], coverage (0,1] and octaves 1..3")
+        if not any(crater_layers):
+            raise ValueError("craters needs at least one layer with proceduralCraters")
+    elif any(crater_layers):
+        raise ValueError("proceduralCraters needs the recipe's craters settings")
     if "slope" in recipe:
         slope = recipe["slope"]
         if not weight_vector(slope.get("weights")) or not 0 <= slope.get("startDegrees", -1) < slope.get("fullDegrees", -1) <= 90:
@@ -670,9 +693,19 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
     paint = {"schema": "bzr-openshim-terrain-paint-v1", "rowZero": "minZ", "repeatMeters": repeats, "maps": entries}
     if any(layer.get("detile") for layer in recipe["layers"]):
         paint["detile"] = [1 if layer.get("detile") else 0 for layer in recipe["layers"]]
+    if "far" in recipe:
+        far = recipe["far"]
+        paint["far"] = [far["scale"], far["startMeters"], far["endMeters"], far["amount"]]
+    if "macro" in recipe:
+        macro = recipe["macro"]
+        paint["macro"] = [macro["meters"], macro["brightness"], macro["saturation"]]
     if material:
         paint["heightBlend"] = recipe.get("heightBlend", 0.5)
         paint["heightMeters"] = [layer.get("heightMeters", 0) for layer in recipe["layers"]]
+        if "craters" in recipe:
+            craters = recipe["craters"]
+            paint["craters"] = [craters["cellMeters"], craters["depth"], craters["coverage"], craters["octaves"]]
+            paint["craterLayers"] = [float(layer.get("proceduralCraters", 0)) for layer in recipe["layers"]]
     manifest = {"schema": "bzr-openshim-terrain-hd-v1", "materials": {capture_material: {
         "sliceCount": 9 if material else 5, "diffuseResource": recipe["diffuseResource"], "fallback": resources[0],
         "tiles": tiles, "paint": paint}}}

@@ -28,7 +28,26 @@ namespace BZROpenShim::TerrainPaint
         // Per layer, 0 or 1: break up the repeat with noise-chosen tile
         // offsets (diffuse, normal, height and displacement alike).
         std::array<float, 4> detile = {};
+        // Two scales by distance: scale, start metres, end metres, amount.
+        // Past start every layer cross-fades toward a copy scale times
+        // larger, so the repeat stops reading at range. Scale 0 is off.
+        std::array<float, 4> farScale = {};
+        // Large-scale variation: noise metres, brightness and saturation
+        // swing (fractions). Metres 0 is off.
+        std::array<float, 3> macro = {};
+        // Procedural world-space craters: cell metres, depth to diameter,
+        // coverage, octaves (each triples the cell). Cell 0 is off.
+        // craterLayers (0..1 per layer) says how strongly each layer carries them.
+        std::array<float, 4> craters = {};
+        std::array<float, 4> craterLayers = {};
         bool Material() const { return sliceCount == 9; }
+        // Deepest a crater stack can reach, for the displacement clamp.
+        float CraterMeters() const
+        {
+            float total = 0, cell = craters[0];
+            for (int o = 0; o < craters[3]; ++o, cell *= 3) total += 0.75f * craters[1] * (1 - 0.25f * o) * 2 * 0.42f * cell;
+            return craters[0] > 0 ? total : 0.0f;
+        }
         // Optional multi-map table. Several campaign maps share one atlas
         // material, so a single pack lists one entry per terrain shape; the
         // entry matching the live fingerprint and bounds supplies the control
@@ -60,6 +79,32 @@ namespace BZROpenShim::TerrainPaint
                 throw std::runtime_error("paint heightMeters needs the 9-slice material form");
             for (float v : detile) if (v != 0 && v != 1)
                 throw std::runtime_error("paint detile must be 0 or 1 per layer");
+            for (float v : farScale) if (!std::isfinite(v))
+                throw std::runtime_error("paint far must be finite");
+            if (farScale[0] != 0 && (farScale[0] < 2 || farScale[0] > 16 || farScale[1] < 0 || farScale[2] <= farScale[1] ||
+                farScale[2] > 100000 || farScale[3] < 0 || farScale[3] > 1))
+                throw std::runtime_error("paint far needs scale 2..16, 0 <= start < end metres and amount 0..1");
+            for (float v : macro) if (!std::isfinite(v))
+                throw std::runtime_error("paint macro must be finite");
+            if (macro[0] != 0 && (macro[0] < 10 || macro[0] > 10000 || macro[1] < 0 || macro[1] > 0.5f ||
+                macro[2] < 0 || macro[2] > 1))
+                throw std::runtime_error("paint macro needs 10..10000 metres, brightness 0..0.5 and saturation 0..1");
+            for (float v : craters) if (!std::isfinite(v))
+                throw std::runtime_error("paint craters must be finite");
+            for (float v : craterLayers) if (!(v >= 0 && v <= 1))
+                throw std::runtime_error("paint craterLayers must be 0..1 per layer");
+            if (craters[0] != 0)
+            {
+                if (craters[0] < 1 || craters[0] > 1000 || craters[1] <= 0 || craters[1] > 0.5f ||
+                    craters[2] <= 0 || craters[2] > 1 || (craters[3] != 1 && craters[3] != 2 && craters[3] != 3))
+                    throw std::runtime_error("paint craters need 1..1000 metre cells, depth 0..0.5, coverage 0..1 and 1..3 octaves");
+                if (!Material())
+                    throw std::runtime_error("paint craters need the 9-slice material form");
+                if (craterLayers == std::array<float, 4>{})
+                    throw std::runtime_error("paint craters need at least one crater layer");
+            }
+            else if (craters != std::array<float, 4>{} || craterLayers != std::array<float, 4>{})
+                throw std::runtime_error("paint craters are off; leave every crater value 0");
             for (std::size_t i = 0; i < maps.size(); ++i)
             {
                 const auto& map = maps[i];
@@ -137,6 +182,52 @@ OpenShimDetile OpenShimDetileAt(float2 uv)
 }
 )HLSL";
     }
+    // Shared like DetileHlsl, after it (it reuses the hash), so the shaded
+    // bowls and the displaced ones agree. Jittered cells, one crater at most
+    // per cell; foot is the sample spacing in metres, and craters too small
+    // to resolve fade out instead of aliasing. slope is dh/dx, dh/dz.
+    inline const char* CraterHlsl()
+    {
+        return R"HLSL(
+struct OpenShimCrater { float h; float2 slope; };
+OpenShimCrater OpenShimCraterField(float2 p, float4 params, float foot)
+{
+    OpenShimCrater c = (OpenShimCrater)0;
+    float cell = params.x;
+    [unroll] for (int o = 0; o < 3; ++o)
+    {
+        if (o >= params.w) break;
+        float fade = 1.0 - smoothstep(0.08, 0.2, foot / cell);
+        // Bigger craters are shallower for their size.
+        float ratio = params.y * (1.0 - 0.25 * o) * fade;
+        float2 q = p / cell + 7.31 * o;
+        float2 id = floor(q);
+        [branch] if (fade > 0)
+        [unroll] for (int j = -1; j <= 1; ++j)
+        [unroll] for (int i = -1; i <= 1; ++i)
+        {
+            float2 k = id + float2(i, j);
+            float2 key = k + 57.0 * o;
+            if (OpenShimDetileHash(key + 0.5) >= params.z) continue;
+            float size = OpenShimDetileHash(key + 19.19);
+            float2 v = q - (k + 0.15 + 0.7 * float2(OpenShimDetileHash(key + 47.7), OpenShimDetileHash(key + 83.3)));
+            float radius = lerp(0.12, 0.42, size * size);
+            float dist = length(v), d = dist / radius;
+            if (d >= 1.6) continue;
+            // Parabolic bowl with a flat floor, raised Gaussian rim.
+            float bowl = d < 1.0 ? max(d * d - 1.0, -0.75) : 0.0;
+            float dBowl = d < 1.0 && d > 0.5 ? 2.0 * d : 0.0;
+            float rim = 0.3 * exp(-14.0 * (d - 1.0) * (d - 1.0));
+            float dRim = -28.0 * (d - 1.0) * rim;
+            c.h += (bowl + rim) * ratio * 2.0 * radius * cell;
+            c.slope += (dBowl + dRim) * ratio * 2.0 * v / max(dist, 1e-5);
+        }
+        cell *= 3.0;
+    }
+    return c;
+}
+)HLSL";
+    }
     inline const char* BlendHlsl()
     {
         return R"HLSL(
@@ -147,11 +238,11 @@ OpenShimDetile OpenShimDetileAt(float2 uv)
 // not Enhanced), so it repeats those conditions.
 #if OPENSHIM_PAINT_TRIPLANAR_SOURCE && defined(IBL_ENABLED) && defined(ENHANCED_MODE) &&     !defined(OG_RETRO_MODE) && !defined(VERTEX_LIGHTING)
 #define OPENSHIM_PAINT_TRIPLANAR 1
-#define OPENSHIM_PAINT_GEO OpenShimPaintGeometry(openShimHdUV, openShimTileSlice, mul(inverseViewMatrix, float4(vViewNormal, 0.0)).xyz)
+#define OPENSHIM_PAINT_GEO OpenShimPaintGeometryAt(openShimHdUV, openShimTileSlice, mul(inverseViewMatrix, float4(vViewNormal, 0.0)).xyz, OPENSHIM_PAINT_VIEW_DEPTH)
 #define OPENSHIM_PAINT_TBN(n) OpenShimPaintTbn(n, inverseViewMatrix)
 #else
 #define OPENSHIM_PAINT_TRIPLANAR 0
-#define OPENSHIM_PAINT_GEO OpenShimPaintGeometry(openShimHdUV, 0.0, float3(0, 1, 0))
+#define OPENSHIM_PAINT_GEO OpenShimPaintGeometryAt(openShimHdUV, 0.0, float3(0, 1, 0), OPENSHIM_PAINT_VIEW_DEPTH)
 #define OPENSHIM_PAINT_TBN(n) cotangent_frame(n, vViewPosition.xyz, openShimHdUV)
 #endif
 #ifndef OPENSHIM_PAINT_SAMPLE
@@ -162,8 +253,9 @@ OpenShimDetile OpenShimDetileAt(float2 uv)
 #define OPENSHIM_PAINT_DDX(v) ddx(v)
 #define OPENSHIM_PAINT_DDY(v) ddy(v)
 #endif
-struct OpenShimPaintGeo { float3 pos; float3 n; float3 blend; float3 flip; float3 dpdx; float3 dpdy; };
-OpenShimPaintGeo OpenShimPaintGeometry(float2 worldXZ, float worldY, float3 worldNormal)
+// farMix is the share of the larger copy; foot is metres per pixel.
+struct OpenShimPaintGeo { float3 pos; float3 n; float3 blend; float3 flip; float3 dpdx; float3 dpdy; float farMix; float foot; };
+OpenShimPaintGeo OpenShimPaintGeometryAt(float2 worldXZ, float worldY, float3 worldNormal, float viewDepth)
 {
     OpenShimPaintGeo g;
     g.pos = float3(worldXZ.x, worldY, worldXZ.y);
@@ -171,6 +263,9 @@ OpenShimPaintGeo OpenShimPaintGeometry(float2 worldXZ, float worldY, float3 worl
     // here outside any branch, give each tap its own.
     g.dpdx = OPENSHIM_PAINT_DDX(g.pos);
     g.dpdy = OPENSHIM_PAINT_DDY(g.pos);
+    g.foot = max(length(g.dpdx), length(g.dpdy));
+    g.farMix = openShimPaintFar.x > 0 ?
+        saturate((viewDepth - openShimPaintFar.y) / (openShimPaintFar.z - openShimPaintFar.y)) * openShimPaintFar.w : 0.0;
     g.n = normalize(worldNormal);
     // Sharp blend: ground under about 30 degrees keeps the single top tap and
     // only real slopes pay for side projections.
@@ -180,6 +275,10 @@ OpenShimPaintGeo OpenShimPaintGeometry(float2 worldXZ, float worldY, float3 worl
     // Mirror u on far faces so no face shows the texture mirrored.
     g.flip = float3(g.n.x < 0 ? -1 : 1, g.n.y < 0 ? -1 : 1, g.n.z < 0 ? 1 : -1);
     return g;
+}
+OpenShimPaintGeo OpenShimPaintGeometry(float2 worldXZ, float worldY, float3 worldNormal)
+{
+    return OpenShimPaintGeometryAt(worldXZ, worldY, worldNormal, 0.0);
 }
 // X projects (z, y); Y projects (x, z), the original paint mapping with
 // tangent +x along world X and +y along world Z; Z projects (x, y).
@@ -202,14 +301,25 @@ float4 OpenShimPaintProjected(Texture2DArray tex, SamplerState sam, float2 uv, f
 #define OPENSHIM_PAINT_TAP(tex, sam, g, axis, s, slice, detile) OpenShimPaintProjected(tex, sam, \
     axis((g).pos, g) * (s), axis((g).dpdx, g) * (s), axis((g).dpdy, g) * (s), slice, detile)
 struct OpenShimPaintTaps { float4 x, y, z; };
-OpenShimPaintTaps OpenShimPaintSampleTaps(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float repeat, float slice, bool detile)
+OpenShimPaintTaps OpenShimPaintSampleScale(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float s, float slice, bool detile)
 {
     OpenShimPaintTaps t = (OpenShimPaintTaps)0;
-    float s = 1.0 / repeat;
     [branch] if (g.blend.x > 0) t.x = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_X, s, slice, detile);
     [branch] if (g.blend.y > 0) t.y = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Y, s, slice, detile);
     [branch] if (g.blend.z > 0) t.z = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Z, s, slice, detile);
     return t;
+}
+// Near and far copies; only the cross-fade pays for both.
+OpenShimPaintTaps OpenShimPaintSampleTaps(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float repeat, float slice, bool detile)
+{
+    float s = 1.0 / repeat;
+    OpenShimPaintTaps nearTaps = (OpenShimPaintTaps)0, farTaps = (OpenShimPaintTaps)0;
+    [branch] if (g.farMix < 1) nearTaps = OpenShimPaintSampleScale(tex, sam, g, s, slice, detile);
+    [branch] if (g.farMix > 0) farTaps = OpenShimPaintSampleScale(tex, sam, g, s / openShimPaintFar.x, slice, detile);
+    nearTaps.x = lerp(nearTaps.x, farTaps.x, g.farMix);
+    nearTaps.y = lerp(nearTaps.y, farTaps.y, g.farMix);
+    nearTaps.z = lerp(nearTaps.z, farTaps.z, g.farMix);
+    return nearTaps;
 }
 float4 OpenShimPaintTap(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float repeat, float slice, bool detile)
 {
@@ -229,12 +339,14 @@ float4 OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintG
     weights = total > 0.00001 ? weights / total : float4(1,0,0,0);
 #if OPENSHIM_PAINT_MATERIAL
     // Height-aware blend: the taller layer wins inside a transition, so rock
-    // pokes through sand at its crests instead of cross-fading.
+    // pokes through sand at its crests instead of cross-fading. Heights stay
+    // at the near scale, as in the domain shader, so displacement agrees.
+    OpenShimPaintGeo nearGeo = g; nearGeo.farMix = 0;
     float4 heights = float4(
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.x, 5, openShimPaintDetile.x > 0).a,
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.y, 6, openShimPaintDetile.y > 0).a,
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.z, 7, openShimPaintDetile.z > 0).a,
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.w, 8, openShimPaintDetile.w > 0).a);
+        OpenShimPaintTap(tex, sam, nearGeo, openShimPaintRepeats.x, 5, openShimPaintDetile.x > 0).a,
+        OpenShimPaintTap(tex, sam, nearGeo, openShimPaintRepeats.y, 6, openShimPaintDetile.y > 0).a,
+        OpenShimPaintTap(tex, sam, nearGeo, openShimPaintRepeats.z, 7, openShimPaintDetile.z > 0).a,
+        OpenShimPaintTap(tex, sam, nearGeo, openShimPaintRepeats.w, 8, openShimPaintDetile.w > 0).a);
     float4 lifted = weights + heights * openShimPaintHeightBlend;
     float crest = max(max(lifted.x, lifted.y), max(lifted.z, lifted.w));
     float4 kept = max(lifted - (crest - 0.2), 0) * step(0.002, weights);
@@ -255,7 +367,17 @@ float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, OpenShim
     float4 weights = OpenShimPaintWeights(tex, sam, g);
     // The fourth control channel is a weight, never terrain transparency, and
     // diffuse alpha (specular in the material form) is not the detail weight.
-    return float4(OpenShimPaintLayers(tex, sam, g, weights, 0).rgb, 1);
+    float3 colour = OpenShimPaintLayers(tex, sam, g, weights, 0).rgb;
+    if (openShimPaintMacro.x > 0)
+    {
+        // Two octaves of soft noise per channel, roughly -1..1.
+        float2 m = g.pos.xz / max(openShimPaintMacro.x, 1.0);
+        float bright = OpenShimDetileNoise(m) * 1.3 + OpenShimDetileNoise(m * 2.7 + 17.0) * 0.7 - 1.0;
+        float sat = OpenShimDetileNoise(m * 0.8 + 41.0) * 1.3 + OpenShimDetileNoise(m * 2.3 + 73.0) * 0.7 - 1.0;
+        float luma = dot(colour, float3(0.299, 0.587, 0.114));
+        colour = max(lerp(luma, colour, 1.0 + sat * openShimPaintMacro.z) * (1.0 + bright * openShimPaintMacro.y), 0.0);
+    }
+    return float4(colour, 1);
 }
 #if OPENSHIM_PAINT_MATERIAL
 // Any orthonormal frame around the geometry normal works: the paint normal is
@@ -289,13 +411,24 @@ float3 OpenShimPaintWorldNormal(OpenShimPaintTaps t, OpenShimPaintGeo g)
 float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
     float4 weights = OpenShimPaintWeights(tex, sam, g);
+    // Crater slopes tilt the blended normal like a height field, on the
+    // crater layers only; the domain shader displaces the same bowls.
+    float2 slope = 0;
+#if OPENSHIM_PAINT_CRATERS
+    slope = OpenShimCraterField(g.pos.xz, openShimPaintCraters, g.foot).slope * dot(weights, openShimPaintCraterLayers);
+#endif
 #if OPENSHIM_PAINT_TRIPLANAR
     float3 world =
         OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.x, 5, openShimPaintDetile.x > 0), g) * weights.x +
         OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.y, 6, openShimPaintDetile.y > 0), g) * weights.y +
         OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.z, 7, openShimPaintDetile.z > 0), g) * weights.z +
         OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.w, 8, openShimPaintDetile.w > 0), g) * weights.w;
+    world.xz -= world.y * slope;
     return float4(mul(OpenShimPaintWorldFrame(g.n), normalize(world)) * 0.5 + 0.5, 1);
+#elif OPENSHIM_PAINT_CRATERS
+    float3 n = OpenShimPaintLayers(tex, sam, g, weights, 5).rgb * 2 - 1;
+    n.xy -= n.z * slope;
+    return float4(normalize(n) * 0.5 + 0.5, 1);
 #else
     return float4(OpenShimPaintLayers(tex, sam, g, weights, 5).rgb, 1);
 #endif
@@ -349,6 +482,18 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             const bool triplanar = source.find("in float3 vViewNormal") != std::string::npos &&
                 source.find("uniform float4x4 inverseViewMatrix") != std::string::npos;
             constants << "#define OPENSHIM_PAINT_TRIPLANAR_SOURCE " << (triplanar ? 1 : 0) << "\n";
+            // The far scale fades by view depth; a pass without it stays near.
+            constants << "#define OPENSHIM_PAINT_VIEW_DEPTH " <<
+                (source.find("in float vDepth") != std::string::npos ? "vDepth" : "0.0") << "\n";
+            constants << "#define OPENSHIM_PAINT_CRATERS " << (config.craters[0] > 0 ? 1 : 0) << "\n";
+            const auto vector = [&](const char* name, const float* v, int n) {
+                constants << "static const float" << n << " " << name << " = float" << n << "(";
+                for (int i = 0; i < n; ++i) constants << (i ? "," : "") << v[i];
+                constants << ");\n"; };
+            vector("openShimPaintFar", config.farScale.data(), 4);
+            vector("openShimPaintMacro", config.macro.data(), 3);
+            vector("openShimPaintCraters", config.craters.data(), 4);
+            vector("openShimPaintCraterLayers", config.craterLayers.data(), 4);
             constants << "static const float4 openShimPaintBounds = float4(";
             for (int i = 0; i < 4; ++i) constants << (i ? "," : "") << config.bounds[i];
             constants << ");\nstatic const float4 openShimPaintRepeats = float4(";
@@ -356,7 +501,7 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             constants << ");\nstatic const float4 openShimPaintDetile = float4(";
             for (int i = 0; i < 4; ++i) constants << (i ? "," : "") << config.detile[i];
             constants << ");\nstatic const float openShimPaintHeightBlend = " << config.heightBlend;
-            source.insert(0, constants.str() + ";\n" + DetileHlsl() + BlendHlsl());
+            source.insert(0, constants.str() + ";\n" + DetileHlsl() + CraterHlsl() + BlendHlsl());
         }
         else
         {

@@ -1185,6 +1185,15 @@ namespace BZROpenShim
                             binding.paint.heightMeters = paint.at("heightMeters").get<std::array<float, 4>>();
                         if (paint.contains("detile"))
                             binding.paint.detile = paint.at("detile").get<std::array<float, 4>>();
+                        if (paint.contains("far"))
+                            binding.paint.farScale = paint.at("far").get<std::array<float, 4>>();
+                        if (paint.contains("macro"))
+                            binding.paint.macro = paint.at("macro").get<std::array<float, 3>>();
+                        if (paint.contains("craters"))
+                        {
+                            binding.paint.craters = paint.at("craters").get<std::array<float, 4>>();
+                            binding.paint.craterLayers = paint.at("craterLayers").get<std::array<float, 4>>();
+                        }
                         if (paint.contains("maps"))
                         {
                             // Multi-map form: one entry per terrain shape sharing this

@@ -205,6 +205,22 @@ class AutoPaintTests(unittest.TestCase):
         self.assertEqual(binding["paint"]["detile"], [1, 0, 0, 0])
         with self.assertRaisesRegex(ValueError, "detile"):
             auto.validate_recipe(dict(recipe, layers=[dict(layer, detile=1)] + self.recipe["layers"][1:]))
+        varied = dict(detiled, far={"scale": 5, "startMeters": 40, "endMeters": 250, "amount": 0.6},
+                      macro={"meters": 260, "brightness": 0.12, "saturation": 0.15},
+                      craters={"cellMeters": 6, "depth": 0.2, "coverage": 0.5, "octaves": 3},
+                      layers=[dict(detiled["layers"][0], proceduralCraters=True)] + self.recipe["layers"][1:])
+        auto.validate_recipe(varied)
+        paint = auto.build_pack(maps, varied, self.root, self.root / "out3", size, "test_auto", False)["materials"]["TERRAIN"]["paint"]
+        self.assertEqual((paint["far"], paint["macro"]), ([5, 40, 250, 0.6], [260, 0.12, 0.15]))
+        self.assertEqual((paint["craters"], paint["craterLayers"]), ([6, 0.2, 0.5, 3], [1, 0, 0, 0]))
+        self.assertEqual(auto.build_pack(maps, dict(varied, layers=[dict(varied["layers"][0], proceduralCraters=0.5)] + self.recipe["layers"][1:]),
+                         self.root, self.root / "out4", size, "test_auto", False)["materials"]["TERRAIN"]["paint"]["craterLayers"], [0.5, 0, 0, 0])
+        for bad, message in ((dict(varied, far={"scale": 1, "startMeters": 0, "endMeters": 1, "amount": 1}), "far"),
+                             (dict(varied, macro={"meters": 5, "brightness": 0.1, "saturation": 0.1}), "macro"),
+                             (dict(varied, craters=dict(varied["craters"], octaves=4)), "craters"),
+                             (dict(detiled, layers=varied["layers"]), "proceduralCraters")):
+            with self.assertRaisesRegex(ValueError, message):
+                auto.validate_recipe(bad)
         with Image.open(self.root / "out" / binding["tiles"]["0"]) as d, Image.open(self.root / "out" / binding["tiles"]["5"]) as nh:
             self.assertEqual(d.getpixel((5, 5))[3], 51)                 # specular = 1 - roughness 0.8
             self.assertGreater(np.ptp(np.asarray(nh)[..., 3]), 200)    # height stretched to 0..1

@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 using Microsoft::WRL::ComPtr;
 using namespace BZROpenShim;
@@ -118,6 +119,7 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         const std::string frame = "float3x3 cotangent_frame(float3 N, float3 p, float2 uv) { return float3x3(ddx(p), ddy(p), N); }\n"
             "Texture2D normalMap : register(t2); SamplerState normalSam : register(s2);\n"
             "Texture2D specularMap : register(t3); SamplerState specularSam : register(s3);\n";
+        const std::string materialRaw = materialSource;
         check(TerrainPaint::Specialize(materialSource, true, material), "material PS specialization failed");
         materialSource = frame + materialSource;
         ok(D3DCompile(materialSource.data(),materialSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors));
@@ -232,6 +234,7 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         std::ifstream tessFile(TERRAIN_TESS_SHADER_PATH, std::ios::binary);
         std::string tessSource((std::istreambuf_iterator<char>(tessFile)), {});
         check(!tessSource.empty(), "shipped terrain shader missing");
+        const std::string tessRaw = tessSource;
         tessSource = std::string("#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
             "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(0,0,4,4)\n#define OPENSHIM_PAINT_REPEATS float4(2,2,2,2)\n"
             "#define OPENSHIM_PAINT_HEIGHT_METERS float4(1,0,0,0)\n#define OPENSHIM_PAINT_DETILE float4(1,0,0,0)\n"
@@ -264,7 +267,68 @@ RWStructuredBuffer<float4> testResults : register(u0);
             moved = moved || std::abs(shaded[i].r-shaded[i].g)>0.05f;
         }
         check(moved,"detile offsets left the pattern unchanged");
-        std::cout<<"PASS: detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        // Distance scale, macro variation and craters: every pixel variant
+        // and the domain shader compile; crater slopes match their heights.
+        TerrainPaint::Config varied = detiled;
+        varied.farScale = {5, 40, 250, 0.6f}; varied.macro = {260, 0.12f, 0.15f};
+        varied.craters = {6, 0.2f, 0.5f, 3}; varied.craterLayers = {1, 0, 0, 0};
+        // Triplanar with IBL, and the top-projection material path.
+        const std::pair<std::string, const char*> variants[] = {
+            {triplanarRaw, "#define IBL_ENABLED\n#define ENHANCED_MODE\n"}, {materialRaw, ""}};
+        for (const auto& [raw, prefix] : variants)
+            {
+                std::string variant = raw;
+                const std::string slice = "float openShimTileSlice : TEXCOORD10";
+                variant.replace(variant.find(slice), slice.size(), slice + ", in float vDepth : TEXCOORD5");
+                check(TerrainPaint::Specialize(variant, true, varied) &&
+                    variant.find("#define OPENSHIM_PAINT_VIEW_DEPTH vDepth") != std::string::npos, "varied PS specialization failed");
+                variant = prefix + frame + variant;
+                compiled = D3DCompile(variant.data(),variant.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
+                if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+                ok(compiled);
+            }
+        std::string craterSource = std::string(TerrainPaint::DetileHlsl()) + TerrainPaint::CraterHlsl() + R"(
+RWStructuredBuffer<float4> results : register(u0);
+[numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
+{ float2 p = float2(3.7 + 13.1 * id.x, 1.9 + 7.7 * id.x); const float e = 0.002;
+  float4 params = float4(6, 0.2, 0.9, 3);
+  OpenShimCrater c = OpenShimCraterField(p, params, 0);
+  float dx = (OpenShimCraterField(p + float2(e, 0), params, 0).h - OpenShimCraterField(p - float2(e, 0), params, 0).h) / (2 * e);
+  float dz = (OpenShimCraterField(p + float2(0, e), params, 0).h - OpenShimCraterField(p - float2(0, e), params, 0).h) / (2 * e);
+  results[id.x] = float4(c.h, c.slope - float2(dx, dz), OpenShimCraterField(p, params, 100).h); }
+)";
+        compiled = D3DCompile(craterSource.data(),craterSource.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> craterShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&craterShader));
+        context->CSSetShader(craterShader.Get(),nullptr,0);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+        bool cratered=false;
+        for(UINT i=0;i<count;++i)
+        {
+            // Kinks at the floor and rim edge make a few samples disagree
+            // only where the finite difference straddles them.
+            check(std::abs(values[i].g)<0.05f&&std::abs(values[i].b)<0.05f,"crater slope differs from its height");
+            check(values[i].a==0,"unresolvable craters did not fade out");
+            cratered = cratered || std::abs(values[i].r)>0.01f;
+        }
+        context->Unmap(staging.Get(),0);
+        check(cratered,"crater field left the ground flat");
+        std::string craterTess = std::string("#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
+            "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(0,0,4,4)\n#define OPENSHIM_PAINT_REPEATS float4(2,2,2,2)\n"
+            "#define OPENSHIM_PAINT_HEIGHT_METERS float4(1,0,0,0)\n#define OPENSHIM_PAINT_CRATERS float4(6,0.2,0.5,3)\n"
+            "#define OPENSHIM_PAINT_CRATER_LAYERS float4(1,0,0,0)\n"
+            "#define OPENSHIM_PAINT_HEIGHT_BLEND 0.5\n#define OPENSHIM_PAINT_HEIGHT_SCALE 1\n") +
+            TerrainPaint::DetileHlsl() + TerrainPaint::CraterHlsl() + tessRaw + R"(
+RWStructuredBuffer<float4> testResults : register(u0);
+[numthreads(1,1,1)] void TestCraters(uint3 id : SV_DispatchThreadID)
+{ testResults[id.x] = float4(TerrainPaintRelief(float2(1.3 + 9.1 * id.x, 0.7 + 4.3 * id.x)), 0); }
+)";
+        compiled = D3DCompile(craterTess.data(),craterTess.size(),nullptr,nullptr,nullptr,"TestCraters","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        std::cout<<"PASS: distance scale, macro variation and crater variants, crater slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

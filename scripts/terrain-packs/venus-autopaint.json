@@ -116,5 +116,16 @@
       "heightMeters": 1.8
     }
   ],
-  "heightBlend": 0.5
+  "heightBlend": 0.5,
+  "far": {
+    "scale": 5,
+    "startMeters": 40,
+    "endMeters": 250,
+    "amount": 0.6
+  },
+  "macro": {
+    "meters": 260,
+    "brightness": 0.12,
+    "saturation": 0.15
+  }
 }

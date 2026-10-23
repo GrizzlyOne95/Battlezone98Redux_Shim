@@ -110,13 +110,8 @@
       "heightMeters": 0.6,
       "derivedReliefMeters": 0.6,
       "specularScale": 0.6,
-      "craters": {
-        "count": 120,
-        "minMeters": 0.6,
-        "maxMeters": 5,
-        "seed": 11,
-        "detail": 0.15
-      }
+      "detile": true,
+      "proceduralCraters": 0.6
     },
     {
       "name": "Blue rock",
@@ -139,16 +134,11 @@
         1.0,
         1.09
       ],
-      "heightMeters": 2.5,
-      "derivedReliefMeters": 2.5,
+      "heightMeters": 1.0,
+      "derivedReliefMeters": 1.0,
       "specularScale": 0.6,
-      "craters": {
-        "count": 70,
-        "minMeters": 2,
-        "maxMeters": 18,
-        "seed": 5,
-        "detail": 0.08
-      }
+      "detile": true,
+      "proceduralCraters": 1
     },
     {
       "name": "Blue rock wide",
@@ -160,5 +150,22 @@
       "heightMeters": 1.6
     }
   ],
-  "heightBlend": 0.5
+  "heightBlend": 0.5,
+  "far": {
+    "scale": 5,
+    "startMeters": 40,
+    "endMeters": 250,
+    "amount": 0.6
+  },
+  "macro": {
+    "meters": 260,
+    "brightness": 0.12,
+    "saturation": 0.15
+  },
+  "craters": {
+    "cellMeters": 6,
+    "depth": 0.2,
+    "coverage": 0.5,
+    "octaves": 3
+  }
 }

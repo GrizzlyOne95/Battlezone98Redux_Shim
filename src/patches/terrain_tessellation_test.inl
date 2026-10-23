@@ -261,8 +261,10 @@ bool InstallNativeTerrainTessellationTest()
             TerrainHdMaterial::ScaledMicroReliefAmplitude(g_config.microReliefAmplitude, reliefScale) : 0.0f;
         // Full-material paint packs replace the noise with their own layer
         // heights, in metres. The relief slider scales them (0.25 = authored).
+        // Craters can reach CraterMeters below or above on top of the layers.
         const float paintHeightMeters = g_HdPaint.enabled && g_HdPaint.Material() ?
-            *std::max_element(g_HdPaint.heightMeters.begin(), g_HdPaint.heightMeters.end()) : 0.0f;
+            *std::max_element(g_HdPaint.heightMeters.begin(), g_HdPaint.heightMeters.end()) +
+            2.0f * g_HdPaint.CraterMeters() : 0.0f;
         const bool paintHeight = g_activeTerrainReliefAmplitude > 0.0f && paintHeightMeters > 0.0f;
         const float paintHeightScale = g_config.microReliefAmplitude / 0.25f;
         if (paintHeight) g_activeTerrainReliefAmplitude = 0.5f * paintHeightMeters * paintHeightScale;
@@ -286,9 +288,14 @@ bool InstallNativeTerrainTessellationTest()
             vector("OPENSHIM_PAINT_REPEATS", g_HdPaint.repeatMeters);
             vector("OPENSHIM_PAINT_HEIGHT_METERS", g_HdPaint.heightMeters);
             vector("OPENSHIM_PAINT_DETILE", g_HdPaint.detile);
+            if (g_HdPaint.craters[0] > 0)
+            {
+                vector("OPENSHIM_PAINT_CRATERS", g_HdPaint.craters);
+                vector("OPENSHIM_PAINT_CRATER_LAYERS", g_HdPaint.craterLayers);
+            }
             defines << "#define OPENSHIM_PAINT_HEIGHT_BLEND " << g_HdPaint.heightBlend << "\n";
             defines << "#define OPENSHIM_PAINT_HEIGHT_SCALE " << paintHeightScale << "\n";
-            source = defines.str() + TerrainPaint::DetileHlsl() + source;
+            source = defines.str() + TerrainPaint::DetileHlsl() + TerrainPaint::CraterHlsl() + source;
         }
         const bool domainTexture = textureHeight || paintHeight;
         void* materialManager = g_ogre.getMaterialManager();

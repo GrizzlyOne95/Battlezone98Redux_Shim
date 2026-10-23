@@ -224,6 +224,34 @@ Layer recipe fields:
   same offsets. Only the fade bands take a second tap; offsets are translations,
   so normals stay valid. It is written as `paint.detile`, one 0 or 1 per layer.
 
+Three recipe-level settings vary the ground past what one tile can show:
+
+- `far` (`scale`, `startMeters`, `endMeters`, `amount`) samples every layer a
+  second time at `scale` times its repeat (2 to 16) and cross-fades toward it
+  with view depth, from nothing at `startMeters` to `amount` at `endMeters`.
+  The repeat stops reading as a grid at range, and only the fade band and
+  beyond pay for the second set of taps. The height-aware blend and the
+  displacement stay at the normal scale. Passes without view depth (the
+  glow pass) keep the normal scale. Written as `paint.far`, four numbers.
+- `macro` (`meters`, `brightness`, `saturation`) multiplies the final colour
+  by soft two-octave noise about `meters` across: brightness swings by up to
+  `brightness` (0 to 0.5) and saturation by up to `saturation` (0 to 1).
+  Written as `paint.macro`, three numbers.
+- `craters` (`cellMeters`, `depth`, `coverage`, `octaves`) adds a procedural
+  impact field in world space, so it never repeats with the layer tile. Each
+  jittered cell holds at most one crater (`coverage` is the share that do),
+  with a parabolic bowl, flat floor and raised rim; `depth` is depth over
+  diameter. Each octave (1 to 3) triples the cell and is shallower. The domain
+  shader displaces the bowls and the pixel shader tilts the normal by the same
+  analytic slopes; an octave whose cell spans fewer than about 12 pixels (or
+  tessellated vertex spacings) fades out rather than aliasing. Layers opt in with `proceduralCraters`
+  (true or a 0..1 strength). Needs the full material form. Written as
+  `paint.craters` plus `paint.craterLayers`. The displacement clamp grows by
+  the deepest possible crater stack.
+
+The baked per-layer `craters` above repeat with the tile; the procedural field
+replaces them where detile is wanted (the Moon dust layers).
+
 Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory.
 
 ## Runtime format and guards
