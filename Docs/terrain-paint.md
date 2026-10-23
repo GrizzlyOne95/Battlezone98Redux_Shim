@@ -217,6 +217,12 @@ Layer recipe fields:
 - `saturation` (0 to 2) scales colour saturation before `matchMean`, to mute
   off-world tints such as rust or moss in a scanned source.
 - `seamless` wrap-blends the normal, height and specular too.
+- `detile` (true or false) breaks up the repeat: low-frequency noise over the
+  tile grid picks one of nine whole-tile offsets per region, about three tiles
+  across, and cross-fades to the next (Quilez texture variation). The colour,
+  normal, specular, height-aware blend and tessellated displacement all use the
+  same offsets. Only the fade bands take a second tap; offsets are translations,
+  so normals stay valid. It is written as `paint.detile`, one 0 or 1 per layer.
 
 Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory.
 

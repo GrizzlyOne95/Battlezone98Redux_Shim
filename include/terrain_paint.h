@@ -25,6 +25,9 @@ namespace BZROpenShim::TerrainPaint
         unsigned sliceCount = 5;
         float heightBlend = 0.5f;
         std::array<float, 4> heightMeters = {};
+        // Per layer, 0 or 1: break up the repeat with noise-chosen tile
+        // offsets (diffuse, normal, height and displacement alike).
+        std::array<float, 4> detile = {};
         bool Material() const { return sliceCount == 9; }
         // Optional multi-map table. Several campaign maps share one atlas
         // material, so a single pack lists one entry per terrain shape; the
@@ -55,6 +58,8 @@ namespace BZROpenShim::TerrainPaint
                 throw std::runtime_error("paint heightMeters must be 0..32 metres");
             if (!Material() && heightMeters != std::array<float, 4>{})
                 throw std::runtime_error("paint heightMeters needs the 9-slice material form");
+            for (float v : detile) if (v != 0 && v != 1)
+                throw std::runtime_error("paint detile must be 0 or 1 per layer");
             for (std::size_t i = 0; i < maps.size(); ++i)
             {
                 const auto& map = maps[i];
@@ -97,6 +102,40 @@ namespace BZROpenShim::TerrainPaint
         for (float v : result) if (!std::isfinite(v) || std::abs(v) > 1000000)
             throw std::runtime_error("paint native vertex coordinates invalid");
         return result;
+    }
+    // Shared by the pixel and tessellation shaders so displacement follows
+    // the shaded tile. Quilez "texture variation": value noise over tile UV
+    // picks one of nine whole-tile offsets and cross-fades to the next; only
+    // the fade bands pay for a second tap. Gradients stay unoffset.
+    inline const char* DetileHlsl()
+    {
+        return R"HLSL(
+float OpenShimDetileHash(float2 p)
+{
+    float3 q = frac(float3(p.xyx) * 0.1031);
+    q += dot(q, q.yzx + 33.33);
+    return frac((q.x + q.y) * q.z);
+}
+float OpenShimDetileNoise(float2 p)
+{
+    float2 i = floor(p), f = p - i;
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(OpenShimDetileHash(i), OpenShimDetileHash(i + float2(1, 0)), f.x),
+        lerp(OpenShimDetileHash(i + float2(0, 1)), OpenShimDetileHash(i + float2(1, 1)), f.x), f.y);
+}
+struct OpenShimDetile { float2 a; float2 b; float t; };
+OpenShimDetile OpenShimDetileAt(float2 uv)
+{
+    // Regions about three tiles across.
+    float l = OpenShimDetileNoise(uv * 0.35) * 8.0;
+    float i = floor(l);
+    OpenShimDetile d;
+    d.a = sin(float2(3, 7) * i);
+    d.b = sin(float2(3, 7) * (i + 1.0));
+    d.t = smoothstep(0.2, 0.8, l - i);
+    return d;
+}
+)HLSL";
     }
     inline const char* BlendHlsl()
     {
@@ -147,21 +186,34 @@ OpenShimPaintGeo OpenShimPaintGeometry(float2 worldXZ, float worldY, float3 worl
 #define OPENSHIM_PAINT_UV_X(v, g) float2((v).z * (g).flip.x, (v).y)
 #define OPENSHIM_PAINT_UV_Y(v, g) float2((v).x * (g).flip.y, (v).z)
 #define OPENSHIM_PAINT_UV_Z(v, g) float2((v).x * (g).flip.z, (v).y)
-#define OPENSHIM_PAINT_TAP(tex, sam, g, axis, s, slice) OPENSHIM_PAINT_SAMPLE(tex, sam, \
-    float3(axis((g).pos, g) * (s), slice), axis((g).dpdx, g) * (s), axis((g).dpdy, g) * (s))
+// detile is a compile-time constant per layer, so plain layers keep one tap.
+float4 OpenShimPaintProjected(Texture2DArray tex, SamplerState sam, float2 uv, float2 gx, float2 gy, float slice, bool detile)
+{
+    if (detile)
+    {
+        OpenShimDetile d = OpenShimDetileAt(uv);
+        float4 a = 0, b = 0;
+        [branch] if (d.t < 1) a = OPENSHIM_PAINT_SAMPLE(tex, sam, float3(uv + d.a, slice), gx, gy);
+        [branch] if (d.t > 0) b = OPENSHIM_PAINT_SAMPLE(tex, sam, float3(uv + d.b, slice), gx, gy);
+        return lerp(a, b, d.t);
+    }
+    return OPENSHIM_PAINT_SAMPLE(tex, sam, float3(uv, slice), gx, gy);
+}
+#define OPENSHIM_PAINT_TAP(tex, sam, g, axis, s, slice, detile) OpenShimPaintProjected(tex, sam, \
+    axis((g).pos, g) * (s), axis((g).dpdx, g) * (s), axis((g).dpdy, g) * (s), slice, detile)
 struct OpenShimPaintTaps { float4 x, y, z; };
-OpenShimPaintTaps OpenShimPaintSampleTaps(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float repeat, float slice)
+OpenShimPaintTaps OpenShimPaintSampleTaps(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float repeat, float slice, bool detile)
 {
     OpenShimPaintTaps t = (OpenShimPaintTaps)0;
     float s = 1.0 / repeat;
-    [branch] if (g.blend.x > 0) t.x = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_X, s, slice);
-    [branch] if (g.blend.y > 0) t.y = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Y, s, slice);
-    [branch] if (g.blend.z > 0) t.z = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Z, s, slice);
+    [branch] if (g.blend.x > 0) t.x = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_X, s, slice, detile);
+    [branch] if (g.blend.y > 0) t.y = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Y, s, slice, detile);
+    [branch] if (g.blend.z > 0) t.z = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Z, s, slice, detile);
     return t;
 }
-float4 OpenShimPaintTap(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float repeat, float slice)
+float4 OpenShimPaintTap(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float repeat, float slice, bool detile)
 {
-    OpenShimPaintTaps t = OpenShimPaintSampleTaps(tex, sam, g, repeat, slice);
+    OpenShimPaintTaps t = OpenShimPaintSampleTaps(tex, sam, g, repeat, slice, detile);
     return t.x * g.blend.x + t.y * g.blend.y + t.z * g.blend.z;
 }
 float4 OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
@@ -179,10 +231,10 @@ float4 OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintG
     // Height-aware blend: the taller layer wins inside a transition, so rock
     // pokes through sand at its crests instead of cross-fading.
     float4 heights = float4(
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.x, 5).a,
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.y, 6).a,
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.z, 7).a,
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.w, 8).a);
+        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.x, 5, openShimPaintDetile.x > 0).a,
+        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.y, 6, openShimPaintDetile.y > 0).a,
+        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.z, 7, openShimPaintDetile.z > 0).a,
+        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.w, 8, openShimPaintDetile.w > 0).a);
     float4 lifted = weights + heights * openShimPaintHeightBlend;
     float crest = max(max(lifted.x, lifted.y), max(lifted.z, lifted.w));
     float4 kept = max(lifted - (crest - 0.2), 0) * step(0.002, weights);
@@ -193,10 +245,10 @@ float4 OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintG
 }
 float4 OpenShimPaintLayers(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float4 weights, float base)
 {
-    return OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.x, base + 0) * weights.x +
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.y, base + 1) * weights.y +
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.z, base + 2) * weights.z +
-        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.w, base + 3) * weights.w;
+    return OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.x, base + 0, openShimPaintDetile.x > 0) * weights.x +
+        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.y, base + 1, openShimPaintDetile.y > 0) * weights.y +
+        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.z, base + 2, openShimPaintDetile.z > 0) * weights.z +
+        OpenShimPaintTap(tex, sam, g, openShimPaintRepeats.w, base + 3, openShimPaintDetile.w > 0) * weights.w;
 }
 float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
@@ -239,10 +291,10 @@ float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, Op
     float4 weights = OpenShimPaintWeights(tex, sam, g);
 #if OPENSHIM_PAINT_TRIPLANAR
     float3 world =
-        OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.x, 5), g) * weights.x +
-        OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.y, 6), g) * weights.y +
-        OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.z, 7), g) * weights.z +
-        OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.w, 8), g) * weights.w;
+        OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.x, 5, openShimPaintDetile.x > 0), g) * weights.x +
+        OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.y, 6, openShimPaintDetile.y > 0), g) * weights.y +
+        OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.z, 7, openShimPaintDetile.z > 0), g) * weights.z +
+        OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats.w, 8, openShimPaintDetile.w > 0), g) * weights.w;
     return float4(mul(OpenShimPaintWorldFrame(g.n), normalize(world)) * 0.5 + 0.5, 1);
 #else
     return float4(OpenShimPaintLayers(tex, sam, g, weights, 5).rgb, 1);
@@ -301,8 +353,10 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             for (int i = 0; i < 4; ++i) constants << (i ? "," : "") << config.bounds[i];
             constants << ");\nstatic const float4 openShimPaintRepeats = float4(";
             for (int i = 0; i < 4; ++i) constants << (i ? "," : "") << config.repeatMeters[i];
+            constants << ");\nstatic const float4 openShimPaintDetile = float4(";
+            for (int i = 0; i < 4; ++i) constants << (i ? "," : "") << config.detile[i];
             constants << ");\nstatic const float openShimPaintHeightBlend = " << config.heightBlend;
-            source.insert(0, constants.str() + ";\n" + BlendHlsl());
+            source.insert(0, constants.str() + ";\n" + DetileHlsl() + BlendHlsl());
         }
         else
         {

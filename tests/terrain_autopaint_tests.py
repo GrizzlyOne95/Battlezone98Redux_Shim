@@ -198,6 +198,13 @@ class AutoPaintTests(unittest.TestCase):
         maps = [auto.load_map("alpha", files, recipe, None, 64)]
         binding = auto.build_pack(maps, recipe, self.root, self.root / "out", size, "test_auto", False)["materials"]["TERRAIN"]
         self.assertEqual((binding["paint"]["heightBlend"], binding["paint"]["heightMeters"]), (0.75, [2.5, 0, 0, 0]))
+        self.assertNotIn("detile", binding["paint"])
+        detiled = dict(recipe, layers=[dict(layer, heightMeters=2.5, detile=True)] + self.recipe["layers"][1:])
+        auto.validate_recipe(detiled)
+        binding = auto.build_pack(maps, detiled, self.root, self.root / "out2", size, "test_auto", False)["materials"]["TERRAIN"]
+        self.assertEqual(binding["paint"]["detile"], [1, 0, 0, 0])
+        with self.assertRaisesRegex(ValueError, "detile"):
+            auto.validate_recipe(dict(recipe, layers=[dict(layer, detile=1)] + self.recipe["layers"][1:]))
         with Image.open(self.root / "out" / binding["tiles"]["0"]) as d, Image.open(self.root / "out" / binding["tiles"]["5"]) as nh:
             self.assertEqual(d.getpixel((5, 5))[3], 51)                 # specular = 1 - roughness 0.8
             self.assertGreater(np.ptp(np.asarray(nh)[..., 3]), 200)    # height stretched to 0..1

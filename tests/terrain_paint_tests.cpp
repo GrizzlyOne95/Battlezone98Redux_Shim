@@ -60,12 +60,13 @@ int main(int argc, char** argv)
         TerrainPaint::Config material = config;
         material.sliceCount = 9; material.heightMeters = {0.5f, 0, 2, 0};
         material.Validate();
-        for (int bad = 0; bad < 3; ++bad)
+        for (int bad = 0; bad < 4; ++bad)
         {
             TerrainPaint::Config broken = bad == 2 ? config : material;
             if (bad == 0) broken.sliceCount = 7;
             if (bad == 1) broken.heightMeters[0] = 40;
             if (bad == 2) broken.heightMeters[1] = 1;
+            if (bad == 3) broken.detile[2] = 0.5f;
             bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
             check(rejected, "invalid paint material accepted");
         }

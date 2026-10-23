@@ -96,6 +96,7 @@
   "layers": [
     {
       "name": "Grass",
+      "detile": true,
       "repeatMeters": 16,
       "archive": "clover_patches_on_grass_sgmkajak_8k.zip",
       "member": "Clover_Patches_on_Grass_sgmkajak_8K_BaseColor.jpg",
@@ -104,6 +105,7 @@
     },
     {
       "name": "Forest floor",
+      "detile": true,
       "repeatMeters": 16,
       "archive": "forest_floor_sfjmafua_8k.zip",
       "member": "Forest_Floor_sfjmafua_8K_BaseColor.jpg",
@@ -112,6 +114,7 @@
     },
     {
       "name": "Mossy rock",
+      "detile": true,
       "repeatMeters": 12,
       "archive": "mossy_rocky_ground_vewmeehlw_8k.zip",
       "member": "Mossy_Rocky_Ground_vewmeehlw_8K_BaseColor.jpg",
@@ -120,6 +123,7 @@
     },
     {
       "name": "River gravel",
+      "detile": true,
       "repeatMeters": 18,
       "archive": "beach_gravel_with_pebbles_uifndiulw_8k.zip",
       "member": "Beach_Gravel_With_Pebbles_uifndiulw_8K_BaseColor.jpg",

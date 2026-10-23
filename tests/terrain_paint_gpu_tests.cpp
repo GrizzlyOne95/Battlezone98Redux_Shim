@@ -3,6 +3,8 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include <cmath>
+#include <cstring>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -167,6 +169,7 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
   results[4] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, west);
   results[5] = OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, north); }
 )";
+        const std::string triplanarRaw = triplanarSource;
         check(TerrainPaint::Specialize(triplanarSource, true, material) &&
             triplanarSource.find("#define OPENSHIM_PAINT_TRIPLANAR_SOURCE 1") != std::string::npos, "triplanar PS specialization failed");
         triplanarSource = "#define IBL_ENABLED\n#define ENHANCED_MODE\n" + triplanarSource;
@@ -197,7 +200,71 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         const Pixel projected[]={{1,.5f,.5f,1},{0,.5f,.5f,1},{.75f,.25f,0,1},{.25f,.5f,0,1},{1,.5f,0,1},{.5f,.5f,0,1}};
         for(UINT i=0;i<6;++i)for(unsigned c=0;c<4;++c)check(std::abs((&values[i].r)[c]-(&projected[i].r)[c])<1e-5f,"triplanar projection/normal failed");
         context->Unmap(staging.Get(),0);
-        std::cout<<"PASS: triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        // De-tiling: the shipping PS4 targets compile, the offsets move the
+        // pattern, and the domain shader picks the same height as the pixel
+        // shader so displacement follows the shaded tile.
+        TerrainPaint::Config detiled = material; detiled.detile = {1, 0, 0, 0};
+        std::string detiledTriplanar = triplanarRaw;
+        check(TerrainPaint::Specialize(detiledTriplanar, true, detiled), "detile PS specialization failed");
+        detiledTriplanar = "#define IBL_ENABLED\n#define ENHANCED_MODE\n" + frame + detiledTriplanar;
+        compiled = D3DCompile(detiledTriplanar.data(),detiledTriplanar.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        std::string detileSource = R"(
+Texture2DArray diffuseMap : register(t0);
+SamplerState diffuseSam : register(s0);
+RWStructuredBuffer<float4> results : register(u0);
+float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXCOORD10) : SV_TARGET
+{ return diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice)); }
+[numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
+{ OpenShimPaintGeo g = OpenShimPaintGeometry(float2(1.3 + 9.1 * id.x, 0.7 + 4.3 * id.x), 0, float3(0,1,0));
+  results[id.x] = float4(OpenShimPaintTap(diffuseMap, diffuseSam, g, openShimPaintRepeats.x, 5, openShimPaintDetile.x > 0).a,
+      OpenShimPaintTap(diffuseMap, diffuseSam, g, openShimPaintRepeats.x, 5, false).a, 0, 0); }
+)";
+        check(TerrainPaint::Specialize(detileSource, true, detiled), "detile compute specialization failed");
+        ok(D3DCompile(detileSource.data(),detileSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors));
+        const std::string detileCompute = noDerivatives + detileSource;
+        compiled = D3DCompile(detileCompute.data(),detileCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> detileShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&detileShader));
+        std::ifstream tessFile(TERRAIN_TESS_SHADER_PATH, std::ios::binary);
+        std::string tessSource((std::istreambuf_iterator<char>(tessFile)), {});
+        check(!tessSource.empty(), "shipped terrain shader missing");
+        tessSource = std::string("#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
+            "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(0,0,4,4)\n#define OPENSHIM_PAINT_REPEATS float4(2,2,2,2)\n"
+            "#define OPENSHIM_PAINT_HEIGHT_METERS float4(1,0,0,0)\n#define OPENSHIM_PAINT_DETILE float4(1,0,0,0)\n"
+            "#define OPENSHIM_PAINT_HEIGHT_BLEND 0.5\n#define OPENSHIM_PAINT_HEIGHT_SCALE 1\n") +
+            TerrainPaint::DetileHlsl() + tessSource + R"(
+RWStructuredBuffer<float4> testResults : register(u0);
+[numthreads(1,1,1)] void TestDetile(uint3 id : SV_DispatchThreadID)
+{ float2 p = float2(1.3 + 9.1 * id.x, 0.7 + 4.3 * id.x);
+  testResults[id.x] = float4(TerrainPaintLayerHeight(p, 2, 5, true), TerrainPaintLayerHeight(p, 2, 5, false), 0, 0); }
+)";
+        compiled = D3DCompile(tessSource.data(),tessSource.size(),nullptr,nullptr,nullptr,"TestDetile","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> tessShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&tessShader));
+        for (unsigned i=0;i<16;++i) layers[5*16+i].a = float((i*7)%16)/15;
+        context->UpdateSubresource(materialTexture.Get(),5,nullptr,layers.data()+5*16,4*sizeof(Pixel),0);
+        std::vector<Pixel> shaded(count), displaced(count);
+        context->CSSetShader(detileShader.Get(),nullptr,0);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));
+        std::memcpy(shaded.data(),mapped.pData,count*sizeof(Pixel));context->Unmap(staging.Get(),0);
+        ID3D11ShaderResourceView* tessViews[]={materialView.Get()};context->CSSetShaderResources(127,1,tessViews);
+        context->CSSetShader(tessShader.Get(),nullptr,0);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));
+        std::memcpy(displaced.data(),mapped.pData,count*sizeof(Pixel));context->Unmap(staging.Get(),0);
+        bool moved=false;
+        for(UINT i=0;i<count;++i)
+        {
+            check(std::abs(shaded[i].r-displaced[i].r)<0.01f&&std::abs(shaded[i].g-displaced[i].g)<0.01f,"detile height differs between pixel and domain shaders");
+            moved = moved || std::abs(shaded[i].r-shaded[i].g)>0.05f;
+        }
+        check(moved,"detile offsets left the pattern unchanged");
+        std::cout<<"PASS: detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

@@ -179,6 +179,19 @@ uint TerrainPaintMip(float repeat)
     return uint(clamp(ceil(log2(max(spacing * width / repeat, 1.0))), 0.0, float(levels - 1)));
 }
 
+#ifndef OPENSHIM_PAINT_DETILE
+#define OPENSHIM_PAINT_DETILE float4(0,0,0,0)
+#endif
+float TerrainPaintLayerHeight(float2 worldXZ, float repeat, uint slice, bool detile)
+{
+    float2 uv = worldXZ / repeat;
+    uint mip = TerrainPaintMip(repeat);
+    if (!detile) return TerrainPaintBilinear(uv, slice, mip, true).a;
+    // Same offsets as the pixel shader's top projection.
+    OpenShimDetile d = OpenShimDetileAt(uv);
+    return lerp(TerrainPaintBilinear(uv + d.a, slice, mip, true).a, TerrainPaintBilinear(uv + d.b, slice, mip, true).a, d.t);
+}
+
 float TerrainPaintHeight(float2 worldXZ)
 {
     if (!all(isfinite(worldXZ))) return 0.0;
@@ -187,11 +200,12 @@ float TerrainPaintHeight(float2 worldXZ)
     float total = dot(weights, 1);
     weights = total > 0.00001 ? weights / total : float4(1,0,0,0);
     float4 repeats = OPENSHIM_PAINT_REPEATS;
+    float4 detile = OPENSHIM_PAINT_DETILE;
     float4 heights = float4(
-        TerrainPaintBilinear(worldXZ / repeats.x, 5, TerrainPaintMip(repeats.x), true).a,
-        TerrainPaintBilinear(worldXZ / repeats.y, 6, TerrainPaintMip(repeats.y), true).a,
-        TerrainPaintBilinear(worldXZ / repeats.z, 7, TerrainPaintMip(repeats.z), true).a,
-        TerrainPaintBilinear(worldXZ / repeats.w, 8, TerrainPaintMip(repeats.w), true).a);
+        TerrainPaintLayerHeight(worldXZ, repeats.x, 5, detile.x > 0),
+        TerrainPaintLayerHeight(worldXZ, repeats.y, 6, detile.y > 0),
+        TerrainPaintLayerHeight(worldXZ, repeats.z, 7, detile.z > 0),
+        TerrainPaintLayerHeight(worldXZ, repeats.w, 8, detile.w > 0));
     // Same height-aware selection as the pixel shader.
     float4 lifted = weights + heights * OPENSHIM_PAINT_HEIGHT_BLEND;
     float crest = max(max(lifted.x, lifted.y), max(lifted.z, lifted.w));

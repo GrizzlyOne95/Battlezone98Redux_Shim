@@ -285,9 +285,10 @@ bool InstallNativeTerrainTessellationTest()
             vector("OPENSHIM_PAINT_BOUNDS", g_HdPaint.bounds);
             vector("OPENSHIM_PAINT_REPEATS", g_HdPaint.repeatMeters);
             vector("OPENSHIM_PAINT_HEIGHT_METERS", g_HdPaint.heightMeters);
+            vector("OPENSHIM_PAINT_DETILE", g_HdPaint.detile);
             defines << "#define OPENSHIM_PAINT_HEIGHT_BLEND " << g_HdPaint.heightBlend << "\n";
             defines << "#define OPENSHIM_PAINT_HEIGHT_SCALE " << paintHeightScale << "\n";
-            source = defines.str() + source;
+            source = defines.str() + TerrainPaint::DetileHlsl() + source;
         }
         const bool domainTexture = textureHeight || paintHeight;
         void* materialManager = g_ogre.getMaterialManager();

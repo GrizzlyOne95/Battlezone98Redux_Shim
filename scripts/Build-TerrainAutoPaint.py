@@ -319,6 +319,8 @@ def validate_recipe(recipe):
     for layer in recipe["layers"]:
         if not 0 <= layer.get("heightMeters", 0) <= 32 or not 0 < layer.get("specularScale", 1) <= 4:
             raise ValueError(f"layer {layer.get('name')} needs heightMeters 0..32 and specularScale in (0,4]")
+        if type(layer.get("detile", False)) is not bool:
+            raise ValueError(f"layer {layer.get('name')} detile must be true or false")
     if "slope" in recipe:
         slope = recipe["slope"]
         if not weight_vector(slope.get("weights")) or not 0 <= slope.get("startDegrees", -1) < slope.get("fullDegrees", -1) <= 90:
@@ -666,6 +668,8 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
     tiles["4"] = entries[0]["control"]
     tiles.update({str(5 + i): name for i, name in enumerate(normal_resources)})
     paint = {"schema": "bzr-openshim-terrain-paint-v1", "rowZero": "minZ", "repeatMeters": repeats, "maps": entries}
+    if any(layer.get("detile") for layer in recipe["layers"]):
+        paint["detile"] = [1 if layer.get("detile") else 0 for layer in recipe["layers"]]
     if material:
         paint["heightBlend"] = recipe.get("heightBlend", 0.5)
         paint["heightMeters"] = [layer.get("heightMeters", 0) for layer in recipe["layers"]]

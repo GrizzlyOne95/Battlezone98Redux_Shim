@@ -1183,6 +1183,8 @@ namespace BZROpenShim
                         binding.paint.heightBlend = paint.value("heightBlend", binding.paint.Material() ? 0.5f : 0.0f);
                         if (paint.contains("heightMeters"))
                             binding.paint.heightMeters = paint.at("heightMeters").get<std::array<float, 4>>();
+                        if (paint.contains("detile"))
+                            binding.paint.detile = paint.at("detile").get<std::array<float, 4>>();
                         if (paint.contains("maps"))
                         {
                             // Multi-map form: one entry per terrain shape sharing this
