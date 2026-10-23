@@ -84,6 +84,25 @@ int main(int argc, char** argv)
             bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
             check(rejected, "invalid paint material accepted");
         }
+        // Eight layers: 18 slices in two banks, per-layer lists of eight, and
+        // a second control per map entry.
+        TerrainPaint::Config eight = material;
+        eight.sliceCount = 18; eight.repeatMeters = {12,16,24,32,8,10,14,20}; eight.heightMeters[6] = 1;
+        eight.Validate();
+        check(eight.Layers() == 8 && material.Layers() == 4 && eight.Material(), "layer count wrong");
+        TerrainPaint::Config eightTable = eight;
+        eightTable.maps = {{"0123456789abcdef", {-320,-640,960,640}, "control_a.png", "control_a2.png"}};
+        eightTable.Validate();
+        for (int bad = 0; bad < 4; ++bad)
+        {
+            TerrainPaint::Config broken = bad < 2 ? eight : bad == 2 ? eightTable : table;
+            if (bad == 0) broken.repeatMeters[5] = 0;
+            if (bad == 1) broken.sliceCount = 9;
+            if (bad == 2) broken.maps[0].control2.clear();
+            if (bad == 3) broken.maps[0].control2 = "control_x.png";
+            bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
+            check(rejected, "invalid eight-layer paint accepted");
+        }
         const std::string pixelSource =
             "float4 d = diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice));\n"
             "float3x3 tbn = cotangent_frame(geometryNormal, vViewPosition.xyz, vTexCoord);\n"
@@ -100,7 +119,11 @@ int main(int argc, char** argv)
             full.find("float3x3 tbn = OPENSHIM_PAINT_TBN(geometryNormal);") != std::string::npos &&
             full.find("#define OPENSHIM_PAINT_TRIPLANAR_SOURCE 0") != std::string::npos &&
             full.find("vTexCoord * 8.0") != std::string::npos &&
-            full.find("#define OPENSHIM_PAINT_MATERIAL 1") != std::string::npos, "material paint specialization incomplete");
+            full.find("#define OPENSHIM_PAINT_MATERIAL 1") != std::string::npos &&
+            full.find("#define OPENSHIM_PAINT_LAYERS 4") != std::string::npos, "material paint specialization incomplete");
+        std::string wide = pixelSource;
+        check(TerrainPaint::Specialize(wide, true, eight) && wide.find("#define OPENSHIM_PAINT_LAYERS 8") != std::string::npos &&
+            wide.find("openShimPaintRepeats[8]") != std::string::npos, "eight-layer specialization failed");
         // A colour-only pass (terrain glow) keeps working; a normal sample in
         // an unknown form must decline rather than follow stock atlas UVs.
         std::string noNormals = "float4 d = diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice));";

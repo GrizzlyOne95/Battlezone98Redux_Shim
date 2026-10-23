@@ -1173,18 +1173,22 @@ namespace BZROpenShim
                         const auto& paint = materialIt.value()["paint"];
                         if (paint.value("schema", std::string()) != "bzr-openshim-terrain-paint-v1" ||
                             paint.value("rowZero", std::string()) != "minZ" ||
-                            (binding.sliceCount != 5 && binding.sliceCount != 9) ||
+                            (binding.sliceCount != 5 && binding.sliceCount != 9 && binding.sliceCount != 18) ||
                             binding.diffuseResource.empty() || binding.tiles.size() != binding.sliceCount)
-                            throw std::runtime_error("paint needs five or nine explicit slices, atlas identity and minZ row order");
+                            throw std::runtime_error("paint needs 5, 9 or 18 explicit slices, atlas identity and minZ row order");
                         if (binding.compact) throw std::runtime_error("compact material arrays do not support paint mode");
                         binding.paint.enabled = true;
                         binding.paint.sliceCount = binding.sliceCount;
-                        binding.paint.repeatMeters = paint.at("repeatMeters").get<std::array<float, 4>>();
+                        // Per-layer lists carry one value per layer: four, or eight with 18 slices.
+                        const auto layers = [&](const char* name, std::array<float, 8>& out) {
+                            const auto values = paint.at(name).get<std::vector<float>>();
+                            if (values.size() != binding.paint.Layers())
+                                throw std::runtime_error(std::string("paint ") + name + " needs one value per layer");
+                            std::copy(values.begin(), values.end(), out.begin()); };
+                        layers("repeatMeters", binding.paint.repeatMeters);
                         binding.paint.heightBlend = paint.value("heightBlend", binding.paint.Material() ? 0.5f : 0.0f);
-                        if (paint.contains("heightMeters"))
-                            binding.paint.heightMeters = paint.at("heightMeters").get<std::array<float, 4>>();
-                        if (paint.contains("detile"))
-                            binding.paint.detile = paint.at("detile").get<std::array<float, 4>>();
+                        if (paint.contains("heightMeters")) layers("heightMeters", binding.paint.heightMeters);
+                        if (paint.contains("detile")) layers("detile", binding.paint.detile);
                         if (paint.contains("far"))
                             binding.paint.farScale = paint.at("far").get<std::array<float, 4>>();
                         if (paint.contains("macro"))
@@ -1198,12 +1202,12 @@ namespace BZROpenShim
                         if (paint.contains("craters"))
                         {
                             binding.paint.craters = paint.at("craters").get<std::array<float, 4>>();
-                            binding.paint.craterLayers = paint.at("craterLayers").get<std::array<float, 4>>();
+                            layers("craterLayers", binding.paint.craterLayers);
                         }
                         if (paint.contains("maps"))
                         {
                             // Multi-map form: one entry per terrain shape sharing this
-                            // atlas material. Tile "4" is only the default control.
+                            // atlas material. Tiles "4" and "13" are only the default controls.
                             const auto& maps = paint.at("maps");
                             if (!maps.is_array() || maps.empty() || maps.size() > 64)
                                 throw std::runtime_error("paint maps must list 1..64 terrains");
@@ -1213,6 +1217,7 @@ namespace BZROpenShim
                                 map.fingerprint = entry.at("terrainFingerprint").get<std::string>();
                                 map.bounds = entry.at("boundsMeters").get<std::array<float, 4>>();
                                 map.control = entry.at("control").get<std::string>();
+                                map.control2 = entry.value("control2", std::string());
                                 binding.paint.maps.push_back(std::move(map));
                             }
                             binding.paint.fingerprint = binding.paint.maps.front().fingerprint;

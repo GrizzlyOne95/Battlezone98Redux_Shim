@@ -220,8 +220,8 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
 { return diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice)); }
 [numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
 { OpenShimPaintGeo g = OpenShimPaintGeometry(float2(1.3 + 9.1 * id.x, 0.7 + 4.3 * id.x), 0, float3(0,1,0));
-  results[id.x] = float4(OpenShimPaintTap(diffuseMap, diffuseSam, g, openShimPaintRepeats.x, 5, openShimPaintDetile.x > 0).a,
-      OpenShimPaintTap(diffuseMap, diffuseSam, g, openShimPaintRepeats.x, 5, false).a, 0, 0); }
+  results[id.x] = float4(OpenShimPaintTap(diffuseMap, diffuseSam, g, openShimPaintRepeats[0], 5, openShimPaintDetile[0] > 0).a,
+      OpenShimPaintTap(diffuseMap, diffuseSam, g, openShimPaintRepeats[0], 5, false).a, 0, 0); }
 )";
         check(TerrainPaint::Specialize(detileSource, true, detiled), "detile compute specialization failed");
         ok(D3DCompile(detileSource.data(),detileSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors));
@@ -235,11 +235,11 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         std::string tessSource((std::istreambuf_iterator<char>(tessFile)), {});
         check(!tessSource.empty(), "shipped terrain shader missing");
         const std::string tessRaw = tessSource;
-        tessSource = std::string("#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
-            "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(0,0,4,4)\n#define OPENSHIM_PAINT_REPEATS float4(2,2,2,2)\n"
-            "#define OPENSHIM_PAINT_HEIGHT_METERS float4(1,0,0,0)\n#define OPENSHIM_PAINT_DETILE float4(1,0,0,0)\n"
-            "#define OPENSHIM_PAINT_HEIGHT_BLEND 0.5\n#define OPENSHIM_PAINT_HEIGHT_SCALE 1\n") +
-            TerrainPaint::DetileHlsl() + tessSource + R"(
+        // The domain shader takes the same layer constants as the pixel shader.
+        const std::string tessDefines = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
+            "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(0,0,4,4)\n#define OPENSHIM_PAINT_HEIGHT_SCALE 1\n";
+        TerrainPaint::Config detiledHeight = detiled; detiledHeight.heightMeters = {1, 0, 0, 0};
+        tessSource = tessDefines + TerrainPaint::LayerHlsl(detiledHeight) + TerrainPaint::DetileHlsl() + tessSource + R"(
 RWStructuredBuffer<float4> testResults : register(u0);
 [numthreads(1,1,1)] void TestDetile(uint3 id : SV_DispatchThreadID)
 { float2 p = float2(1.3 + 9.1 * id.x, 0.7 + 4.3 * id.x);
@@ -315,12 +315,10 @@ RWStructuredBuffer<float4> results : register(u0);
         }
         context->Unmap(staging.Get(),0);
         check(cratered,"crater field left the ground flat");
-        std::string craterTess = std::string("#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
-            "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(0,0,4,4)\n#define OPENSHIM_PAINT_REPEATS float4(2,2,2,2)\n"
-            "#define OPENSHIM_PAINT_HEIGHT_METERS float4(1,0,0,0)\n#define OPENSHIM_PAINT_CRATERS float4(6,0.2,0.5,3)\n"
-            "#define OPENSHIM_PAINT_CRATER_LAYERS float4(1,0,0,0)\n"
-            "#define OPENSHIM_PAINT_HEIGHT_BLEND 0.5\n#define OPENSHIM_PAINT_HEIGHT_SCALE 1\n") +
-            TerrainPaint::DetileHlsl() + TerrainPaint::CraterHlsl() + tessRaw + R"(
+        TerrainPaint::Config craterHeight = material; craterHeight.heightMeters = {1, 0, 0, 0};
+        craterHeight.craters = {6, 0.2f, 0.5f, 3}; craterHeight.craterLayers = {1, 0, 0, 0};
+        std::string craterTess = tessDefines + "#define OPENSHIM_PAINT_CRATERS float4(6,0.2,0.5,3)\n" +
+            TerrainPaint::LayerHlsl(craterHeight) + TerrainPaint::DetileHlsl() + TerrainPaint::CraterHlsl() + tessRaw + R"(
 RWStructuredBuffer<float4> testResults : register(u0);
 [numthreads(1,1,1)] void TestCraters(uint3 id : SV_DispatchThreadID)
 { testResults[id.x] = float4(TerrainPaintRelief(float2(1.3 + 9.1 * id.x, 0.7 + 4.3 * id.x)), 0); }
@@ -328,7 +326,58 @@ RWStructuredBuffer<float4> testResults : register(u0);
         compiled = D3DCompile(craterTess.data(),craterTess.size(),nullptr,nullptr,nullptr,"TestCraters","cs_5_0",0,0,&code,&errors);
         if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
         ok(compiled);
-        std::cout<<"PASS: distance scale, macro variation and crater variants, crater slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        // Eight layers in two 9-slice banks: the second control (slice 13)
+        // weights layers 4-7, whose diffuse sits in 9-12 and normal+height in
+        // 14-17, and the height-aware blend runs across both banks.
+        TerrainPaint::Config eight = material; eight.sliceCount = 18; eight.repeatMeters = {2,2,2,2,2,2,2,2};
+        std::string eightSource = materialRaw;
+        check(TerrainPaint::Specialize(eightSource, true, eight), "eight-layer PS specialization failed");
+        eightSource = frame + eightSource;
+        ok(D3DCompile(eightSource.data(),eightSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors));
+        const std::string eightCompute = noDerivatives + eightSource;
+        compiled = D3DCompile(eightCompute.data(),eightCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> eightShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&eightShader));
+        std::vector<Pixel> banks(16*18);
+        for (unsigned i=0;i<16;++i)
+        {
+            for (unsigned l=0;l<8;++l)
+            {
+                const unsigned bank=l/4*9, local=l%4;
+                banks[(bank+local)*16+i]={float(l)/8,float(l%2),.25f,float(l)/10};
+                banks[(bank+5+local)*16+i]={.5f,.5f,1,l==5?1.0f:0.0f};
+            }
+            banks[5*16+i]={1,.5f,.5f,0};  // layer zero leans +x
+            banks[4*16+i]={0,0,0,0}; banks[13*16+i]={0,1,0,0};
+        }
+        td.ArraySize=18; D3D11_SUBRESOURCE_DATA bankData[18]={};
+        for(unsigned i=0;i<18;++i)bankData[i]={banks.data()+16*i,4*sizeof(Pixel),0};
+        ComPtr<ID3D11Texture2D> eightTexture;ok(device->CreateTexture2D(&td,bankData,&eightTexture));
+        ComPtr<ID3D11ShaderResourceView> eightView;ok(device->CreateShaderResourceView(eightTexture.Get(),nullptr,&eightView));
+        context->CSSetShader(eightShader.Get(),nullptr,0);
+        ID3D11ShaderResourceView* eightViews[]={eightView.Get()};context->CSSetShaderResources(0,1,eightViews);
+        // Second control alone, then a 50/50 split with layer zero where the
+        // taller layer five takes the transition.
+        for (const Pixel first : {Pixel{0,0,0,0},Pixel{1,0,0,0}})
+        {
+            for(unsigned i=0;i<16;++i)banks[4*16+i]=first;
+            context->UpdateSubresource(eightTexture.Get(),4,nullptr,banks.data()+4*16,4*sizeof(Pixel),0);
+            dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+            const Pixel layerFive[]={{5.0f/8,1,.25f,1},{.5f,.5f,1,1},{.5f,.5f,.5f,1}};
+            for(UINT i=0;i<3;++i)for(unsigned c=0;c<4;++c)check(std::abs((&values[i].r)[c]-(&layerFive[i].r)[c])<1e-5f,"eight-layer bank or blend failed");
+            context->Unmap(staging.Get(),0);
+        }
+        std::string eightTess = tessDefines + TerrainPaint::LayerHlsl(eight) + TerrainPaint::DetileHlsl() + tessRaw + R"(
+RWStructuredBuffer<float4> testResults : register(u0);
+[numthreads(1,1,1)] void TestEight(uint3 id : SV_DispatchThreadID)
+{ testResults[id.x] = float4(TerrainPaintRelief(float2(1.3 + 9.1 * id.x, 0.7 + 4.3 * id.x)), 0); }
+)";
+        compiled = D3DCompile(eightTess.data(),eightTess.size(),nullptr,nullptr,nullptr,"TestEight","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        std::cout<<"PASS: eight-layer banks, distance scale, macro variation and crater variants, crater slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

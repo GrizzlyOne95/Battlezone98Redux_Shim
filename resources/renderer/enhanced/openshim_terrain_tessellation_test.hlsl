@@ -179,9 +179,6 @@ uint TerrainPaintMip(float repeat)
     return uint(clamp(ceil(log2(max(spacing * width / repeat, 1.0))), 0.0, float(levels - 1)));
 }
 
-#ifndef OPENSHIM_PAINT_DETILE
-#define OPENSHIM_PAINT_DETILE float4(0,0,0,0)
-#endif
 float TerrainPaintLayerHeight(float2 worldXZ, float repeat, uint slice, bool detile)
 {
     float2 uv = worldXZ / repeat;
@@ -196,27 +193,27 @@ float TerrainPaintHeight(float2 worldXZ)
 {
     if (!all(isfinite(worldXZ))) return 0.0;
     float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / (OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy);
-    float4 weights = max(TerrainPaintBilinear(paintUV, 4, 0, false), 0);
-    float total = dot(weights, 1);
-    weights = total > 0.00001 ? weights / total : float4(1,0,0,0);
-    float4 repeats = OPENSHIM_PAINT_REPEATS;
-    float4 detile = OPENSHIM_PAINT_DETILE;
-    float4 heights = float4(
-        TerrainPaintLayerHeight(worldXZ, repeats.x, 5, detile.x > 0),
-        TerrainPaintLayerHeight(worldXZ, repeats.y, 6, detile.y > 0),
-        TerrainPaintLayerHeight(worldXZ, repeats.z, 7, detile.z > 0),
-        TerrainPaintLayerHeight(worldXZ, repeats.w, 8, detile.w > 0));
+    float4 banks[OPENSHIM_PAINT_LAYERS / 4];
+    [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
+        banks[b] = TerrainPaintBilinear(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
+    OpenShimPaintMix weights = OpenShimPaintNormalize(banks);
+    float heights[OPENSHIM_PAINT_LAYERS];
+    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+    {
+        heights[i] = 0.5;
+        [branch] if (OpenShimPaintPresent(weights, i))
+            heights[i] = TerrainPaintLayerHeight(worldXZ, openShimPaintRepeats[i], uint(OpenShimPaintSlice(i, 5)), openShimPaintDetile[i] > 0);
+    }
     // Same height-aware selection as the pixel shader.
-    float4 lifted = weights + heights * OPENSHIM_PAINT_HEIGHT_BLEND;
-    float crest = max(max(lifted.x, lifted.y), max(lifted.z, lifted.w));
-    float4 kept = max(lifted - (crest - 0.2), 0) * step(0.002, weights);
-    float keptTotal = dot(kept, 1);
-    weights = keptTotal > 0.00001 ? kept / keptTotal : weights;
-    float value = dot(weights, (heights - 0.5) * OPENSHIM_PAINT_HEIGHT_METERS) * OPENSHIM_PAINT_HEIGHT_SCALE;
+    weights = OpenShimPaintSelect(weights, heights);
+    float value = 0;
+    [unroll] for (int j = 0; j < OPENSHIM_PAINT_LAYERS; ++j)
+        value += weights.w[j] * (heights[j] - 0.5) * openShimPaintHeightMeters[j];
+    value *= OPENSHIM_PAINT_HEIGHT_SCALE;
 #if defined(OPENSHIM_PAINT_CRATERS)
     // The pixel shader's crater field, faded at the vertex spacing.
     value += OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR).h *
-        dot(weights, OPENSHIM_PAINT_CRATER_LAYERS) * OPENSHIM_PAINT_HEIGHT_SCALE;
+        OpenShimPaintDot(weights, openShimPaintCraterLayers) * OPENSHIM_PAINT_HEIGHT_SCALE;
 #endif
     return isfinite(value) ? clamp(value, -OPENSHIM_RELIEF_AMPLITUDE, OPENSHIM_RELIEF_AMPLITUDE) : 0.0;
 }

@@ -285,17 +285,11 @@ bool InstallNativeTerrainTessellationTest()
                 defines << "#define " << name << " float4(" << v[0] << "," << v[1] << "," << v[2] << "," << v[3] << ")\n"; };
             defines << "#define OPENSHIM_PAINT_HEIGHT 1\n";
             vector("OPENSHIM_PAINT_BOUNDS", g_HdPaint.bounds);
-            vector("OPENSHIM_PAINT_REPEATS", g_HdPaint.repeatMeters);
-            vector("OPENSHIM_PAINT_HEIGHT_METERS", g_HdPaint.heightMeters);
-            vector("OPENSHIM_PAINT_DETILE", g_HdPaint.detile);
             if (g_HdPaint.craters[0] > 0)
-            {
                 vector("OPENSHIM_PAINT_CRATERS", g_HdPaint.craters);
-                vector("OPENSHIM_PAINT_CRATER_LAYERS", g_HdPaint.craterLayers);
-            }
-            defines << "#define OPENSHIM_PAINT_HEIGHT_BLEND " << g_HdPaint.heightBlend << "\n";
             defines << "#define OPENSHIM_PAINT_HEIGHT_SCALE " << paintHeightScale << "\n";
-            source = defines.str() + TerrainPaint::DetileHlsl() + TerrainPaint::CraterHlsl() + source;
+            source = defines.str() + TerrainPaint::LayerHlsl(g_HdPaint) + TerrainPaint::DetileHlsl() +
+                TerrainPaint::CraterHlsl() + source;
         }
         const bool domainTexture = textureHeight || paintHeight;
         void* materialManager = g_ogre.getMaterialManager();

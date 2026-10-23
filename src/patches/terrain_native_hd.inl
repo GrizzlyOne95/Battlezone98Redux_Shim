@@ -406,7 +406,7 @@ bool InstallNativeTerrainHd()
             if (!binding->paint.maps.empty())
             {
                 // Multi-map pack: take the entry matching this mission and bind
-                // its control image as slice 4; no match declines the whole pack.
+                // its control images as slices 4 and 13; no match declines the whole pack.
                 const auto* entry = TerrainPaint::SelectMap(binding->paint,
                     map.at("terrainFingerprint").get<std::string>(),
                     map.at("boundsMeters").get<std::array<float, 4>>());
@@ -414,6 +414,7 @@ bool InstallNativeTerrainHd()
                     throw std::runtime_error("paint pack has no map entry for this mission: actual=" + map.dump());
                 selectedBinding = *binding;
                 selectedBinding->tiles[4] = entry->control;
+                if (!entry->control2.empty()) selectedBinding->tiles[13] = entry->control2;
                 selectedBinding->paint.fingerprint = entry->fingerprint;
                 selectedBinding->paint.bounds = entry->bounds;
                 selectedBinding->paint.maps.clear();
