@@ -240,7 +240,7 @@ Three recipe-level settings vary the ground past what one tile can show:
 - `craters` (`cellMeters`, `depth`, `coverage`, `octaves`) adds a procedural
   impact field in world space, so it never repeats with the layer tile. Each
   jittered cell holds at most one crater (`coverage` is the share that do),
-  with a parabolic bowl, flat floor and raised rim; `depth` is depth over
+  with a bowl that eases into a low, wide rim and a flat floor; `depth` is depth over
   diameter. Each octave (1 to 3) triples the cell and is shallower. The domain
   shader displaces the bowls and the pixel shader tilts the normal by the same
   analytic slopes; an octave whose cell spans fewer than about 12 pixels (or
@@ -253,6 +253,70 @@ The baked per-layer `craters` above repeat with the tile; the procedural field
 replaces them where detile is wanted (the Moon dust layers).
 
 Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory.
+
+## World packs
+
+Each stock world (Moon, Venus, Io, Europa, Titan, Achilles) has one recipe,
+`scripts/terrain-packs/<world>-autopaint.json`, and one pack that covers every
+mission on it. Mars uses the older `mars-autopaint.json` form.
+
+**Recipe.** A world recipe holds:
+
+- `material` and `diffuseResource`: the stock atlas the pack replaces (the
+  identity guard).
+- `typeNames` and `typeWeights`: the TRN-type-to-layer mapping, plus
+  `transition`, `blurMeters` and `outsideWeights`.
+- `variation`: low-frequency noise that swaps a type's weight to its partner
+  layer, so a world-sized patch of one type is not one layer.
+- `slope`: steep cells go to a rock layer.
+- `layers`: four layers with art, `repeatMeters`, `matchMean` (the stock tile
+  whose mean colour the layer is matched to), height and specular.
+- `heightBlend`, `far`, `macro` and (Moon only) `craters`.
+
+All six worlds use detile on every layer, plus `far` {5, 40, 250, 0.6} and
+`macro` {260, 0.12, 0.15}. The Moon dust layers drop the baked craters for
+`proceduralCraters` (0.6 on Dust, 1 on Cratered dust), with `craters` set to
+cell 8 m, depth 0.2, coverage 0.35 and three octaves. The first setting
+(cell 6 m, coverage 0.5) was too busy and the rims too sharp.
+
+**Build.**
+
+```bash
+scripts/terrain-packs/build-world-packs.sh '<art dir>' '<out dir>' venus europa titan
+```
+
+The script passes each world's missions to `Build-TerrainAutoPaint.py`: every
+Campaign Reimagined map, plus `<map>_stock` wherever CR changes the stock HG2 or
+MAT, so the pack serves both. `GAME_DIR` and `CR_DIR` override the GOG install
+and the CR Workshop folder; both are only read. The art directory holds the
+recipes' Megascans/Poly Haven archives and the `crhd_*` matchMean tiles, which
+stay out of the repository. A map whose fingerprint, bounds or layout the
+builder cannot reproduce is declined, not guessed. Copy the new `<prefix>.json`
+into `scripts/terrain-packs/generated/<world>-auto/` so the manifest diff shows
+in review; the PNGs are not committed.
+
+**In-game check.** Install the manifest and PNGs beside the executable and set:
+
+- `[Terrain] TerrainHdEnabled = 1`
+- `[Terrain] TerrainHdManifest = openshim_<world>_auto.json`
+- `[Terrain] TerrainMicroRelief = 1`
+- `OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1`
+
+If the tessellation shader changed, deploy the repo's
+`openshim_terrain_tessellation_test.hlsl` too. The checks so far used small
+addon test missions, one per world. Each one copies a world map and runs a Lua
+driver that moves the player through three fixed spots, seven seconds each, with
+the camera parked above. The run uses the harness (`BZRHarness.ps1`, windowed)
+and takes screenshots on a timer. Loading time varies, so use a dense
+screenshot schedule (for example every 6 to 8 seconds from 28 s) and pair
+before/after frames by viewpoint, not by index. Look for:
+
+- the repeat grid at mid range
+- seams in fade bands
+- cracks or popping in the displacement
+- crater aliasing at grazing angles
+
+The log should show the manifest bound for that map, not declined.
 
 ## Runtime format and guards
 

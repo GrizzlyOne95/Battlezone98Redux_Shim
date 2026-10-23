@@ -163,9 +163,9 @@
     "saturation": 0.15
   },
   "craters": {
-    "cellMeters": 6,
+    "cellMeters": 8,
     "depth": 0.2,
-    "coverage": 0.5,
+    "coverage": 0.35,
     "octaves": 3
   }
 }

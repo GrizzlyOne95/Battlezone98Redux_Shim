@@ -213,12 +213,14 @@ OpenShimCrater OpenShimCraterField(float2 p, float4 params, float foot)
             float2 v = q - (k + 0.15 + 0.7 * float2(OpenShimDetileHash(key + 47.7), OpenShimDetileHash(key + 83.3)));
             float radius = lerp(0.12, 0.42, size * size);
             float dist = length(v), d = dist / radius;
-            if (d >= 1.6) continue;
-            // Parabolic bowl with a flat floor, raised Gaussian rim.
-            float bowl = d < 1.0 ? max(d * d - 1.0, -0.75) : 0.0;
-            float dBowl = d < 1.0 && d > 0.5 ? 2.0 * d : 0.0;
-            float rim = 0.3 * exp(-14.0 * (d - 1.0) * (d - 1.0));
-            float dRim = -28.0 * (d - 1.0) * rim;
+            if (d >= 1.9) continue;
+            // Bowl that eases into the rim (no crease at the lip), flat
+            // floor, low wide Gaussian rim; weathered rather than fresh.
+            float lip = 1.0 - d * d;
+            float bowl = d < 1.0 ? -min(lip * lip, 0.75) : 0.0;
+            float dBowl = d < 1.0 && lip * lip < 0.75 ? 4.0 * d * lip : 0.0;
+            float rim = 0.2 * exp(-8.0 * (d - 1.0) * (d - 1.0));
+            float dRim = -16.0 * (d - 1.0) * rim;
             c.h += (bowl + rim) * ratio * 2.0 * radius * cell;
             c.slope += (dBowl + dRim) * ratio * 2.0 * v / max(dist, 1e-5);
         }

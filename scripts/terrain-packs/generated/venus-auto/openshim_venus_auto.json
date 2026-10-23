@@ -87,6 +87,23 @@
             "control": "openshim_venus_auto_misn09_stock_control.png"
           }
         ],
+        "detile": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "far": [
+          5,
+          40,
+          250,
+          0.6
+        ],
+        "macro": [
+          260,
+          0.12,
+          0.15
+        ],
         "heightBlend": 0.5,
         "heightMeters": [
           0.8,
