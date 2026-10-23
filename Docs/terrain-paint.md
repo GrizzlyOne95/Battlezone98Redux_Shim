@@ -250,11 +250,67 @@ Three recipe-level settings vary the ground past what one tile can show:
   (true or a 0..1 strength). Needs the full material form. Written as
   `paint.craters` plus `paint.craterLayers`. The displacement clamp grows by
   the deepest possible crater stack.
+- `detail` (`waveMeters`, `heightMeters`, `octaves`, optional `damping`) adds
+  procedural erosion height in world space: fbm whose octaves (1 to 5, each
+  halving the wavelength) are damped where the octaves above are steep, so
+  smooth valleys run between sharper ridges (`damping` 0 is plain fbm, up to 4).
+  The domain shader displaces it and the pixel shader tilts the normal by its
+  slopes; octaves too fine for the pixel or vertex spacing fade out like the
+  crater octaves. Layers opt in with `proceduralDetail` (true or 0..1). Needs the
+  full material form. Written as `paint.detail` plus `paint.detailLayers`.
+- `parallax` (`scale`, optional `fadeMeters` 40, optional `steps` 12) adds
+  close-up parallax occlusion. The ray is marched through each layer's fine
+  height minus the coarse height the domain shader already displaced (the mip of
+  the 1.25 m vertex spacing), so geometry carries the large shapes and parallax
+  only the relief between vertices. `scale` (0 to 2) multiplies `heightMeters`;
+  the depth fades to zero at `fadeMeters` (2 to 300) and on walls; `steps`
+  (4 to 32) is the march length, refined by one secant step. One march per pixel
+  serves the diffuse, normal and specular reads. It runs only in the lit
+  triplanar pass, which has the view position. Needs the full material form.
+  Written as `paint.parallax`, three numbers.
 
 The baked per-layer `craters` above repeat with the tile; the procedural field
 replaces them where detile is wanted (the Moon dust layers).
 
-Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory.
+### Erosion masks
+
+A recipe's `erosion` block routes water and sediment over the HG2 cell grid,
+highest cell first, and blends cells toward a rule's `weights` (`amount` 0..1,
+optional `types` to limit the MAT types it touches):
+
+- `channel` (`startHectares`, `fullHectares`): drainage area, on a log scale,
+  fading out across filled pits and dead-flat ground.
+- `deposit` and `scour` (`coverage` up to 0.5): the share of cells where routed
+  sediment settles or is cut away.
+- `talus` (`coverage`, `radiusMeters` 20..1000, default 60): the foot of slopes
+  steeper than about 30 degrees, not their rims.
+
+Every world recipe uses it.
+
+### Eight layers
+
+A recipe with eight layers builds 18 slices: two banks of nine, each with four
+colours, a control map and four normal+height slices. Layer i's colour is slice
+`(i / 4) * 9 + i % 4`, bank b's control is `b * 9 + 4` and layer i's
+normal+height is `(i / 4) * 9 + 5 + i % 4`. The builder writes a pair of control
+PNGs per map; per-layer arrays (`repeatMeters`, `heightMeters`, `detailLayers`
+and the rest) take eight entries. The weights are normalised across both banks.
+The domain shader binding accepts either size. Eight layers need the full
+material form.
+
+### Adaptive tessellation
+
+With micro-relief on, the hull shader tessellates adaptively by default: each
+edge asks for about one vertex per 12 screen pixels, scaled by the paint relief
+under it (0.4 on flat paint up to 1 where layer heights span 1.5 m or more),
+floored at 2 and capped at the factor. Each edge takes the larger relief of its
+two endpoints, so shared edges agree and no cracks open. The hull reads the same
+height array as the domain shader (HS `t127`, bound and restored in step).
+`OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE=0` restores fixed subdivision; with
+adaptive on, `OPENSHIM_TERRAIN_TESSELLATION_FACTOR=8` raises the cap.
+
+Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory;
+eighteen cost about 384 MiB.
 
 ## World packs
 
