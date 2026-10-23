@@ -9,6 +9,14 @@
 #ifndef OPENSHIM_TESS_TARGET_PIXELS
 #define OPENSHIM_TESS_TARGET_PIXELS 12
 #endif
+// Paint relief scales the adaptive request: layers that displace less than
+// RELIEF_FULL metres get proportionally fewer segments, down to RELIEF_FLAT.
+#ifndef OPENSHIM_TESS_RELIEF_FLAT
+#define OPENSHIM_TESS_RELIEF_FLAT 0.4
+#endif
+#ifndef OPENSHIM_TESS_RELIEF_FULL
+#define OPENSHIM_TESS_RELIEF_FULL 1.5
+#endif
 #if defined(OPENSHIM_HEIGHT_TEST) && (!defined(OPENSHIM_RELIEF_TEST) || defined(VERTEX_LIGHTING))
 #error Texture height needs the qualified per-pixel relief interface
 #endif
@@ -21,8 +29,9 @@
 // Ogre ACT_VIEWPORT_SIZE supplies width/height and their reciprocals per pass.
 float4 tessViewport;
 // Only shared endpoints and viewport affect an edge. Material UVs, normals
-// and the triangle's third vertex must not change its subdivision request.
-float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport)
+// and the triangle's third vertex must not change its subdivision request;
+// relief is the larger of the two endpoints' own paint relief scales.
+float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport, float relief)
 {
     if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(viewport)) ||
         any(viewport <= 0.0) || any(viewport > 16384.0) || min(a.w,b.w) <= 0.0001)
@@ -32,7 +41,7 @@ float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport)
     if (!isfinite(extent)) return OPENSHIM_TESS_FACTOR;
     // Fractional-even retains at least two segments and moves new samples
     // continuously between 2 and the configured cap. Never cull invalid edges.
-    return clamp(extent / OPENSHIM_TESS_TARGET_PIXELS, 2.0, OPENSHIM_TESS_FACTOR);
+    return clamp(extent / OPENSHIM_TESS_TARGET_PIXELS * relief, 2.0, OPENSHIM_TESS_FACTOR);
 }
 #endif
 
@@ -230,6 +239,21 @@ float3 TerrainPaintRelief(float2 worldXZ)
     float dz = TerrainPaintHeight(worldXZ + float2(0, e)) - TerrainPaintHeight(worldXZ - float2(0, e));
     return float3(h, float2(dx, dz) / (2.0 * e));
 }
+
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+// Hull side: how far a vertex's layer mix can displace, from the control
+// maps alone, as a 0..1 tessellation scale. A pure function of world XZ.
+float TerrainPaintReliefScale(float2 worldXZ)
+{
+    if (!all(isfinite(worldXZ))) return 1.0;
+    float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / (OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy);
+    float4 banks[OPENSHIM_PAINT_LAYERS / 4];
+    [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
+        banks[b] = TerrainPaintBilinear(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
+    float span = OpenShimPaintDot(OpenShimPaintNormalize(banks), openShimPaintReliefMeters) * OPENSHIM_PAINT_HEIGHT_SCALE;
+    return isfinite(span) ? lerp(OPENSHIM_TESS_RELIEF_FLAT, 1.0, saturate(span / OPENSHIM_TESS_RELIEF_FULL)) : 1.0;
+}
+#endif
 #endif
 #endif
 
@@ -275,9 +299,13 @@ TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
 {
     TerrainTessFactors f;
 #if defined(OPENSHIM_TESS_ADAPTIVE)
-    f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy);
-    f.edge[1] = TerrainAdaptiveEdge(p[2].position,p[0].position,tessViewport.xy);
-    f.edge[2] = TerrainAdaptiveEdge(p[0].position,p[1].position,tessViewport.xy);
+    float relief[3] = { 1.0, 1.0, 1.0 };
+#if defined(OPENSHIM_PAINT_HEIGHT)
+    [unroll] for (int i = 0; i < 3; ++i) relief[i] = TerrainPaintReliefScale(p[i].hdUV);
+#endif
+    f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy,max(relief[1],relief[2]));
+    f.edge[1] = TerrainAdaptiveEdge(p[2].position,p[0].position,tessViewport.xy,max(relief[2],relief[0]));
+    f.edge[2] = TerrainAdaptiveEdge(p[0].position,p[1].position,tessViewport.xy,max(relief[0],relief[1]));
     f.inside = max(f.edge[0],max(f.edge[1],f.edge[2]));
 #else
     f.edge[0] = f.edge[1] = f.edge[2] = OPENSHIM_TESS_FACTOR;

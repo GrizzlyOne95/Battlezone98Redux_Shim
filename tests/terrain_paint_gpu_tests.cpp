@@ -409,7 +409,17 @@ RWStructuredBuffer<float4> testResults : register(u0);
         compiled = D3DCompile(eightTess.data(),eightTess.size(),nullptr,nullptr,nullptr,"TestEight","cs_5_0",0,0,&code,&errors);
         if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
         ok(compiled);
-        std::cout<<"PASS: eight-layer banks, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        // The adaptive hull reads both control banks for its relief scale.
+        const std::string adaptiveHull = "#define OPENSHIM_TESS_ADAPTIVE 1\n#define OPENSHIM_TESS_FACTOR 8\n"
+            "static const float openShimPaintReliefMeters[8] = {1,0,0,0,0,2,0,0};\n" + eightTess;
+        for (const char* stage : {"TerrainHull", "TerrainDomain"})
+        {
+            compiled = D3DCompile(adaptiveHull.data(),adaptiveHull.size(),nullptr,nullptr,nullptr,stage,
+                stage[7] == 'H' ? "hs_5_0" : "ds_5_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+        }
+        std::cout<<"PASS: eight-layer banks and adaptive hull, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

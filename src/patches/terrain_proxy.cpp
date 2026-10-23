@@ -964,14 +964,22 @@ namespace BZROpenShim
             if (config.microReliefAmplitude == 0.0f) config.microReliefTest = false;
             // The persistent UI switch uses the visually qualified factor-4
             // relief preset; plain submission tests keep their factor-2 default.
-            if (config.microReliefTest) config.tessellationFactor = 4;
+            // It is adaptive by default (screen-space edges scaled by paint
+            // relief); OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE=0 keeps it fixed.
+            if (config.microReliefTest)
+            {
+                config.tessellationFactor = 4;
+                int adaptive = 1;
+                ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE", adaptive);
+                config.tessellationAdaptive = adaptive != 0;
+            }
             int factor = 2;
             if (ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_FACTOR", factor) &&
-                (factor == 1 || factor == 2 || factor == 4))
+                (factor == 1 || factor == 2 || factor == 4 || (factor == 8 && config.tessellationAdaptive)))
                 config.tessellationFactor = factor;
-            if (config.tessellationAdaptive && config.tessellationFactor != 4)
+            if (config.tessellationAdaptive && config.tessellationFactor < 4)
             {
-                LogShimA(LogLevel::Warn, "terrain-tess", "[TERRAIN-TESS] adaptive request declined: factor-4 cap required; fixed subdivision retained");
+                LogShimA(LogLevel::Warn, "terrain-tess", "[TERRAIN-TESS] adaptive request declined: factor-4 or factor-8 cap required; fixed subdivision retained");
                 config.tessellationAdaptive = false;
             }
             config.tessellationTest = config.tessellationTest || config.tessellationAdaptive;

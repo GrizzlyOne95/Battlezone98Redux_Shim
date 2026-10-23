@@ -291,6 +291,12 @@ bool InstallNativeTerrainTessellationTest()
             if (g_HdPaint.detail[0] > 0)
                 vector("OPENSHIM_PAINT_DETAIL", g_HdPaint.detail);
             defines << "#define OPENSHIM_PAINT_HEIGHT_SCALE " << paintHeightScale << "\n";
+            // Per-layer displacement span, for the adaptive hull's relief scale.
+            defines << "static const float openShimPaintReliefMeters[" << g_HdPaint.Layers() << "] = {";
+            for (std::size_t i = 0; i < g_HdPaint.Layers(); ++i)
+                defines << (i ? "," : "") << g_HdPaint.heightMeters[i] + 2.0f * g_HdPaint.CraterMeters() * g_HdPaint.craterLayers[i] +
+                    2.0f * g_HdPaint.DetailMeters() * g_HdPaint.detailLayers[i];
+            defines << "};\n";
             source = defines.str() + TerrainPaint::LayerHlsl(g_HdPaint) + TerrainPaint::DetileHlsl() +
                 TerrainPaint::CraterHlsl() + source;
         }
