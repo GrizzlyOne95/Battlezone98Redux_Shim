@@ -120,6 +120,7 @@
     },
     {
       "name": "Blue rock",
+      "detile": true,
       "repeatMeters": 16,
       "archive": "icelandic_rocky_ground_vglndb0g_8k.zip",
       "member": "Icelandic_Rocky_Ground_vglndb0g_8K_BaseColor.jpg",
@@ -151,6 +152,7 @@
     },
     {
       "name": "Blue rock wide",
+      "detile": true,
       "repeatMeters": 40,
       "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
       "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",

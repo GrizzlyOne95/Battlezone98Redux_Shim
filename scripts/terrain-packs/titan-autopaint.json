@@ -80,6 +80,7 @@
   "layers": [
     {
       "name": "Methane shore",
+      "detile": true,
       "repeatMeters": 20,
       "archive": "beach_gravel_with_pebbles_uifndiulw_8k.zip",
       "member": "Beach_Gravel_With_Pebbles_uifndiulw_8K_BaseColor.jpg",
@@ -88,6 +89,7 @@
     },
     {
       "name": "Rock",
+      "detile": true,
       "repeatMeters": 20,
       "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
       "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
@@ -96,6 +98,7 @@
     },
     {
       "name": "Shore wide",
+      "detile": true,
       "repeatMeters": 40,
       "archive": "sandy_beach_rock_udrkajbn_8k.zip",
       "member": "Sandy_Beach_Rock_udrkajbn_8K_BaseColor.jpg",
@@ -104,6 +107,7 @@
     },
     {
       "name": "Rock wide",
+      "detile": true,
       "repeatMeters": 36,
       "archive": "icelandic_rocky_ground_ve2kbizn_8k.zip",
       "member": "Icelandic_Rocky_Ground_ve2kbizn_8K_BaseColor.jpg",

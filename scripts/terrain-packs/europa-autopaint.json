@@ -83,6 +83,7 @@
   "layers": [
     {
       "name": "Thin ice",
+      "detile": true,
       "repeatMeters": 24,
       "archive": "icelandic_glacier_vf0nbbtn_8k.zip",
       "member": "Icelandic_Glacier_vf0nbbtn_8K_BaseColor.jpg",
@@ -91,6 +92,7 @@
     },
     {
       "name": "Frozen tundra",
+      "detile": true,
       "repeatMeters": 16,
       "archive": "icelandic_sand_with_pebbles_tbklac1n_8k.zip",
       "member": "Icelandic_Sand_With_Pebbles_tbklac1n_8K_BaseColor.jpg",
@@ -99,6 +101,7 @@
     },
     {
       "name": "Snowy rock",
+      "detile": true,
       "repeatMeters": 16,
       "archive": "icelandic_rocky_ground_vglndb0g_8k.zip",
       "member": "Icelandic_Rocky_Ground_vglndb0g_8K_BaseColor.jpg",
@@ -107,6 +110,7 @@
     },
     {
       "name": "Glacial",
+      "detile": true,
       "repeatMeters": 48,
       "archive": "icelandic_glacier_vf0nbbtn_8k.zip",
       "member": "Icelandic_Glacier_vf0nbbtn_8K_BaseColor.jpg",

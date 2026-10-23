@@ -83,6 +83,7 @@
   "layers": [
     {
       "name": "Sulphur deposits",
+      "detile": true,
       "repeatMeters": 18,
       "archive": "sulphur_rock_vmijee1g_8k.zip",
       "member": "Sulphur_Rock_vmijee1g_8K_BaseColor.jpg",
@@ -91,12 +92,14 @@
     },
     {
       "name": "Liquid sulphur",
+      "detile": true,
       "repeatMeters": 16,
       "file": "crhd_venus_ve11sa0_d.dds",
       "heightMeters": 0.15
     },
     {
       "name": "Hardened sulphur",
+      "detile": true,
       "repeatMeters": 20,
       "archive": "muddy_rock_ubkmfang_8k.zip",
       "member": "Muddy_Rock_ubkmfang_8K_BaseColor.jpg",
@@ -105,6 +108,7 @@
     },
     {
       "name": "Crag",
+      "detile": true,
       "repeatMeters": 40,
       "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
       "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
