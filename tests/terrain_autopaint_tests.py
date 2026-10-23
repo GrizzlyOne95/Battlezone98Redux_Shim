@@ -276,12 +276,14 @@ class AutoPaintTests(unittest.TestCase):
                       macro={"meters": 260, "brightness": 0.12, "saturation": 0.15},
                       craters={"cellMeters": 6, "depth": 0.2, "coverage": 0.5, "octaves": 3},
                       detail={"waveMeters": 60, "heightMeters": 1.5, "octaves": 4},
+                      parallax={"scale": 1, "fadeMeters": 30},
                       layers=[dict(detiled["layers"][0], proceduralCraters=True, proceduralDetail=0.5)] + self.recipe["layers"][1:])
         auto.validate_recipe(varied)
         paint = auto.build_pack(maps, varied, self.root, self.root / "out3", size, "test_auto", False)["materials"]["TERRAIN"]["paint"]
         self.assertEqual((paint["far"], paint["macro"]), ([5, 40, 250, 0.6], [260, 0.12, 0.15]))
         self.assertEqual((paint["craters"], paint["craterLayers"]), ([6, 0.2, 0.5, 3], [1, 0, 0, 0]))
         self.assertEqual((paint["detail"], paint["detailLayers"]), ([60, 1.5, 4, 1], [0.5, 0, 0, 0]))
+        self.assertEqual(paint["parallax"], [1, 30, 12])
         hued = auto.build_pack(maps, dict(varied, macro=dict(varied["macro"], hue=0.35)), self.root, self.root / "out6", size, "test_auto", False)
         self.assertEqual(hued["materials"]["TERRAIN"]["paint"]["macro"], [260, 0.12, 0.15, 0.35])
         self.assertEqual(auto.build_pack(maps, dict(varied, layers=[dict(varied["layers"][0], proceduralCraters=0.5)] + self.recipe["layers"][1:]),
@@ -291,6 +293,7 @@ class AutoPaintTests(unittest.TestCase):
                              (dict(varied, macro=dict(varied["macro"], hue=2)), "macro"),
                              (dict(varied, craters=dict(varied["craters"], octaves=4)), "craters"),
                              (dict(varied, detail=dict(varied["detail"], heightMeters=6)), "detail"),
+                             (dict(varied, parallax={"scale": 3}), "parallax"),
                              (dict(varied, diffuseOnly=True), "detail"),
                              (dict({k: v for k, v in varied.items() if k != "detail"}), "proceduralDetail"),
                              (dict(detiled, layers=varied["layers"]), "proceduralCraters")):

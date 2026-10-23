@@ -1217,6 +1217,14 @@ namespace BZROpenShim
                             binding.paint.detail = paint.at("detail").get<std::array<float, 4>>();
                             layers("detailLayers", binding.paint.detailLayers);
                         }
+                        if (paint.contains("parallax"))
+                        {
+                            // Depth scale, fade metres and steps.
+                            const auto parallax = paint.at("parallax").get<std::vector<float>>();
+                            if (parallax.size() != 3)
+                                throw std::runtime_error("paint parallax needs three numbers");
+                            std::copy(parallax.begin(), parallax.end(), binding.paint.parallax.begin());
+                        }
                         if (paint.contains("maps"))
                         {
                             // Multi-map form: one entry per terrain shape sharing this

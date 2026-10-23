@@ -273,6 +273,7 @@ RWStructuredBuffer<float4> testResults : register(u0);
         varied.farScale = {5, 40, 250, 0.6f}; varied.macro = {260, 0.12f, 0.15f, 0.35f};
         varied.craters = {6, 0.2f, 0.5f, 3}; varied.craterLayers = {1, 0, 0, 0};
         varied.detail = {40, 1, 4, 1}; varied.detailLayers = {0.5f, 0, 0, 0};
+        varied.parallax = {1, 40, 12, 0};
         // Triplanar with IBL, and the top-projection material path.
         const std::pair<std::string, const char*> variants[] = {
             {triplanarRaw, "#define IBL_ENABLED\n#define ENHANCED_MODE\n"}, {materialRaw, ""}};
@@ -280,14 +281,93 @@ RWStructuredBuffer<float4> testResults : register(u0);
             {
                 std::string variant = raw;
                 const std::string slice = "float openShimTileSlice : TEXCOORD10";
-                variant.replace(variant.find(slice), slice.size(), slice + ", in float vDepth : TEXCOORD5");
+                // The triplanar pass also takes the view position, for parallax.
+                const bool ibl = *prefix != 0;
+                variant.replace(variant.find(slice), slice.size(), slice + ", in float vDepth : TEXCOORD5" +
+                    (ibl ? ", in float3 vViewPosition : TEXCOORD4" : ""));
                 check(TerrainPaint::Specialize(variant, true, varied) &&
-                    variant.find("#define OPENSHIM_PAINT_VIEW_DEPTH vDepth") != std::string::npos, "varied PS specialization failed");
+                    variant.find("#define OPENSHIM_PAINT_VIEW_DEPTH vDepth") != std::string::npos &&
+                    variant.find(std::string("#define OPENSHIM_PAINT_PARALLAX ") + (ibl ? "1" : "0")) != std::string::npos,
+                    "varied PS specialization failed");
                 variant = prefix + frame + variant;
                 compiled = D3DCompile(variant.data(),variant.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
                 if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
                 ok(compiled);
             }
+        // Parallax: layer 0's height is a checker at mip 0 and flat 0.5 above,
+        // so the fine-minus-coarse relief is the checker alone. Looking
+        // straight down, beyond the fade or at a wall leaves the point; an
+        // oblique ray moves along its own XZ to where it meets the relief.
+        {
+            TerrainPaint::Config pom = material;
+            pom.repeatMeters = {1, 1, 1, 1}; pom.heightMeters = {1, 0, 0, 0}; pom.detile = {};
+            pom.bounds = {0, 0, 8, 8}; pom.parallax = {1, 40, 32, 0};
+            std::string pomSource = R"(
+Texture2DArray diffuseMap : register(t0);
+SamplerState diffuseSam : register(s0);
+RWStructuredBuffer<float4> results : register(u0);
+float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXCOORD10, in float vDepth : TEXCOORD5,
+    in float3 vViewPosition : TEXCOORD4, in float3 vViewNormal : TEXCOORD2, uniform float4x4 inverseViewMatrix) : SV_TARGET
+{ return diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice)); }
+[numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
+{ float2 p = float2(0.31 + 0.137 * id.x, 0.23 + 0.071 * id.x);
+  float3 n = id.x == 2 ? float3(1, 0, 0) : float3(0, 1, 0);
+  float3 view = id.x == 0 ? float3(0, -1, 0) : float3(1, -1, 0);
+  float depth = id.x == 1 ? 50 : 5;
+  OpenShimPaintGeo g = OpenShimPaintGeometryAt(p, 0, n, depth);
+  OpenShimPaintGeo hit = OpenShimPaintParallaxAt(diffuseMap, diffuseSam, g, view, depth);
+  float2 moved = hit.pos.xz - g.pos.xz;
+  // run is (1, 0) at 45 degrees, so the ray meets the relief at height -moved.x.
+  float relief = OpenShimPaintFineHeight(diffuseMap, diffuseSam, g, OpenShimPaintControl(diffuseMap, diffuseSam, p), hit.pos.xz) * 0.875;
+  results[id.x] = float4(moved, relief + moved.x, 0); }
+)";
+            check(TerrainPaint::Specialize(pomSource, true, pom) &&
+                pomSource.find("#define OPENSHIM_PAINT_PARALLAX 1") != std::string::npos, "parallax PS specialization failed");
+            pomSource = "#define IBL_ENABLED\n#define ENHANCED_MODE\n" + pomSource;
+            compiled = D3DCompile(pomSource.data(),pomSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+            // Explicit gradients work in compute; zero ones read mip 0.
+            const std::string pomCompute = "#define OPENSHIM_PAINT_SAMPLE(tex,sam,uv,gx,gy) tex.SampleGrad(sam,float3(frac((uv).xy),(uv).z),gx,gy)\n"
+                "#define OPENSHIM_PAINT_DDX(v) ((v) * 0)\n#define OPENSHIM_PAINT_DDY(v) ((v) * 0)\n" + pomSource;
+            compiled = D3DCompile(pomCompute.data(),pomCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+            ComPtr<ID3D11ComputeShader> pomShader;
+            ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&pomShader));
+            constexpr UINT side=8, mips=4;
+            std::vector<std::vector<Pixel>> texels; std::vector<D3D11_SUBRESOURCE_DATA> pomData;
+            for (UINT s=0;s<9;++s) for (UINT m=0;m<mips;++m)
+            {
+                const UINT w=side>>m; std::vector<Pixel> level(w*w,Pixel{0,0,0,0});
+                for (UINT i=0;i<w*w;++i)
+                {
+                    if (s==4) level[i]={1,0,0,0};
+                    if (s==5) level[i].a = m ? .5f : float(((i%w)+(i/w))%2);
+                }
+                texels.push_back(std::move(level));
+            }
+            for (UINT i=0;i<texels.size();++i) pomData.push_back({texels[i].data(),(side>>(i%mips))*UINT(sizeof(Pixel)),0});
+            D3D11_TEXTURE2D_DESC pd=td; pd.Width=pd.Height=side; pd.MipLevels=mips; pd.ArraySize=9;
+            ComPtr<ID3D11Texture2D> pomTexture; ok(device->CreateTexture2D(&pd,pomData.data(),&pomTexture));
+            ComPtr<ID3D11ShaderResourceView> pomView; ok(device->CreateShaderResourceView(pomTexture.Get(),nullptr,&pomView));
+            ComPtr<ID3D11ShaderResourceView> savedView; context->CSGetShaderResources(0,1,&savedView);
+            ID3D11ShaderResourceView* pomViews[]={pomView.Get()}; context->CSSetShaderResources(0,1,pomViews);
+            context->CSSetShader(pomShader.Get(),nullptr,0);
+            dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+            bool shifted=false;
+            for(UINT i=0;i<count;++i)
+            {
+                if (i<3) { check(values[i].r==0&&values[i].g==0,"parallax moved a point it should leave"); continue; }
+                // Top is half the 1 m relief, faded to 0.875 at 5 m.
+                check(std::abs(values[i].r)<=.4375f+1e-4f&&values[i].g==0,"parallax left its ray or bound");
+                check(std::abs(values[i].b)<.03f,"parallax missed the relief");
+                shifted = shifted || std::abs(values[i].r)>.05f;
+            }
+            context->Unmap(staging.Get(),0);
+            check(shifted,"parallax never moved the point");
+            ID3D11ShaderResourceView* restore[]={savedView.Get()}; context->CSSetShaderResources(0,1,restore);
+        }
         std::string craterSource = std::string(TerrainPaint::DetileHlsl()) + TerrainPaint::CraterHlsl() + R"(
 RWStructuredBuffer<float4> results : register(u0);
 [numthreads(1,1,1)] void ComputeMain(uint3 id : SV_DispatchThreadID)
@@ -419,7 +499,7 @@ RWStructuredBuffer<float4> testResults : register(u0);
             if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
             ok(compiled);
         }
-        std::cout<<"PASS: eight-layer banks and adaptive hull, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        std::cout<<"PASS: eight-layer banks and adaptive hull, close-up parallax, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

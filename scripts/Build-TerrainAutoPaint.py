@@ -550,6 +550,13 @@ def validate_recipe(recipe):
             raise ValueError("detail needs the full material form, not diffuseOnly")
     elif any(detail_layers):
         raise ValueError("proceduralDetail needs the recipe's detail settings")
+    if "parallax" in recipe:
+        parallax = recipe["parallax"]
+        if not (0 < parallax.get("scale", 0) <= 2 and 2 <= parallax.get("fadeMeters", 40) <= 300
+                and parallax.get("steps", 12) in range(4, 33)):
+            raise ValueError("parallax needs scale (0,2], fadeMeters 2..300 and steps 4..32")
+        if recipe.get("diffuseOnly", False):
+            raise ValueError("parallax needs the full material form, not diffuseOnly")
     if "slope" in recipe:
         slope = recipe["slope"]
         if not weight_vector(slope.get("weights")) or not 0 <= slope.get("startDegrees", -1) < slope.get("fullDegrees", -1) <= 90:
@@ -956,6 +963,9 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
             detail = recipe["detail"]
             paint["detail"] = [detail["waveMeters"], detail["heightMeters"], detail["octaves"], detail.get("damping", 1)]
             paint["detailLayers"] = [float(layer.get("proceduralDetail", 0)) for layer in recipe["layers"]]
+        if "parallax" in recipe:
+            parallax = recipe["parallax"]
+            paint["parallax"] = [parallax["scale"], parallax.get("fadeMeters", 40), parallax.get("steps", 12)]
     manifest = {"schema": "bzr-openshim-terrain-hd-v1", "materials": {capture_material: {
         "sliceCount": 9 * (n // 4) if material else 5, "diffuseResource": recipe["diffuseResource"], "fallback": resources[0],
         "tiles": tiles, "paint": paint}}}

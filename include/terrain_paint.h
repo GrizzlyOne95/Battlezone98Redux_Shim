@@ -51,6 +51,11 @@ namespace BZROpenShim::TerrainPaint
         std::array<float, 8> detailLayers = {};
         // The field is normalised to its height, so this bounds it either way.
         float DetailMeters() const { return detail[0] > 0 ? detail[1] : 0.0f; }
+        // Close-up parallax occlusion: depth scale (0..2, of each layer's
+        // heightMeters), fade-out view distance in metres and ray steps.
+        // It carries only the relief finer than the displaced vertices.
+        // Scale 0 is off.
+        std::array<float, 4> parallax = {};
         bool Material() const { return sliceCount != 5; }
         unsigned Layers() const { return sliceCount == 18 ? 8 : 4; }
         // Deepest a crater stack can reach, for the displacement clamp.
@@ -142,6 +147,16 @@ namespace BZROpenShim::TerrainPaint
             }
             else if (detail != std::array<float, 4>{} || detailLayers != std::array<float, 8>{})
                 throw std::runtime_error("paint detail is off; leave every detail value 0");
+            if (parallax[0] != 0)
+            {
+                if (!(parallax[0] > 0 && parallax[0] <= 2 && parallax[1] >= 2 && parallax[1] <= 300 &&
+                    parallax[2] >= 4 && parallax[2] <= 32 && parallax[2] == std::floor(parallax[2]) && parallax[3] == 0))
+                    throw std::runtime_error("paint parallax needs depth scale 0..2, fade 2..300 metres and 4..32 steps");
+                if (!Material())
+                    throw std::runtime_error("paint parallax needs the material form");
+            }
+            else if (parallax != std::array<float, 4>{})
+                throw std::runtime_error("paint parallax is off; leave every parallax value 0");
             for (std::size_t i = 0; i < maps.size(); ++i)
             {
                 const auto& map = maps[i];
@@ -382,7 +397,13 @@ float OpenShimPaintDot(OpenShimPaintMix m, float v[OPENSHIM_PAINT_LAYERS])
 // not Enhanced), so it repeats those conditions.
 #if OPENSHIM_PAINT_TRIPLANAR_SOURCE && defined(IBL_ENABLED) && defined(ENHANCED_MODE) &&     !defined(OG_RETRO_MODE) && !defined(VERTEX_LIGHTING)
 #define OPENSHIM_PAINT_TRIPLANAR 1
+#if OPENSHIM_PAINT_MATERIAL && OPENSHIM_PAINT_PARALLAX
+#define OPENSHIM_PAINT_GEO OpenShimPaintParallax(diffuseMap, diffuseSam, \
+    OpenShimPaintGeometryAt(openShimHdUV, openShimTileSlice, mul(inverseViewMatrix, float4(vViewNormal, 0.0)).xyz, OPENSHIM_PAINT_VIEW_DEPTH), \
+    mul(inverseViewMatrix, float4(vViewPosition.xyz, 0.0)).xyz, OPENSHIM_PAINT_VIEW_DEPTH)
+#else
 #define OPENSHIM_PAINT_GEO OpenShimPaintGeometryAt(openShimHdUV, openShimTileSlice, mul(inverseViewMatrix, float4(vViewNormal, 0.0)).xyz, OPENSHIM_PAINT_VIEW_DEPTH)
+#endif
 #define OPENSHIM_PAINT_TBN(n) OpenShimPaintTbn(n, inverseViewMatrix)
 #else
 #define OPENSHIM_PAINT_TRIPLANAR 0
@@ -470,18 +491,22 @@ float4 OpenShimPaintTap(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g
     OpenShimPaintTaps t = OpenShimPaintSampleTaps(tex, sam, g, repeat, slice, detile);
     return t.x * g.blend.x + t.y * g.blend.y + t.z * g.blend.z;
 }
-OpenShimPaintMix OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
+OpenShimPaintMix OpenShimPaintControl(Texture2DArray tex, SamplerState sam, float2 worldXZ)
 {
     uint width, height, slices;
     tex.GetDimensions(width, height, slices);
-    float2 paintUV = (g.pos.xz - openShimPaintBounds.xy) / (openShimPaintBounds.zw - openShimPaintBounds.xy);
+    float2 paintUV = (worldXZ - openShimPaintBounds.xy) / (openShimPaintBounds.zw - openShimPaintBounds.xy);
     float2 inset = 0.5 / float2(width, height);
     // Level zero plus a half-texel clamp prevents the shared wrapping sampler
     // from blending the opposite edge of the map into its border.
     float4 banks[OPENSHIM_PAINT_LAYERS / 4];
     [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
         banks[b] = tex.SampleLevel(sam, float3(clamp(paintUV, inset, 1.0-inset), OpenShimPaintSlice(b * 4, 4)), 0);
-    OpenShimPaintMix m = OpenShimPaintNormalize(banks);
+    return OpenShimPaintNormalize(banks);
+}
+OpenShimPaintMix OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
+{
+    OpenShimPaintMix m = OpenShimPaintControl(tex, sam, g.pos.xz);
 #if OPENSHIM_PAINT_MATERIAL
     // Heights stay at the near scale, as in the domain shader, so
     // displacement agrees.
@@ -497,6 +522,65 @@ OpenShimPaintMix OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, Open
 #endif
     return m;
 }
+#if OPENSHIM_PAINT_MATERIAL && OPENSHIM_PAINT_PARALLAX
+// Close-up parallax. The domain shader displaces each layer's height at the
+// mip of its factor-4 vertex spacing (1.25 m), so the ray is marched through
+// the fine height minus that coarse one: geometry carries the large shapes
+// and parallax only the relief between vertices. Top projection only.
+float OpenShimPaintFineHeight(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, OpenShimPaintMix m, float2 xz)
+{
+    float sum = 0;
+    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+        [branch] if (OpenShimPaintPresent(m, i) && openShimPaintHeightMeters[i] > 0)
+        {
+            float s = 1.0 / openShimPaintRepeats[i];
+            float2 uv = OPENSHIM_PAINT_UV_Y(float3(xz.x, 0, xz.y), g) * s, coarse = float2(1.25 * s, 0);
+            bool detile = openShimPaintDetile[i] > 0;
+            float fine = OpenShimPaintProjected(tex, sam, uv, OPENSHIM_PAINT_UV_Y(g.dpdx, g) * s,
+                OPENSHIM_PAINT_UV_Y(g.dpdy, g) * s, OpenShimPaintSlice(i, 5), detile).a;
+            float base = OpenShimPaintProjected(tex, sam, uv, coarse, coarse.yx, OpenShimPaintSlice(i, 5), detile).a;
+            sum += m.w[i] * (fine - base) * openShimPaintHeightMeters[i];
+        }
+    return sum * openShimPaintParallax.x;
+}
+// view is camera to pixel in world space. Fades out with distance and slope.
+OpenShimPaintGeo OpenShimPaintParallaxAt(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float3 view, float viewDepth)
+{
+    float fade = saturate(1.0 - viewDepth / openShimPaintParallax.y) * g.blend.y;
+    float3 d = normalize(view);
+    [branch] if (!(fade > 0.001 && d.y < -0.01)) return g;
+    OpenShimPaintMix m = OpenShimPaintControl(tex, sam, g.pos.xz);
+    float top = 0.5 * fade * openShimPaintParallax.x * OpenShimPaintDot(m, openShimPaintHeightMeters);
+    // Ray XZ per metre of descent, held off grazing angles; at relief y
+    // above the surface the ray is over pos.xz - run * y.
+    float2 run = d.xz / max(-d.y, 0.3);
+    float stepY = 2.0 * top / openShimPaintParallax.z;
+    float y = top, prevY = top, h = OpenShimPaintFineHeight(tex, sam, g, m, g.pos.xz - run * top) * fade, prevH = top;
+    [loop] for (int k = 0; k < int(openShimPaintParallax.z) && h < y; ++k)
+    {
+        prevY = y; prevH = h; y -= stepY;
+        h = OpenShimPaintFineHeight(tex, sam, g, m, g.pos.xz - run * y) * fade;
+    }
+    // Secant between the last sample above the relief and the first below.
+    float above = prevY - prevH, below = h - y;
+    float hit = above + below > 1e-5 ? lerp(prevY, y, saturate(above / (above + below))) : y;
+    g.pos.xz -= run * hit;
+    return g;
+}
+// The diffuse, normal and specular reads share one march per pixel.
+static bool openShimPaintParallaxReady = false;
+static float2 openShimPaintParallaxXZ = 0;
+OpenShimPaintGeo OpenShimPaintParallax(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, float3 view, float viewDepth)
+{
+    if (!openShimPaintParallaxReady)
+    {
+        openShimPaintParallaxXZ = OpenShimPaintParallaxAt(tex, sam, g, view, viewDepth).pos.xz;
+        openShimPaintParallaxReady = true;
+    }
+    g.pos.xz = openShimPaintParallaxXZ;
+    return g;
+}
+#endif
 // Layers the blend left out cost nothing.
 float4 OpenShimPaintLayers(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, OpenShimPaintMix m, int part)
 {
@@ -644,6 +728,10 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
                 (source.find("in float vDepth") != std::string::npos ? "vDepth" : "0.0") << "\n";
             constants << "#define OPENSHIM_PAINT_CRATERS " << (config.craters[0] > 0 ? 1 : 0) << "\n";
             constants << "#define OPENSHIM_PAINT_DETAIL " << (config.detail[0] > 0 ? 1 : 0) << "\n";
+            // Parallax needs the view position, and view depth for its fade.
+            const bool parallax = config.parallax[0] > 0 && source.find("in float3 vViewPosition") != std::string::npos &&
+                source.find("in float vDepth") != std::string::npos;
+            constants << "#define OPENSHIM_PAINT_PARALLAX " << (parallax ? 1 : 0) << "\n";
             const auto vector = [&](const char* name, const float* v, int n) {
                 constants << "static const float" << n << " " << name << " = float" << n << "(";
                 for (int i = 0; i < n; ++i) constants << (i ? "," : "") << v[i];
@@ -652,6 +740,7 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             vector("openShimPaintMacro", config.macro.data(), 4);
             vector("openShimPaintCraters", config.craters.data(), 4);
             vector("openShimPaintDetail", config.detail.data(), 4);
+            vector("openShimPaintParallax", config.parallax.data(), 4);
             vector("openShimPaintBounds", config.bounds.data(), 4);
             source.insert(0, constants.str() + LayerHlsl(config) + DetileHlsl() + CraterHlsl() + BlendHlsl());
         }
