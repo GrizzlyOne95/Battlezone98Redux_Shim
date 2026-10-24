@@ -69,7 +69,8 @@ files it did not describe.
 The sync runs only when all of these hold:
 
 1. A Workshop item directory with `OpenShimManifest.lua` is found (same lookup
-   as the updater).
+   as the updater), or the game's own `mods86673790` holds a newer one (a GOG
+   install, where the mod is copied in by hand). The newer manifest wins.
 2. The manifest parses with the normal update-manifest parser.
 3. `manifest.version` equals the file version of the **running** `openshim.dll`.
    This avoids a downgrade when the Workshop item lags a newer installer build,

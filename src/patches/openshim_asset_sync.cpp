@@ -51,15 +51,44 @@ namespace BZROpenShim
             return UpdaterDetail::ReadFileVersion(path, version);
         }
 
+        // The Steam Workshop copy, or the game's own mods\3686673790 when that
+        // holds a newer manifest. GOG has no Workshop, so the mod is installed
+        // there by hand; without it a GOG install with Steam present would read
+        // whatever stale copy sits in the Steam cache. The version gate below
+        // still refuses a manifest that does not match the running DLL.
+        bool FindAssetSourceDirectory(std::filesystem::path& itemDir, std::string& error)
+        {
+            const bool haveWorkshop = UpdaterDetail::FindWorkshopItemDirectory(itemDir, error);
+            const std::filesystem::path gameRoot = UpdaterDetail::GetGameRoot();
+            if (gameRoot.empty())
+                return haveWorkshop;
+            const std::filesystem::path localDir = gameRoot / L"mods" / L"3686673790";
+            std::error_code fileError;
+            const auto localTime = std::filesystem::last_write_time(localDir / L"OpenShimManifest.lua", fileError);
+            if (fileError)
+                return haveWorkshop;
+            if (haveWorkshop)
+            {
+                const auto workshopTime =
+                    std::filesystem::last_write_time(itemDir / L"OpenShimManifest.lua", fileError);
+                if (!fileError && workshopTime >= localTime)
+                    return true;
+            }
+            itemDir = localDir;
+            error.clear();
+            return true;
+        }
+
         void RunSync()
         {
             std::filesystem::path itemDir;
             std::string error;
-            if (!UpdaterDetail::FindWorkshopItemDirectory(itemDir, error))
+            if (!FindAssetSourceDirectory(itemDir, error))
             {
                 LogShimA(LogLevel::Info, kComponent, "No Workshop item to sync assets from: %s", error.c_str());
                 return;
             }
+            LogShimA(LogLevel::Info, kComponent, "Asset source: %s", itemDir.string().c_str());
 
             std::ifstream input(itemDir / L"OpenShimManifest.lua", std::ios::binary);
             const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
