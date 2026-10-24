@@ -579,7 +579,7 @@ namespace BZROpenShim::ShellScreens
 
     bool SetPanelRectColor(void* panel, const Rect& rect, uint32_t argb)
     {
-        if (GetBzrDistribution() != BzrDistribution::GOG || !IsCompatibleGameVersion() ||
+        if (!IsCompatibleGameVersion() ||
             RenderProfiles::IdentifyActiveRenderSystem() != 1) return false;
         static uint32_t reflow = 0;
         static const bool bound = [] {

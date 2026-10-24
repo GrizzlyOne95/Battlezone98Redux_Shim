@@ -267,7 +267,7 @@ namespace BZROpenShim::MenuTheme
             Shell::AddButton(panel,nullptr,"MenuTheme_Back",{0,0,342,77},"Back",Shell::kSkinTopCorner,1,28,Back);
             Shell::AddLabel(panel,panel,"MenuTheme_Title",{470,132,500,56},"MENU COLORS",Shell::kTitleLabelFlags);
             Shell::AddLabel(panel,panel,"MenuTheme_Help",{280,240,880,46},"Adjust RGB, saturation and white level to preview.");
-            const bool supported=GetBzrDistribution()==BzrDistribution::GOG&&IsCompatibleGameVersion()&&
+            const bool supported=IsCompatibleGameVersion()&&
                 RenderProfiles::IdentifyActiveRenderSystem()==1&&BindApi()&&Shell::SlidersAvailable();
             if(!supported)
             {
@@ -302,7 +302,7 @@ namespace BZROpenShim::MenuTheme
     {
         try
         {
-            if(GetBzrDistribution()!=BzrDistribution::GOG||!IsCompatibleGameVersion())return;
+            if(!IsCompatibleGameVersion())return;
             if(!g_read)ReadConfig();
             if((!g_preview.enabled&&!g_collect)||!name||!materialSlot||!IsMenuImage(name))return;
             if(!g_thread)g_thread=GetCurrentThreadId();
