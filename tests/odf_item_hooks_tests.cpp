@@ -422,6 +422,110 @@ void TestMapFolderItemsServeOnlyIndexGaps()
     fs::remove_all(root, ec);
 }
 
+std::vector<std::filesystem::path> g_mpRoots;
+
+std::filesystem::path MpFolderFor(const std::string& base)
+{
+    return MapFolderItems::FindMpDescriptionFolder(g_mpRoots, base);
+}
+
+// The waiting room's description load reads <stem>.mpdes; every other .des
+// read (SP briefing, instant action, mod select) stays on the engine's file.
+void TestMpDescriptionOnlyInsideWaitingRoomLoad()
+{
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "openshim_mpdes_test";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    const fs::path pack = root / "3686673790";
+    const fs::path other = root / "other";
+    fs::create_directories(pack);
+    fs::create_directories(other);
+    const char* kMp = "Co-op: hold the base with a friend.";
+    WriteFile(pack / "misn02b.bzn", "bzn");
+    WriteFile(pack / "misn02b.mpdes", kMp);
+    WriteFile(pack / "misn02b.des", "pack SP briefing");
+    WriteFile(pack / "misn03.bzn", "bzn");
+    WriteFile(pack / "empty.bzn", "bzn");
+    WriteFile(pack / "empty.mpdes", "");
+    WriteFile(other / "misn02b.mpdes", "no bzn beside it");
+
+    Check(MapFolderItems::FindMpDescriptionFolder({ other, pack }, "misn02b") == pack,
+          "the .mpdes folder needs <map>.bzn beside it");
+    Check(MapFolderItems::FindMpDescriptionFolder({ other }, "misn02b").empty(),
+          "a lone .mpdes is no map folder");
+    Check(MapFolderItems::FindMpDescriptionFolder({ pack }, "misn03").empty(),
+          "a map without .mpdes has no override");
+    Check(MapFolderItems::FindMpDescriptionFolder({ pack }, "..\\misn02b").empty(),
+          "a path is never a map name");
+
+    ResetEngine();
+    OdfItemHookTest::SetOptions(false, false, false);
+    MapFolderItems::ResetForTesting();
+    MapFolderItems::SetIndexCheck(&FakeIndexHas);
+    g_mpRoots = { other, pack };
+    const char* kStock = "stock SP briefing";
+    FakeItem& stock = AddItem("misn02b.des", kStock);
+    FakeItem& stock3 = AddItem("misn03.des", "misn03 stock");
+    AddItem("empty.des", "empty stock");
+
+    // No resolver yet: a bracketed load is still stock.
+    MapFolderItems::BeginMpDescription();
+    Check(OdfGetItemSizeDetour("misn02b.des") == std::strlen(kStock), "no resolver: stock size");
+    MapFolderItems::EndMpDescription();
+
+    MapFolderItems::SetMpDescriptionResolver(&MpFolderFor);
+
+    // Outside the waiting room's load: the engine's .des, untouched.
+    Check(OdfGetItemSizeDetour("misn02b.des") == std::strlen(kStock), "SP size is the stock .des");
+    void* sp = OdfUseItemDetour("misn02b.des");
+    Check(sp && std::strcmp(static_cast<const char*>(sp), kStock) == 0 && stock.useCalls == 1,
+          "SP reads the engine's own .des");
+    OdfUnlockItemDetour("misn02b.des");
+    Check(stock.locks == 0 && stock.unlockCalls == 1, "SP releases the engine's item");
+
+    // Inside it, in the loader's order: size, use, unlock.
+    MapFolderItems::BeginMpDescription();
+    Check(OdfGetItemSizeDetour("MISN02B.DES") == std::strlen(kMp), "the waiting room sizes the .mpdes");
+    void* mp = OdfUseItemDetour("misn02b.des");
+    Check(mp && std::strcmp(static_cast<const char*>(mp), kMp) == 0,
+          "the waiting room reads the .mpdes, NUL-terminated");
+    Check(stock.useCalls == 1, "the engine's .des is never opened for it");
+    OdfUnlockItemDetour("misn02b.des");
+    Check(stock.unlockCalls == 1 && g_unknownUnlocks == 0, "its unlock never reaches the engine");
+
+    // A map with no .mpdes, an empty .mpdes and a non-.des name stay stock.
+    Check(OdfGetItemSizeDetour("misn03.des") == std::strlen("misn03 stock"), "no .mpdes: stock size");
+    void* m3 = OdfUseItemDetour("misn03.des");
+    Check(m3 && stock3.useCalls == 1, "no .mpdes: the engine serves the .des");
+    OdfUnlockItemDetour("misn03.des");
+    Check(stock3.locks == 0, "no .mpdes: the engine releases it");
+    Check(OdfGetItemSizeDetour("empty.des") == std::strlen("empty stock"), "an empty .mpdes is ignored");
+    Check(OdfUseItemDetour("misn02b.mpdes") == nullptr, "the .mpdes is never an item by its own name");
+    MapFolderItems::EndMpDescription();
+    Check(MapFolderItems::MpDescriptionItemCount() == 0, "closing the load drops unheld copies");
+
+    // A copy still held when the load closes stays valid until its Release.
+    MapFolderItems::BeginMpDescription();
+    void* held = OdfUseItemDetour("misn02b.des");
+    MapFolderItems::EndMpDescription();
+    Check(held && MapFolderItems::MpDescriptionItemCount() == 1 &&
+              static_cast<const char*>(held)[0] == 'C',
+          "a held copy outlives the load");
+    void* after = OdfUseItemDetour("misn02b.des");
+    Check(after && std::strcmp(static_cast<const char*>(after), kStock) == 0,
+          "after the load a new holder gets the stock .des");
+    OdfUnlockItemDetour("misn02b.des");
+    Check(stock.locks == 1 && MapFolderItems::MpDescriptionItemCount() == 0,
+          "the held .mpdes copy is released first, and freed");
+    OdfUnlockItemDetour("misn02b.des");
+    Check(stock.locks == 0 && g_unknownUnlocks == 0, "then the engine's lock; nothing leaks");
+
+    MapFolderItems::ResetForTesting();
+    g_mpRoots.clear();
+    fs::remove_all(root, ec);
+}
+
 } // namespace
 
 int main()
@@ -437,6 +541,7 @@ int main()
     TestEngineNullOnAHitIsMirrored();
     TestOwnedOdfRead();
     TestMapFolderItemsServeOnlyIndexGaps();
+    TestMpDescriptionOnlyInsideWaitingRoomLoad();
 
     OdfItemHookTest::ResetCache();
     if (OpenShimTest::FailureCount() == 0)
