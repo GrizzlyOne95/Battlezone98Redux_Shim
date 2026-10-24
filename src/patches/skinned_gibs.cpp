@@ -1260,7 +1260,7 @@ namespace BZROpenShim
         {
             if (!renderQueue || !IsSkinnedGibsEnabled())
                 return;
-            if (!g_ResourcePrimeAttempted && !g_IsSteamExe)
+            if (!g_ResourcePrimeAttempted)
             {
                 // Register the payload group before the first death so that
                 // death does not also pay for resource-group initialisation.

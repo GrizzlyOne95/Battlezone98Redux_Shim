@@ -14,7 +14,7 @@ auto = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(auto)
 
 
-def reference_fingerprint(zones_x, zones_z, plane):
+def reference_fingerprint(zones_x, zones_z, plane, pad=0):
     """Straight transcription of the runtime hash for a (zones+1) grid, one sample at a time."""
     def step(h, value):
         for shift in (0, 8, 16, 24):
@@ -29,7 +29,7 @@ def reference_fingerprint(zones_x, zones_z, plane):
                 for x in range(256):
                     sx, sz = i * 256 - 128 + x, j * 256 - 128 + z
                     inside = 0 <= sx < plane.shape[1] and 0 <= sz < plane.shape[0]
-                    h = step(h, int(plane[sz, sx]) if inside else 0)
+                    h = step(h, int(plane[sz, sx]) & 0xFFF if inside else pad)
     return f"{h:016x}"
 
 
@@ -57,6 +57,12 @@ class AutoPaintTests(unittest.TestCase):
         zx, zz, plane = auto.read_hg2(self.root / "m.hg2")
         self.assertEqual((zx, zz), (2, 1))
         self.assertEqual(auto.terrain_fingerprint(zx, zz, plane), reference_fingerprint(zx, zz, plane))
+        # Outside the HG2 the engine reads [Size] Height / 0.1 (Titan: 50 -> 500).
+        self.assertEqual(auto.terrain_fingerprint(zx, zz, plane, 500), reference_fingerprint(zx, zz, plane, 500))
+        trn = self.root / "pad.trn"
+        trn.write_text("[Size]\nWidth=5120\nHeight=50\n[TextureType0]\nHeight=7\n")
+        self.assertEqual(auto.read_trn_pad(trn), 500)
+        self.assertEqual(auto.read_trn_pad(self.root / "m.trn"), 0)
         # Stock misn04 (4x3 zones): bounds measured in game on a (zones+1) grid.
         self.assertEqual(auto.terrain_bounds(4, 3), [-3190.0, -2570.0, 3210.0, 2550.0])
 
@@ -83,6 +89,117 @@ class AutoPaintTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "recipe expects"):
             auto.load_map("m", (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn"), self.recipe, None, 64)
 
+    def test_trn_names_parse_from_comments_or_bare_text(self):
+        trn = self.root / "names.trn"
+        trn.write_text("[TextureType0] // Sulphur Deposits\n[TextureType1] Liquid Sulphur\n[TextureType3]\nSolidA0=c.map\n")
+        self.assertEqual(auto.read_trn_types(trn), {0: "Sulphur Deposits", 1: "Liquid Sulphur", 3: ""})
+
+    def test_type_name_alternatives(self):
+        files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
+        self.recipe["typeNames"]["1"] = ["", "Rocky"]
+        auto.validate_recipe(self.recipe)
+        auto.load_map("m", files, self.recipe, None, 64)
+        self.recipe["typeNames"]["1"] = []
+        with self.assertRaisesRegex(ValueError, "typeNames"):
+            auto.validate_recipe(self.recipe)
+
+    def test_seamless_layer_wraps_continuously(self):
+        ramp = np.tile(np.linspace(0, 255, 64, dtype=np.float64), (64, 1))
+        image = Image.fromarray(np.stack([ramp] * 3, axis=-1).astype(np.uint8))
+        out = np.asarray(auto.make_seamless(image), dtype=np.float64)[..., 0]
+        self.assertLess(abs(out[:, 0] - out[:, -1]).mean(), 10)          # was 255 across the wrap
+        self.assertAlmostEqual(out[32, 32], ramp[32, 32], delta=1)        # centre unchanged
+
+    def test_match_mean_takes_reference_palette(self):
+        art = Image.fromarray(np.stack([np.full((8, 8), v, np.uint8) for v in (100, 100, 100)], axis=-1))
+        reference = Image.new("RGB", (4, 4), (50, 80, 120))
+        mean = np.asarray(auto.match_mean(art, reference), dtype=np.float64).reshape(-1, 3).mean(axis=0)
+        np.testing.assert_allclose(mean, (50, 80, 120), atol=1)
+
+    def test_variation_and_slope_reweight_cells(self):
+        cells = np.zeros((32, 32), dtype=np.uint16)                 # one type everywhere
+        recipe = dict(self.recipe, variation={"meters": 200, "amount": 1, "types": {"0": [0, 0, 1, 0]}})
+        field = auto.cell_field(cells, None, recipe, seed=3)
+        self.assertTrue(field[..., 0].max() > 0.99 and field[..., 2].max() > 0.99, "patches reach both layers")
+        np.testing.assert_allclose(field.sum(axis=2), 1)
+        np.testing.assert_array_equal(field, auto.cell_field(cells, None, recipe, seed=3))
+        plane = np.zeros((128, 128), dtype=np.uint16)
+        plane[:, 64:] = (np.arange(64) * 100)[None, :]              # 10 m rise per 5 m sample: 63 degrees
+        recipe = dict(self.recipe, slope={"weights": [0, 0, 0, 1], "startDegrees": 25, "fullDegrees": 40})
+        field = auto.cell_field(cells, plane, recipe, seed=0)
+        self.assertEqual(tuple(field[5, 4]), (1, 0, 0, 0))           # flat
+        self.assertEqual(tuple(field[5, 24]), (0, 0, 0, 1))          # steep
+        recipe["slope"]["fullDegrees"] = 20
+        with self.assertRaisesRegex(ValueError, "slope"):
+            auto.validate_recipe(recipe)
+
+    def test_shape_reweights_hollows_and_ridges(self):
+        cells = np.zeros((32, 32), dtype=np.uint16)
+        plane = np.full((128, 128), 1000, dtype=np.uint16)
+        plane[28:36, 28:36] = 800                                   # 20 m pit
+        plane[92:100, 92:100] = 1200                                # 20 m mound
+        shape = {"radiusMeters": 60, "rangeMeters": 6, "amount": 1, "hollow": [0, 1, 0, 0], "ridge": [0, 0, 1, 0]}
+        recipe = dict(self.recipe, shape=shape)
+        auto.validate_recipe(recipe)
+        field = auto.cell_field(cells, plane, recipe, seed=0)
+        np.testing.assert_allclose(field[8, 8], (0, 1, 0, 0), atol=1e-6)
+        np.testing.assert_allclose(field[23, 23], (0, 0, 1, 0), atol=1e-6)
+        np.testing.assert_allclose(field[4, 24], (1, 0, 0, 0), atol=1e-6)  # flat ground away from both
+        np.testing.assert_allclose(field.sum(axis=2), 1)
+        typed = auto.cell_field(cells, plane, dict(recipe, shape=dict(shape, types=[1])), seed=0)
+        self.assertTrue(np.all(typed[..., 0] == 1), "unlisted types keep their weights")
+        for bad in (dict(shape, radiusMeters=5), dict(shape, types=[9]),
+                    {k: v for k, v in shape.items() if k not in ("hollow", "ridge")}):
+            with self.assertRaisesRegex(ValueError, "shape"):
+                auto.validate_recipe(dict(self.recipe, shape=bad))
+
+    def test_shape_rules_apply_in_turn(self):
+        cells = np.zeros((32, 32), dtype=np.uint16)
+        plane = np.full((128, 128), 1000, dtype=np.uint16)
+        plane[28:36, 28:36] = 800
+        wide = {"radiusMeters": 60, "rangeMeters": 6, "amount": 1, "hollow": [0, 1, 0, 0]}
+        narrow = {"radiusMeters": 40, "rangeMeters": 6, "amount": 1, "hollow": [0, 0, 1, 0]}
+        recipe = dict(self.recipe, shape=[wide, narrow])
+        auto.validate_recipe(recipe)
+        np.testing.assert_allclose(auto.cell_field(cells, plane, recipe, seed=0)[8, 8], (0, 0, 1, 0), atol=1e-6)
+        with self.assertRaisesRegex(ValueError, "shape"):
+            auto.validate_recipe(dict(self.recipe, shape=[wide, dict(narrow, radiusMeters=5)]))
+
+    def test_erosion_masks_follow_water_and_sediment(self):
+        # A valley: two 30-degree flanks falling to a floor that runs gently toward -row.
+        rows = cols = 64
+        r, c = np.mgrid[0:rows * 4, 0:cols * 4].astype(np.float64)
+        flank = np.abs(c - cols * 2) * 5 * np.tan(np.radians(30))
+        heights = np.minimum(flank, 120) + r * 5 * 0.02 + 50
+        plane = np.rint(heights / auto.HEIGHT_UNIT_METERS).astype(np.uint16)
+        area, deposit, scour, fill = auto.erosion_fields(auto.cell_heights_meters(plane, (rows, cols)))
+        self.assertGreater(area[2, 32], area[2, 16] * 20, "water gathers on the valley floor")
+        self.assertGreater(area[2, 32], area[60, 32], "and grows downstream")
+        self.assertLess(fill.max(), 0.5, "a valley that drains needs no filling")
+        floor, flanks = deposit[:, 30:35].sum(), deposit[:, 5:25].sum() + deposit[:, 40:60].sum()
+        self.assertGreater(floor, flanks, "sediment settles where the slope eases")
+        self.assertGreater(scour[:, 5:25].sum(), scour[:, 30:35].sum(), "and is picked up on the flanks")
+        # A closed pit is filled and drains to the edge; its floor collects sediment.
+        pit = np.full((rows * 4, cols * 4), 2000, dtype=np.uint16)
+        pit[96:160, 96:160] = 1500
+        area, deposit, scour, fill = auto.erosion_fields(auto.cell_heights_meters(pit, (rows, cols)))
+        self.assertGreater(fill[32, 32], 40)
+        erosion = {"channel": {"weights": [0, 0, 0, 1], "amount": 1, "startHectares": 5, "fullHectares": 20},
+                   "talus": {"weights": [0, 0, 1, 0], "amount": 1, "coverage": 0.1}}
+        recipe = dict(self.recipe, erosion=erosion)
+        auto.validate_recipe(recipe)
+        field = auto.cell_field(np.zeros((rows, cols), dtype=np.uint16), plane, recipe, seed=0)
+        self.assertGreater(field[4, 32, 3], 0.5, "the valley floor is a channel")
+        self.assertGreater(field[4, 10, 0], 0.99, "sheet flow on the plateau is no channel")
+        talus = auto.erosion_masks(plane, (rows, cols), erosion)["talus"]
+        self.assertGreater(talus[4, 32], 0.4, "scree at the foot of the flanks")
+        self.assertEqual(talus[4, 21], 0, "but not on their rims")
+        np.testing.assert_allclose(field.sum(axis=2), 1)
+        for bad in ({}, {"gully": erosion["channel"]}, {"channel": dict(erosion["channel"], fullHectares=0.5)},
+                    {"talus": dict(erosion["talus"], coverage=0.9)}, {"talus": dict(erosion["talus"], types=[9])}):
+            with self.assertRaisesRegex(ValueError, "erosion"):
+                auto.validate_recipe(dict(self.recipe, erosion=bad))
+
     def test_multi_map_manifest_shares_identical_controls(self):
         files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
         maps = [auto.load_map(name, files, self.recipe, None, 64) for name in ("alpha", "beta")]
@@ -94,12 +211,156 @@ class AutoPaintTests(unittest.TestCase):
         self.assertEqual([e["terrainFingerprint"] for e in entries], [maps[0]["fingerprint"], "0123456789abcdef"])
         self.assertEqual(entries[0]["control"], entries[1]["control"])
         self.assertEqual(binding["tiles"]["4"], entries[0]["control"])
-        self.assertEqual(binding["sliceCount"], 5)
+        self.assertEqual(binding["sliceCount"], 9)
+        self.assertEqual(sorted(binding["tiles"], key=int), [str(i) for i in range(9)])
+        self.assertEqual(binding["paint"]["heightMeters"], [0, 0, 0, 0])
+        with Image.open(self.root / "out" / binding["tiles"]["5"]) as normal:
+            self.assertEqual((normal.mode, normal.getpixel((3, 3))[:3]), ("RGBA", (128, 128, 255)))
         self.assertNotIn("terrainFingerprint", binding["paint"])
         with Image.open(self.root / "out" / entries[0]["control"]) as control:
             self.assertEqual(control.size, (64, 64))
         self.assertTrue((self.root / "out" / "test_auto_alpha_editor.html").exists())
         self.assertEqual(len(list((self.root / "out").glob("*_control.png"))), 1)
+
+    def test_missions_sharing_a_terrain_get_one_entry(self):
+        files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
+        maps = [auto.load_map(name, files, self.recipe, None, 64) for name in ("alpha", "alpha_b")]
+        manifest = auto.build_pack(maps, self.recipe, self.root, self.root / "out", 64, "test_auto", False)
+        self.assertEqual(len(manifest["materials"]["TERRAIN"]["paint"]["maps"]), 1)
+        maps[1]["weights"] = maps[1]["weights"].transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        with self.assertRaisesRegex(ValueError, "share terrain"):
+            auto.build_pack(maps, self.recipe, self.root, self.root / "out2", 64, "test_auto", False)
+
+    def test_full_material_uses_archive_maps_and_orients_normals(self):
+        import zipfile
+        size, repeat = 64, 16
+        x = np.arange(size)
+        height = np.tile(0.5 + 0.4 * np.sin(2 * np.pi * x / size), (size, 1))  # varies along columns
+        dh = np.gradient(height, axis=1)
+        normal = np.dstack((-dh / np.abs(dh).max() * 0.5, np.zeros_like(dh), np.ones_like(dh)))
+        normal[..., 1] = -normal[..., 0]  # Y disagrees: must be checked, and flipped, against the height
+        height2 = (height + height.T) / 2
+        def png(a, mode):
+            stream = __import__("io").BytesIO(); Image.fromarray(a, mode).save(stream, format="PNG"); return stream.getvalue()
+        enc = lambda a: np.clip(a * 127.5 + 127.5, 0, 255).astype(np.uint8)
+        with zipfile.ZipFile(self.root / "rock.zip", "w") as z:
+            z.writestr("Rock_BaseColor.png", png(np.full((size, size, 3), 90, np.uint8), "RGB"))
+            z.writestr("Rock_Normal.png", png(enc(normal), "RGB"))
+            z.writestr("Rock_Displacement.png", png((height * 255).astype(np.uint8), "L"))
+            z.writestr("Rock_Roughness.png", png(np.full((size, size), 204, np.uint8), "L"))
+        layer = {"name": "Rock", "archive": "rock.zip", "member": "Rock_BaseColor.png", "repeatMeters": repeat}
+        self.assertEqual(auto.material_source(self.root.resolve(), layer, "normal")["member"], "Rock_Normal.png")
+        diffuse, _ = auto._hd.load_art(self.root.resolve(), layer)
+        n, h, spec, identity = auto.material_maps(self.root.resolve(), layer, diffuse, size, repeat)
+        self.assertEqual(identity["normalFlipXY"], [False, False])
+        self.assertAlmostEqual(float(spec.mean()), 0.2, places=2)
+        slope = np.gradient(h, axis=1)
+        self.assertGreater(float(np.mean(n[..., 0] * -slope)), 0)
+        # A normal whose X points uphill is flipped back.
+        flipped, flips = auto.orient_normal(np.dstack((-n[..., 0], n[..., 1], n[..., 2])), h)
+        self.assertEqual(flips[0], True)
+        recipe = dict(self.recipe, heightBlend=0.75, layers=[dict(layer, heightMeters=2.5)] + self.recipe["layers"][1:])
+        auto.validate_recipe(recipe)
+        files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
+        maps = [auto.load_map("alpha", files, recipe, None, 64)]
+        binding = auto.build_pack(maps, recipe, self.root, self.root / "out", size, "test_auto", False)["materials"]["TERRAIN"]
+        self.assertEqual((binding["paint"]["heightBlend"], binding["paint"]["heightMeters"]), (0.75, [2.5, 0, 0, 0]))
+        self.assertNotIn("detile", binding["paint"])
+        detiled = dict(recipe, layers=[dict(layer, heightMeters=2.5, detile=True)] + self.recipe["layers"][1:])
+        auto.validate_recipe(detiled)
+        binding = auto.build_pack(maps, detiled, self.root, self.root / "out2", size, "test_auto", False)["materials"]["TERRAIN"]
+        self.assertEqual(binding["paint"]["detile"], [1, 0, 0, 0])
+        with self.assertRaisesRegex(ValueError, "detile"):
+            auto.validate_recipe(dict(recipe, layers=[dict(layer, detile=1)] + self.recipe["layers"][1:]))
+        varied = dict(detiled, far={"scale": 5, "startMeters": 40, "endMeters": 250, "amount": 0.6},
+                      macro={"meters": 260, "brightness": 0.12, "saturation": 0.15},
+                      craters={"cellMeters": 6, "depth": 0.2, "coverage": 0.5, "octaves": 3},
+                      detail={"waveMeters": 60, "heightMeters": 1.5, "octaves": 4},
+                      parallax={"scale": 1, "fadeMeters": 30},
+                      layers=[dict(detiled["layers"][0], proceduralCraters=True, proceduralDetail=0.5)] + self.recipe["layers"][1:])
+        auto.validate_recipe(varied)
+        paint = auto.build_pack(maps, varied, self.root, self.root / "out3", size, "test_auto", False)["materials"]["TERRAIN"]["paint"]
+        self.assertEqual((paint["far"], paint["macro"]), ([5, 40, 250, 0.6], [260, 0.12, 0.15]))
+        self.assertEqual((paint["craters"], paint["craterLayers"]), ([6, 0.2, 0.5, 3], [1, 0, 0, 0]))
+        self.assertEqual((paint["detail"], paint["detailLayers"]), ([60, 1.5, 4, 1], [0.5, 0, 0, 0]))
+        self.assertEqual(paint["parallax"], [1, 30, 12])
+        hued = auto.build_pack(maps, dict(varied, macro=dict(varied["macro"], hue=0.35)), self.root, self.root / "out6", size, "test_auto", False)
+        self.assertEqual(hued["materials"]["TERRAIN"]["paint"]["macro"], [260, 0.12, 0.15, 0.35])
+        self.assertEqual(auto.build_pack(maps, dict(varied, layers=[dict(varied["layers"][0], proceduralCraters=0.5)] + self.recipe["layers"][1:]),
+                         self.root, self.root / "out4", size, "test_auto", False)["materials"]["TERRAIN"]["paint"]["craterLayers"], [0.5, 0, 0, 0])
+        for bad, message in ((dict(varied, far={"scale": 1, "startMeters": 0, "endMeters": 1, "amount": 1}), "far"),
+                             (dict(varied, macro={"meters": 5, "brightness": 0.1, "saturation": 0.1}), "macro"),
+                             (dict(varied, macro=dict(varied["macro"], hue=2)), "macro"),
+                             (dict(varied, craters=dict(varied["craters"], octaves=4)), "craters"),
+                             (dict(varied, detail=dict(varied["detail"], heightMeters=6)), "detail"),
+                             (dict(varied, parallax={"scale": 3}), "parallax"),
+                             (dict(varied, diffuseOnly=True), "detail"),
+                             (dict({k: v for k, v in varied.items() if k != "detail"}), "proceduralDetail"),
+                             (dict(detiled, layers=varied["layers"]), "proceduralCraters")):
+            with self.assertRaisesRegex(ValueError, message):
+                auto.validate_recipe(bad)
+        with Image.open(self.root / "out" / binding["tiles"]["0"]) as d, Image.open(self.root / "out" / binding["tiles"]["5"]) as nh:
+            self.assertEqual(d.getpixel((5, 5))[3], 51)                 # specular = 1 - roughness 0.8
+            self.assertGreater(np.ptp(np.asarray(nh)[..., 3]), 200)    # height stretched to 0..1
+        diffuse_only = auto.build_pack(maps, dict(recipe, diffuseOnly=True), self.root, self.root / "out5", size, "test_auto", False)
+        self.assertEqual(diffuse_only["materials"]["TERRAIN"]["sliceCount"], 5)
+        self.assertNotIn("heightMeters", diffuse_only["materials"]["TERRAIN"]["paint"])
+        with self.assertRaisesRegex(ValueError, "heightMeters"):
+            auto.validate_recipe(dict(recipe, layers=[dict(layer, heightMeters=40)] + self.recipe["layers"][1:]))
+
+    def eight_layer_recipe(self):
+        wide = lambda *w: list(w) + [0] * (8 - len(w))
+        return dict(self.recipe, typeWeights={"0": wide(1), "1": wide(0, 0, 0, 0, 0, 1)},
+                    undefinedTypeWeights=wide(0, 1), outsideWeights=wide(0, 1),
+                    layers=[{"name": f"L{i}", "file": f"art{i % 4}.png", "repeatMeters": 16 + i, "heightMeters": i} for i in range(8)])
+
+    def test_eight_layer_recipe_needs_eight_weights_everywhere(self):
+        recipe = self.eight_layer_recipe()
+        auto.validate_recipe(recipe)
+        four, eight = [1, 0, 0, 0], [1, 0, 0, 0, 0, 0, 0, 0]
+        for bad in (dict(recipe, typeWeights={"0": four}), dict(recipe, undefinedTypeWeights=four),
+                    dict(recipe, slope={"weights": four, "startDegrees": 25, "fullDegrees": 40}),
+                    dict(recipe, shape={"radiusMeters": 60, "rangeMeters": 6, "hollow": four}),
+                    dict(recipe, erosion={"scour": {"weights": four, "coverage": 0.1}}),
+                    dict(recipe, variation={"types": {"0": four}}),
+                    dict(self.recipe, typeWeights={"0": eight}), dict(self.recipe, slope={"weights": eight, "startDegrees": 25, "fullDegrees": 40})):
+            with self.assertRaises(ValueError):
+                auto.validate_recipe(bad)
+        with self.assertRaises(ValueError):
+            auto.validate_recipe(dict(recipe, layers=recipe["layers"][:6]))
+        with self.assertRaisesRegex(ValueError, "diffuseOnly"):
+            auto.validate_recipe(dict(recipe, diffuseOnly=True))
+
+    def test_eight_layer_pack_has_two_banks_and_joint_controls(self):
+        recipe = self.eight_layer_recipe()
+        files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
+        maps = [auto.load_map(name, files, recipe, None, 64) for name in ("alpha", "beta")]
+        maps[1]["fingerprint"] = "0123456789abcdef"
+        self.assertEqual(len(maps[0]["weights"]), 2)
+        out = self.root / "out8"
+        binding = auto.build_pack(maps, recipe, self.root, out, 64, "test_auto", False)["materials"]["TERRAIN"]
+        self.assertEqual(binding["sliceCount"], 18)
+        tiles = binding["tiles"]
+        self.assertEqual(sorted(tiles, key=int), [str(i) for i in range(18)])
+        entries = binding["paint"]["maps"]
+        self.assertEqual(entries[0]["control"], entries[1]["control"])
+        self.assertEqual(entries[0]["control2"], entries[1]["control2"])
+        self.assertNotEqual(entries[0]["control"], entries[0]["control2"])
+        self.assertEqual((tiles["4"], tiles["13"]), (entries[0]["control"], entries[0]["control2"]))
+        for i in range(8):
+            self.assertEqual(tiles[str(i // 4 * 9 + i % 4)], f"test_auto_layer{i}.png")
+            self.assertEqual(tiles[str(i // 4 * 9 + 5 + i % 4)], f"test_auto_layer{i}_n.png")
+        paint = binding["paint"]
+        self.assertEqual(paint["repeatMeters"], [16 + i for i in range(8)])
+        self.assertEqual(paint["heightMeters"], list(range(8)))
+        with Image.open(out / entries[0]["control"]) as c1, Image.open(out / entries[0]["control2"]) as c2:
+            joint = np.asarray(c1, dtype=int).sum(axis=2) + np.asarray(c2, dtype=int).sum(axis=2)
+            self.assertTrue(np.all(joint == 255))
+            self.assertEqual((np.asarray(c1)[..., 0].max(), np.asarray(c2)[..., 1].max()), (255, 255), "layers 0 and 5 land in their images")
+        self.assertTrue((out / "test_auto_alpha_weights.png").exists() and (out / "test_auto_alpha_weights2.png").exists())
+        self.assertEqual(len(list(out.glob("*_control2.png"))), 1)
+        with self.assertRaisesRegex(ValueError, "diffuseOnly|material"):
+            auto.build_pack(maps, dict(recipe, diffuseOnly=True), self.root, self.root / "out8d", 64, "test_auto", False)
 
 
 if __name__ == "__main__":

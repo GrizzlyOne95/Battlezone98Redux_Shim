@@ -34,9 +34,15 @@
 //
 // Timing: these are global constructors reached from _initterm before main.
 // RunPatcher runs on the patch thread after WaitForSignature, far too late, so
-// this is applied synchronously from DllMain. The Windows loader runs DllMain
+// this is armed synchronously from DllMain. The Windows loader runs DllMain
 // for statically imported DLLs before the executable's entry point, so the
 // ordering is guaranteed by the loader rather than being a race.
+//
+// On GOG the sites are plaintext at DllMain and are written immediately. On
+// Steam, SteamStub has not decrypted .text yet, so the guards read ciphertext.
+// The write is then deferred to the executable's own call through its
+// MSVCR120!_initterm import: that call runs from the CRT entry point after
+// SteamStub has decrypted the image and immediately before the constructors.
 //
 // This also means the usual single-player gate cannot be enforced here: no
 // network state exists yet. The ini key is opt-in and defaults off, and the
@@ -146,6 +152,126 @@ namespace BZROpenShim
             bool enabled = false;
             return BZROpenShim::BoolToken::TryParse(value, enabled) && enabled;
         }
+
+        void ApplyGuardedPriorityWrites()
+        {
+            const bool overViewOk = GuardMatches(kOverViewRegisterAddr, kOverViewExpected);
+            const bool controlPanelOk = GuardMatches(kControlPanelRegisterAddr, kControlPanelExpected);
+
+            // Fail closed as a pair. A half-applied swap ties the two priorities,
+            // and the tie resolves by constructor order, which is neither the stock
+            // behavior nor the 1.5 behavior.
+            if (!overViewOk || !controlPanelOk)
+            {
+                LogShimA(LogLevel::Warn, "editorview",
+                         "Overhead placement order not applied: guard mismatch (overView=%s controlPanel=%s)",
+                         overViewOk ? "ok" : "mismatch",
+                         controlPanelOk ? "ok" : "mismatch");
+                return;
+            }
+
+            if (!WritePriorityByte(kOverViewRegisterAddr, kOverViewLegacyPriority))
+            {
+                LogShimA(LogLevel::Error, "editorview",
+                         "Overhead placement order not applied: write failed at 0x%08X",
+                         static_cast<unsigned>(kOverViewRegisterAddr));
+                return;
+            }
+
+            if (!WritePriorityByte(kControlPanelRegisterAddr, kControlPanelLegacyPriority))
+            {
+                // Put the first site back so the pair stays consistent rather than
+                // leaving both interfaces on priority 0.
+                WritePriorityByte(kOverViewRegisterAddr, kOverViewExpected[kPriorityOperandOffset]);
+                LogShimA(LogLevel::Error, "editorview",
+                         "Overhead placement order not applied: write failed at 0x%08X (reverted first site)",
+                         static_cast<unsigned>(kControlPanelRegisterAddr));
+                return;
+            }
+
+            LogShimA(LogLevel::Info, "editorview",
+                     "Overhead placement order restored to 1.5 (OverView priority 0, ControlPanel priority 1)");
+        }
+
+        using FnInitTerm = void(__cdecl*)(void (__cdecl**)(), void (__cdecl**)());
+
+        FnInitTerm g_originalInitTerm = nullptr;
+        void** g_initTermSlot = nullptr;
+
+        bool WriteImportSlot(void** slot, void* value)
+        {
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &oldProtect))
+                return false;
+            *slot = value;
+            DWORD ignored = 0;
+            VirtualProtect(slot, sizeof(void*), oldProtect, &ignored);
+            return true;
+        }
+
+        // One shot: restore the import, apply the writes against the now
+        // decrypted image, then let the constructors run.
+        void __cdecl InitTermHook(void (__cdecl** first)(), void (__cdecl** last)())
+        {
+            const FnInitTerm original = g_originalInitTerm;
+            if (g_initTermSlot)
+            {
+                WriteImportSlot(g_initTermSlot, reinterpret_cast<void*>(original));
+                g_initTermSlot = nullptr;
+                ApplyGuardedPriorityWrites();
+            }
+            original(first, last);
+        }
+
+        // Finds the executable's import slot currently bound to target by
+        // walking its import directory, which SteamStub leaves in plaintext.
+        void** FindMainModuleImportSlot(const char* dllName, void* target)
+        {
+            __try
+            {
+                auto* base = reinterpret_cast<uint8_t*>(GetModuleHandleW(nullptr));
+                auto* dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+                auto* nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+                const IMAGE_DATA_DIRECTORY& dir =
+                    nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+                if (dir.VirtualAddress == 0)
+                    return nullptr;
+
+                for (auto* desc = reinterpret_cast<IMAGE_IMPORT_DESCRIPTOR*>(base + dir.VirtualAddress);
+                     desc->Name != 0; ++desc)
+                {
+                    if (_stricmp(reinterpret_cast<const char*>(base + desc->Name), dllName) != 0)
+                        continue;
+                    for (auto** slot = reinterpret_cast<void**>(base + desc->FirstThunk); *slot; ++slot)
+                    {
+                        if (*slot == target)
+                            return slot;
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            return nullptr;
+        }
+
+        bool ArmDeferredApply()
+        {
+            HMODULE crt = GetModuleHandleA("MSVCR120.dll");
+            void* initTerm = crt ? reinterpret_cast<void*>(GetProcAddress(crt, "_initterm")) : nullptr;
+            void** slot = initTerm ? FindMainModuleImportSlot("MSVCR120.dll", initTerm) : nullptr;
+            if (!slot)
+                return false;
+
+            g_originalInitTerm = reinterpret_cast<FnInitTerm>(initTerm);
+            g_initTermSlot = slot;
+            if (!WriteImportSlot(slot, reinterpret_cast<void*>(&InitTermHook)))
+            {
+                g_initTermSlot = nullptr;
+                return false;
+            }
+            return true;
+        }
     }
 
     void ApplyEditorOverheadPlacementOrderFix()
@@ -153,41 +279,22 @@ namespace BZROpenShim
         if (!ReadEnabledFromUserConfig())
             return;
 
-        const bool overViewOk = GuardMatches(kOverViewRegisterAddr, kOverViewExpected);
-        const bool controlPanelOk = GuardMatches(kControlPanelRegisterAddr, kControlPanelExpected);
-
-        // Fail closed as a pair. A half-applied swap ties the two priorities,
-        // and the tie resolves by constructor order, which is neither the stock
-        // behavior nor the 1.5 behavior.
-        if (!overViewOk || !controlPanelOk)
+        // Both guards plaintext: the image is already decrypted (GOG).
+        if (GuardMatches(kOverViewRegisterAddr, kOverViewExpected) &&
+            GuardMatches(kControlPanelRegisterAddr, kControlPanelExpected))
         {
-            LogShimA(LogLevel::Warn, "editorview",
-                     "Overhead placement order not applied: guard mismatch (overView=%s controlPanel=%s)",
-                     overViewOk ? "ok" : "mismatch",
-                     controlPanelOk ? "ok" : "mismatch");
+            ApplyGuardedPriorityWrites();
             return;
         }
 
-        if (!WritePriorityByte(kOverViewRegisterAddr, kOverViewLegacyPriority))
+        // Still packed (Steam): check again once the CRT reaches _initterm.
+        if (ArmDeferredApply())
         {
-            LogShimA(LogLevel::Error, "editorview",
-                     "Overhead placement order not applied: write failed at 0x%08X",
-                     static_cast<unsigned>(kOverViewRegisterAddr));
+            LogShimA(LogLevel::Info, "editorview",
+                     "Overhead placement order deferred to CRT _initterm (image not yet decrypted)");
             return;
         }
 
-        if (!WritePriorityByte(kControlPanelRegisterAddr, kControlPanelLegacyPriority))
-        {
-            // Put the first site back so the pair stays consistent rather than
-            // leaving both interfaces on priority 0.
-            WritePriorityByte(kOverViewRegisterAddr, kOverViewExpected[kPriorityOperandOffset]);
-            LogShimA(LogLevel::Error, "editorview",
-                     "Overhead placement order not applied: write failed at 0x%08X (reverted first site)",
-                     static_cast<unsigned>(kControlPanelRegisterAddr));
-            return;
-        }
-
-        LogShimA(LogLevel::Info, "editorview",
-                 "Overhead placement order restored to 1.5 (OverView priority 0, ControlPanel priority 1)");
+        ApplyGuardedPriorityWrites();
     }
 }

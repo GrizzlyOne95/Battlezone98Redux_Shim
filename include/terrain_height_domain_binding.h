@@ -9,10 +9,12 @@ namespace BZROpenShim::TerrainHeight
 {
     // Caller serializes access. Only the immediate context and exact owned DS
     // objects can use this view. Never changes PS resources or foreign SRVs.
+    // The owned hull reads the same slot (adaptive relief), so it binds and
+    // restores in step with the domain.
     struct DomainBinding
     {
         template<class T> using Ptr = Microsoft::WRL::ComPtr<T>;
-        Ptr<ID3D11ShaderResourceView> view, previous;
+        Ptr<ID3D11ShaderResourceView> view, previous, previousHull;
         Ptr<ID3D11DeviceContext> context;
         std::vector<Ptr<ID3D11DomainShader>> domains;
         uint64_t binds = 0, restores = 0;
@@ -31,7 +33,13 @@ namespace BZROpenShim::TerrainHeight
             {
                 auto* saved = previous.Get(); context->DSSetShaderResources(127, 1, &saved);
             }
-            previous.Reset(); context.Reset(); ++restores;
+            current.Reset();
+            context->HSGetShaderResources(127, 1, &current);
+            if (current.Get() == view.Get())
+            {
+                auto* saved = previousHull.Get(); context->HSSetShaderResources(127, 1, &saved);
+            }
+            previous.Reset(); previousHull.Reset(); context.Reset(); ++restores;
         }
         void Select(ID3D11DeviceContext* next, ID3D11DomainShader* shader)
         {
@@ -40,8 +48,10 @@ namespace BZROpenShim::TerrainHeight
             if (context && (!owned || context.Get() != next)) RestoreSlot();
             if (!owned || context) return;
             next->DSGetShaderResources(127, 1, &previous);
+            next->HSGetShaderResources(127, 1, &previousHull);
             context = next;
             auto* height = view.Get(); next->DSSetShaderResources(127, 1, &height);
+            next->HSSetShaderResources(127, 1, &height);
             ++binds;
         }
         bool Bound(ID3D11DeviceContext* candidate) const

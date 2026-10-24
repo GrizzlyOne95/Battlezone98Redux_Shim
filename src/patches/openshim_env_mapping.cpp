@@ -408,7 +408,16 @@ namespace
             return TryReadMappedBool(ini, "General", "SettingsUi", true, out);
 
         if (Equals(name, "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST"))
+        {
+            // On by default (2026-10-24): terrain paint relief needs it.
+            std::string value;
+            if (!ini(IniFile::Main, "Terrain", "TerrainMicroRelief", value))
+            {
+                out = "1";
+                return true;
+            }
             return TryReadMappedBool(ini, "Terrain", "TerrainMicroRelief", false, out);
+        }
         if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_LIFECYCLE_LOG"))
             return ini(IniFile::Main, "Terrain", "TerrainSemanticLifecycleLog", out);
         if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_DEBUG"))

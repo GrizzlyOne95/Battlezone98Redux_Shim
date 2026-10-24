@@ -1,0 +1,139 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "MN_DETAIL_ATLAS": {
+      "sliceCount": 9,
+      "diffuseResource": "moon_atlas_d.dds",
+      "fallback": "openshim_moon_auto_layer0.png",
+      "tiles": {
+        "0": "openshim_moon_auto_layer0.png",
+        "1": "openshim_moon_auto_layer1.png",
+        "2": "openshim_moon_auto_layer2.png",
+        "3": "openshim_moon_auto_layer3.png",
+        "4": "openshim_moon_auto_misn01_stock_control.png",
+        "5": "openshim_moon_auto_layer0_n.png",
+        "6": "openshim_moon_auto_layer1_n.png",
+        "7": "openshim_moon_auto_layer2_n.png",
+        "8": "openshim_moon_auto_layer3_n.png"
+      },
+      "paint": {
+        "schema": "bzr-openshim-terrain-paint-v1",
+        "rowZero": "minZ",
+        "repeatMeters": [
+          24,
+          16,
+          40,
+          40
+        ],
+        "maps": [
+          {
+            "terrainFingerprint": "0ae4c477b71f039f",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_moon_auto_misn01_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "45adf276da82be72",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_moon_auto_misn02_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "11b000341eb35573",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_moon_auto_misn02b_control.png"
+          },
+          {
+            "terrainFingerprint": "4e14e2dfdaf49124",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_moon_auto_misn02b_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "63f4006bc3827fad",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_moon_auto_misn03_control.png"
+          },
+          {
+            "terrainFingerprint": "c4740d36b6ce2c78",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_moon_auto_misn03_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "e4241c78fc44def5",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_moon_auto_crsetup_control.png"
+          }
+        ],
+        "detile": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "far": [
+          5,
+          40,
+          250,
+          0.6
+        ],
+        "macro": [
+          260,
+          0.12,
+          0.15
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.6,
+          1.2,
+          1.0,
+          1.6
+        ],
+        "craters": [
+          8,
+          0.2,
+          0.35,
+          3
+        ],
+        "craterLayers": [
+          0.6,
+          0.0,
+          1.0,
+          0.0
+        ]
+      }
+    }
+  }
+}

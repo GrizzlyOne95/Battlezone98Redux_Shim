@@ -684,7 +684,7 @@ namespace BZROpenShim
                 BzrNetRoutePreferenceName(g_BzrNetRoutePreference),
                 g_BzrNetConfiguredUdpPort > 0 ? std::to_string(g_BzrNetConfiguredUdpPort).c_str()
                                               : "ephemeral",
-                g_BzrNetGlobalsVerified ? "ok" : "failed");
+                VerifyBzrNetGlobals() ? "ok" : "failed");
         }
     }
 

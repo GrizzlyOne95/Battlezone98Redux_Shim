@@ -586,8 +586,8 @@ namespace BZROpenShim::MeshImpact
         g_visualRequested = visual || EnvFlagEnabled("OPENSHIM_MESH_IMPACTS");
         g_gameplayRequested = gameplay || EnvFlagEnabled("OPENSHIM_MESH_HITS");
         if (!g_visualRequested && !g_gameplayRequested) return;
-        // GOG layout only; the mission seams own cache retirement.
-        const bool installed = !g_IsSteamExe && Hooks::g_MissionSeamInstalled && Install();
+        // The mission seams own cache retirement.
+        const bool installed = Hooks::g_MissionSeamInstalled && Install();
         LogShimA(LogLevel::Info, "meshimpact", "visual=%s gameplay=%s (single player only) hooks=%s effectSite=%s",
             g_visualRequested ? "requested" : "off", g_gameplayRequested ? "requested" : "off",
             installed ? "installed" : "unavailable", g_effectResume ? "installed" : "off");

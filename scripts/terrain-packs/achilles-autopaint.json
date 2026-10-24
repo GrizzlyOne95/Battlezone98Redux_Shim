@@ -1,0 +1,255 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "material": "AC_DETAIL_ATLAS",
+  "diffuseResource": "achilles_atlas_d.dds",
+  "typeNames": {
+    "0": "grass",
+    "1": "trees",
+    "2": "rocky rock",
+    "3": "river",
+    "4": "waterfall",
+    "5": "Base"
+  },
+  "typeWeights": {
+    "0": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "1": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "2": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "3": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "4": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "5": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "transition": {
+    "cap": 0.3,
+    "diagonal": 0.5
+  },
+  "blurMeters": 14,
+  "undefinedTypeWeights": [
+    0,
+    0,
+    0,
+    1
+  ],
+  "outsideWeights": [
+    1,
+    0,
+    0,
+    0
+  ],
+  "variation": {
+    "meters": 110,
+    "amount": 0.6,
+    "types": {
+      "0": [
+        0,
+        0.7,
+        0,
+        0.3
+      ],
+      "1": [
+        1,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "shape": [
+    {
+      "radiusMeters": 120,
+      "rangeMeters": 6,
+      "amount": 0.5,
+      "types": [
+        0
+      ],
+      "hollow": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "ridge": [
+        0.5,
+        0,
+        0.1,
+        0.4
+      ]
+    },
+    {
+      "radiusMeters": 40,
+      "rangeMeters": 2.5,
+      "amount": 0.3,
+      "types": [
+        0,
+        1
+      ],
+      "hollow": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "ridge": [
+        0.5,
+        0,
+        0.2,
+        0.3
+      ]
+    },
+    {
+      "radiusMeters": 250,
+      "rangeMeters": 4,
+      "amount": 0.9,
+      "ridge": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "from": [
+        0
+      ]
+    }
+  ],
+  "erosion": {
+    "talus": {
+      "weights": [
+        0,
+        0,
+        0.7,
+        0.3
+      ],
+      "amount": 0.6,
+      "coverage": 0.06,
+      "radiusMeters": 60
+    },
+    "deposit": {
+      "weights": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "amount": 0.45,
+      "coverage": 0.08,
+      "types": [
+        0
+      ]
+    },
+    "channel": {
+      "weights": [
+        0,
+        0,
+        0.3,
+        0.7
+      ],
+      "amount": 0.6,
+      "startHectares": 3,
+      "fullHectares": 30
+    },
+    "scour": {
+      "weights": [
+        0.3,
+        0,
+        0.1,
+        0.6
+      ],
+      "amount": 0.35,
+      "coverage": 0.06,
+      "types": [
+        0
+      ]
+    }
+  },
+  "slope": {
+    "weights": [
+      0,
+      0,
+      0.85,
+      0.15
+    ],
+    "startDegrees": 22,
+    "fullDegrees": 38
+  },
+  "layers": [
+    {
+      "name": "Grass",
+      "detile": true,
+      "repeatMeters": 16,
+      "archive": "clover_patches_on_grass_sgmkajak_8k.zip",
+      "member": "Clover_Patches_on_Grass_sgmkajak_8K_BaseColor.jpg",
+      "matchMean": "crhd_achilles_ac00sa0_d.dds",
+      "heightMeters": 0.6
+    },
+    {
+      "name": "Forest floor",
+      "detile": true,
+      "repeatMeters": 16,
+      "archive": "forest_floor_sfjmafua_8k.zip",
+      "member": "Forest_Floor_sfjmafua_8K_BaseColor.jpg",
+      "matchMean": "crhd_achilles_ac11sa0_d.dds",
+      "heightMeters": 0.4
+    },
+    {
+      "name": "Mossy rock",
+      "detile": true,
+      "repeatMeters": 12,
+      "archive": "mossy_rocky_ground_vewmeehlw_8k.zip",
+      "member": "Mossy_Rocky_Ground_vewmeehlw_8K_BaseColor.jpg",
+      "matchMean": "crhd_achilles_ac22sa0_d.dds",
+      "heightMeters": 1.2
+    },
+    {
+      "name": "Bare earth",
+      "detile": true,
+      "repeatMeters": 18,
+      "archive": "military_trenches_ground_dirt_fine_04_ydyjcgrs_8k.zip",
+      "member": "ydyjcgrs_8K_Basecolor.jpg",
+      "matchMean": "crhd_achilles_ac55sa0_d.dds",
+      "heightMeters": 0.4,
+      "derivedReliefMeters": 0.4
+    }
+  ],
+  "heightBlend": 0.5,
+  "far": {
+    "scale": 5,
+    "startMeters": 40,
+    "endMeters": 250,
+    "amount": 0.6
+  },
+  "macro": {
+    "meters": 260,
+    "brightness": 0.12,
+    "saturation": 0.15,
+    "hue": 0.35
+  }
+}

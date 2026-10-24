@@ -83,7 +83,7 @@ three files, which is needed when a mission overrides only some of them (Campaig
 Reimagined overrides `misn05.hg2` but not its MAT or TRN). `--capture NAME=FILE`
 cross-checks that map against an `OPENSHIM_TERRAIN_HD_EXPORT` capture and
 declines on any disagreement. The output is one multi-map manifest
-(`<prefix>.json`), four layer PNGs shared by every map, one control PNG per
+(`<prefix>.json`), four layer PNGs (plus four normal+height PNGs in the material form) shared by every map, one control PNG per
 distinct layout (maps with identical MAT layouts share one) and, for touch-up, one
 standalone editor per map preloaded with the generated weights. Install the
 manifest beside the executable and the PNGs next to it, as for a hand-painted pack.
@@ -133,7 +133,10 @@ These facts were measured on stock `misn04` and are what the generator uses:
 
 `terrain_fingerprint()` reproduces `CaptureTerrainPaintMap()` from the HG2: FNV-1a
 over the zone count, then for each zone in `(x, z)` order its coordinates and its
-256 x 256 13-bit height samples (row-major, zero outside the file). It matches the
+256 x 256 height samples masked to 12 bits (row-major). Samples outside the file
+read the TRN pad height, `(int)([Size] Height / 0.1)` (0 when absent): the engine
+fills unloaded zones with a default zone of that height (Titan and `misn05` use
+`Height=50`, a pad of 500). It matches the
 in-game value for stock `misn04` (`73f9729303821983`, the hand-painted pack's
 fingerprint), confirmed again by a live capture (`zoneCount` 20, same bounds). No
 game launch is needed to author a pack for a map whose HG2 is at hand. The sample
@@ -147,99 +150,285 @@ both versions as separate map entries.
 | Map | Zones | Stock fingerprint (live) | CR fingerprint (live) |
 |---|---|---|---|
 | `misn04` | 4x3 | `73f9729303821983` (matches offline) | `cd7f44e80ffb7fc1` (matches offline) |
-| `misn05` | 3x3 | `04e39ffb0e80a25e` (offline `087ff2851a95085e` **disagrees**) | `5e4ef40b581c2c36` (offline `b239c56fe89ebe36` **disagrees**) |
+| `misn05` | 3x3 | `04e39ffb0e80a25e` (matches offline) | `5e4ef40b581c2c36` (matches offline) |
 | `misn06` | 4x4 | `9c77ccbdec3593fe` (matches offline) | `47910f1f7563463d` (matches offline) |
 
-The offline model reproduces four of the six maps. For `misn05` the bounds and
-zone count (16) match the live capture but the hash does not; the cause is not
-found (a 3x3 file is the only odd-sized one; a brute-force search over zone and
-sample offsets did not reproduce it). `--capture NAME=FILE --trust-capture` uses
-the live values for such a map, which is how `misn05` is packed here. Reading the
-live map from the decline message (it prints the actual fingerprint and bounds) or
-capturing once with `OPENSHIM_TERRAIN_HD_EXPORT` is the fallback.
+`misn05` and every Titan map disagreed until the pad height was modelled; all
+listed maps now reproduce offline. `--capture NAME=FILE --trust-capture` remains
+for a map the offline model cannot reproduce: read the live fingerprint and
+bounds from the decline message or capture once with `OPENSHIM_TERRAIN_HD_EXPORT`.
 
-### In-game results (GOG, DX11 Enhanced, `OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1`)
+## Full material form (9 slices)
 
-Test missions were minimal text BZNs with the map's own terrain files and a Lua
-driver that teleported the player and parked a chase camera, so each run shows
-three spots. Before = HD tiles off; after = the generated multi-map pack.
+The auto-paint builder emits the full material by default (`"diffuseOnly": true`
+in a recipe keeps the five-slice form):
 
-| Mission (terrain files) | Selected entry | Result |
+| Slice | RGB | A |
 |---|---|---|
-| stock `misn04` | `73f9...` | painted; also compared with the hand-painted set |
-| CR `misn04` | `cd7f...` | painted |
-| CR `misn06` | `4791...` | painted |
-| stock `misn06` | `9c77...` | entry selected; shots not inspected |
-| stock and CR `misn05` | none | pack declined (offline fingerprint wrong); the packed live values were **not** re-run in game |
+| 0-3 | layer colour (sRGB) | specular mask, `(1 - roughness) * specularScale` |
+| 4 | control weights (RGBA) | |
+| 5-8 | tangent normal, `rgb * 2 - 1`, +x along world X, +y along world Z | height, median 0.5, 1st..99th percentile stretched to 0..1 |
 
-![stock misn04: before, auto, hand-painted](images/terrain_autopaint/misn04_stock_before_auto_hand.jpg)
-![CR misn04: before, auto](images/terrain_autopaint/misn04_cr_before_after.jpg)
-![CR misn06: before, auto](images/terrain_autopaint/misn06_cr_before_after.jpg)
+`paint.heightBlend` (default 0.5, range 0..4) lifts each weight by its layer
+height, keeps only layers within 0.2 of the tallest and renormalizes, so rock
+crests poke through dust inside transitions instead of cross-fading. The same
+blend drives the pixel shader and the tessellation domain shader.
+`paint.heightMeters` (per layer, 0..32) is the peak-to-peak displacement. With
+`[Terrain] TerrainMicroRelief = 1`, the domain shader reads the height slices
+from the same array (bound to DS `t127`), blends them like the pixel shader and
+displaces by `(h - 0.5) * heightMeters`, scaled by `microReliefAmplitude / 0.25`.
+Each layer reads one fixed mip, chosen from the tessellated vertex spacing and
+repeat length, so shared patch edges always agree and no cracks open.
 
-What the shots show: paint boundaries follow the stock layout (pale sand patches
-and cliff/rock faces sit where the stock tiles put them), the selection logic
-binds the right entry, and the runtime logs `multi-map entry selected` for each.
-They do not show parity of look: the four recipe layers share one brown palette,
-so the stock atlas's dark and red rock tiles become a similar brown. That is an
-artwork choice (layers 2 and 3 need darker albedo to carry the stock contrast),
-not a layout error. The "hand-painted" Mars set is the recipe's demonstration
-blobs, not a map-specific paint, and at these spots it is visually close to the
-auto result; no quantitative comparison was made. Pre-generated outputs
-(manifest and control maps, no artwork) are in
-`scripts/terrain-packs/generated/mars-auto/`; the layer PNGs are local.
+In the material form the paint replaces the stock normal and specular atlas
+samples, and the cotangent frame follows the paint UVs.
 
-Existing tooling: CR's `Build-MarsHdTileSources.py` / `Build-MoonHdTerrain.py` and
-the Toolbox `hd_tiles.py` author per-tile v2 packs, a different runtime format;
-none derives paint weights or fingerprints from MAT/HG2, so this script reuses only
-OpenShim's own `Build-TerrainHdPack.py` and `Build-TerrainPaintPack.py` helpers.
+### Triplanar slopes
 
-### Extending to other worlds
+In Enhanced passes with IBL (which declare the view normal and the inverse
+view), every layer is projected three ways and blended by `|n|^4` of the world
+normal, with slivers under 3% dropped. Ground flatter than about 30 degrees
+keeps the single top projection, which is the original world-XZ mapping, so
+flat terrain looks and costs the same. Cliffs get side projections, (z, y)
+and (x, y), instead of stretched XZ streaks; u is mirrored on far faces.
+Colour, specular and the height-blend heights use all three; normals are
+combined per projection with the whiteout blend and returned in a frame around
+the geometry normal that matches the original +X/+Z frame on flat ground.
+Native world Y reaches the pixel shader through the atlas rect's x and the
+slice index, both unused in paint mode, so camera-relative rendering does not
+matter. The control weights and the domain-shader displacement stay in world
+XZ. Glow, vertex-lit and retro passes keep the top projection.
 
-1. List the world's campaign missions in `Config/crcampgn.ini`; the TRN's
-   `[Atlases] MaterialName` (for example `ve_detail_atlas`) is the manifest material
-   key, so one manifest can hold every world as a separate `materials` entry.
-2. Copy `scripts/terrain-packs/mars-autopaint.json`: set `diffuseResource` to the
-   world's atlas diffuse texture, `typeNames` to the TRN `[TextureTypeN]` comments
-   and `typeWeights` to the four layers that best match each type. The script
-   declines a TRN whose type names differ from the recipe, so a new world cannot
-   silently get Mars' mapping.
-3. Run the script over every mission of that world, both the stock and the CR copy
-   of the HG2 where they differ, and merge the `materials` entry into the shared
-   manifest. Confirm one map per world live (the `[TERRAIN-PAINT] map accepted
-   fingerprint=...` log line prints the live value, or use
-   `OPENSHIM_TERRAIN_HD_EXPORT` and `--capture`) before trusting the offline
-   fingerprint for the others.
-4. The layer artwork is the only per-world creative input. A TRN with more than four
-   visually distinct materials needs a `typeWeights` that folds some together; four
-   layers is the runtime limit.
+Layer recipe fields:
 
-## Multi-map manifests
+- `normal`, `height`, `roughness`: an archive member name, or a full source
+  entry. When omitted, members are found by suffix swap (`_BaseColor` to
+  `_Normal`, `_Displacement`, `_Roughness`; Poly Haven `diff` to `nor_gl`,
+  `disp`, `rough`, also next to a loose `file`, as in `_diff_2k.png`).
+- Normal X and Y are each checked against the height gradient and flipped when
+  they disagree, so DirectX- and OpenGL-convention maps both work.
+- `craters` (`count`, `minMeters`, `maxMeters`, `seed`, `detail`) stamps a
+  tileable field of rimmed impact bowls, power-law sized with depth a fifth of
+  the diameter, into the height; the source height stays as `detail`. The
+  normal is derived from that height, with the source normal's detail on top.
+- Missing maps are derived: height from the colour's high-passed luminance, the
+  normal from that height (`derivedReliefMeters`, default 0.25), and specular as
+  0.5.
+- `saturation` (0 to 2) scales colour saturation before `matchMean`, to mute
+  off-world tints such as rust or moss in a scanned source.
+- `seamless` wrap-blends the normal, height and specular too.
+- `detile` (true or false) breaks up the repeat: low-frequency noise over the
+  tile grid picks one of nine whole-tile offsets per region, about three tiles
+  across, and cross-fades to the next (Quilez texture variation). The colour,
+  normal, specular, height-aware blend and tessellated displacement all use the
+  same offsets. Only the fade bands take a second tap; offsets are translations,
+  so normals stay valid. It is written as `paint.detile`, one 0 or 1 per layer.
 
-Several campaign missions share one atlas material (`MA_DETAIL_ATLAS` for all of
-Mars), so a one-fingerprint manifest could only ever cover one of them. `paint` may
-now carry a `maps` table instead of a single `terrainFingerprint`/`boundsMeters`:
+Three recipe-level settings vary the ground past what one tile can show:
 
-```json
-"paint": {
-  "schema": "bzr-openshim-terrain-paint-v1",
-  "rowZero": "minZ",
-  "repeatMeters": [24, 16, 12, 24],
-  "maps": [
-    {"terrainFingerprint": "73f9729303821983", "boundsMeters": [-3190, -2570, 3210, 2550], "control": "mars_misn04_control.png"},
-    {"terrainFingerprint": "087ff2851a95085e", "boundsMeters": [-2550, -2570, 2570, 2550], "control": "mars_misn05_control.png"}
-  ]
-}
+- `far` (`scale`, `startMeters`, `endMeters`, `amount`) samples every layer a
+  second time at `scale` times its repeat (2 to 16) and cross-fades toward it
+  with view depth, from nothing at `startMeters` to `amount` at `endMeters`.
+  The repeat stops reading as a grid at range, and only the fade band and
+  beyond pay for the second set of taps. The height-aware blend and the
+  displacement stay at the normal scale. Passes without view depth (the
+  glow pass) keep the normal scale. Written as `paint.far`, four numbers.
+- `macro` (`meters`, `brightness`, `saturation`, optional `hue`) multiplies the
+  final colour by soft two-octave noise about `meters` across: brightness swings
+  by up to `brightness` (0 to 0.5) and saturation by up to `saturation` (0 to 1).
+  `hue` (-1 to 1 radians) turns the chroma in YIQ inside separate noise patches
+  covering about half the ground; positive turns green toward yellow, for dry
+  meadow next to lush. Written as `paint.macro`, three numbers, or four with hue.
+- `craters` (`cellMeters`, `depth`, `coverage`, `octaves`) adds a procedural
+  impact field in world space, so it never repeats with the layer tile. Each
+  jittered cell holds at most one crater (`coverage` is the share that do),
+  with a bowl that eases into a low, wide rim and a flat floor; `depth` is depth over
+  diameter. Each octave (1 to 3) triples the cell and is shallower. The domain
+  shader displaces the bowls and the pixel shader tilts the normal by the same
+  analytic slopes; an octave whose cell spans fewer than about 12 pixels (or
+  tessellated vertex spacings) fades out rather than aliasing. Layers opt in with `proceduralCraters`
+  (true or a 0..1 strength). Needs the full material form. Written as
+  `paint.craters` plus `paint.craterLayers`. The displacement clamp grows by
+  the deepest possible crater stack.
+- `detail` (`waveMeters`, `heightMeters`, `octaves`, optional `damping`) adds
+  procedural erosion height in world space: fbm whose octaves (1 to 5, each
+  halving the wavelength) are damped where the octaves above are steep, so
+  smooth valleys run between sharper ridges (`damping` 0 is plain fbm, up to 4).
+  The domain shader displaces it and the pixel shader tilts the normal by its
+  slopes; octaves too fine for the pixel or vertex spacing fade out like the
+  crater octaves. Layers opt in with `proceduralDetail` (true or 0..1). Needs the
+  full material form. Written as `paint.detail` plus `paint.detailLayers`.
+- `parallax` (`scale`, optional `fadeMeters` 40, optional `steps` 12) adds
+  close-up parallax occlusion. The ray is marched through each layer's fine
+  height minus the coarse height the domain shader already displaced (the mip of
+  the 1.25 m vertex spacing), so geometry carries the large shapes and parallax
+  only the relief between vertices. `scale` (0 to 2) multiplies `heightMeters`;
+  the depth fades to zero at `fadeMeters` (2 to 300) and on walls; `steps`
+  (4 to 32) is the march length, refined by one secant step. One march per pixel
+  serves the diffuse, normal and specular reads. It runs only in the lit
+  triplanar pass, which has the view position. Needs the full material form.
+  Written as `paint.parallax`, three numbers.
+
+The baked per-layer `craters` above repeat with the tile; the procedural field
+replaces them where detile is wanted (the Moon dust layers).
+
+### Erosion masks
+
+A recipe's `erosion` block routes water and sediment over the HG2 cell grid,
+highest cell first, and blends cells toward a rule's `weights` (`amount` 0..1,
+optional `types` to limit the MAT types it touches):
+
+- `channel` (`startHectares`, `fullHectares`): drainage area, on a log scale,
+  fading out across filled pits and dead-flat ground.
+- `deposit` and `scour` (`coverage` up to 0.5): the share of cells where routed
+  sediment settles or is cut away.
+- `talus` (`coverage`, `radiusMeters` 20..1000, default 60): the foot of slopes
+  steeper than about 30 degrees, not their rims.
+
+Every world recipe uses it.
+
+### Eight layers
+
+A recipe with eight layers builds 18 slices: two banks of nine, each with four
+colours, a control map and four normal+height slices. Layer i's colour is slice
+`(i / 4) * 9 + i % 4`, bank b's control is `b * 9 + 4` and layer i's
+normal+height is `(i / 4) * 9 + 5 + i % 4`. The builder writes a pair of control
+PNGs per map; per-layer arrays (`repeatMeters`, `heightMeters`, `detailLayers`
+and the rest) take eight entries. The weights are normalised across both banks.
+The domain shader binding accepts either size. Eight layers need the full
+material form.
+
+### Adaptive tessellation
+
+With micro-relief on, the hull shader tessellates adaptively by default: each
+edge asks for about one vertex per 12 screen pixels, scaled by the paint relief
+under it (0.4 on flat paint up to 1 where layer heights span 1.5 m or more),
+floored at 2 and capped at the factor. Each edge takes the larger relief of its
+two endpoints, so shared edges agree and no cracks open. The hull reads the same
+height array as the domain shader (HS `t127`, bound and restored in step).
+`OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE=0` restores fixed subdivision; with
+adaptive on, `OPENSHIM_TERRAIN_TESSELLATION_FACTOR=8` raises the cap.
+
+Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory;
+eighteen cost about 384 MiB.
+
+## World packs
+
+Each stock world (Moon, Venus, Io, Europa, Titan, Achilles) has one recipe,
+`scripts/terrain-packs/<world>-autopaint.json`, and one pack that covers every
+mission on it. Mars uses the older `mars-autopaint.json` form.
+
+**Recipe.** A world recipe holds:
+
+- `material` and `diffuseResource`: the stock atlas the pack replaces (the
+  identity guard).
+- `typeNames` and `typeWeights`: the TRN-type-to-layer mapping, plus
+  `transition`, `blurMeters` and `outsideWeights`.
+- `variation`: low-frequency noise that swaps a type's weight to its partner
+  layer, so a world-sized patch of one type is not one layer.
+- `slope`: steep cells go to a rock layer.
+- `shape` (`radiusMeters`, `rangeMeters`, `amount`, optional `types`, `hollow`,
+  `ridge`): each cell's height against its surroundings, about `radiusMeters`
+  across, blends cells of the listed types toward `hollow` where the ground
+  sits lower and `ridge` where it stands higher, reaching `amount` at
+  `rangeMeters` of difference. Applied after `variation` and before `slope`.
+  A list of shape rules applies each in turn, for example a wide one for
+  valleys and a narrow one (about 40 m) for crevices and worn crests.
+  Optional `from` (layer indices) moves weight only out of those layers, so
+  the rule adds a layer on top of the base and never overwrites the others
+  (flows, pools, slope rock). The world recipes use it to bring layers a map
+  otherwise barely shows onto its high ground.
+- `erosion`: masks from one water and sediment routing pass over the HG2 at
+  MAT-cell size (20 m). Pits are filled so water drains to the map edge.
+  Water then spreads downhill to every lower neighbour, weighted toward the
+  steepest. Each cell carries sediment up to its stream power (the square root
+  of upstream area times its slope); it scours below that and deposits above
+  it. Each rule has `weights`, `amount` and optional `types`:
+  - `talus`: scree at the foot of slopes steeper than about 30 degrees, within
+    `radiusMeters` (default 60), on ground lower than its surroundings.
+  - `deposit`: where sediment settles (slope feet, valley floors, filled pits).
+  - `channel`: upstream area from `startHectares` to `fullHectares` (log
+    ramp), faded out on dead-flat ground and across filled pits, where the
+    routed path is a straight line rather than a stream bed.
+  - `scour`: where water picks sediment up (upper slopes, steep gullies).
+
+  `talus`, `deposit` and `scour` take `coverage`, the fraction of the map's
+  cells that get the full effect, ramping over the next `coverage`. Using a
+  fraction keeps one setting usable across maps of very different relief.
+  Cells below 5% of the map's strongest signal stay untouched. Applied after
+  `shape` and before `slope`. The stock maps were not built with drainage in
+  mind, so channels are rare (under 1% of cells). Talus, deposit and scour do
+  most of the work, following every hill.
+- `layers`: four layers with art, `repeatMeters`, `matchMean` (the stock tile
+  whose mean colour the layer is matched to), height and specular.
+- `heightBlend`, `far`, `macro` and (Moon only) `craters`.
+
+All six worlds use detile on every layer, plus `far` {5, 40, 250, 0.6} and
+`macro` {260, 0.12, 0.15}. The Moon dust layers drop the baked craters for
+`proceduralCraters` (0.6 on Dust, 1 on Cratered dust), with `craters` set to
+cell 8 m, depth 0.2, coverage 0.35 and three octaves. The first setting
+(cell 6 m, coverage 0.5) was too busy and the rims too sharp.
+
+Achilles (Earth-like) adds the shape rule and hue. Grass that sits above
+its surroundings by 6 m within about 120 m turns half to bare earth and a
+little rock. Grass in hollows stays grass rather than becoming forest floor.
+Slopes start turning to mossy rock with some earth at 22 degrees. `macro.hue`
+is 0.35, which gives straw-coloured patches in the green. The fourth layer is
+bare earth (fine dirt matched to the stock river tile) rather than river gravel:
+the CR Achilles maps paint almost no river cells, so the layer now serves the
+crests, banks and variation patches. A first try with `amount` 0.7, shape on
+forest too and 40% earth on slopes turned misn18's hillsides tan; the control
+map preview (each channel tinted) catches that before a game run.
+
+Achilles also uses erosion:
+
+- talus goes to mossy rock and earth, at 6% coverage and 0.6.
+- deposits on grass go to forest floor, at 8% coverage and 0.45, which gives
+  lush bands at the foot of the hills.
+- channels go to earth and rock, from 3 to 30 ha.
+- scour on grass goes to earth, at 6% coverage and 0.35.
+
+A second, 40 m shape rule darkens crevices toward forest floor and wears small
+crests toward earth.
+
+**Build.**
+
+```bash
+scripts/terrain-packs/build-world-packs.sh '<art dir>' '<out dir>' venus europa titan
 ```
 
-`tiles` still lists exactly five slices; slice 4 names the default control image.
-At install the runtime computes the live fingerprint and bounds (unchanged) and
-binds the control image of the entry matching **both**; no entry means the whole
-pack declines before binding anything and the stock atlas stays. The layers, the
-five-slice array size and every other guard are unchanged, and the single-map form
-still works. Log lines: `[TERRAIN-PAINT] multi-map entry selected fingerprint=...
-control=...`, or on a mismatch the decline message with the live map. Entries must
-be unique per fingerprint and bounds; at most 64. Unit tests cover selection and
-validation.
+The script passes each world's missions to `Build-TerrainAutoPaint.py`: every
+Campaign Reimagined map, plus `<map>_stock` wherever CR changes the stock HG2 or
+MAT, so the pack serves both. `GAME_DIR` and `CR_DIR` override the GOG install
+and the CR Workshop folder; both are only read. The art directory holds the
+recipes' Megascans/Poly Haven archives and the `crhd_*` matchMean tiles, which
+stay out of the repository. A map whose fingerprint, bounds or layout the
+builder cannot reproduce is declined, not guessed. Copy the new `<prefix>.json`
+into `scripts/terrain-packs/generated/<world>-auto/` so the manifest diff shows
+in review; the PNGs are not committed.
+
+**In-game check.** Install the manifest and PNGs beside the executable and set:
+
+- `[Terrain] TerrainHdEnabled = 1`
+- `[Terrain] TerrainHdManifest = openshim_<world>_auto.json`
+- `[Terrain] TerrainMicroRelief = 1`
+- `OPENSHIM_ENABLE_ENHANCED_STOCK_TERRAIN=1`
+
+If the tessellation shader changed, deploy the repo's
+`openshim_terrain_tessellation_test.hlsl` too. The checks so far used small
+addon test missions, one per world. Each one copies a world map and runs a Lua
+driver that moves the player through three fixed spots, seven seconds each, with
+the camera parked above. The run uses the harness (`BZRHarness.ps1`, windowed)
+and takes screenshots on a timer. Loading time varies, so use a dense
+screenshot schedule (for example every 6 to 8 seconds from 28 s) and pair
+before/after frames by viewpoint, not by index. Look for:
+
+- the repeat grid at mid range
+- seams in fade bands
+- cracks or popping in the displacement
+- crater aliasing at grazing angles
+
+The log should show the manifest bound for that map, not declined.
 
 ## Runtime format and guards
 
@@ -256,8 +445,12 @@ Paint extends `bzr-openshim-terrain-hd-v1` material bindings with:
 ```
 
 The illustration's fingerprint/bounds are placeholders; use the live capture.
-Exactly five explicit slices are required: four material images then one RGBA
-control image. The diffuse-resource identity guard is mandatory. Canonical
+A `bzr-openshim-terrain-hd-v2` manifest may carry paint materials too. They keep
+this explicit-slice form while the other materials use compact v2 arrays, so a
+single manifest (such as Campaign Reimagined's `cr_terrain_hd.json`) can paint some
+worlds and keep DDS tile packs on the rest.
+Exactly five or nine explicit slices are required: four material images, one
+RGBA control image and, in the material form, four normal+height images. The diffuse-resource identity guard is mandatory. Canonical
 zone coordinates and every native height sample contribute to a 64-bit FNV
 map fingerprint. This is an accidental
 misapplication guard, not a security hash. Native sample-storage origins are
@@ -270,14 +463,14 @@ streams; painting requires rebuilding the pack and restarting the game.
 
 ## Current limits
 
-This is diffuse-only painting with the stock lighting pipeline. Normal,
-detail and specular maps retain their stock atlas coordinates, and materials
-are blended before the stock colour-space processing. Diffuse repetition is
+The five-slice form is diffuse-only: normal, detail and specular keep their stock
+atlas coordinates. The nine-slice form (above) replaces normal and specular;
+the detail map still uses stock coordinates. Materials are blended before the
+stock colour-space processing. Diffuse repetition is
 explicit, with
 UV gradients taken before wrapping so repeat boundaries do not select
-incorrect mip levels. Material height assets,
-height-based blending and physically based material maps are future work.
-The bounded procedural micro relief remains separate from the paint layers.
+incorrect mip levels. When the material form has non-zero `heightMeters`, the
+paint heights replace the procedural micro relief.
 
 The initial implementation packs control weights into slice 4 of the same
 texture array to reuse the validated native binding/upload/lifetime path.

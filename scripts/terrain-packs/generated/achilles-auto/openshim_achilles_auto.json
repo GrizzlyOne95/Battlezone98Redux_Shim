@@ -1,0 +1,98 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "AC_DETAIL_ATLAS": {
+      "sliceCount": 9,
+      "diffuseResource": "achilles_atlas_d.dds",
+      "fallback": "openshim_achilles_auto_layer0.png",
+      "tiles": {
+        "0": "openshim_achilles_auto_layer0.png",
+        "1": "openshim_achilles_auto_layer1.png",
+        "2": "openshim_achilles_auto_layer2.png",
+        "3": "openshim_achilles_auto_layer3.png",
+        "4": "openshim_achilles_auto_misn17_control.png",
+        "5": "openshim_achilles_auto_layer0_n.png",
+        "6": "openshim_achilles_auto_layer1_n.png",
+        "7": "openshim_achilles_auto_layer2_n.png",
+        "8": "openshim_achilles_auto_layer3_n.png"
+      },
+      "paint": {
+        "schema": "bzr-openshim-terrain-paint-v1",
+        "rowZero": "minZ",
+        "repeatMeters": [
+          16,
+          16,
+          12,
+          18
+        ],
+        "maps": [
+          {
+            "terrainFingerprint": "120a7283e9727a45",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_achilles_auto_misn17_control.png"
+          },
+          {
+            "terrainFingerprint": "fda1034769facef5",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_achilles_auto_misn17_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "d8f70565e3d51947",
+            "boundsMeters": [
+              -1910.0,
+              -3210.0,
+              1930.0,
+              3190.0
+            ],
+            "control": "openshim_achilles_auto_misn18_control.png"
+          },
+          {
+            "terrainFingerprint": "7a918703327d147d",
+            "boundsMeters": [
+              -1910.0,
+              -3210.0,
+              1930.0,
+              3190.0
+            ],
+            "control": "openshim_achilles_auto_misn18_stock_control.png"
+          }
+        ],
+        "detile": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "far": [
+          5,
+          40,
+          250,
+          0.6
+        ],
+        "macro": [
+          260,
+          0.12,
+          0.15,
+          0.35
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.6,
+          0.4,
+          1.2,
+          0.4
+        ]
+      }
+    }
+  }
+}

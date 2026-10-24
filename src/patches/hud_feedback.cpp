@@ -485,17 +485,15 @@ namespace BZROpenShim::HudFeedback
         if (NeedsDamage(settings) && !g_subscribed) g_subscribed = SubscribeEvents(EventSink, nullptr);
         if (!NeedsDamage(settings) && g_subscribed) { UnsubscribeEvents(EventSink, nullptr); g_subscribed = false; }
         if (!settings.NeedsDraw() && !incoming.enabled) return true;
-        // This first adapter is deliberately GOG-only until the other native
-        // ABIs have independent runtime qualification. No new dependencies.
-        if (g_IsSteamExe || !IsCompatibleGameVersion()) return false;
+        if (!IsCompatibleGameVersion()) return false;
         return (!incoming.enabled || InstallCamera()) && InstallDraw() &&
             (!NeedsDamage(settings) || (g_subscribed && InstallDamage()));
     }
 
     const char* UnavailableReason()
     {
-        return g_IsSteamExe || !IsCompatibleGameVersion()
-            ? "Unavailable: reticle feedback currently requires qualified GOG 2.2.301." : nullptr;
+        return !IsCompatibleGameVersion()
+            ? "Unavailable: reticle feedback requires Battlezone 98 Redux 2.2.301." : nullptr;
     }
 
     void Tick()
@@ -505,7 +503,7 @@ namespace BZROpenShim::HudFeedback
         if (!g_configRead) { ReloadConfig(); return; }
         if (!g_needsDraw.load(std::memory_order_relaxed)) return;
         const Settings settings = ReadSettings();
-        if (g_IsSteamExe || !IsCompatibleGameVersion()) return;
+        if (!IsCompatibleGameVersion()) return;
         if (g_incomingEnabled.load(std::memory_order_relaxed))
         {
             std::array<float, 9> inverse{};

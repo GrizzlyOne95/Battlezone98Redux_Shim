@@ -24,6 +24,7 @@
 #include "terrain_hd_texture_copy.h"
 #include "terrain_hd_material.h"
 #include "terrain_paint.h"
+#include "terrain_tess_defines.h"
 #include "frame_bridge_native_geometry.h"
 #include "frame_bridge_native_mesh.h"
 #include "frame_bridge_native_lease.h"
@@ -377,6 +378,7 @@ namespace BZROpenShim
         std::array<std::string, 3> g_hdChannelResources;
         // Borrowed from the owned Ogre arrays; cleared before removing them.
         std::array<ID3D11Texture2D*, 3> g_hdChannelNativeTextures{};
+        ID3D11Texture2D* g_hdDiffuseNativeTexture = nullptr;
 
         struct TerrainHdManifest
         {
@@ -628,6 +630,8 @@ namespace BZROpenShim
 
         TerrainConfig g_config;
         float g_activeTerrainReliefAmplitude = 0.0f;
+        // Paint config accepted for the live mission (selected map entry).
+        TerrainPaint::Config g_HdPaint;
         ProxyState g_proxy;
         OgreApi g_ogre;
         TerrainHdManifest g_hdManifest;
@@ -871,7 +875,7 @@ namespace BZROpenShim
             config.followCameraReselectFrames = GetPrivateProfileIntA(
                 "Terrain", "TerrainProxyFollowCameraReselectFrames", 300, iniText.c_str());
             config.hdEnabled = GetPrivateProfileIntA(
-                "Terrain", "TerrainHdEnabled", 0, iniText.c_str()) != 0;
+                "Terrain", "TerrainHdEnabled", 1, iniText.c_str()) != 0;
             config.hdManifest = ReadIniString(
                 iniText, "TerrainHdManifest", BZROpenShim::Assets::kDefaultTerrainHdManifest);
             config.zoneOrdinal = GetPrivateProfileIntA("Terrain", "TerrainProxyZone", -1, iniText.c_str());
@@ -961,14 +965,22 @@ namespace BZROpenShim
             if (config.microReliefAmplitude == 0.0f) config.microReliefTest = false;
             // The persistent UI switch uses the visually qualified factor-4
             // relief preset; plain submission tests keep their factor-2 default.
-            if (config.microReliefTest) config.tessellationFactor = 4;
+            // It is adaptive by default (screen-space edges scaled by paint
+            // relief); OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE=0 keeps it fixed.
+            if (config.microReliefTest)
+            {
+                config.tessellationFactor = 4;
+                int adaptive = 1;
+                ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE", adaptive);
+                config.tessellationAdaptive = adaptive != 0;
+            }
             int factor = 2;
             if (ReadEnvInt("OPENSHIM_TERRAIN_TESSELLATION_FACTOR", factor) &&
-                (factor == 1 || factor == 2 || factor == 4))
+                (factor == 1 || factor == 2 || factor == 4 || (factor == 8 && config.tessellationAdaptive)))
                 config.tessellationFactor = factor;
-            if (config.tessellationAdaptive && config.tessellationFactor != 4)
+            if (config.tessellationAdaptive && config.tessellationFactor < 4)
             {
-                LogShimA(LogLevel::Warn, "terrain-tess", "[TERRAIN-TESS] adaptive request declined: factor-4 cap required; fixed subdivision retained");
+                LogShimA(LogLevel::Warn, "terrain-tess", "[TERRAIN-TESS] adaptive request declined: factor-4 or factor-8 cap required; fixed subdivision retained");
                 config.tessellationAdaptive = false;
             }
             config.tessellationTest = config.tessellationTest || config.tessellationAdaptive;
@@ -1107,7 +1119,9 @@ namespace BZROpenShim
                                 tileIt.value().get<std::string>());
                         }
                     }
-                    if (schema == "bzr-openshim-terrain-hd-v2")
+                    // A v2 manifest may also carry paint materials: they keep the
+                    // explicit-slice form, so one manifest serves both kinds of world.
+                    if (schema == "bzr-openshim-terrain-hd-v2" && !materialIt.value().contains("paint"))
                     {
                         if (g_config.proxyEnabled || binding.diffuseResource.empty())
                             throw std::runtime_error("HD material packs require native terrain and diffuse identity");
@@ -1169,16 +1183,55 @@ namespace BZROpenShim
                     {
                         const auto& paint = materialIt.value()["paint"];
                         if (paint.value("schema", std::string()) != "bzr-openshim-terrain-paint-v1" ||
-                            paint.value("rowZero", std::string()) != "minZ" || binding.sliceCount != 5 ||
-                            binding.diffuseResource.empty() || binding.tiles.size() != 5)
-                            throw std::runtime_error("paint needs five explicit slices, atlas identity and minZ row order");
+                            paint.value("rowZero", std::string()) != "minZ" ||
+                            (binding.sliceCount != 5 && binding.sliceCount != 9 && binding.sliceCount != 18) ||
+                            binding.diffuseResource.empty() || binding.tiles.size() != binding.sliceCount)
+                            throw std::runtime_error("paint needs 5, 9 or 18 explicit slices, atlas identity and minZ row order");
                         if (binding.compact) throw std::runtime_error("compact material arrays do not support paint mode");
                         binding.paint.enabled = true;
-                        binding.paint.repeatMeters = paint.at("repeatMeters").get<std::array<float, 4>>();
+                        binding.paint.sliceCount = binding.sliceCount;
+                        // Per-layer lists carry one value per layer: four, or eight with 18 slices.
+                        const auto layers = [&](const char* name, std::array<float, 8>& out) {
+                            const auto values = paint.at(name).get<std::vector<float>>();
+                            if (values.size() != binding.paint.Layers())
+                                throw std::runtime_error(std::string("paint ") + name + " needs one value per layer");
+                            std::copy(values.begin(), values.end(), out.begin()); };
+                        layers("repeatMeters", binding.paint.repeatMeters);
+                        binding.paint.heightBlend = paint.value("heightBlend", binding.paint.Material() ? 0.5f : 0.0f);
+                        if (paint.contains("heightMeters")) layers("heightMeters", binding.paint.heightMeters);
+                        if (paint.contains("detile")) layers("detile", binding.paint.detile);
+                        if (paint.contains("far"))
+                            binding.paint.farScale = paint.at("far").get<std::array<float, 4>>();
+                        if (paint.contains("macro"))
+                        {
+                            // Three numbers, or four with the hue turn.
+                            const auto macro = paint.at("macro").get<std::vector<float>>();
+                            if (macro.size() != 3 && macro.size() != 4)
+                                throw std::runtime_error("paint macro needs three or four numbers");
+                            std::copy(macro.begin(), macro.end(), binding.paint.macro.begin());
+                        }
+                        if (paint.contains("craters"))
+                        {
+                            binding.paint.craters = paint.at("craters").get<std::array<float, 4>>();
+                            layers("craterLayers", binding.paint.craterLayers);
+                        }
+                        if (paint.contains("detail"))
+                        {
+                            binding.paint.detail = paint.at("detail").get<std::array<float, 4>>();
+                            layers("detailLayers", binding.paint.detailLayers);
+                        }
+                        if (paint.contains("parallax"))
+                        {
+                            // Depth scale, fade metres and steps.
+                            const auto parallax = paint.at("parallax").get<std::vector<float>>();
+                            if (parallax.size() != 3)
+                                throw std::runtime_error("paint parallax needs three numbers");
+                            std::copy(parallax.begin(), parallax.end(), binding.paint.parallax.begin());
+                        }
                         if (paint.contains("maps"))
                         {
                             // Multi-map form: one entry per terrain shape sharing this
-                            // atlas material. Tile "4" is only the default control.
+                            // atlas material. Tiles "4" and "13" are only the default controls.
                             const auto& maps = paint.at("maps");
                             if (!maps.is_array() || maps.empty() || maps.size() > 64)
                                 throw std::runtime_error("paint maps must list 1..64 terrains");
@@ -1188,6 +1241,7 @@ namespace BZROpenShim
                                 map.fingerprint = entry.at("terrainFingerprint").get<std::string>();
                                 map.bounds = entry.at("boundsMeters").get<std::array<float, 4>>();
                                 map.control = entry.at("control").get<std::string>();
+                                map.control2 = entry.value("control2", std::string());
                                 binding.paint.maps.push_back(std::move(map));
                             }
                             binding.paint.fingerprint = binding.paint.maps.front().fingerprint;
@@ -2775,6 +2829,7 @@ namespace BZROpenShim
         void RemoveTerrainHdTextureResource(const char* reason)
         {
             g_hdChannelNativeTextures.fill(nullptr);
+            g_hdDiffuseNativeTexture = nullptr;
             for (auto& name : g_hdChannelResources)
             {
                 if (name.empty()) continue;
@@ -3145,6 +3200,7 @@ namespace BZROpenShim
                     g_hdChannelNativeTextures.at(size_t(channel)) = g_ogre.getD3D11Texture2D(arrayTexture.rep);
                 if (channel < 0)
                 {
+                    g_hdDiffuseNativeTexture = g_ogre.getD3D11Texture2D(arrayTexture.rep);
                     g_proxy.hdDiffuseFallback = binding.fallback;
                     g_proxy.hdSliceCount = binding.sliceCount;
                     g_proxy.hdWidth = width;
@@ -5186,6 +5242,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             {
                 zoneOrdinal = g_nextZoneOrdinal++;
                 g_zoneOrdinals.emplace(zone, zoneOrdinal);
+                // Paint waited on a partial terrain; this zone may complete it.
+                if (g_proxy.selected && g_config.hdEnabled && g_HdPaintDeferredZones &&
+                    g_zoneOrdinals.size() > g_HdPaintDeferredZones)
+                    InstallNativeTerrainHd();
             }
             if (g_proxy.selected) return true;
 
@@ -5732,13 +5792,6 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
         DWORD WINAPI WorkerProc(void*)
         {
-            // Validated on GOG only; Steam stays stock as it always has.
-            if (g_IsSteamExe)
-            {
-                LogShimA(LogLevel::Warn, "terrain-proxy",
-                    "[TERRAIN-PROXY] GOG executable only; Phase 2 unavailable on Steam");
-                return 0;
-            }
             if (!TerrainProxyAddressesBound())
                 return 0;
             LogShimA(LogLevel::Info, "terrain-proxy", "[TERRAIN-PROXY] engine addresses bound");

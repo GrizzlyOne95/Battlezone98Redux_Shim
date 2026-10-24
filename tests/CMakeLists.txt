@@ -143,6 +143,7 @@ openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
 )
 openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
 openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
+openshim_add_test(terrain_tess_defines_tests STD 17 SOURCES terrain_tess_defines_tests.cpp)
 openshim_add_test(options_ui_l10n_tests STD 17 SOURCES options_ui_l10n_tests.cpp ../src/patches/options_ui_l10n.cpp)
 target_compile_definitions(options_ui_l10n_tests PRIVATE
     OPENSHIM_L10N_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/../resources/localization/openshim_localization.csv")
@@ -150,6 +151,8 @@ target_compile_definitions(options_ui_l10n_tests PRIVATE
 if(WIN32)
     openshim_add_test(terrain_paint_gpu_tests STD 17 SOURCES terrain_paint_gpu_tests.cpp)
     target_link_libraries(terrain_paint_gpu_tests PRIVATE d3d11 d3dcompiler)
+    target_compile_definitions(terrain_paint_gpu_tests PRIVATE
+        TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
     openshim_add_test(terrain_hd_texture_copy_tests STD 17 SOURCES terrain_hd_texture_copy_tests.cpp)
     target_link_libraries(terrain_hd_texture_copy_tests PRIVATE d3d11)
     openshim_add_test(terrain_microrelief_gpu_tests STD 17 SOURCES terrain_microrelief_gpu_tests.cpp)
