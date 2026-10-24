@@ -55,7 +55,10 @@ nlohmann::json CaptureTerrainPaintMap()
             bounds[2] = (std::max)(bounds[2], high[0]); bounds[3] = (std::max)(bounds[3], high[1]);
         }
     }
+    std::set<int> columns;
+    for (const auto& zone : zones) columns.insert(zone.first.first);
+    const float zoneMeters = (bounds[2] - bounds[0]) / float(columns.size());
     return {{"terrainFingerprint", TerrainPaint::HashString(hash)}, {"boundsMeters", bounds},
-        {"zoneCount", zones.size()}, {"rowZero", "minZ"}, {"originSamples", {originX,originZ}},
+        {"zoneCount", zones.size()}, {"zoneMeters", zoneMeters}, {"rowZero", "minZ"}, {"originSamples", {originX,originZ}},
         {"heightFingerprint", TerrainPaint::HashString(heightHash)}};
 }

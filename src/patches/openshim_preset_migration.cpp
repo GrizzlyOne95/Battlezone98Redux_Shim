@@ -344,6 +344,14 @@ namespace BZROpenShim
             { "Graphics", "RenderProfile", "Redux", "Enhanced" },
         };
 
+        // Revision 6 -> 7. HD terrain (and the terrain paint it carries)
+        // became the default at the user's request on 2026-10-24, so a player
+        // who subscribes never has to find the toggle. It stays inert without
+        // an HD terrain pack. Only the old shipped 0 moves.
+        const SurgicalEntry kRevision6SurgicalTable[] = {
+            { "Terrain", "TerrainHdEnabled", "0", "1" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -372,6 +380,9 @@ namespace BZROpenShim
             if (fromRevision <= 5)
                 append(kRevision5SurgicalTable,
                        sizeof(kRevision5SurgicalTable) / sizeof(kRevision5SurgicalTable[0]));
+            if (fromRevision <= 6)
+                append(kRevision6SurgicalTable,
+                       sizeof(kRevision6SurgicalTable) / sizeof(kRevision6SurgicalTable[0]));
             return entries;
         }
 

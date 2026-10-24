@@ -605,6 +605,39 @@ int main()
               "6f: Redux chosen after the revision is respected");
     }
 
+    // 6g. Revision 6 -> 7: native HD terrain became the default. The shipped
+    // 0 moves once; a 0 the player sets after the revision is respected.
+    {
+        fs::path canonical = tmpRoot / "canonical6g.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        fs::path off = tmpRoot / "rev6_hd_off.ini";
+        WriteLines(off, {
+            "; OpenShimPresetRevision = 6",
+            "",
+            "[Terrain]",
+            "TerrainHdEnabled = 0",
+        });
+        auto r = MigratePresetFileIfNeeded(off, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 6,
+              "6g: revision 6 file is migrated");
+        Check(FileContains(off, "TerrainHdEnabled = 1"),
+              "6g: shipped HD off becomes on");
+        Check(FileContains(off, CurrentRevisionMarker()),
+              "6g: marker is the current revision");
+
+        fs::path chosen = tmpRoot / "rev7_hd_off.ini";
+        WriteLines(chosen, {
+            "; " + CurrentRevisionMarker(),
+            "",
+            "[Terrain]",
+            "TerrainHdEnabled = 0",
+        });
+        auto again = MigratePresetFileIfNeeded(chosen, canonical);
+        Check(again.action == MigrationAction::None &&
+                  FileContains(chosen, "TerrainHdEnabled = 0"),
+              "6g: HD off chosen after the revision is respected");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";

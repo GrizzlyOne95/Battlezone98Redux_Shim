@@ -47,6 +47,13 @@ int main(int argc, char** argv)
         check(TerrainPaint::SelectMap(table, "0123456789abcdef", {-3190,-2570,3210,2550})->control == "control_c.png", "bounds must disambiguate");
         check(!TerrainPaint::SelectMap(table, "0123456789abcdef", {-320,-640,960,641}), "bounds mismatch selected a map");
         check(!TerrainPaint::SelectMap(table, "0000000000000000", {-320,-640,960,640}), "unknown fingerprint selected a map");
+        // A partial zone set (fewer zones built than the map has) waits; a full or larger one declines.
+        // The 6400 x 5120 entry is a 5 x 4 grid of 1280 m zones.
+        check(TerrainPaint::MapMayGrow(table, {-3190,-2570,650,2550}, 12, 1280), "partial terrain must wait for more zones");
+        check(TerrainPaint::MapMayGrow(table, {-3190,-2570,3210,2550}, 19, 1280), "full bounds with missing zones must wait");
+        check(!TerrainPaint::MapMayGrow(table, {-3190,-2570,3210,2550}, 20, 1280), "complete terrain must not wait");
+        check(!TerrainPaint::MapMayGrow(table, {-3190,-2570,3210,2560}, 12, 1280), "terrain outside every entry must not wait");
+        check(!TerrainPaint::MapMayGrow(table, {-3190,-2570,650,2550}, 12, 0), "unknown zone size must not wait");
         for (int bad = 0; bad < 3; ++bad)
         {
             TerrainPaint::Config broken = table;

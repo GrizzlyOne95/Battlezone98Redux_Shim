@@ -874,7 +874,7 @@ namespace BZROpenShim
             config.followCameraReselectFrames = GetPrivateProfileIntA(
                 "Terrain", "TerrainProxyFollowCameraReselectFrames", 300, iniText.c_str());
             config.hdEnabled = GetPrivateProfileIntA(
-                "Terrain", "TerrainHdEnabled", 0, iniText.c_str()) != 0;
+                "Terrain", "TerrainHdEnabled", 1, iniText.c_str()) != 0;
             config.hdManifest = ReadIniString(
                 iniText, "TerrainHdManifest", BZROpenShim::Assets::kDefaultTerrainHdManifest);
             config.zoneOrdinal = GetPrivateProfileIntA("Terrain", "TerrainProxyZone", -1, iniText.c_str());
@@ -5241,6 +5241,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             {
                 zoneOrdinal = g_nextZoneOrdinal++;
                 g_zoneOrdinals.emplace(zone, zoneOrdinal);
+                // Paint waited on a partial terrain; this zone may complete it.
+                if (g_proxy.selected && g_config.hdEnabled && g_HdPaintDeferredZones &&
+                    g_zoneOrdinals.size() > g_HdPaintDeferredZones)
+                    InstallNativeTerrainHd();
             }
             if (g_proxy.selected) return true;
 
