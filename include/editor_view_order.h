@@ -14,6 +14,7 @@ namespace BZROpenShim
     //
     // MUST be called synchronously from DllMain. Both patch sites are global
     // constructors that run from the CRT's _initterm before main, which is
-    // long before the normal patch thread reaches RunPatcher.
+    // long before the normal patch thread reaches RunPatcher. On a packed
+    // (Steam) image the write is deferred to the CRT's _initterm call.
     void ApplyEditorOverheadPlacementOrderFix();
 }

@@ -2256,8 +2256,12 @@ namespace BZROpenShim
         g_TessStatisticsEnabled = tessLength > 0 && tessLength < sizeof(tessTest) &&
             BoolToken::IsTruthy(tessTest, tessLength);
         const bool terrainProbeRequested = TerrainProbeRequested() || g_TessStatisticsEnabled;
+        // Keyed on HD terrain alone, not Terrain Micro Detail: the preset
+        // migration that turns relief on runs later in startup, and the
+        // options page can turn it on mid-session. Without the hook the
+        // relief test is declined and the painted terrain falls back to
+        // native. The hook only observes DSSetShader, which nothing else uses.
         const bool heightBindingRequested =
-            DiagnosticSwitch::Requested("OPENSHIM_TERRAIN_MICRO_RELIEF_TEST", "Terrain", "TerrainMicroRelief") &&
             DiagnosticSwitch::Requested("OPENSHIM_TERRAIN_HD", "Terrain", "TerrainHdEnabled");
         if (g_TessStatisticsEnabled)
             LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] GPU statistics observer requested");

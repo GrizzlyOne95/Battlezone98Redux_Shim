@@ -215,8 +215,8 @@ namespace BZROpenShim::HudPalette
 
     const char* UnavailableReason()
     {
-        return g_IsSteamExe || !IsCompatibleGameVersion()
-            ? "Unavailable: HUD colors currently require qualified GOG 2.2.301." : nullptr;
+        return !IsCompatibleGameVersion()
+            ? "Unavailable: HUD colors require Battlezone 98 Redux 2.2.301." : nullptr;
     }
 
     bool ReloadConfig()

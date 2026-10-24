@@ -70,6 +70,38 @@
       ]
     }
   },
+  "shape": [
+    {
+      "radiusMeters": 300,
+      "rangeMeters": 5,
+      "amount": 0.6,
+      "hollow": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "from": [
+        1,
+        2
+      ]
+    },
+    {
+      "radiusMeters": 400,
+      "rangeMeters": 24,
+      "amount": 0.5,
+      "ridge": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "from": [
+        1,
+        2
+      ]
+    }
+  ],
   "erosion": {
     "talus": {
       "weights": [

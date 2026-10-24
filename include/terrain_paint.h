@@ -187,6 +187,26 @@ namespace BZROpenShim::TerrainPaint
         return nullptr;
     }
 
+    // True while the live terrain is a partial zone set inside some table
+    // entry. The engine builds zones as the camera reaches them, so a partial
+    // set can still grow into a match; a complete terrain that matches nothing
+    // cannot. zoneMeters is the live zone edge, so an entry's full zone count
+    // follows from its bounds.
+    inline bool MapMayGrow(const Config& config, const std::array<float, 4>& bounds,
+        std::size_t zoneCount, float zoneMeters)
+    {
+        if (!(zoneMeters > 0)) return false;
+        for (const auto& map : config.maps)
+        {
+            if (bounds[0] < map.bounds[0] || bounds[1] < map.bounds[1] ||
+                bounds[2] > map.bounds[2] || bounds[3] > map.bounds[3]) continue;
+            const double full = std::round((map.bounds[2] - map.bounds[0]) / zoneMeters) *
+                std::round((map.bounds[3] - map.bounds[1]) / zoneMeters);
+            if (double(zoneCount) < full) return true;
+        }
+        return false;
+    }
+
     inline void HashU32(std::uint64_t& hash, std::uint32_t value)
     {
         for (unsigned i = 0; i < 4; ++i) { hash ^= (value >> (i * 8)) & 255; hash *= UINT64_C(1099511628211); }

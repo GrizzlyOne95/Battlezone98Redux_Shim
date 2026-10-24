@@ -14,10 +14,12 @@ std::vector<NativeHdPass> g_HdPasses;
 std::string g_HdSourceMaterial, g_HdBackupMaterial;
 bool g_HdActive = false, g_HdDeclined = false;
 bool g_HdProfileSuspended = false;
+// Zones seen when paint last waited for a partial terrain; 0 when not waiting.
+std::size_t g_HdPaintDeferredZones = 0;
 std::array<bool, 256> g_HdTileMapped{};
 std::array<uint8_t, 256> g_HdSliceRemap = TerrainHdMaterial::IdentityRemap();
 std::array<bool, 3> g_HdChannelEnabled{};
-void ResetNativeTerrainHd() { g_HdDeclined = false; g_HdProfileSuspended = false; }
+void ResetNativeTerrainHd() { g_HdDeclined = false; g_HdProfileSuspended = false; g_HdPaintDeferredZones = 0; }
 
 bool HdProfileAllowed()
 {
@@ -352,6 +354,7 @@ bool InstallNativeTerrainHd()
     if (g_HdActive) return true;
     OgreSharedPtr source, backup, array, program;
     std::array<OgreSharedPtr, 3> channelArrays{};
+    g_HdPaintDeferredZones = 0;
     try
     {
         ResolveNativeHdApi();
@@ -411,7 +414,15 @@ bool InstallNativeTerrainHd()
                     map.at("terrainFingerprint").get<std::string>(),
                     map.at("boundsMeters").get<std::array<float, 4>>());
                 if (!entry)
+                {
+                    if (TerrainPaint::MapMayGrow(binding->paint, map.at("boundsMeters").get<std::array<float, 4>>(),
+                            map.at("zoneCount").get<std::size_t>(), map.at("zoneMeters").get<float>()))
+                    {
+                        g_HdPaintDeferredZones = g_zoneOrdinals.size();
+                        throw std::runtime_error("paint map incomplete, retrying as zones are built: actual=" + map.dump());
+                    }
                     throw std::runtime_error("paint pack has no map entry for this mission: actual=" + map.dump());
+                }
                 selectedBinding = *binding;
                 selectedBinding->tiles[4] = entry->control;
                 if (!entry->control2.empty()) selectedBinding->tiles[13] = entry->control2;
@@ -553,12 +564,17 @@ bool InstallNativeTerrainHd()
         for (auto& channel : channelArrays) ReleaseCloneHandoff(channel);
         return true;
     }
-    catch (const std::exception& error) { LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] native tiles declined: %s; stock atlas retained", error.what()); }
-    catch (...) { LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] native tiles declined after Ogre exception"); }
+    catch (const std::exception& error)
+    {
+        if (g_HdPaintDeferredZones) LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] native tiles deferred: %s", error.what());
+        else LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] native tiles declined: %s; stock atlas retained", error.what());
+    }
+    catch (...) { g_HdPaintDeferredZones = 0; LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] native tiles declined after Ogre exception"); }
     ReleaseCloneHandoff(program); ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup); ReleaseCloneHandoff(array);
     for (auto& channel : channelArrays) ReleaseCloneHandoff(channel);
     RestoreNativeTerrainHd(); RemoveSemanticResources("native-hd-declined");
-    g_HdDeclined = true;
+    // A deferred paint match stays retryable: ObserveZone reinstalls when a zone is added.
+    g_HdDeclined = g_HdPaintDeferredZones == 0;
     return false;
 }
 

@@ -398,7 +398,9 @@ def cell_field(cells, plane, recipe, seed):
     ground sits below its surroundings and toward `ridge` where it stands above,
     reaching `amount` at `rangeMeters` of difference: lush valleys, dry crests.
     A list of such rules applies each in turn (say a wide one for valleys and a
-    narrow one for crevices and worn crests).
+    narrow one for crevices and worn crests). With "from": [layers] a shape
+    rule moves weight only out of those layers, so it adds a layer on top of
+    the base without overwriting the others (flows, pools, slope rock).
     erosion: {"talus", "deposit", "channel", "scour"}, each {"weights", "amount",
     optional "types"} plus its threshold (see erosion_masks), blends cells toward
     `weights` by masks from a water and sediment routing pass over the HG2.
@@ -424,7 +426,14 @@ def cell_field(cells, plane, recipe, seed):
         for key, sign in (("hollow", -1), ("ridge", 1)):
             if key in shape:
                 t = (shape.get("amount", 0.5) * smoothstep(0, shape["rangeMeters"], sign * relief) * type_mask(shape))[..., None]
-                weights = weights * (1 - t) + np.asarray(shape[key], dtype=np.float64) * t
+                if "from" in shape:
+                    source = list(shape["from"])
+                    moved = weights[..., source] * t
+                    weights = weights.copy()
+                    weights[..., source] -= moved
+                    weights = weights + np.asarray(shape[key], dtype=np.float64) * moved.sum(axis=-1, keepdims=True)
+                else:
+                    weights = weights * (1 - t) + np.asarray(shape[key], dtype=np.float64) * t
     erosion = recipe.get("erosion")
     if erosion and plane is not None:
         masks = erosion_masks(plane, cells.shape, erosion)
@@ -569,9 +578,12 @@ def validate_recipe(recipe):
         for shape in shapes:
             if not (isinstance(shape, dict) and 20 <= shape.get("radiusMeters", 0) <= 1000 and 0 < shape.get("rangeMeters", 0) <= 100
                     and 0 < shape.get("amount", 0.5) <= 1 and ("hollow" in shape or "ridge" in shape)
-                    and all(weight_vector(shape[k]) for k in ("hollow", "ridge") if k in shape) and mapped_types(shape)):
+                    and all(weight_vector(shape[k]) for k in ("hollow", "ridge") if k in shape) and mapped_types(shape)
+                    and (isinstance(shape.get("from", []), list) and len(set(shape.get("from", []))) == len(shape.get("from", []))
+                         and all(isinstance(i, int) and 0 <= i < n for i in shape.get("from", [])))
+                    and ("from" not in shape or shape["from"])):
                 raise ValueError("shape needs radiusMeters 20..1000, rangeMeters (0,100], amount (0,1], "
-                                 "hollow and/or ridge weights and mapped types")
+                                 "hollow and/or ridge weights, mapped types and distinct non-empty from layers")
     if "erosion" in recipe:
         erosion = recipe["erosion"]
         if not erosion or set(erosion) - set(EROSION_RULES):
@@ -708,6 +720,9 @@ def wrap_blend(a):
 
 
 def gray(image, size):
+    # load_art hands 16-bit and float maps over as float 0..255 ("F").
+    if image.mode == "F":
+        return np.asarray(image.resize((size, size), Image.Resampling.LANCZOS), dtype=np.float64) / 255
     a = np.asarray(image.convert("RGB").resize((size, size), Image.Resampling.LANCZOS), dtype=np.float64) / 255
     return a[..., 0]
 
