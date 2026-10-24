@@ -280,6 +280,12 @@ class ProtocolState:
         )
         if content.get("name"):
             lobby.metadata["name"] = str(content["name"])
+        elif lobby_type == "CreateGame":
+            # The creator's client sets "name" before it has a local entry for the lobby, so that
+            # write never lands locally and it loops on "requesting missing data". Seed a
+            # placeholder in the first OnLobbyChanged; the owner's SetLobbyData replaces it.
+            privacy = "priv" if lobby.is_private else "pub"
+            lobby.metadata["name"] = f"~game~{privacy}~~{client.name}"
         self.lobbies[lobby_id] = lobby
         client.lobby_id = lobby_id
         deliveries.append(self.one(client.connection, "OnLobbyCreated", {"success": True, "id": lobby_id}))
@@ -571,7 +577,11 @@ class WebSocketServer:
             for connection in delivery.connections:
                 websocket = self.websockets.get(connection)
                 if websocket:
-                    await websocket.send(encoded)
+                    try:
+                        await websocket.send(encoded)
+                    except websockets.ConnectionClosed:
+                        # A game that is exiting closes mid-burst; its handler cleans up.
+                        pass
 
     async def handler(self, websocket: Any) -> None:
         connection = f"connection-{self.next_connection}"
@@ -631,7 +641,10 @@ def main() -> None:
     parser.add_argument("--name", default=f"local server {socket.gethostname()}",
                         help="announced in lobby chat on join; empty to disable")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s:%(name)s:%(message)s",
+    )
     asyncio.run(run(args.host, args.port, None if args.disable_probe else args.probe_port, args.name))
 
 

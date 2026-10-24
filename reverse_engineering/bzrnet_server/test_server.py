@@ -58,6 +58,16 @@ class ProtocolStateTests(unittest.TestCase):
         joined = state.handle("b", message("DoJoinLobby", {"id": game_id}))
         self.assertFalse(any(item.payload["type"] == "OnChatMessage" for item in joined))
 
+    def test_created_game_carries_placeholder_name_until_owner_sets_it(self):
+        created = self.state.handle("a", message("CreateGame", {"memberLimit": 4, "isPrivate": True}))
+        lobby_id = self.state.clients_by_connection["a"].lobby_id
+        first_change = next(item for item in created if item.payload["type"] == "OnLobbyChanged")
+        metadata = first_change.payload["data"]["lobbies"][str(lobby_id)]["metadata"]
+        self.assertEqual(metadata["name"], "~game~priv~~Alpha")
+
+        self.state.handle("a", message("SetLobbyData", {"key": "name", "value": "~game~priv~~coop"}))
+        self.assertEqual(self.state.lobbies[lobby_id].metadata["name"], "~game~priv~~coop")
+
     def test_password_and_owner_enforcement(self):
         self.state.handle("a", message("CreateLobby", {"memberLimit": 2, "password": "secret"}))
         lobby_id = self.state.clients_by_connection["a"].lobby_id
