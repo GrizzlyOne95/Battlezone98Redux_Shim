@@ -119,8 +119,8 @@
       "name": "Sulphur deposits",
       "detile": true,
       "repeatMeters": 18,
-      "archive": "desert_western_detail_sand_coarse_01_xgindh1_8k.zip",
-      "member": "Desert_Western_Detail_Sand_Coarse_01_xgindh1_8K_BaseColor.jpg",
+      "archive": "rock_boulder_cracked_8k.zip",
+      "member": "rock_boulder_cracked_diff_8k.jpg",
       "matchMean": "crhd_venus_ve00sa0_d.dds",
       "heightMeters": 0.8
     },

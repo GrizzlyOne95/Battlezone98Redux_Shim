@@ -720,6 +720,9 @@ def wrap_blend(a):
 
 
 def gray(image, size):
+    # load_art hands 16-bit and float maps over as float 0..255 ("F").
+    if image.mode == "F":
+        return np.asarray(image.resize((size, size), Image.Resampling.LANCZOS), dtype=np.float64) / 255
     a = np.asarray(image.convert("RGB").resize((size, size), Image.Resampling.LANCZOS), dtype=np.float64) / 255
     return a[..., 0]
 

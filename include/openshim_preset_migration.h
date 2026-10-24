@@ -83,7 +83,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 7;
+    constexpr int kCurrentPresetRevision = 8;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset as a Windows checkout

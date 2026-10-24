@@ -76,6 +76,13 @@ def load_art(root, entry):
         image = Image.open(path)
         identity = {"file": entry["file"], "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     image.load()
+    if image.mode in ("I", "I;16", "I;16B", "I;16L", "F"):
+        # 16-bit and float maps (Poly Haven _disp PNG): keep the precision as
+        # float 0..255; convert("RGB") would clip them to flat white.
+        high = image.mode.startswith("I")
+        image = image.convert("F")
+        top = 65535.0 if high else max(image.getextrema()[1], 1e-6)
+        return image.point(lambda v: v * (255.0 / top)), identity
     return image.convert("RGB"), identity
 
 

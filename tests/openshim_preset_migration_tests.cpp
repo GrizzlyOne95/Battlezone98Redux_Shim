@@ -638,6 +638,36 @@ int main()
               "6g: HD off chosen after the revision is respected");
     }
 
+    // 6h. Revision 7 -> 8: Terrain Micro Detail became the default.
+    {
+        fs::path canonical = tmpRoot / "canonical6h.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        fs::path off = tmpRoot / "rev7_relief_off.ini";
+        WriteLines(off, {
+            "; OpenShimPresetRevision = 7",
+            "",
+            "[Terrain]",
+            "TerrainMicroRelief = 0",
+        });
+        auto r = MigratePresetFileIfNeeded(off, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 7,
+              "6h: revision 7 file is migrated");
+        Check(FileContains(off, "TerrainMicroRelief = 1"),
+              "6h: shipped relief off becomes on");
+
+        fs::path chosen = tmpRoot / "rev8_relief_off.ini";
+        WriteLines(chosen, {
+            "; " + CurrentRevisionMarker(),
+            "",
+            "[Terrain]",
+            "TerrainMicroRelief = 0",
+        });
+        auto again = MigratePresetFileIfNeeded(chosen, canonical);
+        Check(again.action == MigrationAction::None &&
+                  FileContains(chosen, "TerrainMicroRelief = 0"),
+              "6h: relief off chosen after the revision is respected");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";

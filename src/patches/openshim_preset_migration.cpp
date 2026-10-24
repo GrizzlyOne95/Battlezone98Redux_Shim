@@ -352,6 +352,14 @@ namespace BZROpenShim
             { "Terrain", "TerrainHdEnabled", "0", "1" },
         };
 
+        // Revision 7 -> 8. Terrain Micro Detail became the default the same
+        // day: the paint packs' rock, crack and crater height is displaced by
+        // its tessellation, so without it painted ground looks flat. DX11
+        // only; other renderers keep native terrain. Only the shipped 0 moves.
+        const SurgicalEntry kRevision7SurgicalTable[] = {
+            { "Terrain", "TerrainMicroRelief", "0", "1" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -383,6 +391,9 @@ namespace BZROpenShim
             if (fromRevision <= 6)
                 append(kRevision6SurgicalTable,
                        sizeof(kRevision6SurgicalTable) / sizeof(kRevision6SurgicalTable[0]));
+            if (fromRevision <= 7)
+                append(kRevision7SurgicalTable,
+                       sizeof(kRevision7SurgicalTable) / sizeof(kRevision7SurgicalTable[0]));
             return entries;
         }
 
