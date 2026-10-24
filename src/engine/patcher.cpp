@@ -1550,11 +1550,6 @@ namespace BZROpenShim
                 L"cannot tell when SteamStub has finished, so engine patches stay off\n");
             return;
         }
-        // .text is decrypted by now, so the CLI delimiter repair applied at
-        // attach can finally have its .text corroboration settled, and a
-        // SteamStub restore over the .data write would be reported rather than
-        // failing silently.
-        BZROpenShim::VerifyCliMultiParameterOptionFix();
         const ReduxCompatibilityGate compatibilityGate = PrepareReduxCompatibilityGate(isSteam);
         StartSoundChannelOverride(isSteam);
         // Before FirstGAS runs: the pool can only move while it is empty.
@@ -1598,6 +1593,11 @@ namespace BZROpenShim
                 if (barren > kMaxBarrenPasses) break;
             }
         }
+        // .text has settled by now (on Steam the signature wait only proves
+        // decryption has started), so the CLI delimiter repair applied at
+        // attach can have its .text corroboration settled, and a SteamStub
+        // restore over the .data write is reported rather than failing silently.
+        BZROpenShim::VerifyCliMultiParameterOptionFix();
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Map List Fix Support 1/3"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();
