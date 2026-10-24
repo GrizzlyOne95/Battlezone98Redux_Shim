@@ -3665,7 +3665,8 @@ namespace BZROpenShim
                 for (int sample = 0; sample < 3; ++sample)
                 {
                     _snprintf_s(name, _TRUNCATE, "ReticlePreviewCaption%d", sample);
-                    Shell::AddLabel(panel, panel, name, {775.0f + sample * 150.0f, 470, 130, 28},
+                    // Below slot 12 (the Stock Shader row, y 458-500), above the samples.
+                    Shell::AddLabel(panel, panel, name, {775.0f + sample * 150.0f, 506, 130, 28},
                         category == kShimDamageCategory ? damageCaptions[sample] : captions[sample]);
                 }
                 ui.previewNote = Shell::AddLabel(panel, panel, "ReticlePreviewNote", {752, 650, 440, 28}, "");
