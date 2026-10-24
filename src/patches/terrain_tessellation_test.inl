@@ -317,6 +317,7 @@ bool InstallNativeTerrainTessellationTest()
         if (!clone.rep)
             throw std::runtime_error("material clone unavailable");
         ++g_semanticMaterialCreated;
+        const ULONGLONG compileStart = GetTickCount64();
         std::map<std::string, std::pair<std::string, std::string>> programs;
         std::map<std::string, std::string> interfaces;
         unsigned specialized = 0;
@@ -351,7 +352,11 @@ bool InstallNativeTerrainTessellationTest()
                 const auto signatureInsertion = interfaces.emplace(defines, expected);
                 if (!signatureInsertion.second && signatureInsertion.first->second != expected)
                     throw std::runtime_error("same-defines terrain passes have different runtime interfaces");
-                auto found = programs.find(defines);
+                // Passes that differ only in switches the hull and domain never
+                // read share one compiled pair; the interface is in the key.
+                const std::string stageDefines = TerrainTess::RelevantDefines(defines, source);
+                const std::string key = stageDefines + "|" + expected;
+                auto found = programs.find(key);
                 if (found == programs.end())
                 {
                     std::pair<std::string, std::string> names;
@@ -360,7 +365,7 @@ bool InstallNativeTerrainTessellationTest()
                         // Released Ogre's microcode cache is name-keyed. Include
                         // defines so a reordered pass cannot reuse another
                         // permutation's bytecode from an earlier game session.
-                        const std::string name = prefix + "/" + SourceHashSuffix(defines) +
+                        const std::string name = prefix + "/" + SourceHashSuffix(key) +
                             (stage == 0 ? "/Hull" : "/Domain");
                         // Ogre 1.10 GpuProgramType: domain=3, hull=4.
                         g_ogre.createHighLevelProgram(programManager, &program, name,
@@ -374,7 +379,7 @@ bool InstallNativeTerrainTessellationTest()
                                 stage == 0 ? std::string("hs_5_0") : std::string("ds_5_0")) ||
                             !g_ogre.setStringParameter(program.rep, std::string("entry_point"),
                                 stage == 0 ? std::string("TerrainHull") : std::string("TerrainDomain")) ||
-                            !g_ogre.setStringParameter(program.rep, std::string("preprocessor_defines"), defines))
+                            !g_ogre.setStringParameter(program.rep, std::string("preprocessor_defines"), stageDefines))
                             throw std::runtime_error("shader parameters rejected");
                         g_ogre.loadResource(program.rep, true);
                         if (!g_ogre.programSupported(program.rep))
@@ -390,7 +395,7 @@ bool InstallNativeTerrainTessellationTest()
                         ReleaseCloneHandoff(program);
                         (stage == 0 ? names.first : names.second) = name;
                     }
-                    found = programs.emplace(defines, names).first;
+                    found = programs.emplace(key, names).first;
                 }
                 g_ogre.setHullProgram(pass, found->second.first, true);
                 g_ogre.setDomainProgram(pass, found->second.second, true);
@@ -443,11 +448,11 @@ bool InstallNativeTerrainTessellationTest()
         ReleaseCloneHandoff(clone);
         g_proxy.semanticMaterialInstalled = true;
         LogShimA(LogLevel::Info, "terrain-tess",
-            "[TERRAIN-TESS] shared native material installed discoveryZone=(%d,%d) discoveryCluster=(%d,%d) factor=%d displacement=%.3f wireframe=%d passes=%u programs=%zu featureLevel=0x%X source=\"%s\" test=\"%s\"",
+            "[TERRAIN-TESS] shared native material installed discoveryZone=(%d,%d) discoveryCluster=(%d,%d) factor=%d displacement=%.3f wireframe=%d passes=%u programs=%zu buildMs=%llu featureLevel=0x%X source=\"%s\" test=\"%s\"",
             g_proxy.zoneX, g_proxy.zoneZ, g_proxy.clusterX, g_proxy.clusterZ,
             g_config.tessellationFactor, g_activeTerrainReliefAmplitude,
             g_config.tessellationWireframe ? 1 : 0,
-            specialized, g_proxy.semanticProgramNames.size(), static_cast<unsigned>(level),
+            specialized, g_proxy.semanticProgramNames.size(), GetTickCount64() - compileStart, static_cast<unsigned>(level),
             g_proxy.materialName.c_str(), g_proxy.semanticMaterialName.c_str());
         if (g_config.tessellationAdaptive)
             LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] adaptive hull installed passes=%u viewportAuto=111 partition=fractional_even minFactor=2 maxFactor=%d targetPixels=%.3f; shared-endpoint policy, fixed relief phase", specialized, g_config.tessellationFactor, g_config.tessellationTargetPixels);

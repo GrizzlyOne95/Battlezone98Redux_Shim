@@ -334,6 +334,10 @@ mission on it. Mars uses the older `mars-autopaint.json` form.
   `rangeMeters` of difference. Applied after `variation` and before `slope`.
   A list of shape rules applies each in turn, for example a wide one for
   valleys and a narrow one (about 40 m) for crevices and worn crests.
+  Optional `from` (layer indices) moves weight only out of those layers, so
+  the rule adds a layer on top of the base and never overwrites the others
+  (flows, pools, slope rock). The world recipes use it to bring layers a map
+  otherwise barely shows onto its high ground.
 - `erosion`: masks from one water and sediment routing pass over the HG2 at
   MAT-cell size (20 m). Pits are filled so water drains to the map edge.
   Water then spreads downhill to every lower neighbour, weighted toward the
@@ -441,6 +445,10 @@ Paint extends `bzr-openshim-terrain-hd-v1` material bindings with:
 ```
 
 The illustration's fingerprint/bounds are placeholders; use the live capture.
+A `bzr-openshim-terrain-hd-v2` manifest may carry paint materials too. They keep
+this explicit-slice form while the other materials use compact v2 arrays, so a
+single manifest (such as Campaign Reimagined's `cr_terrain_hd.json`) can paint some
+worlds and keep DDS tile packs on the rest.
 Exactly five or nine explicit slices are required: four material images, one
 RGBA control image and, in the material form, four normal+height images. The diffuse-resource identity guard is mandatory. Canonical
 zone coordinates and every native height sample contribute to a 64-bit FNV

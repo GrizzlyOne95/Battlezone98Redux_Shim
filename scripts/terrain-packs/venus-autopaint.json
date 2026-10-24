@@ -70,6 +70,22 @@
       ]
     }
   },
+  "shape": [
+    {
+      "radiusMeters": 400,
+      "rangeMeters": 8,
+      "amount": 0.9,
+      "ridge": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "from": [
+        0
+      ]
+    }
+  ],
   "erosion": {
     "talus": {
       "weights": [
@@ -103,10 +119,11 @@
       "name": "Sulphur deposits",
       "detile": true,
       "repeatMeters": 18,
-      "archive": "sulphur_rock_vmijee1g_8k.zip",
-      "member": "Sulphur_Rock_vmijee1g_8K_BaseColor.jpg",
+      "archive": "rock_boulder_cracked_8k.zip",
+      "member": "rock_boulder_cracked_diff_8k.jpg",
       "matchMean": "crhd_venus_ve00sa0_d.dds",
-      "heightMeters": 0.8
+      "heightMeters": 1.2,
+      "proceduralDetail": 0.6
     },
     {
       "name": "Liquid sulphur",
@@ -122,7 +139,8 @@
       "archive": "muddy_rock_ubkmfang_8k.zip",
       "member": "Muddy_Rock_ubkmfang_8K_BaseColor.jpg",
       "matchMean": "crhd_venus_ve33sa0_d.dds",
-      "heightMeters": 0.6
+      "heightMeters": 1.0,
+      "proceduralDetail": 0.8
     },
     {
       "name": "Crag",
@@ -131,7 +149,8 @@
       "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
       "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
       "matchMean": "crhd_venus_ve33sa0_d.dds",
-      "heightMeters": 1.8
+      "heightMeters": 2.6,
+      "proceduralDetail": 1
     }
   ],
   "heightBlend": 0.5,
@@ -145,5 +164,16 @@
     "meters": 260,
     "brightness": 0.12,
     "saturation": 0.15
+  },
+  "detail": {
+    "waveMeters": 60,
+    "heightMeters": 1.5,
+    "octaves": 4,
+    "damping": 1
+  },
+  "parallax": {
+    "scale": 1,
+    "fadeMeters": 30,
+    "steps": 12
   }
 }

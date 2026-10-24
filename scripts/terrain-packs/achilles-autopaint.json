@@ -124,6 +124,20 @@
         0.2,
         0.3
       ]
+    },
+    {
+      "radiusMeters": 250,
+      "rangeMeters": 4,
+      "amount": 0.9,
+      "ridge": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "from": [
+        0
+      ]
     }
   ],
   "erosion": {

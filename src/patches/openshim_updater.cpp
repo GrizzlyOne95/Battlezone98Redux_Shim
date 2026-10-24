@@ -291,6 +291,21 @@ namespace BZROpenShim
             itemDirectory.clear();
             std::filesystem::file_time_type newest =
                 std::filesystem::file_time_type::min();
+            // GOG has no Workshop client: the item is unpacked into the game's
+            // own mods folder, and that copy is the one this install loads, so
+            // it wins over any Steam library on the same machine.
+            const std::filesystem::path gameRoot = GetGameRoot();
+            if (!gameRoot.empty() && gameRoot.parent_path().parent_path().filename() != L"steamapps")
+            {
+                const std::filesystem::path local = gameRoot / L"mods" / kWorkshopItemIdW;
+                std::error_code localError;
+                if (std::filesystem::is_regular_file(local / L"OpenShimManifest.lua", localError) &&
+                    !localError)
+                {
+                    itemDirectory = local;
+                    return true;
+                }
+            }
             for (const auto& library : FindSteamLibraries())
             {
                 const std::filesystem::path candidate = library / L"steamapps" /
@@ -308,7 +323,7 @@ namespace BZROpenShim
             }
             if (itemDirectory.empty())
             {
-                error = "Workshop item 3686673790 is not installed in a Steam library";
+                error = "Workshop item 3686673790 is not installed in a Steam library or the game's mods folder";
                 return false;
             }
             return true;

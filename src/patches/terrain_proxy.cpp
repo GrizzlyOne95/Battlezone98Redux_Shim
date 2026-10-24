@@ -24,6 +24,7 @@
 #include "terrain_hd_texture_copy.h"
 #include "terrain_hd_material.h"
 #include "terrain_paint.h"
+#include "terrain_tess_defines.h"
 #include "frame_bridge_native_geometry.h"
 #include "frame_bridge_native_mesh.h"
 #include "frame_bridge_native_lease.h"
@@ -874,7 +875,7 @@ namespace BZROpenShim
             config.followCameraReselectFrames = GetPrivateProfileIntA(
                 "Terrain", "TerrainProxyFollowCameraReselectFrames", 300, iniText.c_str());
             config.hdEnabled = GetPrivateProfileIntA(
-                "Terrain", "TerrainHdEnabled", 0, iniText.c_str()) != 0;
+                "Terrain", "TerrainHdEnabled", 1, iniText.c_str()) != 0;
             config.hdManifest = ReadIniString(
                 iniText, "TerrainHdManifest", BZROpenShim::Assets::kDefaultTerrainHdManifest);
             config.zoneOrdinal = GetPrivateProfileIntA("Terrain", "TerrainProxyZone", -1, iniText.c_str());
@@ -1118,7 +1119,9 @@ namespace BZROpenShim
                                 tileIt.value().get<std::string>());
                         }
                     }
-                    if (schema == "bzr-openshim-terrain-hd-v2")
+                    // A v2 manifest may also carry paint materials: they keep the
+                    // explicit-slice form, so one manifest serves both kinds of world.
+                    if (schema == "bzr-openshim-terrain-hd-v2" && !materialIt.value().contains("paint"))
                     {
                         if (g_config.proxyEnabled || binding.diffuseResource.empty())
                             throw std::runtime_error("HD material packs require native terrain and diffuse identity");
@@ -5239,6 +5242,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             {
                 zoneOrdinal = g_nextZoneOrdinal++;
                 g_zoneOrdinals.emplace(zone, zoneOrdinal);
+                // Paint waited on a partial terrain; this zone may complete it.
+                if (g_proxy.selected && g_config.hdEnabled && g_HdPaintDeferredZones &&
+                    g_zoneOrdinals.size() > g_HdPaintDeferredZones)
+                    InstallNativeTerrainHd();
             }
             if (g_proxy.selected) return true;
 
