@@ -3978,6 +3978,66 @@
       "identity": "RTTI .?AVBZRNetLobby@@ vtable; the nickname reauth path checks the live lobby against it"
     },
     {
+      "name": "BzrNetLobbySetLobbyOwner",
+      "address": "0x0074B9F0",
+      "expected": "55 8B EC 6A FF 68 78 B7 84 00 64 A1 00 00 00 00",
+      "identity": "BZRNetLobby::SetLobbyOwner (vtable 0x89ADDC +0x6C), __thiscall(const LobbyId*, const UserId*), ret 8; sends websocket DoSetLobbyOwner via FUN_006C49F0. Lobby team commands require the live vtable slot to hold this address"
+    },
+    {
+      "name": "NetGameLobbyIsOwner",
+      "address": "0x00742CF0",
+      "expected": "55 8B EC 83 EC 24 89 4D FC 8B 4D FC 83 C1 28",
+      "identity": "CNetGameLobby::IsOwner, __thiscall; GetLobbyOwner (+0x68) of this+0x28 (current lobby id, the add ecx,0x28 here) compared with GetMyID (+0x38). Called first by AssignTeam 0x007468F8"
+    },
+    {
+      "name": "NetGameLobbyFindRecord",
+      "address": "0x007470B0",
+      "expected": "55 8B EC 6A FF 68 5B B8 85 00 64 A1 00 00 00 00",
+      "identity": "CNetGameLobby lobby-record lookup, __thiscall(const LobbyId*, bool create), ret 8; walks the std::list at this+4. Reached from FUN_0056F900 (this, this+0x28, 0) at the top of the AssignTeam wrapper 0x007467B0"
+    },
+    {
+      "name": "NetGameLobbyFindRecordIdCompare",
+      "address": "0x0074714B",
+      "expected": "8B 95 90 FE FF FF 83 C2 10",
+      "identity": "inside NetGameLobbyFindRecord: lea edx,[record+0x10] before the lobby-id compare 0x0056F780; pins the record's lobby id at +0x10"
+    },
+    {
+      "name": "NetGameLobbyAssignTeam",
+      "address": "0x007468B0",
+      "expected": "55 8B EC 6A FF 68 E3 B7 85 00 64 A1 00 00 00 00",
+      "identity": "CNetGameLobby::AssignTeam(cUser*, int team), __thiscall, ret 8; owner-only; self -> SetPlayerData team/miniid, others -> lobby chat AT~<id>~<team>~<miniid>; logs 'Assigned Player'. Called from user populate 0x0074501A and wrapper 0x007467B0"
+    },
+    {
+      "name": "NetGameLobbyAssignTeamRange",
+      "address": "0x007468E1",
+      "expected": "83 7D 0C 01 7C 06 83 7D 0C 10 7C 05",
+      "identity": "inside NetGameLobbyAssignTeam: cmp [ebp+0xC],1 / jl / cmp [ebp+0xC],0x10 / jl -- the accepted team range 1..15 the /team parser mirrors"
+    },
+    {
+      "name": "NetGameLobbyMemberListRead",
+      "address": "0x00746829",
+      "expected": "8B 4D E8 81 C1 B8 00 00 00 E8 89 70 CE FF",
+      "identity": "in the AssignTeam wrapper 0x007467B0: add ecx,0xB8 then std::list begin() -- the lobby record's cUser list at +0xB8 (element at node+8 per 0x004242F0)"
+    },
+    {
+      "name": "NetGameLobbyMemberTeamRead",
+      "address": "0x007467D5",
+      "expected": "8B 4D 08 8B 91 80 00 00 00",
+      "identity": "in the AssignTeam wrapper 0x007467B0: mov edx,[cUser+0x80] -- the member's team"
+    },
+    {
+      "name": "NetGameLobbyMemberLog",
+      "address": "0x007453DF",
+      "expected": "8B 85 48 FE FF FF 0F B7 48 28 51 8B 95 48 FE FF FF 8B 82 80 00 00 00 50 8B 8D 48 FE FF FF 83 C1 2C E8 6B A4 CD FF 50 68 20 A6 89 00",
+      "identity": "in user populate 0x00744A50: pushes cUser+0x28 (miniid, word), +0x80 (team) and c_str(+0x2C name) into 'Player %s set to Team %d and Player %d' (0x0089A620)"
+    },
+    {
+      "name": "NetGameLobbyOwnerRestore",
+      "address": "0x0074423B",
+      "expected": "83 C0 08 50 8B 55 08 83 C2 10 52 8B 85 BC FE FF FF 8B 10 8B 8D BC FE FF FF 8B 42 6C FF D0",
+      "identity": "PopulateLobbyFromData 0x00743F40 handing ownership back: pushes cUser+8 (user id) and record+0x10, then calls lobby vtable +0x6C (SetLobbyOwner) -- the argument order the /host command uses"
+    },
+    {
       "name": "TerrainZoneConstruct",
       "address": "0x007778B0",
       "expected": "55 8B EC 6A FF 68 67 E3 85 00 64 A1 00 00 00 00",
