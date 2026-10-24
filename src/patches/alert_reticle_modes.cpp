@@ -562,4 +562,10 @@ namespace BZROpenShim
             (std::max)(g_UnderAttackAlertCooldownSeconds, minSpacing);
         g_UnderAttackAlertNextAllowedTime = currentTime + nextDelay;
     }
+
+    void RaiseUnderAttackAlertFloor(float time)
+    {
+        if (time > g_UnderAttackAlertNextAllowedTime)
+            g_UnderAttackAlertNextAllowedTime = time;
+    }
 }
