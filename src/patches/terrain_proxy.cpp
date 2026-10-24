@@ -24,6 +24,7 @@
 #include "terrain_hd_texture_copy.h"
 #include "terrain_hd_material.h"
 #include "terrain_paint.h"
+#include "terrain_tess_defines.h"
 #include "frame_bridge_native_geometry.h"
 #include "frame_bridge_native_mesh.h"
 #include "frame_bridge_native_lease.h"
