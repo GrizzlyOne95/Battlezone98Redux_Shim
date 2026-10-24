@@ -70,6 +70,22 @@
       ]
     }
   },
+  "shape": [
+    {
+      "radiusMeters": 400,
+      "rangeMeters": 8,
+      "amount": 0.9,
+      "ridge": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "from": [
+        0
+      ]
+    }
+  ],
   "erosion": {
     "talus": {
       "weights": [
@@ -103,8 +119,8 @@
       "name": "Sulphur deposits",
       "detile": true,
       "repeatMeters": 18,
-      "archive": "sulphur_rock_vmijee1g_8k.zip",
-      "member": "Sulphur_Rock_vmijee1g_8K_BaseColor.jpg",
+      "archive": "desert_western_detail_sand_coarse_01_xgindh1_8k.zip",
+      "member": "Desert_Western_Detail_Sand_Coarse_01_xgindh1_8K_BaseColor.jpg",
       "matchMean": "crhd_venus_ve00sa0_d.dds",
       "heightMeters": 0.8
     },
