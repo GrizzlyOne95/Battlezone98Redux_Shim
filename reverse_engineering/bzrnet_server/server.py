@@ -281,11 +281,14 @@ class ProtocolState:
         if content.get("name"):
             lobby.metadata["name"] = str(content["name"])
         elif lobby_type == "CreateGame":
-            # The creator's client sets "name" before it has a local entry for the lobby, so that
-            # write never lands locally and it loops on "requesting missing data". Seed a
-            # placeholder in the first OnLobbyChanged; the owner's SetLobbyData replaces it.
+            # The creator's client sets "name" and "GameVersion" before it has a local entry for
+            # the lobby, so those writes never land locally. OnLobbyDataUpdate only re-populates a
+            # lobby that has a GameVersion, so without both it sits on "gathering information".
+            # Seed them in the first OnLobbyChanged; the owner's SetLobbyData replaces them.
             privacy = "priv" if lobby.is_private else "pub"
             lobby.metadata["name"] = f"~game~{privacy}~~{client.name}"
+            if client.client_version:
+                lobby.metadata["GameVersion"] = client.client_version
         self.lobbies[lobby_id] = lobby
         client.lobby_id = lobby_id
         deliveries.append(self.one(client.connection, "OnLobbyCreated", {"success": True, "id": lobby_id}))
