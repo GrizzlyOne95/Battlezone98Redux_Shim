@@ -5182,7 +5182,7 @@ namespace BZROpenShim
             // pass-through for everything that is not a person.
             const bool trace = g_TraceChunkRender || g_TraceChunkEffectRuntime;
             const bool gibs = IsSkinnedGibsEnabled();
-            if ((!trace && !gibs) || g_ChunkEffectFragmentHooksInstalled || g_IsSteamExe)
+            if ((!trace && !gibs) || g_ChunkEffectFragmentHooksInstalled)
                 return;
             if (trace && g_ChunkEffectPartialFragmentAddr == 0)
                 g_ChunkEffectPartialFragmentAddr = HookEngine::EngineAddress("ChunkEffectPartialFragment");

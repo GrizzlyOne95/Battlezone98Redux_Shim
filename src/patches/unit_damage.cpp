@@ -74,7 +74,7 @@ namespace
     {
         HookEngine::FrameThreadSitesScope frameSites;
         if (g_Resume) return true;
-        if (BZROpenShim::g_IsSteamExe || !BZROpenShim::IsCompatibleGameVersion()) return false;
+        if (!BZROpenShim::IsCompatibleGameVersion()) return false;
         const auto site = HookEngine::ResolveNamedAddress("Craft::EffectiveDamageResistanceSite");
         g_GetHandle = HookEngine::ResolveNamedAddress("GameObject::GetHandle");
         if (!site || !g_GetHandle) return false;

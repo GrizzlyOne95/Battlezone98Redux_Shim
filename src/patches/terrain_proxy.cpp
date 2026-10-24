@@ -5792,13 +5792,6 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
 
         DWORD WINAPI WorkerProc(void*)
         {
-            // Validated on GOG only; Steam stays stock as it always has.
-            if (g_IsSteamExe)
-            {
-                LogShimA(LogLevel::Warn, "terrain-proxy",
-                    "[TERRAIN-PROXY] GOG executable only; Phase 2 unavailable on Steam");
-                return 0;
-            }
             if (!TerrainProxyAddressesBound())
                 return 0;
             LogShimA(LogLevel::Info, "terrain-proxy", "[TERRAIN-PROXY] engine addresses bound");

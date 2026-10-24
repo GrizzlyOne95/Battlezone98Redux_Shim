@@ -480,13 +480,11 @@ namespace BZROpenShim
                 g_MissionSeamFailureLogged = true;
                 return;
             }
-            // GOG-only absolute addresses, and the stolen prologue carries an
-            // absolute operand, so require the pinned image at its fixed base.
-            if (g_IsSteamExe ||
-                reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) != 0x00400000)
+            // The stolen prologue carries an absolute operand, so require the
+            // image at its fixed base (Steam and GOG both load there).
+            if (reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) != 0x00400000)
             {
-                Log(L"[MISSION] Mission transition seam unavailable (%hs)\n",
-                    g_IsSteamExe ? "Steam executable" : "executable relocated");
+                Log(L"[MISSION] Mission transition seam unavailable (executable relocated)\n");
                 g_MissionSeamFailureLogged = true;
                 return;
             }

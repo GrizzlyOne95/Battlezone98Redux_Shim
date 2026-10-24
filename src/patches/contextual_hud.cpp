@@ -655,14 +655,14 @@ namespace BZROpenShim::ContextualHud
         g_read = true;
         g_resources.store(settings.groups[1].enabled || settings.groups[2].enabled,std::memory_order_relaxed);
         if (!settings.Active()) { RefreshScrapPilotHudLayout(); return true; }
-        if (g_IsSteamExe || !IsCompatibleGameVersion()) return false;
+        if (!IsCompatibleGameVersion()) return false;
         const bool installed = InstallForSettings(settings);
         RefreshScrapPilotHudLayout();
         return installed;
     }
     const char* UnavailableReason()
     {
-        return g_IsSteamExe || !IsCompatibleGameVersion() ? "Unavailable: HUD fading currently requires qualified GOG 2.2.301." : nullptr;
+        return !IsCompatibleGameVersion() ? "Unavailable: HUD fading requires Battlezone 98 Redux 2.2.301." : nullptr;
     }
     void Tick()
     {
@@ -671,7 +671,7 @@ namespace BZROpenShim::ContextualHud
         if (!g_read) { ReloadConfig(); return; }
         Settings settings;
         AcquireSRWLockShared(&g_lock); settings = g_settings; ReleaseSRWLockShared(&g_lock);
-        if (!settings.Active() || g_IsSteamExe || !IsCompatibleGameVersion()) return;
+        if (!settings.Active() || !IsCompatibleGameVersion()) return;
         const uint64_t now = GetTickCount64();
         if (!g_ready.load(std::memory_order_acquire) ||
             (settings.groups[kCommands].enabled && !g_commandsReady.load(std::memory_order_acquire)) ||
