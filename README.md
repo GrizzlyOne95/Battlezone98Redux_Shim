@@ -1,588 +1,134 @@
 # BZR Open Shim
 
-An open-source runtime patch and compatibility layer for **Battlezone 98 Redux v2.2.301**.
+An open-source native patch and compatibility layer for **Battlezone 98 Redux 2.2.301**. OpenShim fixes engine and gameplay bugs, restores selected Battlezone 1.5 behavior, improves multiplayer, and exposes functionality that normal Lua/ODF/Workshop mods cannot reach.
 
-OpenShim provides engine-level bug fixes, quality-of-life improvements, restored legacy behavior, multiplayer fixes, modding extensions, and opt-in native features that cannot be implemented through normal Redux modding alone.
+<img src="https://github.com/user-attachments/assets/7da1eab5-50d1-417a-9d76-4004dcd11300" width="960" alt="Battlezone 98 Redux with OpenShim" />
 
-<img width="2172" height="724" alt="1cfef10a-e840-44f1-9a8e-fb67ca4ae9da" src="https://github.com/user-attachments/assets/7da1eab5-50d1-417a-9d76-4004dcd11300" />
+**Get the current release:** [OpenShimSetup.exe](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/latest/download/OpenShimSetup.exe) · [Releases and checksums](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/latest)
 
-Supported executables:
+> **Release vs. development:** `main` changes frequently and may contain features or defaults that have not been released. The files and `openshim.ini` bundled with a release are authoritative for that release. Other Redux versions are not assumed compatible.
 
-- **GOG:** `battlezone98redux.exe`
-- **Steam:** `battlezone98redux.exe`
+## Install
 
-Windows/GOG, Windows/Steam, Linux/Steam via Proton, and Linux/GOG through a
-compatible Wine/Proton prefix are maintained together. See the shared
-[`BZR platform and distribution compatibility policy`](Docs/BZR_PLATFORM_COMPATIBILITY.md).
+### Windows (Steam or GOG)
 
+1. Download and run [OpenShimSetup.exe](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/latest/download/OpenShimSetup.exe).
+2. Select an install folder (Steam, GOG, or a custom game path) and an action:
+   - **Install:** deploy the version embedded in the setup executable.
+   - **Repair:** restore missing/changed files at the *same* installed version, preserving existing `openshim.ini` and `net.ini`.
+   - **Update:** retrieve the latest published release; refuses downgrades. Use Repair for damaged files already at the latest version.
+   - **Uninstall:** remove OpenShim-owned files and backups; keep player configuration and logs by default. An unchecked cleanup option can also remove OpenShim settings, logs, dumps, and uploader data.
+3. Close the game before any of these actions. Start Redux normally afterward; no Windows launch option is needed.
 
-## Installation
+**Note:** Normal Install/Update can replace `net.ini` after backing up the old file; Repair preserves an existing one. The full cleanup option removes current-user OpenShim data shared across installations, but retains shared `net.ini`, `BZLogger.txt`, and unrelated mods.
 
-Developer prototype: [World Builder source-folder saves](Docs/BZN_SAVE_SOURCE.md)
-is opt-in and awaiting editor qualification; it is not enabled by default.
+### Linux (Steam/Proton)
 
-### Windows
-
-[**Download OpenShimSetup.exe**](https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/releases/latest/download/OpenShimSetup.exe)
-and double-click it. The setup menu now offers:
-
-- **Install** — install the version bundled inside the executable (or the
-  latest published release for a development build).
-- **Repair** — restore missing or changed OpenShim files from the bundled
-  version; refuses to substitute a different version. Unchanged files are not
-  backed up again. Existing `openshim.ini`, `net.ini`, and unrelated mod files
-  are preserved.
-- **Update** — download and verify the **latest published release**, even
-  when the executable has an older release embedded. If that version is already
-  installed, no files change; downgrades are refused. For damaged files at the
-  same version, choose Repair instead.
-- **Uninstall** — remove OpenShim's deployed files and backups. Player
-  configuration (`openshim.ini`), network settings (`net.ini`) and logs are
-  retained by default. A separate **unchecked checkbox** in the confirmation
-  dialog, *Also remove OpenShim settings, logs, crash dumps, and uploader data*,
-  opts into a more complete cleanup. This removes OpenShim-owned logs and
-  minidumps from the selected game folder(s), player settings/backups, and the
-  current Windows user's dedicated `%LOCALAPPDATA%\openshim` and
-  `%APPDATA%\openshim` folders (including pending uploader bundles and
-  saved webhook configuration). It **does not** remove shared `net.ini`,
-  `BZLogger.txt`, other game logs, or unrelated mods. If Steam still has the
-  OpenShim uploader launch option configured, remove that launch option
-  manually; the installer cannot modify it. The user-data folders are shared
-  across any OpenShim installations for that Windows account.
-
-It finds Steam and GOG installs (including custom GOG locations), asks which
-one to change, and lets you browse for another game folder. You can also drag
-a game folder onto the executable. **Close the game before running any action.**
-No Windows launch options are needed after installation.
-
-For command-line or scripted use, supply `--install`, `--repair`,
-`--update` or `--uninstall`. To opt into full cleanup without a GUI, use
-`OpenShimSetup.exe --uninstall --purge-leftovers --quiet --no-pause`.
-The standalone PowerShell uninstaller accepts `OPENSHIM_PURGE_LEFTOVERS=1`
-and `OPENSHIM_DRY_RUN=1` to inspect the deletion plan beforehand.
-`--quiet` skips interactive menus and defaults
-to Install when no action is specified; `--no-pause` also avoids waiting for
-Enter on exit. `OPENSHIM_GAME_PATH` limits the operation to one game directory.
-
-Windows may display a SmartScreen warning because OpenShimSetup.exe is not
-code-signed yet; inspect the release and its hashes before choosing to run it.
-
-#### Advanced: PowerShell one-liner
-
-Same installer, no download. Press Start, type `powershell`, Enter — the blue
-window, not Command Prompt. Paste this in:
-
-```powershell
-irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1 | iex
-```
-
-That's it. No launch options needed — just start the game.
-
-<details>
-<summary>If the command fails with an "empty string" error</summary>
-
-`Cannot bind argument to parameter 'Command'` means `irm` downloaded nothing —
-something on your machine emptied the response (an ad-blocker or corporate
-DNS blackholing `raw.githubusercontent.com`, or antivirus HTTPS inspection).
-Download to a file first to see the real failure:
-
-```powershell
-$dst = "$env:TEMP\openshim_install.ps1"
-Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_windows.ps1' -OutFile $dst
-(Get-Item $dst).Length   # expect a few thousand bytes, not 0
-powershell -NoProfile -ExecutionPolicy Bypass -File $dst
-```
-</details>
-
-<details>
-<summary>If Defender flags <code>winmm.dll</code></summary>
-
-A known false positive — unsigned DLL proxies that hook the game are exactly
-the shape AV heuristics flag. Restore it from Protection History and add an
-exception for that one file. Don't disable AV globally.
-</details>
-
-Uninstall:
-
-```powershell
-irm https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_windows.ps1 | iex
-```
-
-That removes everything the installer deployed and keeps your `openshim.ini`, `net.ini` and logs. Run `$env:OPENSHIM_PURGE_CONFIG=1` first to remove `openshim.ini` as well, or `$env:OPENSHIM_DRY_RUN=1` to see the plan without deleting anything.
-
-### Linux (Proton)
-
-Native Steam or Flatpak — paste in a terminal:
+For native Steam or Flatpak Steam:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --native
 ```
 
-Snap Steam — paste in a terminal:
+For Snap Steam:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/install_linux.sh | bash -s -- --snap
 ```
 
-Then set launch options once (Steam → Battlezone 98 Redux → Properties → Launch Options).
-
-Native Steam, Flatpak, or Snap:
+Set Steam's **Launch Options** to:
 
 ```text
 WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" %command%
 ```
 
-Quotes are required; a bare `;` splits the command. Drop `dsound=n,b` if you are not also using the dsound netcode proxy.
+Keep the quotes: the semicolon otherwise splits the shell command. Remove `;dsound=n,b` if you do not use the separate `dsound` netcode proxy. Linux/GOG under a compatible Wine/Proton prefix is also in the support matrix, but needs an explicit game path; see [Installation and troubleshooting](Docs/INSTALLATION.md).
 
-If you have both Steam flavours, paste both install commands and set the launch options in each Steam you actually launch from.
+The installer downloads and verifies a matched release suite. **The same Win32 binaries run through Proton/Wine; OpenShim does not have a native Linux `.so` build.**
 
-Uninstall, with the same flavour flag you installed with:
+For Windows PowerShell alternatives, uninstall commands, Linux cleanup, offline setup, security notes, and troubleshooting, see [Installation and troubleshooting](Docs/INSTALLATION.md).
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_linux.sh | bash -s -- --native
-```
+## Compatibility and loading
 
-Then clear the launch options. That removes everything the installer deployed and keeps `openshim.ini`, `net.ini` and logs (`--purge-config` removes `openshim.ini` as well; `--dry-run` shows the plan without deleting anything).
+| Host | Distribution | Executable / runtime |
+| --- | --- | --- |
+| Windows | Steam | `battlezone98redux.exe` (Win32) |
+| Windows | GOG | `BZR.exe` (the installer also detects `battlezone98redux.exe`) |
+| Linux | Steam | Windows game/DLLs through Proton (native, Flatpak, or Snap Steam) |
+| Linux | GOG | Windows game/DLLs through a compatible Wine/Proton prefix |
 
-## Test crew: session logging (opt-in)
+See the [shared platform compatibility policy](Docs/BZR_PLATFORM_COMPATIBILITY.md). Support policy is not proof that every current development commit has passed every runtime smoke test.
 
-**Before anything else:** playing Battlezone 98 multiplayer at all means
-**anyone in the game can see your public IP address.** That is how the
-engine's peer-to-peer networking works, it is true with or without OpenShim,
-and nothing here changes it. Session logging does not create that exposure —
-but it does write those addresses down, which is why bundles only ever go to
-a private channel.
-
-Logging is off unless you opt in. Members of the test crew can have each
-session's logs bundled and uploaded automatically to the private channel:
-
-1. Install with the pinned command from the private Discord channel (it's
-   the normal install command with the webhook included). That command is
-   deliberately not in this repository and never will be: GitHub's secret
-   scanning revokes Discord webhooks on push, so committing it would break
-   logging for the whole test crew. If you are not opting in to logging,
-   use the plain install commands above instead.
-2. Use the wrapper launch option instead of the plain one.
-
-Windows:
+OpenShim does **not** modify the game's executable on disk. Its load chain is:
 
 ```text
-cmd /c ""%LOCALAPPDATA%\openshim\openshim_wrap.bat" %command%"
+Redux executable
+  -> winmm.dll                 (Windows multimedia forwarding / bootstrap)
+  -> bzloader.dll              (plugin host)
+  -> plugins/openshim.dll      (runtime patches and hooks)
+       + scripts/patches.json  (version-specific patch definitions)
 ```
 
-Linux — native or Flatpak Steam:
-
-```text
-WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" "${XDG_DATA_HOME:-$HOME/.local/share}/openshim/openshim_wrap.sh" %command%
-```
-
-Linux — Snap Steam:
+These files form a matched set; a lone `winmm.dll` does not provide OpenShim's runtime. The project is independently developed and does not require any closed-source patch DLL.
 
-```text
-WINEDLLOVERRIDES="winmm=n,b;dsound=n,b" "$SNAP_USER_COMMON/.local/share/openshim/openshim_wrap.sh" %command%
-```
+## What it changes
 
-The installer prints the right one for your machine on its last lines — copy
-that. Don't guess between them: the wrapper is the launch target, so a path
-that doesn't resolve inside the sandbox kills the launch instead of starting
-the game.
+The core patch layer and most player-facing features are implemented. Some are configurable, and some enabled fixes are restricted to single-player to avoid multiplayer simulation differences.
 
-A Windows console window stays open while the game runs. That is the wrapper
-waiting to bundle on exit. Closing it kills the upload, not the game.
-
-No wrapper in the launch options = nothing ever uploads. Bundles contain
-every peer's public IP, which is why the destination is a private channel.
-Details: [`upload/README.md`](upload/README.md).
-
-### Snap Steam
-
-Snap needs its own line because snapd remaps `HOME` into
-`~/snap/steam/common/` and its home interface hides the host's
-dot-directories, so the `XDG_DATA_HOME` path above can never exist inside
-the sandbox. `$SNAP_USER_COMMON` is guaranteed by snapd and points at the
-mirrored copy the installer places there.
-
-The Steam snap's runtime also ships neither `curl` nor `python3`, so nothing
-inside the sandbox can send a bundle. Sessions are parked in an outbox and a
-host-side systemd user unit drains them — the installer enables
-`openshim-retry.path` (fires within seconds of the game exiting) plus a
-10-minute timer as a backstop. Nothing to do; a parked bundle is not a lost
-one. If the installer says it couldn't enable those units, send by hand:
-
-```bash
-"$HOME/snap/steam/common/.local/share/openshim/openshim_wrap.sh" --retry
-```
-
-### Standalone (DLL-only) Operation
-
-OpenShim is intentionally supported as a **standalone DLL-only install** on top of a stock Battlezone 98 Redux 2.2.301 installation. The Campaign Reimagined / OpenShim asset pack (Steam Workshop item) is **not required** for native and networking fixes.
-
-```text
-OpenShim DLL only
-    │
-    ├── native engine fixes
-    ├── gameplay fixes
-    ├── multiplayer / network fixes
-    ├── native UI / configuration
-    ├── diagnostics
-    └── asset-backed features → safely unavailable
+| Area | Examples |
+| --- | --- |
+| **Engine and gameplay** | AI/build-state fixes (APC, tug, constructor, howitzer, etc.); mission load/restart and briefing fixes; resource/material collision guards; DX11 device-loss recovery; sound-channel capacity; Battlezone 1.5 jump-sniping restoration |
+| **Player options** | Native OpenShim Options/keybinding screens; raw mouse input; headlights; smart reticles and targeted/targetless weapon convergence; optional HUD, voice, turbo, and turret behavior |
+| **Multiplayer** | Map-list preservation; host controls and persistent bans; vehicle flags and lobby selection; nickname/network preferences; socket/buffer tuning; guarded reliable-send backlog fix and route diagnostics |
+| **Modding** | Lua/ExtraUtilities bridge; gameplay-state and music controls; mission briefing media overrides; Ogre integration; native death-chunk generation; experimental producer build-menu extensions |
 
-OpenShim DLL + compatible assets
-    │
-    └── full supported feature set
-```
-
-* The binaries have no hard dependency on Workshop content. The DLL-only layout is the whole load chain without the asset pack: `winmm.dll`, `bzloader.dll`, `plugins\openshim.dll` and `scripts\patches.json` (plus `openshim.ini`) in a stock install. That is a deliberately supported degraded configuration. `winmm.dll` on its own is not: without `bzloader.dll` and the plugin the game starts with no OpenShim at all, and without a matching `patches.json` the address-dependent patches stand down.
-* Asset-dependent features — such as `Death Chunk Meshes` (`chunkMeshes`), Enhanced renderer resources (`openshim/renderer/enhanced`), and other visual payloads — require the separate asset package. When those resources are absent, OpenShim suppresses the dependent feature, emits a single concise diagnostic, and continues running. No crash, no invalid Ogre/resource access, and no repeated per-frame load attempts occur.
-* A copied `openshim.ini` that enables an asset-backed feature (for example `ChunkMeshes=1`) cannot bypass this protection: the feature also requires verified asset availability and remains unavailable until compatible assets are detected.
-* The native **OpenShim Options** screens (Options → OpenShim Options) report asset-pack status directly on the hub:
+An optional `ChunkMeshes` feature can generate destruction pieces directly from the source model and skeleton; **it does not require a separate chunk asset pack**. Existing authored assets remain fallback inputs for unsupported models. See [Native chunk meshes](Docs/NATIVE_CHUNK_MESHES.md).
 
-```text
-OpenShim Status
+OpenShim also supports installation without the Campaign Reimagined/Workshop asset pack. Native fixes and networking remain available; **Enhanced renderer resources and other asset-backed effects are enabled only when their required files are detected**. The settings UI reports missing or incompatible resources. Asset-pack installation is separate from the required DLL/patch load chain.
 
-Runtime:       Active
-Version:      5
-Game:         Steam/GOG 2.2.301
+## Defaults, configuration, and current limitations
 
-Asset Pack:    Detected
-```
+Open **Options → OpenShim Options** in game, or edit the installed `openshim.ini` and restart where a setting requires it. `openshim.ini.example` is the detailed reference for allowed values, compatibility variables, and live/restart behavior. `net.ini` holds lower-level network values.
 
-```text
-Asset Pack:    NOT DETECTED
-               Asset-dependent features are unavailable.
-```
+- Confirmed and qualified fixes may default **on**; optional and experimental features are not universally off. **Check the exact preset shipped with your release.** Current `main` selects DX11 Enhanced, enables terrain micro-relief, and enables HD-terrain manifest auto-discovery; missing HD assets degrade to stock behavior. A released build can have different defaults.
+- `RawMouseInput = 1` bypasses the legacy mouse-message smoothing/acceleration path; restart required.
+- `[Network] GovernorTuning = OpenShim` retains measured governor/host auto-kick tuning. Use `Stock` for strict stock-policy parity; `net.ini` remains the granular source for low-level values.
+- **World Builder source-folder saves are on by default** (`EditorSaveToSourceFolder = 1`) and show a destination/overwrite confirmation with Cancel as the default. Set `0` for stock root-addon saves. Full editor round-trip/platform qualification is still pending; see [feature status](Docs/BZN_SAVE_SOURCE.md).
 
-```text
-Asset Pack:    VERSION MISMATCH
-               Installed: 999
-               Expected:  1
-```
+Larger active development areas include whole-map HD terrain replacement, production-menu extensions, remaining Battlezone 1.5 multiplayer UI, shutdown/lifetime testing, and opt-in UDP packet-reordering experiments. Their presence in the source tree is **not** a promise that they are completed or enabled in a published release.
 
-Rows whose resources are absent stay visible but show `Unavailable` and cannot be toggled: today that is `DX11 FXAA` and `DX11 Local Lights` (Video) without the Enhanced renderer resources. `Death Chunk Meshes` builds its pieces from the model itself and needs no pack. The hub's info box always reflects the current asset-pack state so a DLL-only install is immediately recognizable.
+Native patch sites validate supported executable identity and expected bytes and are designed to skip a mismatched site rather than patch blindly. That safeguard is not a guarantee of universal crash-free behavior. Refer to [release qualification](Docs/RELEASE_QUALIFICATION.md) for the required Steam/GOG, multiplayer, and lifecycle smoke tests.
 
-Partial or stale packs (for example a stale `resources.version` or a manifest that claims `ChunkMeshes=1` while the mesh files are missing) degrade the affected capability only; unrelated native fixes and netcode continue to operate.
+## Opt-in test-crew logging
 
-After the first installation through Campaign Reimagined's Setup / Repair mission,
-**OpenShim Updates** (OpenShim Options → System) downloads and verifies the Workshop
-bundle and performs the same OpenShim file repair: the bootstrap, loader, runtime
-plugin, network defaults, patch definitions, missing player configuration, and
-asset-pack manifest. Existing `openshim.ini` settings are preserved. Support-file
-repairs take effect immediately; native suite replacements require a complete
-game exit and restart. A newer installed OpenShim is never downgraded. This
-expanded repair behavior requires a release newer than 1.0.0.34.
+Ordinary installs do **not** automatically upload session logs. Testers can explicitly install the private-channel logging configuration and launch through a separate wrapper. Multiplayer peers' public IP addresses can appear in those bundles because Redux uses peer-to-peer networking; share bundles only through a trusted private channel.
 
-See `resources/openshim/OpenShimAssets.ini` (shipped with the asset pack) and `include/openshim_assets.h` for the capability / manifest design. The detection itself validates the deployed filesystem via the same resource-resolution mechanism the runtime uses (including `addon`, `mods`, `packaged_mods`, and `steamapps/workshop/content/301650` probing), not Workshop subscription state, so it remains compatible with Steam, GOG, Proton, and manual installs.
+On Windows, configuring the uploader may also cause its installer to **attempt a Microsoft Defender exclusion for the current user's dedicated OpenShim uploader folder**. Review that behavior before opting in. The wrapper launch option is the upload opt-in, and any leftover Steam launch option must be removed manually after uninstalling.
 
-## What is OpenShim?
+Full setup, privacy, and platform-specific wrapper instructions: [Automatic session upload](upload/README.md).
 
-OpenShim loads through a small `winmm.dll` proxy that Battlezone 98 Redux picks up automatically when it starts.
+## Build and contribute
 
-The proxy forwards the normal Windows Multimedia API calls to the real system `winmm.dll`, then loads the BZLoader plugin host (`bzloader.dll`), which loads the OpenShim runtime (`plugins\openshim.dll`) inside the game process.
+- **Windows:** Visual Studio 2022+ with C++ tools. Run `./setup-dev.ps1` to fetch pinned Ogre 1.10 reference headers, open `BZROpenShim.sln`, and build **Release | Win32**. Deploy all three DLLs with matching `scripts/patches.json`; Redux remains a 32-bit executable.
+- **Linux host tests:** run `./setup-dev.sh`, then `cmake -S tests -B tests/build`, `cmake --build tests/build -j`, and `ctest --test-dir tests/build --output-on-failure`. Linux does not build the full Windows proxy/runtime.
+- The runtime integrates with the game's loaded Ogre module; it does not ship a replacement `OgreMain.dll`. The game's Ogre ABI differs in places from stock Ogre 1.10, so runtime hooks require actual Redux validation.
 
-This allows the project to safely hook or patch native Redux behavior at runtime without modifying the game executable on disk.
+CI exercises the engine-independent suite, INI/config and network safety checks, shader compilation, and Win32 build/package checks. These automated gates complement, rather than replace, real-game release qualification. Detailed reverse-engineering research, diagnostic scripts, and ABI probes live in `Docs/` and `reverse_engineering/`.
 
-```text
-Battlezone 98 Redux
-        │
-        ▼
-    winmm.dll  (bootstrap proxy)
-        │
-        ├── Forwards WinMM calls to Windows
-        │
-        └── bzloader.dll  (plugin host)
-                │
-                └── plugins\openshim.dll  (runtime)
-                        │
-                        ├── Detects Steam/GOG build
-                        ├── Validates expected game code (scripts\patches.json)
-                        ├── Installs native hooks
-                        ├── Applies runtime fixes
-                        └── Loads OpenShim configuration
-```
+## Security, scope, and license
 
-OpenShim is a clean-room implementation and runs independently of any closed-source patch DLL.
-
-## Project Status
-
-OpenShim is mature enough that most of the repository should **not** be read as unfinished end-user functionality. Much of its size is reverse-engineering evidence, validation tooling, diagnostics, compatibility infrastructure, and records of experiments used to arrive at the current implementations.
-
-### Working functionality
-
-The main runtime patch layer and most user-facing features are implemented and usable. This includes the engine/gameplay fixes described below plus features such as:
-
-- native legacy death-chunk rendering using `chunkMeshes`
-- native input/options UI extensions
-- multiplayer host controls and persistent bans
-- multiplayer vehicle flags and flag-selection UI
-- native nickname and network-preference UI
-- Lua/ExtraUtilities bridge functionality
-- mission briefing and media compatibility fixes
-- Ogre/resource compatibility fixes and runtime integration
-
-Some working features are still opt-in because they intentionally change stock behavior. **Opt-in does not automatically mean experimental.**
-
-### Active development
-
-The remaining larger feature work is concentrated in a few areas:
-
-- **HD terrain replacement:** the semantic terrain path, mission lifecycle, shader specialization, and initial texture-array path exist; whole-map HD replacement and the remaining material/lifetime validation are still in progress.
-- **Producer build-menu extensions:** native recursive build-menu behavior has been reverse engineered and is being exposed as an opt-in nested-menu path for testing before it is promoted to a supported modding extension.
-- **Battlezone 1.5 multiplayer UI restoration:** flag selection and nickname/network controls are implemented; game-option controls and persistent profile/player-card functionality remain.
-- **Shutdown/lifetime validation:** renderer and Ogre ownership fixes exist, but normal-exit regression coverage and loader-lock-safe shutdown remain completion work.
-- **UDP packet reordering:** retained as an opt-in networking experiment/diagnostic until its long-term design is settled.
-
-Developer probes, packet capture, renderer diagnostics, ABI tests, reverse-engineering scripts, and similar tooling are intentionally not part of the normal user-facing feature set.
-
-## What does it do?
-
-OpenShim is primarily intended to fix or extend parts of Redux that are inaccessible to Lua, ODFs, shaders, or normal Workshop mods.
-
-Major areas include:
-
-### Engine & Gameplay Fixes
-
-Native fixes and restorations for Redux behavior, including:
-
-- multiplayer map-list position preservation
-- constructor/build-state cleanup
-- APC, tug, howitzer, minelayer, and other AI/gameplay fixes
-- mission restart/load behavior improvements
-- mission briefing scrolling fixes
-- Ogre resource/material collision handling
-- legacy jump-sniping behavior
-- engine light and visual-state fixes
-- increased sound-channel capacity
-- restored legacy death-chunk rendering
-- DX11 device-loss recovery: the lost device is recreated after the GPU settles and vertex/index buffers are restored in place
-
-### Global Gameplay Improvements
-
-Optional improvements can be configured through:
-
-```text
-openshim.ini
-```
-
-including:
-
-- smart reticle range
-- weapon convergence on explicitly targeted craft, plus targetless smart-reticle convergence
-- improved scavenger targeting
-- turret aim-pitch limits
-- turbo behavior
-- unit voice-feedback policy
-- player and AI headlights
-- scrap/pilot HUD behavior
-- target-reticle behavior
-- sound-channel limits
-- native input and options UI extensions
-
-Single-player-specific patches are automatically gated from multiplayer where required.
-
-### Multiplayer & Networking
-
-OpenShim also contains multiplayer fixes and diagnostic tooling, including:
-
-- host ban controls and persistent ban lists
-- multiplayer vehicle data fixes
-- multiplayer vehicle flag support and flag selection
-- native nickname and network-preference controls
-- socket and buffer tuning
-- network route diagnostics
-- optional packet/session capture tools
-- guarded reliable-send backlog fix for lag in native 3+ player games
-- opt-in UDP packet-reorder experimentation
-
-Diagnostics and experimental networking behavior are disabled by default unless explicitly enabled.
-
-### Modding Extensions
-
-OpenShim exposes engine functionality that normal Redux mods cannot directly access.
-
-Examples include:
-
-- mission briefing asset overrides
-- native configuration shared across campaigns and Instant Action
-- Lua/ExtraUtilities bridge functions
-- music-control bridge support
-- native gameplay-state access for EXU
-- runtime Ogre integration
-- legacy `chunkMeshes` rendering support
-- ongoing native producer build-menu extensions
-
-When EXU and OpenShim expose the same feature, OpenShim can provide the native implementation while EXU provides the Lua-facing API.
-
-## Configuration
-
-Normal player defaults are shipped in:
-
-```text
-openshim.ini
-```
-
-That file contains every first-class OpenShim setting with conservative player-oriented values. Confirmed Redux engine defects under `[Fixes]` are enabled by default and can be individually disabled for strict parity or regression isolation. Optional enhancements, UI replacements, autosave, diagnostics, and single-player behavior changes remain opt-in.
-
-`[Network] GovernorTuning = OpenShim` is an intentional compatibility exception to the otherwise stock-oriented preset: it preserves OpenShim's already-shipped measured bandwidth-governor and host auto-kick tuning. Set it to `Stock` for strict mixed-client parity; `net.ini` remains the granular authority for low-level network values.
-
-To disable the legacy mouse path's smoothing/Windows acceleration, set `[General] RawMouseInput = 1` and restart the game, or use **Raw Mouse Input** under OpenShim Options → Controls and restart.
-
-The exhaustive technical reference remains:
-
-```text
-openshim.ini.example
-```
-
-Use the example when you need accepted values, aliases, ranges, restart/live-apply behavior, implementation notes, or legacy `OPENSHIM_*` / `BZR_*` compatibility variables. It is a reference, not the recommended player preset.
-
-Set the environment variable `OPENSHIM_DISABLE_D3D11_BUFFER_RESTORE` to disable the in-place DX11 buffer restore after a device loss (logged under `[DX11 Buffers]`).
-
-Networking-specific low-level settings are available through:
-
-```text
-net.ini
-```
-
-See the configuration files and `Docs/` / `reverse_engineering/` documentation for detailed options and validation notes.
-
-## Safety & Compatibility
-
-OpenShim is designed to **fail safely**.
-
-Before modifying native game code, hooks validate the executable, runtime state, and expected machine-code bytes. If a supported patch site does not match what OpenShim expects, that patch is skipped rather than blindly modifying memory.
-
-Steam and GOG differences are handled separately where necessary.
-
-The current target is:
-
-```text
-Battlezone 98 Redux 2.2.301
-```
-
-Other game versions should not be assumed compatible.
-
-## Development & Diagnostics
-
-The repository contains substantial reverse-engineering and validation material alongside the runtime patch itself. This is intentional: native hooks depend on exact executable behavior, ABI layout, ownership rules, and patch-site validation.
-
-Examples include:
-
-- renderer/Ogre diagnostics and profiling
-- terrain semantic/parity validation
-- multiplayer packet/session capture and route diagnostics
-- UI ABI probes and Battlezone 1.5 UI recovery tools
-- producer/build-menu reverse engineering
-- executable address, signature, and lifecycle research
-
-These tools may be incomplete, highly specialized, or development-only even when the runtime feature they helped produce is already working.
-
-Detailed research, addresses, traces, validation results, and test procedures belong under:
-
-```text
-Docs/
-reverse_engineering/
-```
-
-rather than being treated as the public feature list.
-
-## Building
-
-Requirements:
-
-- Visual Studio 2022 or newer
-- C++ development tools
-- Git
-- Win32/x86 target
-
-Fetch the pinned Ogre 1.10.0 reference headers once after cloning:
-
-```powershell
-.\setup-dev.ps1
-```
-
-On Linux, the same pinned headers are fetched with:
-
-```bash
-./setup-dev.sh
-```
-
-**Linux hosts build and test the engine-independent suite only.** The full
-`winmm.dll` proxy must be built as **Release | Win32** on Windows (MSVC). There
-is no supported MinGW cross-compile of the complete shim yet. Proton install
-steps are under [Installation](#linux--proton).
-
-```bash
-cmake -S tests -B tests/build
-cmake --build tests/build -j
-ctest --test-dir tests/build --output-on-failure
-```
-
-Open:
-
-```text
-BZROpenShim.sln
-```
-
-Build:
-
-```text
-Release | Win32
-```
-
-Output (all three ship together, with `scripts\patches.json`; use
-`scripts\Deploy-OpenShim.ps1` to copy the whole chain into a test install):
-
-```text
-bin\Release\winmm.dll
-bin\Release\bzloader.dll
-bin\Release\plugins\openshim.dll
-```
-
-Redux is a 32-bit application, so OpenShim must also be built as **32-bit**.
-
-The current renderer diagnostics compile against these reference declarations. OpenShim does **not** build or link a replacement `OgreMain.dll`; runtime integration continues to target the game's already-loaded Ogre module. The shipped BZR Ogre binary has known ABI differences from pristine upstream 1.10.0, so runtime-facing hooks must still validate the actual BZR DLL.
-
-## Release Qualification
-
-Normal PR/main CI runs the network safety baseline, Ogre profiler tests, INI/config tests, the complete engine-independent CTest suite, DX11 Enhanced FXAA shader compilation, and the Release | Win32 build.
-
-Public releases must additionally qualify the exact frozen artifacts on both supported storefronts and through the multiplayer/lifecycle smoke matrix in [`Docs/RELEASE_QUALIFICATION.md`](Docs/RELEASE_QUALIFICATION.md). Do not combine a DLL, patch table, or configuration from different commits/tags in a Workshop or standalone package.
-
-## Project Scope
-
-OpenShim is not a replacement game engine and does not attempt to rewrite Battlezone 98 Redux.
-
-Its purpose is to provide a maintainable native patch layer for targeted fixes and extensions where the stock game does not expose enough functionality through its normal modding interfaces.
-
-Where possible, features remain:
-
-- narrowly scoped
-- configurable
-- backwards compatible
-- signature validated
-- disabled when unsafe
-- compatible with normal Redux mods and EXU
-
-## License
-
-MIT — see [LICENSE](LICENSE).
+- OpenShim is an unofficial community extension, not a replacement game engine. It requires a legitimate Battlezone 98 Redux installation and is not affiliated with the game's publisher or original developers.
+- The release binaries are currently unsigned. SmartScreen or antivirus may warn about native proxy/hooking DLLs; **verify the release and SHA-256 hashes before deciding whether to allow a flagged file**. Do not disable antivirus globally.
+- Project-owned code is licensed under **MIT**; see [LICENSE](LICENSE). This does not grant rights to the proprietary game or third-party assets.
 
 ## Credits
 
-- **GrizzlyOne95** — primary implementation, reverse engineering, maintenance, design
-- **Piercing** — multiplayer testing, network investigation, technical collaboration, acting as partner developer
-- **Kingfurykiller** - multiplayer/singleplayer testing, bug squashing, feedback, technical assistance and collaboration
-- **VTrider** — technical assistance and collaboration
-- **Business Lawyer** — technical assistance and collaboration
-- **Janne** — early work investigating DLL shimming and hooking in Battlezone 98 Redux
-- **GoombaBZ** - technical assistance and collaboration, assistance with reverse engineering and bug issues compiling, assistance with DLL shimming
+- **GrizzlyOne95** — primary implementation, reverse engineering, maintenance, and design
+- **Piercing** — partner development, multiplayer testing, network investigation, technical collaboration
+- **Kingfurykiller** — multiplayer/single-player testing, debugging, feedback, and technical assistance
+- **VTrider**, **Business Lawyer**, **GoombaBZ** — technical collaboration and reverse-engineering assistance
+- **Janne** — early Battlezone 98 Redux DLL-shimming and hooking research
 
-### AI-Assisted Development
+### AI-assisted development
 
-This project is developed with the assistance of AI coding tools for tasks such as code drafting, analysis, documentation, test construction, and navigating large reverse-engineering workloads. Examples include Claude Fable (Fable cracked the final destruction chunks blockers) / Opus 5.5, and Codex GPT 5.5/5.6/6.1 Sol.
-
-AI output is treated as an implementation aid, not as authoritative reverse-engineering evidence. Native behavior, addresses, ABI assumptions, patch sites, and compatibility claims are verified against the actual game binaries, runtime traces, tests, or other reproducible evidence before being treated as established.
-
-All changes remain maintainer-directed and are reviewed, tested, and integrated through the same validation process regardless of how the initial code or analysis was produced. Multiplayer testing is all performed by active community members and automated real client tests.
-
-The feature set and bug fixes would be far less complete without the assistance of these tools to speed up and improve development. 
-
+AI tools, including Claude Fable / Opus 5.5 and Codex, assist with code, analysis, documentation, and tests; Claude Fable notably helped resolve native destruction-chunk blockers. Maintainers review and integrate the work. Native addresses, patch sites, ABI claims, and gameplay behavior require evidence from binaries, tests, traces, or real-client testing rather than acceptance of AI output alone.
