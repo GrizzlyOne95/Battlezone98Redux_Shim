@@ -356,6 +356,10 @@ openshim_add_test(sun_flash_tests STD 20 SOURCES
     sun_flash_tests.cpp
 )
 
+openshim_add_test(lobby_team_commands_tests STD 17 SOURCES
+    lobby_team_commands_tests.cpp
+)
+
 openshim_add_test(screen_flash_tests STD 20 SOURCES
     screen_flash_tests.cpp
 )

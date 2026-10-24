@@ -42,6 +42,7 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "lobby_team_commands.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -636,6 +637,9 @@ namespace BZROpenShim
                 "/lock - prevent new players from joining",
                 "/unlock - allow new players to join",
                 "/nickname <text> - set your multiplayer name (/name alias)",
+                "/team <1-15> - host: move the selected player (or /team <name> <1-15>)",
+                "/swap <team> <team> - host: swap the players on two teams",
+                "/host - host: hand the lobby to the selected player (or /host <name>)",
             };
 
             void* helpObj = (g_BzrPtr_920168 && *g_BzrPtr_920168) ? *g_BzrPtr_920168 : nullptr;
@@ -722,6 +726,9 @@ namespace BZROpenShim
             NetRouteRefreshClient();
             return true;
         }
+
+        if (HandleLobbyTeamCommand(id, cmd))
+            return true;
 
         if (_stricmp(cmd, "/ban") == 0)
         {
