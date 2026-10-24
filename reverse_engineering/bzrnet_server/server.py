@@ -13,6 +13,7 @@ import asyncio
 import ipaddress
 import json
 import logging
+import socket
 import struct
 import time
 from dataclasses import dataclass, field
@@ -85,7 +86,8 @@ class Delivery:
 class ProtocolState:
     """Deterministic protocol model kept separate from WebSocket transport."""
 
-    def __init__(self) -> None:
+    def __init__(self, server_name: str = "") -> None:
+        self.server_name = server_name
         self.clients_by_connection: dict[str, Client] = {}
         self.connections_by_id: dict[str, str] = {}
         self.system_clients_by_id: dict[str, Client] = {}
@@ -323,6 +325,11 @@ class ProtocolState:
         deliveries.append(self.one(client.connection, "OnLobbyJoined", {
             "success": True, "id": lobby_id, "reason": "", "reasonCode": 0
         }))
+        if self.server_name and lobby.owner in self.system_clients_by_id:
+            # Spoken by the seeded bridge, so players can tell this server from Rebellion's.
+            deliveries.append(self.one(client.connection, "OnChatMessage", {
+                "text": f"Connected to {self.server_name}", "lobbyId": lobby_id, "speakerId": lobby.owner
+            }))
         changed = self.list_changed()
         if changed:
             deliveries.append(changed)
@@ -553,8 +560,8 @@ class EndpointProbeProtocol(asyncio.DatagramProtocol):
 
 
 class WebSocketServer:
-    def __init__(self) -> None:
-        self.state = ProtocolState()
+    def __init__(self, server_name: str = "") -> None:
+        self.state = ProtocolState(server_name)
         self.websockets: dict[str, Any] = {}
         self.next_connection = 1
 
@@ -596,8 +603,8 @@ class WebSocketServer:
             await self.deliver(self.state.disconnect(connection))
 
 
-async def run(host: str, port: int, probe_port: int | None) -> None:
-    server = WebSocketServer()
+async def run(host: str, port: int, probe_port: int | None, server_name: str = "") -> None:
+    server = WebSocketServer(server_name)
     LOG.info("Listening on ws://%s:%d", host, port)
     loop = asyncio.get_running_loop()
     probe_transport: asyncio.DatagramTransport | None = None
@@ -621,9 +628,11 @@ def main() -> None:
     parser.add_argument("--probe-port", type=int, default=1338)
     parser.add_argument("--disable-probe", action="store_true")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--name", default=f"local server {socket.gethostname()}",
+                        help="announced in lobby chat on join; empty to disable")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
-    asyncio.run(run(args.host, args.port, None if args.disable_probe else args.probe_port))
+    asyncio.run(run(args.host, args.port, None if args.disable_probe else args.probe_port, args.name))
 
 
 if __name__ == "__main__":
