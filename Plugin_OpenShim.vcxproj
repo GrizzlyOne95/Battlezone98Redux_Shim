@@ -194,6 +194,7 @@
     <ClCompile Include="src\patches\lifecycle_seams.cpp" />
     <ClCompile Include="src\patches\lobby_screen_hooks.cpp" />
     <ClCompile Include="src\patches\lobby_ui.cpp" />
+    <ClCompile Include="src\patches\lobby_team_commands.cpp" />
     <ClCompile Include="src\patches\mission_hook_bridges.cpp" />
     <ClCompile Include="src\patches\moderation.cpp" />
     <ClCompile Include="src\patches\multiplayer_vehicle_flags.cpp" />
@@ -450,6 +451,7 @@
     <ClInclude Include="include\lua_send_length_install.h" />
     <ClInclude Include="include\lua_handle_sync.h" />
     <ClInclude Include="include\lua_handle_sync_install.h" />
+    <ClInclude Include="include\lobby_team_commands.h" />
     <ClInclude Include="include\mp_faction_restrict.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />
     <ClInclude Include="include\odf_compat.h" />
