@@ -1118,7 +1118,9 @@ namespace BZROpenShim
                                 tileIt.value().get<std::string>());
                         }
                     }
-                    if (schema == "bzr-openshim-terrain-hd-v2")
+                    // A v2 manifest may also carry paint materials: they keep the
+                    // explicit-slice form, so one manifest serves both kinds of world.
+                    if (schema == "bzr-openshim-terrain-hd-v2" && !materialIt.value().contains("paint"))
                     {
                         if (g_config.proxyEnabled || binding.diffuseResource.empty())
                             throw std::runtime_error("HD material packs require native terrain and diffuse identity");

@@ -441,6 +441,10 @@ Paint extends `bzr-openshim-terrain-hd-v1` material bindings with:
 ```
 
 The illustration's fingerprint/bounds are placeholders; use the live capture.
+A `bzr-openshim-terrain-hd-v2` manifest may carry paint materials too. They keep
+this explicit-slice form while the other materials use compact v2 arrays, so a
+single manifest (such as Campaign Reimagined's `cr_terrain_hd.json`) can paint some
+worlds and keep DDS tile packs on the rest.
 Exactly five or nine explicit slices are required: four material images, one
 RGBA control image and, in the material form, four normal+height images. The diffuse-resource identity guard is mandatory. Canonical
 zone coordinates and every native height sample contribute to a 64-bit FNV
