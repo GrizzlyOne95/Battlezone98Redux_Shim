@@ -64,7 +64,7 @@ namespace BZROpenShim::GeometryContactTest
 
         bool Resolve()
         {
-            if (g_IsSteamExe || !g_GameObjectGetHandleAddr) return false;
+            if (!g_GameObjectGetHandleAddr) return false;
             if (g_hierarchy && g_create && g_delete && g_select && g_properties) return true;
             g_hierarchy = reinterpret_cast<ContactFn>(HookEngine::ResolveNamedAddress("CollisionTest::CarHierarchyCheck"));
             g_create = reinterpret_cast<CreateFn>(HookEngine::ResolveNamedAddress("CollisionTest::CgeomCreate"));

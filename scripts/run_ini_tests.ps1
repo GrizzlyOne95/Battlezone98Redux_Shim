@@ -294,8 +294,15 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Experimental/GpuSkinning",
 
     # A manifest locator, not a toggle: "auto" only chooses where to look for
-    # the separate HD terrain pack. TerrainHdEnabled stays 0 and gates use.
+    # the separate HD terrain pack.
     "Terrain/TerrainHdManifest",
+    # Native HD terrain tiles and paint. Default on 2026-10-24 at the user's
+    # request so subscribers never miss it; inert without an HD terrain pack,
+    # DX11 Enhanced only, and any failure keeps the stock atlas.
+    "Terrain/TerrainHdEnabled",
+    # Terrain paint relief (DX11 tessellation). Default on 2026-10-24 with HD
+    # terrain so painted rock and cracks are not flat; visual only.
+    "Terrain/TerrainMicroRelief",
 
     # Stages OpenShim updates from the Workshop on the main menu (Steam only,
     # never in multiplayer); installs only at game exit. Default on by design.

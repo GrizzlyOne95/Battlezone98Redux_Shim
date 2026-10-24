@@ -85,6 +85,22 @@
       ]
     }
   },
+  "shape": [
+    {
+      "radiusMeters": 400,
+      "rangeMeters": 6,
+      "amount": 0.9,
+      "ridge": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "from": [
+        0
+      ]
+    }
+  ],
   "erosion": {
     "talus": {
       "weights": [

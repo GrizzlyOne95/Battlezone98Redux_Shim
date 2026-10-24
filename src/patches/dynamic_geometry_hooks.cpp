@@ -531,7 +531,7 @@ namespace BZROpenShim
 
             const bool wantBegin =
                 g_DgPieceReuseEnabled || g_DgMaterialCacheEnabled || g_DgBeginStats;
-            if (g_IsSteamExe || (!wantBegin && !g_DgFastSortEnabled))
+            if (!wantBegin && !g_DgFastSortEnabled)
             {
                 g_DgPieceReuseEnabled = false;
                 g_DgMaterialCacheEnabled = false;
@@ -678,7 +678,7 @@ namespace BZROpenShim
                 g_DynamicAlphaDepthBatchingEnabled = false;
         }
         static uintptr_t s_SetSquaredViewDepthAddr = 0;
-        const bool depthBound = !g_IsSteamExe && g_DynamicAlphaDepthBatchingEnabled && [] {
+        const bool depthBound = g_DynamicAlphaDepthBatchingEnabled && [] {
             static const bool bound = [] {
                 const HookEngine::EngineRow rows[] = {
                     { "DynamicGeometrySetSquaredViewDepth", &s_SetSquaredViewDepthAddr },
@@ -725,7 +725,7 @@ namespace BZROpenShim
         InstallDynamicGeometryBatchingHooks(wantPrepareHook);
         const bool profilerCollecting = IsOgreAnimationProfilerCollecting();
         static uintptr_t s_PrepareAddr = 0;
-        if (!g_IsSteamExe && (profilerCollecting || wantPrepareHook))
+        if (profilerCollecting || wantPrepareHook)
         {
             static const bool prepareBound = [] {
                 const HookEngine::EngineRow rows[] = {
@@ -764,7 +764,7 @@ namespace BZROpenShim
                     "[OgreProfile] GOG DynamicGeometry::prepareForSubmit prologue mismatch; native rebuild attribution unavailable");
             }
         }
-        if (!g_IsSteamExe && profilerCollecting)
+        if (profilerCollecting)
         {
             static const uintptr_t kRenderQueueAddRenderableIatSlot = FindMainImageImportSlot(
                 "OgreMain.dll", "?addRenderable@RenderQueue@Ogre@@QAEXPAVRenderable@2@E@Z");

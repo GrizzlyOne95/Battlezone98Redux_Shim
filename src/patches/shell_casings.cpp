@@ -1203,7 +1203,7 @@ namespace BZROpenShim
             void* const sceneManager = GetOgreSceneManagerRuntime();
             if (!sceneManager)
                 return;
-            if (!g_ResourcePrimeAttempted && !g_IsSteamExe)
+            if (!g_ResourcePrimeAttempted)
             {
                 g_ResourcePrimeAttempted = true;
                 const bool ready = EnsureSkinnedGibResourceLocations();

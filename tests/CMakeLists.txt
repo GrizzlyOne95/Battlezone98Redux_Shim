@@ -143,6 +143,7 @@ openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
 )
 openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
 openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
+openshim_add_test(terrain_tess_defines_tests STD 17 SOURCES terrain_tess_defines_tests.cpp)
 openshim_add_test(options_ui_l10n_tests STD 17 SOURCES options_ui_l10n_tests.cpp ../src/patches/options_ui_l10n.cpp)
 target_compile_definitions(options_ui_l10n_tests PRIVATE
     OPENSHIM_L10N_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/../resources/localization/openshim_localization.csv")

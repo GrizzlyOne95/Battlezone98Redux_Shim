@@ -105,8 +105,12 @@
             // E5E693960B95AD0D60733A3B688464A6C6CBA234E86950698F9C2BEA4ACFEB45.
             // PE identity is checked before touching a vtable; exports and the
             // exact target function pointer provide a second ABI check.
-            return ModuleImageMatches(
-                       GetModuleHandleA(nullptr), 0x58D9D6CCu, 0x0290F000u) &&
+            // Steam is the same image plus SteamStub's .bind section, so only
+            // SizeOfImage differs (0x0292F000).
+            return (ModuleImageMatches(
+                        GetModuleHandleA(nullptr), 0x58D9D6CCu, 0x0290F000u) ||
+                    ModuleImageMatches(
+                        GetModuleHandleA(nullptr), 0x58D9D6CCu, 0x0292F000u)) &&
                 ModuleImageMatches(ogreModule, 0x5866BF6Au, 0x00A65000u);
         }
 

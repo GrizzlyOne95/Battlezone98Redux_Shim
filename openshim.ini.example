@@ -779,12 +779,13 @@ DxgiFlipModel = 0
 
 
 [Terrain]
-; Terrain Micro Detail in the OpenShim settings page. Off by default.
+; Terrain Micro Detail in the OpenShim settings page. On by default: terrain paint
+; height (rock, cracks, craters) shows only with it.
 ; Experimental visual-only ground relief, using factor-4 DX11 tessellation and
 ; a 0.25-world-unit maximum offset. Collision, placement and gameplay heights
 ; are unchanged. Requires DX11 and a game restart; increases GPU cost.
 ; Unsupported renderer/build/terrain contracts retain native terrain.
-TerrainMicroRelief = 0
+TerrainMicroRelief = 1
 
 
 ; NOTE: terrain booleans below are integer flags; use 0/1.
@@ -928,7 +929,7 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; resources fail soft to the stock atlas.
 ; Native full-resolution diffuse tile replacement (DX11). Requires a texture
 ; pack manifest; existing tile placement, orientation and gameplay stay intact.
-TerrainHdEnabled = 0
+TerrainHdEnabled = 1
 
 ; HD tile manifest. Accepted: auto, or a path string.
 ; auto (or empty): find the separately installed HD terrain pack, searching the
