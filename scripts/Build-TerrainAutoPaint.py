@@ -863,6 +863,23 @@ def match_mean(image, reference):
     return Image.fromarray(np.clip(a * scale + 0.5, 0, 255).astype(np.uint8))
 
 
+def height_shade(rgb, height, amount):
+    """Fold the height's fine relief back into a de-lit albedo as cavity shading.
+
+    Delighted scans (Poly Haven's lunar sets) keep almost all their detail in
+    height and normal, so the colour alone reads flat once normals mip away.
+    The shade is normalised to mean 1, so a matched mean colour is kept.
+    """
+    if type(amount) not in (int, float) or not 0 <= amount <= 4:
+        raise ValueError("layer heightShade must be from 0 to 4")
+    size = height.shape[0]
+    blur = np.asarray(Image.fromarray(to_u8(height)).filter(
+        ImageFilter.GaussianBlur(max(size / 64, 1))), dtype=np.float64) / 255
+    shade = np.maximum(1 + amount * (height - blur), 0.05)
+    shade /= shade.mean()
+    return np.clip(rgb * shade[..., None] + 0.5, 0, 255).astype(np.uint8)
+
+
 def build_pack(maps, recipe, source_root, output, size, prefix, force):
     output = Path(output)
     if output.exists() and any(output.iterdir()) and not force:
@@ -906,6 +923,9 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
             identity = dict(identity, material=maps_identity)
             # Diffuse alpha carries specular; the normal slice carries height.
             rgb = np.asarray(art.convert("RGB"))
+            if "heightShade" in layer:
+                rgb = height_shade(rgb, height, layer["heightShade"])
+                identity = dict(identity, heightShade=layer["heightShade"])
             layers.append(Image.fromarray(np.dstack((rgb, to_u8(specular))), "RGBA"))
             normals.append(Image.fromarray(np.dstack((to_u8(normal * 0.5 + 0.5), to_u8(height))), "RGBA"))
         else:

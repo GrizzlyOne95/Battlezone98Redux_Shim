@@ -116,6 +116,17 @@ class AutoPaintTests(unittest.TestCase):
         mean = np.asarray(auto.match_mean(art, reference), dtype=np.float64).reshape(-1, 3).mean(axis=0)
         np.testing.assert_allclose(mean, (50, 80, 120), atol=1)
 
+    def test_height_shade_darkens_pits_and_keeps_mean(self):
+        rgb = np.full((256, 256, 3), 120, np.uint8)
+        height = np.full((256, 256), 0.5)
+        height[127:129, 127:129] = 0.0                                # one pit, narrower than the blur
+        out = auto.height_shade(rgb, height, 2).astype(np.float64)
+        self.assertLess(out[128, 128, 0], 100)                        # pit is darker
+        self.assertAlmostEqual(out.mean(), 120, delta=1.5)            # palette kept
+        np.testing.assert_array_equal(auto.height_shade(rgb, height, 0), rgb)
+        with self.assertRaises(ValueError):
+            auto.height_shade(rgb, height, 5)
+
     def test_variation_and_slope_reweight_cells(self):
         cells = np.zeros((32, 32), dtype=np.uint16)                 # one type everywhere
         recipe = dict(self.recipe, variation={"meters": 200, "amount": 1, "types": {"0": [0, 0, 1, 0]}})
