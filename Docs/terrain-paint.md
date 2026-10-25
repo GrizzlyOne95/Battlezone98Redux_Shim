@@ -318,9 +318,10 @@ eighteen cost about 384 MiB.
 
 ## World packs
 
-Each stock world (Moon, Venus, Io, Europa, Titan, Achilles) has one recipe,
+Each stock world (Moon, Mars, Venus, Io, Europa, Titan, Achilles) has one recipe,
 `scripts/terrain-packs/<world>-autopaint.json`, and one pack that covers every
-mission on it. Mars uses the older `mars-autopaint.json` form.
+mission on it. `mars-paint.json` and `mars-pilot.json` are the earlier
+hand-painted and tile-array prototypes.
 
 **Recipe.** A world recipe holds:
 
@@ -367,7 +368,7 @@ mission on it. Mars uses the older `mars-autopaint.json` form.
   whose mean colour the layer is matched to), height and specular.
 - `heightBlend`, `far`, `macro` and (Moon only) `craters`.
 
-All six worlds use detile on every layer, plus `far` {5, 40, 250, 0.6} and
+All seven worlds use detile on every layer, plus `far` {5, 40, 250, 0.6} and
 `macro` {260, 0.12, 0.15}. The Moon dust layers drop the baked craters for
 `proceduralCraters` (0.6 on Dust, 1 on Cratered dust), with `craters` set to
 cell 8 m, depth 0.2, coverage 0.35 and three octaves. The first setting
@@ -394,6 +395,18 @@ Achilles also uses erosion:
 
 A second, 40 m shape rule darkens crevices toward forest floor and wears small
 crests toward earth.
+
+Mars layers are fine dune sand (Sandy), coarse sand with stones (Rocky), arid
+gravel (Geyser and Base) and cracked boulder rock (Rock mountain, slopes from 24
+degrees). The three ground layers are Megascans desert scans no other world
+uses; the rock is the Poly Haven boulder Venus also uses. Every layer is matched
+to a CR Mars tile. Two shape rules apply.
+A wide one (400 m) sends sand into hollows and rocky soil onto high ground. A
+narrow one (40 m) puts sand in crevices and gravel on small crests. Erosion
+puts talus on gravel and rocky soil (6%, 0.6), deposits sand on Rocky ground
+(8%, 0.5) and scours sand and soil to gravel (6%, 0.35). CR overrides only
+`misn05.hg2`, so `build-world-packs.sh` takes each of a map's HG2, MAT and TRN
+from CR when present and from the stock folder otherwise.
 
 **Build.**
 

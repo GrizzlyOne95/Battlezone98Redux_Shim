@@ -37,10 +37,12 @@ namespace BZROpenShim::Hooks
         // Static analysis cannot qualify engine thread ordering, Ogre/native
         // lifetime, renderer visibility or model reload. This broader/legacy
         // activation gate stays closed; settings allow the bounded authored
-        // ODF experimental path below, still exact-GOG/SP and byte guarded.
+        // ODF experimental path below, still exact-image (GOG or Steam)/SP and byte guarded.
         constexpr bool kNativePresentationLiveQualified = false;
         constexpr char kGogSha256[] =
             "8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413";
+        constexpr char kSteamSha256[] =
+            "d298782fc9a13edb0665db934110440c45461031db5f7fe1a76c8784b61cc90d";
 
         // Released-layout contracts; instruction sites are catalogued in
         // scripts/patches.json, never used as addresses here.
@@ -1168,7 +1170,11 @@ namespace BZROpenShim::Hooks
             const DWORD length = GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path)));
             if (!length || length >= std::size(path)) return false;
             std::string hash;
-            return TryComputeFileSha256Hex(std::filesystem::path(path), hash) && hash == kGogSha256;
+            // Steam's SteamStub-wrapped file unpacks to the same code; the
+            // patcher installs this after the Steam settled-byte gate, and
+            // ReplaceCall still byte-checks every site.
+            return TryComputeFileSha256Hex(std::filesystem::path(path), hash) &&
+                (hash == kGogSha256 || hash == kSteamSha256);
         }
 
         bool ReplaceCall(uint32_t site, void* target, void* original)

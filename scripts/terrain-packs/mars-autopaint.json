@@ -2,20 +2,234 @@
   "schema": "bzr-openshim-terrain-autopaint-v1",
   "material": "MA_DETAIL_ATLAS",
   "diffuseResource": "mars_atlas_d.dds",
-  "typeNames": {"0": "Sandy", "1": "Rocky", "2": "Geyser", "3": "Rock mountain", "4": "Base"},
-  "typeWeights": {
-    "0": [1, 0, 0, 0],
-    "1": [0, 1, 0, 0],
-    "2": [0, 0, 1, 0],
-    "3": [0, 0, 0, 1],
-    "4": [0, 0, 1, 0]
+  "typeNames": {
+    "0": "Sandy",
+    "1": "Rocky",
+    "2": "Geyser",
+    "3": "Rock mountain",
+    "4": "Base"
   },
-  "transition": {"cap": 0.3, "diagonal": 0.5},
+  "typeWeights": {
+    "0": [
+      1,
+      0,
+      0,
+      0
+    ],
+    "1": [
+      0,
+      1,
+      0,
+      0
+    ],
+    "2": [
+      0,
+      0,
+      1,
+      0
+    ],
+    "3": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "4": [
+      0,
+      0,
+      1,
+      0
+    ]
+  },
+  "transition": {
+    "cap": 0.3,
+    "diagonal": 0.5
+  },
   "blurMeters": 14,
+  "outsideWeights": [
+    1,
+    0,
+    0,
+    0
+  ],
+  "variation": {
+    "meters": 200,
+    "amount": 0.4,
+    "types": {
+      "0": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "1": [
+        1,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "shape": [
+    {
+      "radiusMeters": 400,
+      "rangeMeters": 8,
+      "amount": 0.8,
+      "hollow": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "ridge": [
+        0,
+        1,
+        0,
+        0
+      ],
+      "from": [
+        0,
+        1
+      ]
+    },
+    {
+      "radiusMeters": 40,
+      "rangeMeters": 3,
+      "amount": 0.5,
+      "hollow": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "ridge": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "from": [
+        0,
+        1
+      ]
+    }
+  ],
+  "erosion": {
+    "talus": {
+      "weights": [
+        0,
+        0.4,
+        0.6,
+        0
+      ],
+      "amount": 0.6,
+      "coverage": 0.06,
+      "types": [
+        0,
+        1,
+        3
+      ]
+    },
+    "deposit": {
+      "weights": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "amount": 0.5,
+      "coverage": 0.08,
+      "types": [
+        1
+      ]
+    },
+    "scour": {
+      "weights": [
+        0,
+        0,
+        1,
+        0
+      ],
+      "amount": 0.35,
+      "coverage": 0.06,
+      "types": [
+        0,
+        1
+      ]
+    }
+  },
+  "slope": {
+    "weights": [
+      0,
+      0,
+      0,
+      1
+    ],
+    "startDegrees": 24,
+    "fullDegrees": 38
+  },
   "layers": [
-    {"name":"Dune sand", "repeatMeters":24, "archive":"MarsDustySandDunes_PbrGenericSpecular4kBitmap.zip", "member":"MarsDustySandDunes_albedo.png"},
-    {"name":"Rocky soil", "repeatMeters":16, "archive":"MarsSoilWithRockyDebris_PbrGenericSpecular4kBitmap.zip", "member":"MarsSoilWithRockyDebris_albedo.png"},
-    {"name":"Gravel", "repeatMeters":12, "archive":"MarsGravel_PbrGenericSpecular4kBitmap.zip", "member":"MarsGravel_albedo.png"},
-    {"name":"Cracked rock", "repeatMeters":24, "archive":"MarsCrackedRock_PbrGenericSpecular4kBitmap.zip", "member":"MarsCrackedRock_albedo.png"}
-  ]
+    {
+      "name": "Dune sand",
+      "detile": true,
+      "repeatMeters": 20,
+      "archive": "desert_western_ground_sand_fine_01_xgmpdek_8k.zip",
+      "member": "Desert_Western_Ground_Sand_Fine_01_xgmpdek_8K_BaseColor.jpg",
+      "matchMean": "crhd_mars_ma00sa0_d.dds",
+      "heightMeters": 0.4,
+      "proceduralDetail": 0.4
+    },
+    {
+      "name": "Rocky soil",
+      "detile": true,
+      "repeatMeters": 16,
+      "archive": "desert_western_detail_sand_coarse_01_xgindh1_8k.zip",
+      "member": "Desert_Western_Detail_Sand_Coarse_01_xgindh1_8K_BaseColor.jpg",
+      "matchMean": "crhd_mars_ma11sa0_d.dds",
+      "heightMeters": 0.8,
+      "proceduralDetail": 0.6
+    },
+    {
+      "name": "Gravel",
+      "detile": true,
+      "repeatMeters": 12,
+      "archive": "arid_gravel_ground_wikdaikbw_8k.zip",
+      "member": "Arid_Gravel_Ground_wikdaikbw_8K_BaseColor.jpg",
+      "matchMean": "crhd_mars_ma11sa0_d.dds",
+      "heightMeters": 0.5,
+      "proceduralDetail": 0.5
+    },
+    {
+      "name": "Cracked rock",
+      "detile": true,
+      "repeatMeters": 24,
+      "file": "rock_boulder_cracked_diff_8k.jpg",
+      "matchMean": "crhd_mars_ma33sa0_d.dds",
+      "heightMeters": 2.0,
+      "proceduralDetail": 1
+    }
+  ],
+  "heightBlend": 0.5,
+  "far": {
+    "scale": 5,
+    "startMeters": 40,
+    "endMeters": 250,
+    "amount": 0.6
+  },
+  "macro": {
+    "meters": 260,
+    "brightness": 0.12,
+    "saturation": 0.15
+  },
+  "detail": {
+    "waveMeters": 60,
+    "heightMeters": 1.5,
+    "octaves": 4,
+    "damping": 1
+  },
+  "parallax": {
+    "scale": 1,
+    "fadeMeters": 30,
+    "steps": 12
+  }
 }

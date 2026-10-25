@@ -41,6 +41,35 @@ class ProtocolStateTests(unittest.TestCase):
         self.assertEqual(view["metadata"]["userPack"], "!BRIDGE".ljust(32))
         self.assertIn("BLOCALBRIDGE", view["users"])
 
+    def test_named_server_greets_chat_lobby_joiner(self):
+        state = ProtocolState("Test LAN")
+        state.handle("a", message("Authorization", {"id": "A", "name": "Alpha"}))
+        joined = state.handle("a", message("DoJoinLobby", {"id": 1}))
+        chats = [item for item in joined if item.payload["type"] == "OnChatMessage"]
+        self.assertEqual(len(chats), 1)
+        self.assertEqual(chats[0].connections, ("a",))
+        self.assertEqual(chats[0].payload["data"]["text"], "Connected to Test LAN")
+        self.assertEqual(chats[0].payload["data"]["speakerId"], "BLOCALBRIDGE")
+
+        # Game lobbies belong to players, so no greeting there.
+        state.handle("b", message("Authorization", {"id": "B", "name": "Bravo"}))
+        state.handle("a", message("CreateGame", {"memberLimit": 4}))
+        game_id = state.clients_by_connection["a"].lobby_id
+        joined = state.handle("b", message("DoJoinLobby", {"id": game_id}))
+        self.assertFalse(any(item.payload["type"] == "OnChatMessage" for item in joined))
+
+    def test_created_game_carries_placeholder_name_until_owner_sets_it(self):
+        self.state.handle("c", message("Authorization", {"id": "C", "name": "Alpha", "clientVersion": "2.2.301"}))
+        created = self.state.handle("c", message("CreateGame", {"memberLimit": 4, "isPrivate": True}))
+        lobby_id = self.state.clients_by_connection["c"].lobby_id
+        first_change = next(item for item in created if item.payload["type"] == "OnLobbyChanged")
+        metadata = first_change.payload["data"]["lobbies"][str(lobby_id)]["metadata"]
+        self.assertEqual(metadata["name"], "~game~priv~~Alpha")
+        self.assertEqual(metadata["GameVersion"], "2.2.301")
+
+        self.state.handle("c", message("SetLobbyData", {"key": "name", "value": "~game~priv~~coop"}))
+        self.assertEqual(self.state.lobbies[lobby_id].metadata["name"], "~game~priv~~coop")
+
     def test_password_and_owner_enforcement(self):
         self.state.handle("a", message("CreateLobby", {"memberLimit": 2, "password": "secret"}))
         lobby_id = self.state.clients_by_connection["a"].lobby_id

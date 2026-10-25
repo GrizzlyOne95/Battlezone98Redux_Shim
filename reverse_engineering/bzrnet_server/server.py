@@ -13,6 +13,7 @@ import asyncio
 import ipaddress
 import json
 import logging
+import socket
 import struct
 import time
 from dataclasses import dataclass, field
@@ -85,7 +86,8 @@ class Delivery:
 class ProtocolState:
     """Deterministic protocol model kept separate from WebSocket transport."""
 
-    def __init__(self) -> None:
+    def __init__(self, server_name: str = "") -> None:
+        self.server_name = server_name
         self.clients_by_connection: dict[str, Client] = {}
         self.connections_by_id: dict[str, str] = {}
         self.system_clients_by_id: dict[str, Client] = {}
@@ -278,6 +280,15 @@ class ProtocolState:
         )
         if content.get("name"):
             lobby.metadata["name"] = str(content["name"])
+        elif lobby_type == "CreateGame":
+            # The creator's client sets "name" and "GameVersion" before it has a local entry for
+            # the lobby, so those writes never land locally. OnLobbyDataUpdate only re-populates a
+            # lobby that has a GameVersion, so without both it sits on "gathering information".
+            # Seed them in the first OnLobbyChanged; the owner's SetLobbyData replaces them.
+            privacy = "priv" if lobby.is_private else "pub"
+            lobby.metadata["name"] = f"~game~{privacy}~~{client.name}"
+            if client.client_version:
+                lobby.metadata["GameVersion"] = client.client_version
         self.lobbies[lobby_id] = lobby
         client.lobby_id = lobby_id
         deliveries.append(self.one(client.connection, "OnLobbyCreated", {"success": True, "id": lobby_id}))
@@ -323,6 +334,11 @@ class ProtocolState:
         deliveries.append(self.one(client.connection, "OnLobbyJoined", {
             "success": True, "id": lobby_id, "reason": "", "reasonCode": 0
         }))
+        if self.server_name and lobby.owner in self.system_clients_by_id:
+            # Spoken by the seeded bridge, so players can tell this server from Rebellion's.
+            deliveries.append(self.one(client.connection, "OnChatMessage", {
+                "text": f"Connected to {self.server_name}", "lobbyId": lobby_id, "speakerId": lobby.owner
+            }))
         changed = self.list_changed()
         if changed:
             deliveries.append(changed)
@@ -553,8 +569,8 @@ class EndpointProbeProtocol(asyncio.DatagramProtocol):
 
 
 class WebSocketServer:
-    def __init__(self) -> None:
-        self.state = ProtocolState()
+    def __init__(self, server_name: str = "") -> None:
+        self.state = ProtocolState(server_name)
         self.websockets: dict[str, Any] = {}
         self.next_connection = 1
 
@@ -564,7 +580,11 @@ class WebSocketServer:
             for connection in delivery.connections:
                 websocket = self.websockets.get(connection)
                 if websocket:
-                    await websocket.send(encoded)
+                    try:
+                        await websocket.send(encoded)
+                    except websockets.ConnectionClosed:
+                        # A game that is exiting closes mid-burst; its handler cleans up.
+                        pass
 
     async def handler(self, websocket: Any) -> None:
         connection = f"connection-{self.next_connection}"
@@ -596,8 +616,8 @@ class WebSocketServer:
             await self.deliver(self.state.disconnect(connection))
 
 
-async def run(host: str, port: int, probe_port: int | None) -> None:
-    server = WebSocketServer()
+async def run(host: str, port: int, probe_port: int | None, server_name: str = "") -> None:
+    server = WebSocketServer(server_name)
     LOG.info("Listening on ws://%s:%d", host, port)
     loop = asyncio.get_running_loop()
     probe_transport: asyncio.DatagramTransport | None = None
@@ -607,7 +627,12 @@ async def run(host: str, port: int, probe_port: int | None) -> None:
         )
         LOG.info("Listening for endpoint probes on udp://%s:%d", host, probe_port)
     try:
-        async with websockets.serve(server.handler, host, port, max_size=2**20):
+        # No server keepalive: the game stops answering pings while a mission
+        # loads, and websockets' default 20 s ping timeout then drops a
+        # launched game. The client sends its own pings.
+        async with websockets.serve(
+            server.handler, host, port, max_size=2**20, ping_interval=None
+        ):
             await asyncio.Future()
     finally:
         if probe_transport is not None:
@@ -621,9 +646,14 @@ def main() -> None:
     parser.add_argument("--probe-port", type=int, default=1338)
     parser.add_argument("--disable-probe", action="store_true")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--name", default=f"local server {socket.gethostname()}",
+                        help="announced in lobby chat on join; empty to disable")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO)
-    asyncio.run(run(args.host, args.port, None if args.disable_probe else args.probe_port))
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s:%(name)s:%(message)s",
+    )
+    asyncio.run(run(args.host, args.port, None if args.disable_probe else args.probe_port, args.name))
 
 
 if __name__ == "__main__":
