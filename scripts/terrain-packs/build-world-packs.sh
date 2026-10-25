@@ -16,20 +16,25 @@ STOCK="$GAME/StockODFFiles"
 cd "$(dirname "$0")/../.."
 declare -A MAPS=(
   [moon]="misn01 misn02 misn02b misn03 crsetup"
+  [mars]="misn04 misn05 misn06"
   [venus]="misn07 misn08 misn09"
   [io]="misn10 misn11 misns4"
   [europa]="misn12 misn13"
   [titan]="misn14 misn15 misn16 misn15b misn16b"
   [achilles]="misn17 misn18"
 )
-for w in ${@:-moon venus io europa titan achilles}; do
+for w in ${@:-moon mars venus io europa titan achilles}; do
   args=()
   for m in ${MAPS[$w]}; do
-    [ -f "$CR/$m.mat" ] && args+=(--map "$m=$CR/$m")
-    # The stock map gets its own entry only when CR changed its height field or layout.
-    if [ -f "$STOCK/$m.mat" ] && ! { [ -f "$CR/$m.hg2" ] && cmp -s "$CR/$m.hg2" "$STOCK/$m.hg2" && cmp -s "$CR/$m.mat" "$STOCK/$m.mat"; }; then
-      args+=(--map "${m}_stock=$STOCK/$m")
+    # CR may override only some of a map's files (misn05 ships just its HG2): take each from CR when present.
+    # Git Bash leaves paths inside a comma list unconverted, so hand Windows Python mixed-form paths.
+    pick() { local f="$STOCK/$m.$1"; [ -f "$CR/$m.$1" ] && f="$CR/$m.$1"; if command -v cygpath >/dev/null; then cygpath -m "$f"; else echo "$f"; fi; }
+    if [ -f "$CR/$m.hg2" ] || [ -f "$CR/$m.mat" ]; then
+      args+=(--map "$m=$(pick hg2),$(pick mat),$(pick trn)")
+      # The stock map gets its own entry only when CR changed its height field or layout.
+      cmp -s "$(pick hg2)" "$STOCK/$m.hg2" && cmp -s "$(pick mat)" "$STOCK/$m.mat" && continue
     fi
+    [ -f "$STOCK/$m.mat" ] && args+=(--map "${m}_stock=$STOCK/$m")
   done
   echo "=== $w"
   python scripts/Build-TerrainAutoPaint.py --recipe "scripts/terrain-packs/$w-autopaint.json" --source-root "$ART" \
