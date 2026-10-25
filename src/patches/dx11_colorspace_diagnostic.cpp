@@ -2303,6 +2303,21 @@ namespace BZROpenShim
         }
     }
 
+    void EnsureTerrainHeightDomainHook(ID3D11Device* device)
+    {
+        if (!device || !g_HeightBindingRequested.load(std::memory_order_acquire))
+            return;
+        ID3D11DeviceContext* context = nullptr;
+        device->GetImmediateContext(&context);
+        if (!context)
+            return;
+        // AlreadyHooked counts as success, so a context the observers did reach is a no-op.
+        if (PatchComVtableEntry(context, TerrainHeight::kDomainShaderSetterSlot, &HookDSSetShader,
+                g_RealDSSetShader, "ID3D11DeviceContext::DSSetShader (owned terrain height, late)"))
+            TerrainHeightDomainHookInstalled();
+        context->Release();
+    }
+
     void ShutdownDx11ColorSpaceDiagnostic()
     {
         g_ShutdownRequested.store(true, std::memory_order_release);

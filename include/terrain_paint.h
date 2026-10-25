@@ -255,6 +255,17 @@ OpenShimDetile OpenShimDetileAt(float2 uv)
     d.t = smoothstep(0.35, 0.65, l - i);
     return d;
 }
+// dt/duv of OpenShimDetileAt's band, for the domain shader's analytic slope.
+float2 OpenShimDetileSlope(float2 uv)
+{
+    float2 i = floor(uv * 0.35), f = uv * 0.35 - i;
+    float2 u = f * f * (3.0 - 2.0 * f), du = 6.0 * f * (1.0 - f);
+    float a = OpenShimDetileHash(i), b = OpenShimDetileHash(i + float2(1, 0));
+    float c = OpenShimDetileHash(i + float2(0, 1)), d = OpenShimDetileHash(i + float2(1, 1));
+    float l = lerp(lerp(a, b, u.x), lerp(c, d, u.x), u.y) * 8.0;
+    float s = saturate((l - floor(l) - 0.35) / 0.3);
+    return (6.0 * s * (1.0 - s) / 0.3) * 8.0 * 0.35 * du * (float2(b - a, c - a) + (a - b - c + d) * u.yx);
+}
 )HLSL";
     }
     // Shared like DetileHlsl, after it (it reuses the hash), so the shaded

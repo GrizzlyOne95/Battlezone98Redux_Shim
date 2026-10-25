@@ -1,5 +1,7 @@
 #pragma once
 
+struct ID3D11Device;
+
 namespace BZROpenShim
 {
     // Starts the shared, opt-in, read-only Direct3D 11 diagnostics bootstrap.
@@ -24,4 +26,10 @@ namespace BZROpenShim
     // running. Runtime observation hooks intentionally remain process-lifetime
     // because they wrap D3D11 objects owned by Ogre.
     void ShutdownDx11ColorSpaceDiagnostic();
+
+    // The import observers miss a device that Ogre creates between the D3D11
+    // renderer's load and the discovery poll. The height path calls this with
+    // its live device so the owned DSSetShader seam is installed late instead
+    // of the binding declining. No-op unless the height binding was requested.
+    void EnsureTerrainHeightDomainHook(ID3D11Device* device);
 }

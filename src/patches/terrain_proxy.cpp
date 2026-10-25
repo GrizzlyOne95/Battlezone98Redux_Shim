@@ -7,6 +7,7 @@
 #include "render_profile_runtime.h"
 
 #include "bzr_hooks.h"
+#include "dx11_colorspace_diagnostic.h"
 #include "bzr_options_ui.h"
 #include "shim_log.h"
 #include "openshim_assets.h"

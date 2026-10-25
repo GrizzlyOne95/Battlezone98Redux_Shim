@@ -16,9 +16,19 @@ void RestoreTerrainHeightTexture()
     g_heightBinding.Reset();
 }
 
+void RequireTerrainHeightHook(ID3D11DeviceChild* resource)
+{
+    if (!g_heightHookReady.load() && resource)
+    {
+        ComPtr<ID3D11Device> device; resource->GetDevice(&device);
+        EnsureTerrainHeightDomainHook(device.Get());
+    }
+    if (!g_heightHookReady.load()) throw std::runtime_error("domain texture lifetime hook unavailable");
+}
+
 void PrepareTerrainHeightTexture(ID3D11Buffer* source, const std::string& relativePath)
 {
-    if (!g_heightHookReady.load()) throw std::runtime_error("domain texture lifetime hook unavailable");
+    RequireTerrainHeightHook(source);
     const std::filesystem::path relative{std::u8string(relativePath.begin(), relativePath.end())};
     if (relative.empty() || relative.has_root_path()) throw std::runtime_error("height path must be pack-relative");
     for (const auto& component : relative)
@@ -53,8 +63,8 @@ void PrepareTerrainHeightTexture(ID3D11Buffer* source, const std::string& relati
 // second view of the owned Ogre texture, released with the binding.
 void PrepareTerrainPaintHeightTexture(ID3D11Texture2D* paintArray)
 {
-    if (!g_heightHookReady.load()) throw std::runtime_error("domain texture lifetime hook unavailable");
     if (!paintArray) throw std::runtime_error("paint array texture unavailable");
+    RequireTerrainHeightHook(paintArray);
     D3D11_TEXTURE2D_DESC desc{}; paintArray->GetDesc(&desc);
     if ((desc.ArraySize != 9 && desc.ArraySize != 18) || !(desc.BindFlags & D3D11_BIND_SHADER_RESOURCE))
         throw std::runtime_error("paint array is not a 9- or 18-slice shader resource");
