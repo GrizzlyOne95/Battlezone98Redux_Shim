@@ -7,6 +7,7 @@
 #include "render_profile_runtime.h"
 
 #include "bzr_hooks.h"
+#include "dx11_colorspace_diagnostic.h"
 #include "bzr_options_ui.h"
 #include "shim_log.h"
 #include "openshim_assets.h"
@@ -3734,6 +3735,30 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         void RestoreNativeTerrainHd();
         void RestoreNativeTerrainSurface();
         void ResetNativeTerrainHd();
+        // Generated terrain programs are named by content only. Ogre's
+        // microcode cache is name-keyed, so a name that carried the per-session
+        // install counter (which every deferred paint retry bumps) missed the
+        // cache and recompiled ~40 terrain shaders on the render thread: a
+        // 14-20 s single frame at pilot spawn. A leftover program of the same
+        // name was built from the same source, so it is dropped rather than
+        // letting createProgram throw ERR_DUPLICATE_ITEM.
+        void ForgetGeneratedProgram(void* programManager, const std::string& name)
+        {
+            using ResourceExists = bool(__thiscall*)(void*, const std::string&);
+            static const auto resourceExists = Resolve<ResourceExists>(
+                GetModuleHandleW(L"OgreMain.dll"),
+                "?resourceExists@ResourceManager@Ogre@@UAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            if (!programManager || !resourceExists || !g_ogre.removeResource ||
+                !resourceExists(programManager, name))
+                return;
+            // Remove only: an older material clone may still hold the program
+            // through its shared pointer, so it must stay loaded until the
+            // last owner drops it.
+            g_ogre.removeResource(programManager, name);
+            LogShimA(LogLevel::Info, "terrain-proxy",
+                "[TERRAIN-PROXY] replaced leftover generated program \"%s\"", name.c_str());
+        }
+
         #include "terrain_height_binding.inl"
         #include "terrain_tessellation_test.inl"
 

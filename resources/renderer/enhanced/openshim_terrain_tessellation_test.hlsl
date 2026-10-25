@@ -160,12 +160,17 @@ float3 TerrainHeightRelief(float2 uv, float2 xz0, float2 xz1, float2 xz2,
 // patches on a shared edge displace it identically and no cracks open.
 Texture2DArray<float4> terrainPaintArray : register(t127);
 
-float4 TerrainPaintBilinear(float2 uv, uint slice, uint mip, bool wrap)
+// A bilinear tap and its exact derivative per unit of uv (piecewise constant
+// per texel, like the filter), so the relief's slope needs no extra taps.
+struct TerrainPaintTap { float4 v; float4 du; float4 dv; };
+TerrainPaintTap TerrainPaintBilinearGrad(float2 uv, uint slice, uint mip, bool wrap)
 {
     uint width, height, elements, levels;
     terrainPaintArray.GetDimensions(mip, width, height, elements, levels);
     int2 size = int2(width, height);
     float2 pixel = (wrap ? frac(uv) : uv) * float2(size) - 0.5;
+    // A clamped axis is flat past the edge texels.
+    float2 inside = wrap ? 1.0 : step(0.0, pixel) * step(pixel, float2(size - 1));
     if (!wrap) pixel = clamp(pixel, 0.0, float2(size - 1));
     int2 lo = int2(floor(pixel));
     float2 f = pixel - float2(lo);
@@ -175,7 +180,16 @@ float4 TerrainPaintBilinear(float2 uv, uint slice, uint mip, bool wrap)
     float4 b = terrainPaintArray.Load(int4(hi.x, lo.y, slice, mip));
     float4 c = terrainPaintArray.Load(int4(lo.x, hi.y, slice, mip));
     float4 d = terrainPaintArray.Load(int4(hi, slice, mip));
-    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+    TerrainPaintTap t;
+    t.v = lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+    t.du = lerp(b - a, d - c, f.y) * (size.x * inside.x);
+    t.dv = lerp(c - a, d - b, f.x) * (size.y * inside.y);
+    return t;
+}
+
+float4 TerrainPaintBilinear(float2 uv, uint slice, uint mip, bool wrap)
+{
+    return TerrainPaintBilinearGrad(uv, slice, mip, wrap).v;
 }
 
 uint TerrainPaintMip(float repeat)
@@ -188,56 +202,115 @@ uint TerrainPaintMip(float repeat)
     return uint(clamp(ceil(log2(max(spacing * width / repeat, 1.0))), 0.0, float(levels - 1)));
 }
 
-float TerrainPaintLayerHeight(float2 worldXZ, float repeat, uint slice, bool detile)
+// Layer height and its slope per world metre.
+float3 TerrainPaintLayerHeightGrad(float2 worldXZ, float repeat, uint slice, bool detile)
 {
     float2 uv = worldXZ / repeat;
     uint mip = TerrainPaintMip(repeat);
-    if (!detile) return TerrainPaintBilinear(uv, slice, mip, true).a;
-    // Same offsets as the pixel shader's top projection.
-    OpenShimDetile d = OpenShimDetileAt(uv);
-    return lerp(TerrainPaintBilinear(uv + d.a, slice, mip, true).a, TerrainPaintBilinear(uv + d.b, slice, mip, true).a, d.t);
-}
-
-float TerrainPaintHeight(float2 worldXZ)
-{
-    if (!all(isfinite(worldXZ))) return 0.0;
-    float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / (OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy);
-    float4 banks[OPENSHIM_PAINT_LAYERS / 4];
-    [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
-        banks[b] = TerrainPaintBilinear(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
-    OpenShimPaintMix weights = OpenShimPaintNormalize(banks);
-    float heights[OPENSHIM_PAINT_LAYERS];
-    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+    if (!detile)
     {
-        heights[i] = 0.5;
-        [branch] if (OpenShimPaintPresent(weights, i))
-            heights[i] = TerrainPaintLayerHeight(worldXZ, openShimPaintRepeats[i], uint(OpenShimPaintSlice(i, 5)), openShimPaintDetile[i] > 0);
+        TerrainPaintTap t = TerrainPaintBilinearGrad(uv, slice, mip, true);
+        return float3(t.v.a, float2(t.du.a, t.dv.a) / repeat);
     }
-    // Same height-aware selection as the pixel shader.
-    weights = OpenShimPaintSelect(weights, heights);
-    float value = 0;
-    [unroll] for (int j = 0; j < OPENSHIM_PAINT_LAYERS; ++j)
-        value += weights.w[j] * (heights[j] - 0.5) * openShimPaintHeightMeters[j];
-    value *= OPENSHIM_PAINT_HEIGHT_SCALE;
-#if defined(OPENSHIM_PAINT_CRATERS)
-    // The pixel shader's crater field, faded at the vertex spacing.
-    value += OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR).h *
-        OpenShimPaintDot(weights, openShimPaintCraterLayers) * OPENSHIM_PAINT_HEIGHT_SCALE;
-#endif
-#if defined(OPENSHIM_PAINT_DETAIL)
-    value += OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, 5.0 / OPENSHIM_TESS_FACTOR).h *
-        OpenShimPaintDot(weights, openShimPaintDetailLayers) * OPENSHIM_PAINT_HEIGHT_SCALE;
-#endif
-    return isfinite(value) ? clamp(value, -OPENSHIM_RELIEF_AMPLITUDE, OPENSHIM_RELIEF_AMPLITUDE) : 0.0;
+    // Same offsets as the pixel shader's top projection; outside the band
+    // only one tap counts.
+    OpenShimDetile d = OpenShimDetileAt(uv);
+    float3 a = 0, b = 0;
+    [branch] if (d.t < 1)
+    {
+        TerrainPaintTap t = TerrainPaintBilinearGrad(uv + d.a, slice, mip, true);
+        a = float3(t.v.a, t.du.a, t.dv.a);
+    }
+    [branch] if (d.t > 0)
+    {
+        TerrainPaintTap t = TerrainPaintBilinearGrad(uv + d.b, slice, mip, true);
+        b = float3(t.v.a, t.du.a, t.dv.a);
+    }
+    float3 h = lerp(a, b, d.t);
+    if (d.t > 0 && d.t < 1) h.yz += (b.x - a.x) * OpenShimDetileSlope(uv);
+    return float3(h.x, h.yz / repeat);
 }
 
+float TerrainPaintLayerHeight(float2 worldXZ, float repeat, uint slice, bool detile)
+{
+    return TerrainPaintLayerHeightGrad(worldXZ, repeat, slice, detile).x;
+}
+
+// Height and its world XZ slope from one evaluation: every step (bilinear
+// taps, normalisation, the height-aware selection, craters, detail) is
+// differentiated alongside its value as (value, d/dx, d/dz), where finite
+// differences took four more full evaluations.
 float3 TerrainPaintRelief(float2 worldXZ)
 {
-    const float e = 0.5 * 5.0 / OPENSHIM_TESS_FACTOR;
-    float h = TerrainPaintHeight(worldXZ);
-    float dx = TerrainPaintHeight(worldXZ + float2(e, 0)) - TerrainPaintHeight(worldXZ - float2(e, 0));
-    float dz = TerrainPaintHeight(worldXZ + float2(0, e)) - TerrainPaintHeight(worldXZ - float2(0, e));
-    return float3(h, float2(dx, dz) / (2.0 * e));
+    if (!all(isfinite(worldXZ))) return 0.0;
+    float2 span = OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy;
+    float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / span;
+    float3 control[OPENSHIM_PAINT_LAYERS];
+    float3 total = 0;
+    [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
+    {
+        TerrainPaintTap t = TerrainPaintBilinearGrad(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
+        [unroll] for (int c = 0; c < 4; ++c)
+        {
+            control[b * 4 + c] = t.v[c] > 0 ? float3(t.v[c], t.du[c] / span.x, t.dv[c] / span.y) : 0.0;
+            total += control[b * 4 + c];
+        }
+    }
+    // OpenShimPaintNormalize, differentiated.
+    OpenShimPaintMix weights;
+    float3 mix[OPENSHIM_PAINT_LAYERS];
+    [unroll] for (int n = 0; n < OPENSHIM_PAINT_LAYERS; ++n)
+    {
+        mix[n] = total.x > 0.00001 ? float3(control[n].x / total.x, (control[n].yz * total.x - control[n].x * total.yz) / (total.x * total.x))
+                                   : float3(n == 0 ? 1.0 : 0.0, 0, 0);
+        weights.w[n] = mix[n].x;
+    }
+    float3 heights[OPENSHIM_PAINT_LAYERS];
+    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+    {
+        heights[i] = float3(0.5, 0, 0);
+        [branch] if (OpenShimPaintPresent(weights, i))
+            heights[i] = TerrainPaintLayerHeightGrad(worldXZ, openShimPaintRepeats[i], uint(OpenShimPaintSlice(i, 5)), openShimPaintDetile[i] > 0);
+    }
+    // OpenShimPaintSelect, differentiated: it is piecewise linear.
+    float3 lifted[OPENSHIM_PAINT_LAYERS];
+    float3 crest = 0;
+    [unroll] for (int s = 0; s < OPENSHIM_PAINT_LAYERS; ++s)
+    {
+        lifted[s] = OpenShimPaintPresent(weights, s) ? mix[s] + heights[s] * openShimPaintHeightBlend : 0.0;
+        if (lifted[s].x > crest.x) crest = lifted[s];
+    }
+    float3 kept[OPENSHIM_PAINT_LAYERS];
+    float3 keptTotal = 0;
+    [unroll] for (int k = 0; k < OPENSHIM_PAINT_LAYERS; ++k)
+    {
+        float3 above = lifted[k] - (crest - float3(0.2, 0, 0));
+        kept[k] = OpenShimPaintPresent(weights, k) && above.x > 0 ? above : 0.0;
+        keptTotal += kept[k];
+    }
+    float3 value = 0, craterMix = 0, detailMix = 0;
+    [unroll] for (int j = 0; j < OPENSHIM_PAINT_LAYERS; ++j)
+    {
+        float3 w = keptTotal.x > 0.00001 ? float3(kept[j].x / keptTotal.x, (kept[j].yz * keptTotal.x - kept[j].x * keptTotal.yz) / (keptTotal.x * keptTotal.x))
+                                         : mix[j];
+        float h = heights[j].x - 0.5;
+        value += float3(w.x * h, w.yz * h + w.x * heights[j].yz) * openShimPaintHeightMeters[j];
+        craterMix += w * openShimPaintCraterLayers[j];
+        detailMix += w * openShimPaintDetailLayers[j];
+    }
+#if defined(OPENSHIM_PAINT_CRATERS)
+    // The pixel shader's crater field, faded at the vertex spacing.
+    OpenShimCrater crater = OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR);
+    value += float3(crater.h * craterMix.x, crater.slope * craterMix.x + crater.h * craterMix.yz);
+#endif
+#if defined(OPENSHIM_PAINT_DETAIL)
+    OpenShimCrater detail = OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, 5.0 / OPENSHIM_TESS_FACTOR);
+    value += float3(detail.h * detailMix.x, detail.slope * detailMix.x + detail.h * detailMix.yz);
+#endif
+    value *= OPENSHIM_PAINT_HEIGHT_SCALE;
+    if (!all(isfinite(value))) return 0.0;
+    // Pinned at the clamp, the surface is flat.
+    return abs(value.x) > OPENSHIM_RELIEF_AMPLITUDE ? float3(clamp(value.x, -OPENSHIM_RELIEF_AMPLITUDE, OPENSHIM_RELIEF_AMPLITUDE), 0, 0) : value;
 }
 
 #if defined(OPENSHIM_TESS_ADAPTIVE)

@@ -345,6 +345,10 @@ openshim_add_test(diagnostic_output_cap_tests STD 14 SOURCES
     diagnostic_output_cap_tests.cpp
 )
 
+openshim_add_test(sun_baseline_tests STD 20 SOURCES
+    sun_baseline_tests.cpp
+)
+
 add_executable(shadow_far_distance_tests
     shadow_far_distance_tests.cpp
 )

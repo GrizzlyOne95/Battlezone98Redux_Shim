@@ -50,6 +50,7 @@
 ;   [Startup]      startup-only hooks/behavior
 ;   [Terrain]      terrain replacement/proxy development controls
 ;   [DX11Enhanced] experimental modern DX11 Enhanced presentation controls
+;   [SunBaseline]  Enhanced-profile sun power and per-world colour grade
 ;   [Display]      local/cosmetic behavior
 ;   [AutoSave]     rolling single-player recovery save
 ;   [Diagnostics]  read-only traces/probes unless explicitly noted
@@ -652,6 +653,21 @@ MpVehiclePreviewShadowScheme = 1
 ; answers the scheme miss with the material's own base-scheme technique
 ; instead, via Ogre's handleSchemeNotFound hook.
 EnhancedSchemeFallback = 1
+; The sun (Ogre light terrain_masterlight) is destroyed whenever certain
+; render info is torn down - a pilot getting into a vehicle, an in-place
+; pilot class swap - and the next frame rebuilds it from the stock mission
+; Sun_Ambient/Sun_Diffuse/Sun_Specular, a 128 m shadow far distance and
+; Ogre's default power scale. Everything a mod set through EXU's
+; SetSunDiffuse/SetSunSpecular/SetSunDirection/SetSunPowerScale/
+; SetSunShadowFarDistance/SetAmbientLight is wiped, which shows as a lighting
+; flap a few seconds into a mission. OpenShim snapshots those values every
+; frame and puts back any the rebuild changed. Direction is put back only
+; while the engine sun vector is unchanged, so a deliberate rebuild (EXU's
+; SetTimeOfDay, CR's mission-init refresh) keeps the engine's new direction.
+; Each rebuild logs one [SUNWATCH] line naming what was restored and kept.
+; Renderer-only; no simulation or wire effect.
+; Accepted: boolean. Default: ON. Restart required.
+SunRebuildRestore = 1
 ; Automatic DX11 legacy material compatibility for old mods
 ; (Docs/DX11_LEGACY_MATERIAL_COMPATIBILITY.md). D3D11 has no fixed pipeline
 ; and rejects SM2/SM3 targets, so legacy fixed-function passes and stock
@@ -779,13 +795,13 @@ DxgiFlipModel = 0
 
 
 [Terrain]
-; Terrain Micro Detail in the OpenShim settings page. On by default: terrain paint
-; height (rock, cracks, craters) shows only with it.
-; Experimental visual-only ground relief, using factor-4 DX11 tessellation and
-; a 0.25-world-unit maximum offset. Collision, placement and gameplay heights
-; are unchanged. Requires DX11 and a game restart; increases GPU cost.
-; Unsupported renderer/build/terrain contracts retain native terrain.
-TerrainMicroRelief = 1
+; Terrain Micro Detail in the OpenShim settings page. Off by default (opt-in):
+; a 2026-10-24 measurement on an RTX 5080 at 4K roughly halved the frame rate.
+; Turning it on shows terrain paint height (rock, cracks, craters) using
+; factor-4 DX11 tessellation and a 0.25-world-unit maximum offset. Visual only:
+; collision, placement and gameplay heights are unchanged. Requires DX11 and a
+; game restart. Unsupported renderer/build/terrain contracts retain native terrain.
+TerrainMicroRelief = 0
 
 
 ; NOTE: terrain booleans below are integer flags; use 0/1.
@@ -983,6 +999,45 @@ EnhancedLightSelectionV2 = 1
 ; Not exposed on the OpenShim Settings page; this is a developer tool.
 ; Environment override: OPENSHIM_DX11_SCENE_DEPTH_DIAG
 SceneDepthDiagnostic = 0
+
+
+[SunBaseline]
+
+; Enhanced sun lighting baseline. The Enhanced profile's sun look was tuned
+; with Campaign Reimagined's Lua, which sets the sun power scale and a
+; per-world colour grade through EXU; stock and third-party maps never ran
+; that Lua. With this on, OpenShim applies the same calibration natively to
+; the terrain sun (terrain_masterlight) on the frame the mission creates it,
+; so any content gets it without EXU.
+; Applies only in the Enhanced render profile on Direct3D 11. Redux, Retro and
+; DX9 are untouched. Switching away from Enhanced mid-mission puts back the
+; stock value of every field that still holds the baseline's; switching back
+; applies it again.
+; It is a starting point, not an override: anything Lua/EXU writes to the sun
+; afterwards (SetSunDiffuse, SetAmbientLight, ...) still wins, and
+; [Fixes] SunRebuildRestore carries the result across the engine's sun
+; rebuilds. Needs SunRebuildRestore on; with it off this stands down.
+; Accepted: boolean/integer flag; use 0/1. Default: ON.
+Enabled = 1
+
+; Per-world colour grade of the sun diffuse, specular and the scene ambient,
+; keyed by the terrain's world code. Each channel is stock * multiplier,
+; raised to a floor, clamped to [0, 4]:
+;   Titan (ti):                 power 0.95, warm grade with colour floors
+;   Moon, Europa, Io (mn/eu/io): power 1.32, brighter diffuse/specular,
+;                               cooler and dimmer ambient
+;   every other world:          power 1.15, colours untouched
+; Set 0 to keep stock colours and apply only the power scale.
+; Accepted: boolean/integer flag; use 0/1. Default: ON.
+WorldColorGrading = 1
+
+; Sun power scale for every world, overriding the table above.
+; Blank or absent uses the per-world value. Accepted: 0 to 8.
+PowerScale =
+
+; Sun shadow far distance in metres. Blank or absent leaves the engine's own
+; value alone. Accepted: 16 to 4096.
+ShadowFarDistance =
 
 
 [Display]

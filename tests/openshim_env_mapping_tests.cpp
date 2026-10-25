@@ -364,7 +364,7 @@ namespace
         FakeIni ini;
         FakeEnv env;
         constexpr const char* name = "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST";
-        Check(Lookup(name, &ini, env) == "1", "absent relief setting defaults on");
+        Check(Lookup(name, &ini, env) == "<unset>", "absent relief setting is not mapped (off)");
         ini.Set("Terrain", "TerrainMicroRelief", "On");
         Check(Lookup(name, &ini, env) == "1", "saved UI On enables relief without launch environment");
         env.values[name] = "0";

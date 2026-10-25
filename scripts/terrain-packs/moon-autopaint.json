@@ -130,8 +130,7 @@
     {
       "name": "Dust",
       "repeatMeters": 24,
-      "archive": "military_trenches_ground_dirt_fine_03_yd0jchk_8k.zip",
-      "member": "yd0jchk_8K_Basecolor.jpg",
+      "file": "moon_03_diff_4k.jpg",
       "matchMean": "crhd_moon_mn00sa0_d.dds",
       "gain": [
         0.9,
@@ -139,7 +138,7 @@
         1.09
       ],
       "heightMeters": 0.6,
-      "derivedReliefMeters": 0.6,
+      "heightShade": 2,
       "specularScale": 0.6,
       "detile": true,
       "proceduralCraters": 0.6
@@ -156,9 +155,7 @@
     {
       "name": "Cratered dust",
       "repeatMeters": 40,
-      "archive": "dark_rock_detail_texture_sexhdi0f0_4k.zip",
-      "member": "Dark_Rock_Detail_Texture_sexhdi0f0_4K_BaseColor.jpg",
-      "saturation": 0.15,
+      "file": "moon_meteor_01_diff_4k.jpg",
       "matchMean": "crhd_moon_mn00sa0_d.dds",
       "gain": [
         0.9,
@@ -166,7 +163,7 @@
         1.09
       ],
       "heightMeters": 1.0,
-      "derivedReliefMeters": 1.0,
+      "heightShade": 3,
       "specularScale": 0.6,
       "detile": true,
       "proceduralCraters": 1
@@ -175,8 +172,8 @@
       "name": "Blue rock wide",
       "detile": true,
       "repeatMeters": 40,
-      "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
-      "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
+      "file": "Icelandic_Jagged_Slate_Rock_shfsaida_4K_BaseColor.jpg",
+      "saturation": 0.15,
       "matchMean": "crhd_moon_mn33sa0_d.dds",
       "heightMeters": 1.6
     }

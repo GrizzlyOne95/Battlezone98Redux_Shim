@@ -216,6 +216,10 @@ Layer recipe fields:
   0.5.
 - `saturation` (0 to 2) scales colour saturation before `matchMean`, to mute
   off-world tints such as rust or moss in a scanned source.
+- `heightShade` (0 to 4) multiplies the colour by the height's high-passed
+  relief, normalised to mean 1, as cavity shading. Use it for de-lit scans
+  (Poly Haven's lunar sets) whose albedo is nearly flat and keeps its detail
+  in height and normal. The Moon dust layers use 2 and 3.
 - `seamless` wrap-blends the normal, height and specular too.
 - `detile` (true or false) breaks up the repeat: low-frequency noise over the
   tile grid picks one of nine whole-tile offsets per region, about three tiles

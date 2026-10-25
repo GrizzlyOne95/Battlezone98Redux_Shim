@@ -310,9 +310,12 @@ bool InstallNativeTerrainTessellationTest()
             throw std::runtime_error("source material unavailable");
         g_proxy.generation = ++g_resourceSerial;
         g_proxy.semanticMaterialGeneration = ++g_semanticMaterialSerial;
-        const std::string prefix = "OpenShim/TerrainTessTest/" +
-            std::to_string(g_proxy.semanticMaterialGeneration) + "/" + SourceHashSuffix(source);
-        g_proxy.semanticMaterialName = prefix + "/Material";
+        // Programs are named by content only so the name-keyed microcode
+        // cache hits on every run; the material clone keeps the generation
+        // because a clone name must be unique while an older clone lives.
+        const std::string prefix = "OpenShim/TerrainTessTest/" + SourceHashSuffix(source);
+        g_proxy.semanticMaterialName = prefix + "/" +
+            std::to_string(g_proxy.semanticMaterialGeneration) + "/Material";
         g_ogre.cloneMaterial(sourceMaterial.rep, &clone, g_proxy.semanticMaterialName, false, std::string());
         if (!clone.rep)
             throw std::runtime_error("material clone unavailable");
@@ -367,6 +370,7 @@ bool InstallNativeTerrainTessellationTest()
                         // permutation's bytecode from an earlier game session.
                         const std::string name = prefix + "/" + SourceHashSuffix(key) +
                             (stage == 0 ? "/Hull" : "/Domain");
+                        ForgetGeneratedProgram(programManager, name);
                         // Ogre 1.10 GpuProgramType: domain=3, hull=4.
                         g_ogre.createHighLevelProgram(programManager, &program, name,
                             std::string("General"), std::string("hlsl"), stage == 0 ? 4 : 3);

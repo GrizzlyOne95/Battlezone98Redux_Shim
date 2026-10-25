@@ -267,6 +267,58 @@ RWStructuredBuffer<float4> testResults : register(u0);
             moved = moved || std::abs(shaded[i].r-shaded[i].g)>0.05f;
         }
         check(moved,"detile offsets left the pattern unchanged");
+        // The relief's analytic slope matches a fine central difference of its
+        // height through control normalisation, the height-aware selection,
+        // detile and craters (the detail field's slope is approximate by design
+        // and checked on its own below). Kinks (texel edges, selection
+        // switches) may disagree for a few of the 448 samples.
+        TerrainPaint::Config slopedHeight = detiled; slopedHeight.heightMeters = {1, .6f, 0, 0};
+        slopedHeight.craterLayers = {1, 0, 0, 0}; slopedHeight.detailLayers = {.5f, .5f, 0, 0};
+        const std::string slopeTess = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
+            "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(-3,-5,90,50)\n#define OPENSHIM_PAINT_HEIGHT_SCALE 1\n"
+            "#define OPENSHIM_PAINT_CRATERS float4(6,0.2,0.5,3)\n" +
+            TerrainPaint::LayerHlsl(slopedHeight) + TerrainPaint::DetileHlsl() + TerrainPaint::CraterHlsl() + tessRaw + R"(
+RWStructuredBuffer<float4> testResults : register(u0);
+[numthreads(1,1,1)] void TestSlope(uint3 id : SV_DispatchThreadID)
+{ const float e = 0.001; float worst = 0, misses = 0, steep = 0;
+  [loop] for (int s = 0; s < 64; ++s)
+  { float2 p = float2(0.37 + 5.3 * id.x + 0.57 * s, 0.61 + 3.1 * id.x + 0.71 * (s % 9));
+    // One inlined relief: the 32-bit compiler runs out of memory on five.
+    // Divide by the steps the floats actually took, not by 2e.
+    float2 at[5] = { p, p + float2(e, 0), p - float2(e, 0), p + float2(0, e), p - float2(0, e) };
+    float3 r[5];
+    [loop] for (int k = 0; k < 5; ++k) r[k] = TerrainPaintRelief(at[k]);
+    float2 fd = float2((r[1].x - r[2].x) / (at[1].x - at[2].x), (r[3].x - r[4].x) / (at[3].y - at[4].y));
+    float err = length(r[0].yz - fd) / max(1.0, length(fd));
+    if (err > 0.02) misses += 1; else worst = max(worst, err);
+    steep += length(r[0].yz); }
+  testResults[id.x] = float4(worst, misses, steep, 0); }
+)";
+        compiled = D3DCompile(slopeTess.data(),slopeTess.size(),nullptr,nullptr,nullptr,"TestSlope","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> slopeShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&slopeShader));
+        const std::vector<Pixel> keptLayers = layers;
+        for (unsigned i=0;i<16;++i)
+        {
+            layers[4*16+i] = {float(i%4)/3, float(i/4)/3 + .1f, 0, 0};
+            layers[6*16+i].a = float((i*5)%16)/15;
+        }
+        for (unsigned s : {4u, 6u}) context->UpdateSubresource(materialTexture.Get(),s,nullptr,layers.data()+s*16,4*sizeof(Pixel),0);
+        context->CSSetShader(slopeShader.Get(),nullptr,0);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+        float misses = 0, steep = 0;
+        for(UINT i=0;i<count;++i)
+        {
+            check(values[i].r<0.02f,"relief slope differs from its height");
+            misses += values[i].g; steep += values[i].b;
+        }
+        context->Unmap(staging.Get(),0);
+        check(misses<=count*64*0.03f,"relief slope differs from its height at too many samples");
+        check(steep>count*64*0.05f,"relief slope test ground is flat");
+        layers = keptLayers;
+        for (unsigned s : {4u, 6u}) context->UpdateSubresource(materialTexture.Get(),s,nullptr,layers.data()+s*16,4*sizeof(Pixel),0);
         // Distance scale, macro variation and craters: every pixel variant
         // and the domain shader compile; crater slopes match their heights.
         TerrainPaint::Config varied = detiled;

@@ -10,6 +10,9 @@
 #include "hook_engine.h"
 #include "patcher.h"
 #include "shim_log.h"
+#include "planet_environment.h"
+#include "render_profile_runtime.h"
+#include "sun_baseline.h"
 
 #include <Windows.h>
 
@@ -439,11 +442,16 @@ namespace BZROpenShim
         // Mission lifecycle seam. Leaving simulation destroys every Ogre object
         // with no teardown callback, so the light is forgotten, never destroyed,
         // and nothing new is built until a world is running again.
+        static void NoteSunMissionBoundary();
+
         void PilotFlashlightNotifyMissionRunStateChanged(bool enteringSimulation)
         {
             g_PilotFlashlightWorldRunning = enteringSimulation;
             if (!enteringSimulation)
+            {
                 ForgetPilotFlashlight(L"left simulation");
+                NoteSunMissionBoundary();
+            }
         }
 
         static void RetirePilotFlashlight(const wchar_t* reason)
@@ -989,6 +997,520 @@ namespace BZROpenShim
             }
         }
 
+        // --- Sun rebuild restore ---------------------------------------------
+        // The rebuilt sun re-reads stock Sun_Ambient/Sun_Diffuse/Sun_Specular
+        // (0x0067DD60), takes its direction from the engine sun vector, forces
+        // a 128 m shadow far distance and leaves powerScale at Ogre's 1.0, so
+        // anything a mod pushed through EXU (SetSunDiffuse, SetSunDirection,
+        // SetAmbientLight, ...) is wiped a few seconds into a mission. EXU keeps
+        // no cache, so snapshot the live values once per frame and put back the
+        // ones the rebuild changed. Direction is put back only while the engine
+        // sun vector is unchanged: if it moved, the rebuild was a deliberate
+        // RefreshTerrainMasterLight (time of day) and the new direction stands.
+        // [Fixes] SunRebuildRestore, default on.
+        using FnOgreSetLightFloat = void(__thiscall*)(void*, float);
+        using FnOgreGetAmbientLight = const OgreColourValue*(__thiscall*)(void*);
+        using FnOgreSetAmbientLight = void(__thiscall*)(void*, const OgreColourValue&);
+
+        struct SunRestoreApi
+        {
+            FnOgreGetLightColour getDiffuse = nullptr;
+            FnOgreSetLightColour setDiffuse = nullptr;
+            FnOgreGetLightColour getSpecular = nullptr;
+            FnOgreSetLightColour setSpecular = nullptr;
+            FnOgreGetLightVector3 getDirection = nullptr;
+            FnOgreSetLightColour setDirection = nullptr;  // (x, y, z) floats
+            FnOgreGetLightFloat getPowerScale = nullptr;
+            FnOgreSetLightFloat setPowerScale = nullptr;
+            FnOgreGetLightFloat getShadowFar = nullptr;
+            FnOgreSetLightFloat setShadowFar = nullptr;
+            FnOgreGetAmbientLight getAmbient = nullptr;
+            FnOgreSetAmbientLight setAmbient = nullptr;
+        };
+
+        // Plain data only: the guarded cores copy it inside __try.
+        struct SunLightState
+        {
+            OgreColourValue diffuse;
+            OgreColourValue specular;
+            OgreColourValue ambient;
+            OgreVector3 direction;
+            float powerScale;
+            float shadowFar;
+            float engineSun[3];
+        };
+
+        enum SunField : uint32_t
+        {
+            kSunFieldDiffuse = 1u << 0,
+            kSunFieldSpecular = 1u << 1,
+            kSunFieldDirection = 1u << 2,
+            kSunFieldPowerScale = 1u << 3,
+            kSunFieldShadowFar = 1u << 4,
+            kSunFieldAmbient = 1u << 5,
+        };
+
+        static SunRestoreApi g_SunRestore;
+        static uint32_t g_SunDirectionStateAddr = 0;
+        static int g_SunRestoreBound = 0;  // 0 untried, 1 bound, -1 off or stood down
+        static SunLightState g_SunSnapshot = {};
+        static void* g_SunSnapshotLight = nullptr;
+        static bool g_SunSnapshotValid = false;
+
+        static bool BindSunRestore()
+        {
+            if (g_SunRestoreBound != 0)
+                return g_SunRestoreBound > 0;
+
+            bool enabled = true;
+            TryGetUserConfigBool("Fixes", "SunRebuildRestore", enabled);
+            if (!enabled)
+            {
+                g_SunRestoreBound = -1;
+                Log(L"[SUNWATCH] restore off ([Fixes] SunRebuildRestore=0)\n");
+                return false;
+            }
+
+            SunRestoreApi& api = g_SunRestore;
+            api.getDiffuse = ResolveOgreProc<FnOgreGetLightColour>(
+                "?getDiffuseColour@Light@Ogre@@QBEABVColourValue@2@XZ");
+            api.setDiffuse = ResolveOgreProc<FnOgreSetLightColour>(
+                "?setDiffuseColour@Light@Ogre@@QAEXMMM@Z");
+            api.getSpecular = ResolveOgreProc<FnOgreGetLightColour>(
+                "?getSpecularColour@Light@Ogre@@QBEABVColourValue@2@XZ");
+            api.setSpecular = ResolveOgreProc<FnOgreSetLightColour>(
+                "?setSpecularColour@Light@Ogre@@QAEXMMM@Z");
+            api.getDirection = ResolveOgreProc<FnOgreGetLightVector3>(
+                "?getDirection@Light@Ogre@@QBEABVVector3@2@XZ");
+            api.setDirection = ResolveOgreProc<FnOgreSetLightColour>(
+                "?setDirection@Light@Ogre@@QAEXMMM@Z");
+            api.getPowerScale = ResolveOgreProc<FnOgreGetLightFloat>(
+                "?getPowerScale@Light@Ogre@@QBEMXZ");
+            api.setPowerScale = ResolveOgreProc<FnOgreSetLightFloat>(
+                "?setPowerScale@Light@Ogre@@QAEXM@Z");
+            api.getShadowFar = ResolveOgreProc<FnOgreGetLightFloat>(
+                "?getShadowFarDistance@Light@Ogre@@QBEMXZ");
+            api.setShadowFar = ResolveOgreProc<FnOgreSetLightFloat>(
+                "?setShadowFarDistance@Light@Ogre@@QAEXM@Z");
+            api.getAmbient = ResolveOgreProc<FnOgreGetAmbientLight>(
+                "?getAmbientLight@SceneManager@Ogre@@QBEABVColourValue@2@XZ");
+            api.setAmbient = ResolveOgreProc<FnOgreSetAmbientLight>(
+                "?setAmbientLight@SceneManager@Ogre@@QAEXABVColourValue@2@@Z");
+
+            const bool exportsOk =
+                api.getDiffuse && api.setDiffuse && api.getSpecular && api.setSpecular &&
+                api.getDirection && api.setDirection && api.getPowerScale &&
+                api.setPowerScale && api.getShadowFar && api.setShadowFar &&
+                api.getAmbient && api.setAmbient;
+            const HookEngine::EngineRow rows[] = {
+                { "SunDirectionState", &g_SunDirectionStateAddr },
+            };
+            const bool rowOk = HookEngine::BindEngineRows("Sun rebuild restore", rows);
+
+            g_SunRestoreBound = exportsOk && rowOk ? 1 : -1;
+            if (g_SunRestoreBound < 0)
+            {
+                Log(L"[SUNWATCH] restore stood down (%ls%ls%ls); light lists are still marked dirty\n",
+                    exportsOk ? L"" : L"Ogre export unresolved",
+                    !exportsOk && !rowOk ? L", " : L"",
+                    rowOk ? L"" : L"SunDirectionState row unresolved");
+            }
+            return g_SunRestoreBound > 0;
+        }
+
+        __declspec(noinline) static bool ReadSunLightStateGuarded(
+            void* light, void* sceneManager, uint32_t engineSunAddr, SunLightState* out)
+        {
+            __try
+            {
+                const OgreColourValue* const diffuse = g_SunRestore.getDiffuse(light);
+                const OgreColourValue* const specular = g_SunRestore.getSpecular(light);
+                const OgreVector3* const direction = g_SunRestore.getDirection(light);
+                const OgreColourValue* const ambient = g_SunRestore.getAmbient(sceneManager);
+                if (!diffuse || !specular || !direction || !ambient)
+                    return false;
+                out->diffuse = *diffuse;
+                out->specular = *specular;
+                out->direction = *direction;
+                out->ambient = *ambient;
+                out->powerScale = g_SunRestore.getPowerScale(light);
+                out->shadowFar = g_SunRestore.getShadowFar(light);
+                const float* const engineSun =
+                    reinterpret_cast<const float*>(static_cast<uintptr_t>(engineSunAddr));
+                out->engineSun[0] = engineSun[0];
+                out->engineSun[1] = engineSun[1];
+                out->engineSun[2] = engineSun[2];
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        __declspec(noinline) static bool ApplySunLightStateGuarded(
+            void* light, void* sceneManager, const SunLightState* want, uint32_t fields)
+        {
+            __try
+            {
+                if (fields & kSunFieldDiffuse)
+                    g_SunRestore.setDiffuse(light, want->diffuse.r, want->diffuse.g, want->diffuse.b);
+                if (fields & kSunFieldSpecular)
+                    g_SunRestore.setSpecular(light, want->specular.r, want->specular.g, want->specular.b);
+                if (fields & kSunFieldDirection)
+                    g_SunRestore.setDirection(light, want->direction.x, want->direction.y, want->direction.z);
+                if (fields & kSunFieldPowerScale)
+                    g_SunRestore.setPowerScale(light, want->powerScale);
+                if (fields & kSunFieldShadowFar)
+                    g_SunRestore.setShadowFar(light, want->shadowFar);
+                if (fields & kSunFieldAmbient)
+                    g_SunRestore.setAmbient(sceneManager, want->ambient);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void SnapshotSunLight(void* sun, void* sceneManager)
+        {
+            g_SunSnapshotValid = ReadSunLightStateGuarded(
+                sun, sceneManager, g_SunDirectionStateAddr, &g_SunSnapshot);
+            g_SunSnapshotLight = g_SunSnapshotValid ? sun : nullptr;
+        }
+
+        static bool SameRgb(const OgreColourValue& a, const OgreColourValue& b)
+        {
+            return a.r == b.r && a.g == b.g && a.b == b.b;
+        }
+
+        static void AppendSunFieldNames(uint32_t fields, wchar_t* out, size_t outCount)
+        {
+            static const struct { uint32_t bit; const wchar_t* name; } kNames[] = {
+                { kSunFieldDiffuse, L"diffuse" },
+                { kSunFieldSpecular, L"specular" },
+                { kSunFieldDirection, L"direction" },
+                { kSunFieldPowerScale, L"powerScale" },
+                { kSunFieldShadowFar, L"shadowFar" },
+                { kSunFieldAmbient, L"ambient" },
+            };
+            bool any = false;
+            for (const auto& entry : kNames)
+            {
+                if (!(fields & entry.bit))
+                    continue;
+                if (any)
+                    wcscat_s(out, outCount, L",");
+                wcscat_s(out, outCount, entry.name);
+                any = true;
+            }
+            if (!any)
+                wcscat_s(out, outCount, L"none");
+        }
+
+        // Puts the previous sun's mod-set values back on the rebuilt one and
+        // describes what it did in `out` for the one replacement log line.
+        static void RestoreSunAfterRebuild(
+            void* previous, void* sun, void* sceneManager, wchar_t* out, size_t outCount)
+        {
+            if (!g_SunSnapshotValid || g_SunSnapshotLight != previous)
+            {
+                wcscpy_s(out, outCount, L"; restore skipped (no snapshot of the previous sun)");
+                return;
+            }
+            SunLightState fresh = {};
+            if (!ReadSunLightStateGuarded(sun, sceneManager, g_SunDirectionStateAddr, &fresh))
+            {
+                wcscpy_s(out, outCount, L"; restore skipped (fault reading the new sun)");
+                return;
+            }
+
+            // The rebuild only ever produces stock config values, so any field
+            // that differs from last frame's snapshot is a mod override.
+            const SunLightState& want = g_SunSnapshot;
+            uint32_t restore = 0;
+            uint32_t kept = 0;
+            if (!SameRgb(want.diffuse, fresh.diffuse))
+                restore |= kSunFieldDiffuse;
+            if (!SameRgb(want.specular, fresh.specular))
+                restore |= kSunFieldSpecular;
+            if (want.powerScale != fresh.powerScale)
+                restore |= kSunFieldPowerScale;
+            if (want.shadowFar != fresh.shadowFar)
+                restore |= kSunFieldShadowFar;
+            if (!SameRgb(want.ambient, fresh.ambient) || want.ambient.a != fresh.ambient.a)
+                restore |= kSunFieldAmbient;
+            if (want.direction.x != fresh.direction.x || want.direction.y != fresh.direction.y ||
+                want.direction.z != fresh.direction.z)
+            {
+                const bool engineSunUnchanged =
+                    want.engineSun[0] == fresh.engineSun[0] &&
+                    want.engineSun[1] == fresh.engineSun[1] &&
+                    want.engineSun[2] == fresh.engineSun[2];
+                if (engineSunUnchanged)
+                    restore |= kSunFieldDirection;
+                else
+                    kept |= kSunFieldDirection;
+            }
+
+            const bool applied =
+                restore == 0 || ApplySunLightStateGuarded(sun, sceneManager, &want, restore);
+            wcscpy_s(out, outCount, applied ? L"; restored=" : L"; restore FAULTED for=");
+            AppendSunFieldNames(restore, out, outCount);
+            wcscat_s(out, outCount, L" kept=");
+            AppendSunFieldNames(kept, out, outCount);
+            if (kept & kSunFieldDirection)
+                wcscat_s(out, outCount, L" (engine sun vector moved)");
+        }
+
+        // --- Enhanced sun lighting baseline -----------------------------------
+        // The Enhanced profile's sun look was calibrated with Campaign
+        // Reimagined's Lua, which pushes a power scale and a per-world colour
+        // grade through EXU; stock maps never got it. Apply the same
+        // calibration (include/sun_baseline.h) natively to the first sun of
+        // each mission, before the rebuild-restore snapshot, so the snapshot
+        // carries it across engine sun rebuilds and any later EXU/Lua write
+        // still wins. Lua runs between frames and this runs once per rendered
+        // frame, so nothing can have written to a sun created this frame.
+        // Enhanced profile on Direct3D 11 only; leaving the profile reverts the
+        // fields still holding our values. [SunBaseline] in openshim.ini.
+        static_assert(static_cast<unsigned>(openshim::sunbaseline::kFieldDiffuse) == kSunFieldDiffuse &&
+                          static_cast<unsigned>(openshim::sunbaseline::kFieldSpecular) == kSunFieldSpecular &&
+                          static_cast<unsigned>(openshim::sunbaseline::kFieldPowerScale) == kSunFieldPowerScale &&
+                          static_cast<unsigned>(openshim::sunbaseline::kFieldShadowFar) == kSunFieldShadowFar &&
+                          static_cast<unsigned>(openshim::sunbaseline::kFieldAmbient) == kSunFieldAmbient,
+                      "sun baseline field bits must match SunField");
+
+        static int g_BaselineState = 0;  // 0 untried, 1 active, -1 disabled or stood down
+        static openshim::sunbaseline::SunBaselineConfig g_BaselineConfig;
+        static bool g_BaselineApplied = false;
+        static bool g_BaselineGateLast = false;
+        static char g_BaselineWorld[4] = "";
+        static SunLightState g_BaselinePre = {};
+        static SunLightState g_BaselinePost = {};
+        static uint32_t g_BaselineMask = 0;
+        // Set when the mission leaves simulation: Redux keeps one SceneManager
+        // for the process, so the next mission's sun reads as a rebuild unless
+        // the boundary is remembered.
+        static bool g_SunMissionBoundaryPending = false;
+
+        static void NoteSunMissionBoundary()
+        {
+            g_SunMissionBoundaryPending = true;
+            g_BaselineApplied = false;
+            g_BaselineGateLast = false;
+        }
+
+        static bool SunBaselineGatePasses()
+        {
+            return RenderProfiles::Exports::GetActiveBackend() ==
+                       static_cast<uint32_t>(RenderProfiles::ActiveBackend::DX11) &&
+                   RenderProfiles::Exports::GetEffectiveRenderProfile() ==
+                       RenderProfiles::Abi::kProfileEnhanced &&
+                   RenderProfiles::IdentifyActiveRenderSystem() == 1;
+        }
+
+        static void StandDownSunBaseline(const wchar_t* reason)
+        {
+            g_BaselineState = -1;
+            g_BaselineApplied = false;
+            Log(L"[SUNBASE] stood down (%ls)\n", reason);
+        }
+
+        static openshim::sunbaseline::SunLightStateLike ToBaselineState(const SunLightState& state)
+        {
+            openshim::sunbaseline::SunLightStateLike out = {};
+            out.diffuse[0] = state.diffuse.r;
+            out.diffuse[1] = state.diffuse.g;
+            out.diffuse[2] = state.diffuse.b;
+            out.specular[0] = state.specular.r;
+            out.specular[1] = state.specular.g;
+            out.specular[2] = state.specular.b;
+            out.ambient[0] = state.ambient.r;
+            out.ambient[1] = state.ambient.g;
+            out.ambient[2] = state.ambient.b;
+            out.powerScale = state.powerScale;
+            out.shadowFar = state.shadowFar;
+            return out;
+        }
+
+        // Alpha channels and the direction stay as they were in `state`.
+        static void FromBaselineState(const openshim::sunbaseline::SunLightStateLike& in,
+                                      SunLightState& state)
+        {
+            state.diffuse.r = in.diffuse[0];
+            state.diffuse.g = in.diffuse[1];
+            state.diffuse.b = in.diffuse[2];
+            state.specular.r = in.specular[0];
+            state.specular.g = in.specular[1];
+            state.specular.b = in.specular[2];
+            state.ambient.r = in.ambient[0];
+            state.ambient.g = in.ambient[1];
+            state.ambient.b = in.ambient[2];
+            state.powerScale = in.powerScale;
+            state.shadowFar = in.shadowFar;
+        }
+
+        static bool SunNearlyEqual(float a, float b)
+        {
+            return std::fabs(a - b) <= 1e-4f;
+        }
+
+        static bool SunNearlyEqualRgb(const OgreColourValue& a, const OgreColourValue& b)
+        {
+            return SunNearlyEqual(a.r, b.r) && SunNearlyEqual(a.g, b.g) && SunNearlyEqual(a.b, b.b);
+        }
+
+        // Fields of `mask` whose live value still holds what the baseline wrote.
+        static uint32_t SunBaselineFieldsStillOurs(const SunLightState& live, uint32_t mask)
+        {
+            const SunLightState& post = g_BaselinePost;
+            uint32_t ours = 0;
+            if ((mask & kSunFieldDiffuse) && SunNearlyEqualRgb(live.diffuse, post.diffuse))
+                ours |= kSunFieldDiffuse;
+            if ((mask & kSunFieldSpecular) && SunNearlyEqualRgb(live.specular, post.specular))
+                ours |= kSunFieldSpecular;
+            if ((mask & kSunFieldAmbient) && SunNearlyEqualRgb(live.ambient, post.ambient))
+                ours |= kSunFieldAmbient;
+            if ((mask & kSunFieldPowerScale) && SunNearlyEqual(live.powerScale, post.powerScale))
+                ours |= kSunFieldPowerScale;
+            if ((mask & kSunFieldShadowFar) && SunNearlyEqual(live.shadowFar, post.shadowFar))
+                ours |= kSunFieldShadowFar;
+            return ours;
+        }
+
+        static void ApplySunBaseline(void* sun, void* sceneManager)
+        {
+            SunLightState live = {};
+            if (!ReadSunLightStateGuarded(sun, sceneManager, g_SunDirectionStateAddr, &live))
+            {
+                StandDownSunBaseline(L"fault reading the sun");
+                return;
+            }
+
+            const std::string world = LastTerrainWorldCode();
+            openshim::sunbaseline::SunLightStateLike computed = {};
+            unsigned mask = 0;
+            openshim::sunbaseline::ComputeBaseline(
+                g_BaselineConfig, openshim::sunbaseline::BaselineForWorldCode(world),
+                ToBaselineState(live), computed, mask);
+            SunLightState want = live;
+            FromBaselineState(computed, want);
+            if (mask != 0 && !ApplySunLightStateGuarded(sun, sceneManager, &want, mask))
+            {
+                StandDownSunBaseline(L"fault writing the sun");
+                return;
+            }
+
+            g_BaselinePre = live;
+            g_BaselinePost = want;
+            g_BaselineMask = mask;
+            g_BaselineApplied = true;
+            strncpy_s(g_BaselineWorld, world.c_str(), _TRUNCATE);
+
+            wchar_t shadowDetail[64] = L"";
+            if (mask & kSunFieldShadowFar)
+            {
+                swprintf_s(shadowDetail, L" shadowFar %.1f->%.1f",
+                    static_cast<double>(live.shadowFar), static_cast<double>(want.shadowFar));
+            }
+            Log(L"[SUNBASE] applied world=%hs power %.2f->%.2f"
+                L" diffuse (%.2f,%.2f,%.2f)->(%.2f,%.2f,%.2f)"
+                L" ambient (%.2f,%.2f,%.2f)->(%.2f,%.2f,%.2f)"
+                L" specular (%.2f,%.2f,%.2f)->(%.2f,%.2f,%.2f)%ls\n",
+                g_BaselineWorld[0] ? g_BaselineWorld : "none",
+                static_cast<double>(live.powerScale), static_cast<double>(want.powerScale),
+                static_cast<double>(live.diffuse.r), static_cast<double>(live.diffuse.g),
+                static_cast<double>(live.diffuse.b),
+                static_cast<double>(want.diffuse.r), static_cast<double>(want.diffuse.g),
+                static_cast<double>(want.diffuse.b),
+                static_cast<double>(live.ambient.r), static_cast<double>(live.ambient.g),
+                static_cast<double>(live.ambient.b),
+                static_cast<double>(want.ambient.r), static_cast<double>(want.ambient.g),
+                static_cast<double>(want.ambient.b),
+                static_cast<double>(live.specular.r), static_cast<double>(live.specular.g),
+                static_cast<double>(live.specular.b),
+                static_cast<double>(want.specular.r), static_cast<double>(want.specular.g),
+                static_cast<double>(want.specular.b),
+                shadowDetail);
+        }
+
+        // Puts back the stock value of every field that still holds ours; a
+        // field EXU/Lua has since changed is left alone.
+        static void RevertSunBaseline(void* sun, void* sceneManager)
+        {
+            SunLightState live = {};
+            if (!ReadSunLightStateGuarded(sun, sceneManager, g_SunDirectionStateAddr, &live))
+            {
+                StandDownSunBaseline(L"fault reading the sun");
+                return;
+            }
+            const uint32_t revert = SunBaselineFieldsStillOurs(live, g_BaselineMask);
+            if (revert != 0 && !ApplySunLightStateGuarded(sun, sceneManager, &g_BaselinePre, revert))
+            {
+                StandDownSunBaseline(L"fault writing the sun");
+                return;
+            }
+            g_BaselineApplied = false;
+
+            wchar_t reverted[128] = L"";
+            wchar_t kept[128] = L"";
+            AppendSunFieldNames(revert, reverted, sizeof(reverted) / sizeof(reverted[0]));
+            AppendSunFieldNames(g_BaselineMask & ~revert, kept, sizeof(kept) / sizeof(kept[0]));
+            Log(L"[SUNBASE] reverted (profile left Enhanced) fields=%ls kept=%ls\n", reverted, kept);
+        }
+
+        // Runs each frame with the live sun, before the restore snapshot.
+        // `firstSun` is the first sun of a scene or mission.
+        static void TickSunBaseline(void* sun, void* sceneManager, bool firstSun, bool restoreOn)
+        {
+            if (g_BaselineState < 0)
+                return;
+            if (firstSun)
+            {
+                g_BaselineApplied = false;
+                g_BaselineGateLast = false;
+            }
+            if (g_BaselineState == 0)
+            {
+                g_BaselineConfig = openshim::sunbaseline::ParseSunBaselineConfig(
+                    [](const char* key, std::string& out) {
+                        return TryGetUserConfigString("SunBaseline", key, out);
+                    },
+                    [](const char* key, bool& out) {
+                        return TryGetUserConfigBool("SunBaseline", key, out);
+                    },
+                    [](const char* key) {
+                        Log(L"[SUNBASE] Ignoring invalid [SunBaseline] %hs\n", key);
+                    });
+                if (!g_BaselineConfig.enabled)
+                {
+                    g_BaselineState = -1;
+                    Log(L"[SUNBASE] disabled by [SunBaseline] Enabled=0\n");
+                    return;
+                }
+                if (!restoreOn)
+                {
+                    StandDownSunBaseline(L"sun rebuild restore unavailable");
+                    return;
+                }
+                g_BaselineState = 1;
+            }
+
+            const bool gate = SunBaselineGatePasses();
+            const bool entered = gate && (firstSun || !g_BaselineGateLast);
+            g_BaselineGateLast = gate;
+            if (g_BaselineApplied)
+            {
+                if (!gate)
+                    RevertSunBaseline(sun, sceneManager);
+                return;
+            }
+            if (entered)
+                ApplySunBaseline(sun, sceneManager);
+        }
+
         void WatchSunLightReplacement()
         {
             if (!BindSunWatch())
@@ -999,23 +1521,71 @@ namespace BZROpenShim
             // pointer so the rebuilt one still reads as a change.
             if (!sceneManager || !sun)
                 return;
+            const bool restoreOn = BindSunRestore();
             if (sun == g_LastSunLight && sceneManager == g_LastSunSceneManager)
+            {
+                // After a mission boundary the same pointer is either the
+                // outgoing sun (leave it alone) or, once the next mission is
+                // running, a new sun the allocator put at the same address.
+                bool firstSun = false;
+                if (g_SunMissionBoundaryPending)
+                {
+                    if (!g_PilotFlashlightWorldRunning)
+                        return;
+                    g_SunMissionBoundaryPending = false;
+                    firstSun = true;
+                }
+                TickSunBaseline(sun, sceneManager, firstSun, restoreOn);
+                if (restoreOn)
+                    SnapshotSunLight(sun, sceneManager);
                 return;
+            }
 
             void* const previous = g_LastSunLight;
             const bool sameScene = sceneManager == g_LastSunSceneManager;
             g_LastSunLight = sun;
             g_LastSunSceneManager = sceneManager;
             if (!previous || !sameScene)
-                return;  // first sun of this scene: nothing cached yet
+            {
+                // First sun of this scene: nothing cached yet. The baseline
+                // goes on before the snapshot so rebuilds carry it.
+                g_SunMissionBoundaryPending = false;
+                TickSunBaseline(sun, sceneManager, true, restoreOn);
+                if (restoreOn)
+                    SnapshotSunLight(sun, sceneManager);
+                return;
+            }
+
+            // The first sun of the next mission shares the scene manager, so
+            // it arrives here. The snapshot belongs to the mission that ended:
+            // do not carry it over.
+            const bool newMission = g_SunMissionBoundaryPending;
+            g_SunMissionBoundaryPending = false;
 
             const bool notified = NotifySceneLightsDirty(sceneManager);
+            wchar_t restoreDetail[256] = L"";
+            if (restoreOn)
+            {
+                if (newMission)
+                {
+                    wcscpy_s(restoreDetail, L"; restore skipped (new mission)");
+                }
+                else
+                {
+                    RestoreSunAfterRebuild(previous, sun, sceneManager,
+                        restoreDetail, sizeof(restoreDetail) / sizeof(restoreDetail[0]));
+                }
+            }
+            TickSunBaseline(sun, sceneManager, newMission, restoreOn);
+            if (restoreOn)
+                SnapshotSunLight(sun, sceneManager);
             if (++g_SunReplacements <= kSunReplacementLogLimit)
             {
-                Log(L"[SUNWATCH] sun replaced 0x%08X -> 0x%08X; light lists %ls (#%u)\n",
+                Log(L"[SUNWATCH] sun replaced 0x%08X -> 0x%08X; light lists %ls%ls (#%u)\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(previous)),
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sun)),
                     notified ? L"marked dirty" : L"NOT marked (fault)",
+                    restoreDetail,
                     static_cast<unsigned>(g_SunReplacements));
             }
         }

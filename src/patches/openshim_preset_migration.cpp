@@ -360,6 +360,14 @@ namespace BZROpenShim
             { "Terrain", "TerrainMicroRelief", "0", "1" },
         };
 
+        // Revision 8 -> 9. Terrain Micro Detail went back to opt-in the same
+        // day: measured at ~10 ms/frame at 3840x2160 on an RTX 5080 (165-195
+        // fps off vs 60-80 fps on), which halves the frame rate. Only the
+        // shipped 1 moves, so an explicit 0 (or any other value) is untouched.
+        const SurgicalEntry kRevision8SurgicalTable[] = {
+            { "Terrain", "TerrainMicroRelief", "1", "0" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -394,6 +402,9 @@ namespace BZROpenShim
             if (fromRevision <= 7)
                 append(kRevision7SurgicalTable,
                        sizeof(kRevision7SurgicalTable) / sizeof(kRevision7SurgicalTable[0]));
+            if (fromRevision <= 8)
+                append(kRevision8SurgicalTable,
+                       sizeof(kRevision8SurgicalTable) / sizeof(kRevision8SurgicalTable[0]));
             return entries;
         }
 
