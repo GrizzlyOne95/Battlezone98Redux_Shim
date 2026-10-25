@@ -91,6 +91,30 @@ void ConfigureTerrainMicroReliefDomain(void* pass, const std::string& defines)
     }
     catch (...) { ReleaseCloneHandoff(parameters); throw; }
     ReleaseCloneHandoff(parameters);
+    // The hull's off-screen cull sweeps patches through the relief range with
+    // the same two matrices. A hull without them (older HLSL, or optimized
+    // out) reads zeros, and the shader then never culls.
+    auto getHullParameters = Resolve<FnGetGpuProgramParameters>(ogre,
+        "?getTessellationHullProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ");
+    if (!getHullParameters) throw std::runtime_error("relief hull parameter API unavailable");
+    OgreSharedPtr hullParameters;
+    getHullParameters(pass, &hullParameters);
+    if (!hullParameters.rep) throw std::runtime_error("relief hull parameters unavailable");
+    try
+    {
+        const auto bindIfPresent = [&](const char* name, int type) {
+            const auto* definition = find(hullParameters.rep, std::string(name), false);
+            if (!definition) return;
+            if (definition->type != 21 || definition->elementSize != 16 ||
+                definition->arraySize != 1 || definition->physical > 4096 || definition->logical > 4096)
+                throw std::runtime_error("relief hull matrix definition contract unavailable");
+            set(hullParameters.rep, definition->logical, type, 0);
+        };
+        bindIfPresent("reliefView", 8);       // ACT_VIEW_MATRIX
+        bindIfPresent("reliefProjection", 12); // ACT_PROJECTION_MATRIX
+    }
+    catch (...) { ReleaseCloneHandoff(hullParameters); throw; }
+    ReleaseCloneHandoff(hullParameters);
 }
 
 // Released renderer export: vector<uint8_t> uses the three-pointer release ABI.

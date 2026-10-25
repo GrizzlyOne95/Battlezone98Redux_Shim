@@ -375,6 +375,30 @@ struct TerrainTessFactors
     float inside : SV_InsideTessFactor;
 };
 
+#if defined(OPENSHIM_RELIEF_TEST)
+// A patch can be skipped (tess factor 0) only when all three corners, each
+// swept through the full clamped relief range, lie outside the same clip
+// plane or behind the eye. Non-finite input, or a hull whose matrices were
+// never bound (a zero projection w row), is never culled.
+bool TerrainPatchOffscreen(float4 a, float4 b, float4 c)
+{
+    if (all(reliefProjection[3] == 0.0)) return false;
+    float4 sweep = mul(reliefProjection, mul(reliefView, float4(0.0, OPENSHIM_RELIEF_AMPLITUDE, 0.0, 0.0)));
+    if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(c)) || !all(isfinite(sweep))) return false;
+    float4 corner[6] = { a + sweep, a - sweep, b + sweep, b - sweep, c + sweep, c - sweep };
+    bool4 sideOut = bool4(true, true, true, true);
+    bool behind = true;
+    [unroll] for (int i = 0; i < 6; ++i)
+    {
+        float4 q = corner[i];
+        sideOut = sideOut && (float4(q.x, -q.x, q.y, -q.y) > q.w + abs(q.w) * 0.02);
+        behind = behind && (q.w <= 0.0);
+    }
+    return any(sideOut) || behind;
+}
+#endif
+
+
 TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
 {
     TerrainTessFactors f;
@@ -390,6 +414,10 @@ TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
 #else
     f.edge[0] = f.edge[1] = f.edge[2] = OPENSHIM_TESS_FACTOR;
     f.inside = OPENSHIM_TESS_FACTOR;
+#endif
+#if defined(OPENSHIM_RELIEF_TEST)
+    if (TerrainPatchOffscreen(p[0].position, p[1].position, p[2].position))
+        f.edge[0] = f.edge[1] = f.edge[2] = f.inside = 0.0;
 #endif
     return f;
 }
