@@ -3571,6 +3571,12 @@
       "identity": "Ogre::Light* terrain_masterlight (the sun); built by 0x0067DF70, destroyed and nulled by 0x0067E550, rebuilt lazily by the frame render 0x00682540"
     },
     {
+      "name": "SunDirectionState",
+      "address": "0x02CEB830",
+      "kind": "data",
+      "identity": "float[3] engine sun vector (x,y,z at +0/+4/+8); 0x0067DF70 builds terrain_masterlight with setDirection(-x,-y,z) from it; written by 0x0068A150 (up vector rotated by the time-of-day matrix); also read by the sky code 0x00783630/0x007838A0"
+    },
+    {
       "name": "TerrainEditMode",
       "address": "0x009454B8",
       "kind": "data",

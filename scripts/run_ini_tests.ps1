@@ -247,6 +247,12 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # no setting a mapmaker could reach for.
     "Fixes/EnhancedSchemeFallback",
 
+    # Renderer-only: puts a mod's EXU sun/ambient values back on the sun Redux
+    # rebuilds from stock config when a pilot enters a vehicle. No simulation
+    # or wire effect. Ships ON because without it every EXU lighting mod flaps
+    # back to stock a few seconds into a mission.
+    "Fixes/SunRebuildRestore",
+
     # DX11 shaderless-draw guard: no pixels change, it only converts
     # per-draw D3D11 exceptions into once-only [DX11COMPAT] diagnostics
     # plus counters. Ships ON so one bad mod material cannot spam
