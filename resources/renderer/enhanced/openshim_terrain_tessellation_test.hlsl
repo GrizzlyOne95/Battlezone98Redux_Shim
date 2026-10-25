@@ -299,13 +299,20 @@ float3 TerrainPaintRelief(float2 worldXZ)
         detailMix += w * openShimPaintDetailLayers[j];
     }
 #if defined(OPENSHIM_PAINT_CRATERS)
-    // The pixel shader's crater field, faded at the vertex spacing.
-    OpenShimCrater crater = OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR);
-    value += float3(crater.h * craterMix.x, crater.slope * craterMix.x + crater.h * craterMix.yz);
+    // The pixel shader's crater field, faded at the vertex spacing. Ground
+    // without crater layers, and so no crater slope either, skips it.
+    [branch] if (any(craterMix != 0))
+    {
+        OpenShimCrater crater = OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR);
+        value += float3(crater.h * craterMix.x, crater.slope * craterMix.x + crater.h * craterMix.yz);
+    }
 #endif
 #if defined(OPENSHIM_PAINT_DETAIL)
-    OpenShimCrater detail = OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, 5.0 / OPENSHIM_TESS_FACTOR);
-    value += float3(detail.h * detailMix.x, detail.slope * detailMix.x + detail.h * detailMix.yz);
+    [branch] if (any(detailMix != 0))
+    {
+        OpenShimCrater detail = OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, 5.0 / OPENSHIM_TESS_FACTOR);
+        value += float3(detail.h * detailMix.x, detail.slope * detailMix.x + detail.h * detailMix.yz);
+    }
 #endif
     value *= OPENSHIM_PAINT_HEIGHT_SCALE;
     if (!all(isfinite(value))) return 0.0;

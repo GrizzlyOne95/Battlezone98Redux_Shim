@@ -536,19 +536,33 @@ OpenShimPaintMix OpenShimPaintControl(Texture2DArray tex, SamplerState sam, floa
         banks[b] = tex.SampleLevel(sam, float3(clamp(paintUV, inset, 1.0-inset), OpenShimPaintSlice(b * 4, 4)), 0);
     return OpenShimPaintNormalize(banks);
 }
+#if OPENSHIM_PAINT_MATERIAL
+// The height taps read the normal+height slice at the near scale, which is
+// exactly the normal's near tap, so the normal reuses each present layer's
+// top projection (the only one flat ground pays for). Written with the
+// weights cache and keyed on it.
+static bool openShimPaintNearValid[OPENSHIM_PAINT_LAYERS];
+static float4 openShimPaintNearTop[OPENSHIM_PAINT_LAYERS];
+#endif
 OpenShimPaintMix OpenShimPaintWeightsAt(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
     OpenShimPaintMix m = OpenShimPaintControl(tex, sam, g.pos.xz);
 #if OPENSHIM_PAINT_MATERIAL
     // Heights stay at the near scale, as in the domain shader, so
     // displacement agrees.
-    OpenShimPaintGeo nearGeo = g; nearGeo.farMix = 0;
     float heights[OPENSHIM_PAINT_LAYERS];
     [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
     {
         heights[i] = 0;
-        [branch] if (OpenShimPaintPresent(m, i))
-            heights[i] = OpenShimPaintTap(tex, sam, nearGeo, openShimPaintRepeats[i], OpenShimPaintSlice(i, 5), openShimPaintDetile[i] > 0).a;
+        openShimPaintNearValid[i] = OpenShimPaintPresent(m, i);
+        openShimPaintNearTop[i] = 0;
+        [branch] if (openShimPaintNearValid[i])
+        {
+            OpenShimPaintTaps t = OpenShimPaintSampleScale(tex, sam, g, 1.0 / openShimPaintRepeats[i],
+                OpenShimPaintSlice(i, 5), openShimPaintDetile[i] > 0);
+            openShimPaintNearTop[i] = t.y;
+            heights[i] = (t.x * g.blend.x + t.y * g.blend.y + t.z * g.blend.z).a;
+        }
     }
     m = OpenShimPaintSelect(m, heights);
 #endif
@@ -710,6 +724,30 @@ float3 OpenShimPaintWorldNormal(OpenShimPaintTaps t, OpenShimPaintGeo g)
     tz = float3(tz.xy + n.xy, abs(tz.z) * n.z);
     return tx.zyx * g.blend.x + ty.xzy * g.blend.y + tz * g.blend.z;
 }
+// OpenShimPaintSampleTaps on the normal slice, taking the near top
+// projection from the height pass when the layer had one. Call after
+// OpenShimPaintWeights with the same geometry.
+OpenShimPaintTaps OpenShimPaintNormalTaps(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, int i)
+{
+    float s = 1.0 / openShimPaintRepeats[i], slice = OpenShimPaintSlice(i, 5);
+    bool detile = openShimPaintDetile[i] > 0;
+    OpenShimPaintTaps nearTaps = (OpenShimPaintTaps)0, farTaps = (OpenShimPaintTaps)0;
+    [branch] if (g.farMix < 1)
+    {
+        [branch] if (g.blend.x > 0) nearTaps.x = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_X, s, slice, detile);
+        if (openShimPaintNearValid[i]) nearTaps.y = openShimPaintNearTop[i];
+        else
+        {
+            [branch] if (g.blend.y > 0) nearTaps.y = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Y, s, slice, detile);
+        }
+        [branch] if (g.blend.z > 0) nearTaps.z = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Z, s, slice, detile);
+    }
+    [branch] if (g.farMix > 0) farTaps = OpenShimPaintSampleScale(tex, sam, g, s / openShimPaintFar.x, slice, detile);
+    nearTaps.x = lerp(nearTaps.x, farTaps.x, g.farMix);
+    nearTaps.y = lerp(nearTaps.y, farTaps.y, g.farMix);
+    nearTaps.z = lerp(nearTaps.z, farTaps.z, g.farMix);
+    return nearTaps;
+}
 // Packed tangent normal (mode 0 RGB) in the paint frame; the lighting path
 // renormalizes. Flat ground: +x along world X, +y along world Z.
 float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
@@ -717,27 +755,40 @@ float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, Op
     OpenShimPaintMix weights = OpenShimPaintWeights(tex, sam, g);
     // Crater slopes tilt the blended normal like a height field, on the
     // crater layers only; the domain shader displaces the same bowls.
+    // Ground without those layers skips the field.
     float2 slope = 0;
 #if OPENSHIM_PAINT_CRATERS
-    slope = OpenShimCraterField(g.pos.xz, openShimPaintCraters, g.foot).slope * OpenShimPaintDot(weights, openShimPaintCraterLayers);
+    float craterWeight = OpenShimPaintDot(weights, openShimPaintCraterLayers);
+    [branch] if (craterWeight > 0)
+        slope = OpenShimCraterField(g.pos.xz, openShimPaintCraters, g.foot).slope * craterWeight;
 #endif
 #if OPENSHIM_PAINT_DETAIL
-    slope += OpenShimDetailField(g.pos.xz, openShimPaintDetail, g.foot).slope * OpenShimPaintDot(weights, openShimPaintDetailLayers);
+    float detailWeight = OpenShimPaintDot(weights, openShimPaintDetailLayers);
+    [branch] if (detailWeight > 0)
+        slope += OpenShimDetailField(g.pos.xz, openShimPaintDetail, g.foot).slope * detailWeight;
 #endif
 #if OPENSHIM_PAINT_TRIPLANAR
     float3 world = 0;
     [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
         [branch] if (weights.w[i] > 0)
-            world += OpenShimPaintWorldNormal(OpenShimPaintSampleTaps(tex, sam, g, openShimPaintRepeats[i],
-                OpenShimPaintSlice(i, 5), openShimPaintDetile[i] > 0), g) * weights.w[i];
+            world += OpenShimPaintWorldNormal(OpenShimPaintNormalTaps(tex, sam, g, i), g) * weights.w[i];
     world.xz -= world.y * slope;
     return float4(mul(OpenShimPaintWorldFrame(g.n), normalize(world)) * 0.5 + 0.5, 1);
-#elif OPENSHIM_PAINT_CRATERS || OPENSHIM_PAINT_DETAIL
-    float3 n = OpenShimPaintLayers(tex, sam, g, weights, 5).rgb * 2 - 1;
+#else
+    float4 sum = 0;
+    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+        [branch] if (weights.w[i] > 0)
+        {
+            OpenShimPaintTaps t = OpenShimPaintNormalTaps(tex, sam, g, i);
+            sum += (t.x * g.blend.x + t.y * g.blend.y + t.z * g.blend.z) * weights.w[i];
+        }
+#if OPENSHIM_PAINT_CRATERS || OPENSHIM_PAINT_DETAIL
+    float3 n = sum.rgb * 2 - 1;
     n.xy -= n.z * slope;
     return float4(normalize(n) * 0.5 + 0.5, 1);
 #else
-    return float4(OpenShimPaintLayers(tex, sam, g, weights, 5).rgb, 1);
+    return float4(sum.rgb, 1);
+#endif
 #endif
 }
 float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
