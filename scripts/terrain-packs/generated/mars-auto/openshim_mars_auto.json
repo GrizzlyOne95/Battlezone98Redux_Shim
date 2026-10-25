@@ -2,7 +2,7 @@
   "schema": "bzr-openshim-terrain-hd-v1",
   "materials": {
     "MA_DETAIL_ATLAS": {
-      "sliceCount": 5,
+      "sliceCount": 9,
       "diffuseResource": "mars_atlas_d.dds",
       "fallback": "openshim_mars_auto_layer0.png",
       "tiles": {
@@ -10,13 +10,17 @@
         "1": "openshim_mars_auto_layer1.png",
         "2": "openshim_mars_auto_layer2.png",
         "3": "openshim_mars_auto_layer3.png",
-        "4": "openshim_mars_auto_misn04_control.png"
+        "4": "openshim_mars_auto_misn04_control.png",
+        "5": "openshim_mars_auto_layer0_n.png",
+        "6": "openshim_mars_auto_layer1_n.png",
+        "7": "openshim_mars_auto_layer2_n.png",
+        "8": "openshim_mars_auto_layer3_n.png"
       },
       "paint": {
         "schema": "bzr-openshim-terrain-paint-v1",
         "rowZero": "minZ",
         "repeatMeters": [
-          24,
+          20,
           16,
           12,
           24
@@ -33,6 +37,16 @@
             "control": "openshim_mars_auto_misn04_control.png"
           },
           {
+            "terrainFingerprint": "73f9729303821983",
+            "boundsMeters": [
+              -3190.0,
+              -2570.0,
+              3210.0,
+              2550.0
+            ],
+            "control": "openshim_mars_auto_misn04_stock_control.png"
+          },
+          {
             "terrainFingerprint": "5e4ef40b581c2c36",
             "boundsMeters": [
               -2550.0,
@@ -41,6 +55,16 @@
               2550.0
             ],
             "control": "openshim_mars_auto_misn05_control.png"
+          },
+          {
+            "terrainFingerprint": "04e39ffb0e80a25e",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_mars_auto_misn05_stock_control.png"
           },
           {
             "terrainFingerprint": "47910f1f7563463d",
@@ -53,26 +77,6 @@
             "control": "openshim_mars_auto_misn06_control.png"
           },
           {
-            "terrainFingerprint": "73f9729303821983",
-            "boundsMeters": [
-              -3190.0,
-              -2570.0,
-              3210.0,
-              2550.0
-            ],
-            "control": "openshim_mars_auto_misn04_control.png"
-          },
-          {
-            "terrainFingerprint": "04e39ffb0e80a25e",
-            "boundsMeters": [
-              -2550.0,
-              -2570.0,
-              2570.0,
-              2550.0
-            ],
-            "control": "openshim_mars_auto_misn05_control.png"
-          },
-          {
             "terrainFingerprint": "9c77ccbdec3593fe",
             "boundsMeters": [
               -3190.0,
@@ -82,6 +86,47 @@
             ],
             "control": "openshim_mars_auto_misn06_stock_control.png"
           }
+        ],
+        "detile": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "far": [
+          5,
+          40,
+          250,
+          0.6
+        ],
+        "macro": [
+          260,
+          0.12,
+          0.15
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.4,
+          0.8,
+          0.5,
+          2.0
+        ],
+        "detail": [
+          60,
+          1.5,
+          4,
+          1
+        ],
+        "detailLayers": [
+          0.4,
+          0.6,
+          0.5,
+          1.0
+        ],
+        "parallax": [
+          1,
+          30,
+          12
         ]
       }
     }
