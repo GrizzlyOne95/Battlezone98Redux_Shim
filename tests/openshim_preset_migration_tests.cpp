@@ -638,7 +638,7 @@ int main()
               "6g: HD off chosen after the revision is respected");
     }
 
-    // 6h. Revision 7 -> 8: Terrain Micro Detail became the default.
+    // 6h. Revision 7 -> 8: Terrain Micro Detail became the default (reversed in 8 -> 9).
     {
         fs::path canonical = tmpRoot / "canonical6h.ini";
         WriteLines(canonical, MakeCanonicalLines());
@@ -652,8 +652,9 @@ int main()
         auto r = MigratePresetFileIfNeeded(off, canonical);
         Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 7,
               "6h: revision 7 file is migrated");
-        Check(FileContains(off, "TerrainMicroRelief = 1"),
-              "6h: shipped relief off becomes on");
+        // The chain continues to revision 9, which returns the shipped 1 to 0.
+        Check(FileContains(off, "TerrainMicroRelief = 0"),
+              "6h: shipped relief off stays off through the 7 -> 8 -> 9 chain");
 
         fs::path chosen = tmpRoot / "rev8_relief_off.ini";
         WriteLines(chosen, {
@@ -666,6 +667,46 @@ int main()
         Check(again.action == MigrationAction::None &&
                   FileContains(chosen, "TerrainMicroRelief = 0"),
               "6h: relief off chosen after the revision is respected");
+    }
+
+    // 6i. Revision 8 -> 9: Terrain Micro Detail went back to opt-in.
+    {
+        fs::path canonical = tmpRoot / "canonical6i.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        fs::path on = tmpRoot / "rev8_relief_on.ini";
+        WriteLines(on, {
+            "; OpenShimPresetRevision = 8",
+            "",
+            "[Terrain]",
+            "TerrainMicroRelief = 1",
+        });
+        auto r = MigratePresetFileIfNeeded(on, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 8,
+              "6i: revision 8 file is migrated");
+        Check(FileContains(on, "TerrainMicroRelief = 0"),
+              "6i: shipped relief on becomes off");
+
+        fs::path chosen = tmpRoot / "rev8_relief_explicit_off.ini";
+        WriteLines(chosen, {
+            "; OpenShimPresetRevision = 8",
+            "",
+            "[Terrain]",
+            "TerrainMicroRelief = 0",
+        });
+        MigratePresetFileIfNeeded(chosen, canonical);
+        Check(FileContains(chosen, "TerrainMicroRelief = 0"),
+              "6i: explicit relief off stays off");
+
+        fs::path stale = tmpRoot / "rev7_relief_chain.ini";
+        WriteLines(stale, {
+            "; OpenShimPresetRevision = 7",
+            "",
+            "[Terrain]",
+            "TerrainMicroRelief = 0",
+        });
+        MigratePresetFileIfNeeded(stale, canonical);
+        Check(FileContains(stale, "TerrainMicroRelief = 0"),
+              "6i: revision 7 file chains 0 -> 1 -> 0");
     }
 
     // 7. unknown/custom file -> untouched

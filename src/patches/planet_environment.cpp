@@ -42,8 +42,16 @@ namespace BZROpenShim
         std::uint32_t g_pendingGeneration = 0;
         std::uint32_t g_pendingFrames = 0;
         std::uint32_t g_pendingAttempts = 0;
-        constexpr std::uint32_t kFramesBetweenAttempts = 30;
-        constexpr std::uint32_t kMaxAttempts = 40;
+        // The neutral cubemaps load with the first material that binds them,
+        // which is usually the frame the player's objects spawn. That frame
+        // is also where the terrain rewrite and shader compiles stall the
+        // render thread for seconds, so a retry spaced in frames would leave
+        // one neutral frame on screen for the whole stall and then swap in
+        // plain view. Try every frame until the textures exist; only after
+        // a long run of misses fall back to a sparse cadence.
+        constexpr std::uint32_t kEveryFrameAttempts = 1800;
+        constexpr std::uint32_t kFramesBetweenLateAttempts = 30;
+        constexpr std::uint32_t kMaxAttempts = kEveryFrameAttempts + 40;
 
         // The neutral cubemaps are Ogre textures created by the CR/Enhanced
         // materials; only the lookup and the native D3D11 handle are needed.
@@ -374,7 +382,9 @@ namespace BZROpenShim
     {
         // Returns true once there is nothing left to retry: both kinds
         // reached a final state, or the profile/renderer rules the swap out.
-        bool ApplyPlanetEnvironmentNow(const bool finalAttempt)
+        bool ApplyPlanetEnvironmentNow(const bool finalAttempt,
+                                       const std::uint32_t attempt,
+                                       const std::uint32_t frame)
         {
         if (RenderProfiles::Exports::GetActiveBackend() !=
                 static_cast<uint32_t>(RenderProfiles::ActiveBackend::DX11) ||
@@ -420,10 +430,13 @@ namespace BZROpenShim
                              irradiance != Status::Unavailable;
         if (settled || finalAttempt)
         {
+            // attempt/frame count from the request; the swap is visible
+            // when frame is large and the textures were already drawn.
             LogShimA(LogLevel::Info, kComponent,
-                "[PLANET-ENV] world=%s prefilter=%s irradiance=%s",
+                "[PLANET-ENV] world=%s prefilter=%s irradiance=%s attempt=%u frame=%u",
                 code.empty() ? "<unknown>" : code.c_str(),
-                StatusName(prefilter), StatusName(irradiance));
+                StatusName(prefilter), StatusName(irradiance),
+                static_cast<unsigned>(attempt), static_cast<unsigned>(frame));
         }
         return settled;
         }
@@ -445,10 +458,12 @@ namespace BZROpenShim
             g_pendingFrames = 0;
             g_pendingAttempts = 0;
         }
-        if (g_pendingFrames++ % kFramesBetweenAttempts != 0)
+        const std::uint32_t frame = g_pendingFrames++;
+        if (g_pendingAttempts >= kEveryFrameAttempts &&
+            frame % kFramesBetweenLateAttempts != 0)
             return;
         const bool finalAttempt = ++g_pendingAttempts >= kMaxAttempts;
-        if (ApplyPlanetEnvironmentNow(finalAttempt) || finalAttempt)
+        if (ApplyPlanetEnvironmentNow(finalAttempt, g_pendingAttempts, frame) || finalAttempt)
             g_appliedGeneration = wanted;
     }
 }

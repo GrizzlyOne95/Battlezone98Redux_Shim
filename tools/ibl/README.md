@@ -38,3 +38,21 @@ the azimuth convention only affects billboards and is unverified.
 Legacy DDS, DXT1 cube, caps 0x401008, caps2 0xFE00, faces +X -X +Y -Y +Z -Z with all mips per face.
 Values are LINEAR radiance in 8-bit BC1 (the shader samples with no decode), so very dark values
 quantise coarsely. Each pair is 68,944 bytes; 9 worlds total about 620 KB.
+
+## Calibration (shipped files)
+
+The shipped `openshim_env_*` files are **not** the raw bake. The raw bake is physically motivated and
+very dark: an airless world's irradiance averages about 7/255 against the neutral map's 90/255, and the
+Enhanced shaders take their ambient from the irradiance cube (`OSE_IBL_LEGACY_AMBIENT_RETAIN` keeps only
+20% of the scene ambient), so swapping the raw moon map in drops most of the ambient on every surface and
+reads as a lighting failure. `calibrate_env_cubemaps.py` pins each planet's mean luminance to the neutral
+map's, mixes half of the exposure-matched planet map with the neutral map tinted by the planet's mean hue,
+and damps the hue to 60%:
+
+    py -3 tools/ibl/bake_planet_env.py --game-dir "<game dir>" --output <raw dir>
+    py -3 tools/ibl/calibrate_env_cubemaps.py --input-dir <raw dir> --output resources/renderer/enhanced
+
+Run the calibration on raw bakes only; a second pass over calibrated output pulls the maps further toward
+neutral. `--planet-weight` (0.5) and `--chroma` (0.6) are the two knobs; `--dry-run` prints the per-face
+luminance before and after. A swap between the neutral pair and any shipped planet pair therefore never
+changes overall brightness; only the hue and the sky/ground balance move.
