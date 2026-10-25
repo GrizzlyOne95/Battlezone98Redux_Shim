@@ -251,7 +251,8 @@ OpenShimDetile OpenShimDetileAt(float2 uv)
     OpenShimDetile d;
     d.a = sin(float2(3, 7) * i);
     d.b = sin(float2(3, 7) * (i + 1.0));
-    d.t = smoothstep(0.2, 0.8, l - i);
+    // Only the band pays for both taps; 0.35..0.65 still hides the seam.
+    d.t = smoothstep(0.35, 0.65, l - i);
     return d;
 }
 )HLSL";
@@ -524,7 +525,7 @@ OpenShimPaintMix OpenShimPaintControl(Texture2DArray tex, SamplerState sam, floa
         banks[b] = tex.SampleLevel(sam, float3(clamp(paintUV, inset, 1.0-inset), OpenShimPaintSlice(b * 4, 4)), 0);
     return OpenShimPaintNormalize(banks);
 }
-OpenShimPaintMix OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
+OpenShimPaintMix OpenShimPaintWeightsAt(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
     OpenShimPaintMix m = OpenShimPaintControl(tex, sam, g.pos.xz);
 #if OPENSHIM_PAINT_MATERIAL
@@ -542,6 +543,28 @@ OpenShimPaintMix OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, Open
 #endif
     return m;
 }
+// The diffuse, normal and specular reads each start from the same geometry,
+// so the weights (control tap plus a height tap per present layer) and the
+// diffuse sum, whose alpha is specular, are worked out once per pixel. Keyed
+// on the geometry, so a caller passing another one still gets its own.
+bool OpenShimPaintSameGeo(OpenShimPaintGeo a, OpenShimPaintGeo b)
+{
+    return all(a.pos == b.pos) && all(a.n == b.n) && all(a.dpdx == b.dpdx) && all(a.dpdy == b.dpdy) && a.farMix == b.farMix;
+}
+static bool openShimPaintWeightsReady = false;
+static OpenShimPaintGeo openShimPaintWeightsGeo;
+static OpenShimPaintMix openShimPaintWeightsCache;
+OpenShimPaintMix OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
+{
+    [branch] if (!(openShimPaintWeightsReady && OpenShimPaintSameGeo(g, openShimPaintWeightsGeo)))
+    {
+        openShimPaintWeightsCache = OpenShimPaintWeightsAt(tex, sam, g);
+        openShimPaintWeightsGeo = g;
+        openShimPaintWeightsReady = true;
+    }
+    return openShimPaintWeightsCache;
+}
+)HLSL" R"HLSL(
 #if OPENSHIM_PAINT_MATERIAL && OPENSHIM_PAINT_PARALLAX
 // Close-up parallax. The domain shader displaces each layer's height at the
 // mip of its factor-4 vertex spacing (1.25 m), so the ray is marched through
@@ -610,12 +633,24 @@ float4 OpenShimPaintLayers(Texture2DArray tex, SamplerState sam, OpenShimPaintGe
             sum += OpenShimPaintTap(tex, sam, g, openShimPaintRepeats[i], OpenShimPaintSlice(i, part), openShimPaintDetile[i] > 0) * m.w[i];
     return sum;
 }
+static bool openShimPaintDiffuseReady = false;
+static OpenShimPaintGeo openShimPaintDiffuseGeo;
+static float4 openShimPaintDiffuseCache;
+float4 OpenShimPaintDiffuse(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
+{
+    [branch] if (!(openShimPaintDiffuseReady && OpenShimPaintSameGeo(g, openShimPaintDiffuseGeo)))
+    {
+        openShimPaintDiffuseCache = OpenShimPaintLayers(tex, sam, g, OpenShimPaintWeights(tex, sam, g), 0);
+        openShimPaintDiffuseGeo = g;
+        openShimPaintDiffuseReady = true;
+    }
+    return openShimPaintDiffuseCache;
+}
 float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
-    OpenShimPaintMix weights = OpenShimPaintWeights(tex, sam, g);
     // The fourth control channel is a weight, never terrain transparency, and
     // diffuse alpha (specular in the material form) is not the detail weight.
-    float3 colour = OpenShimPaintLayers(tex, sam, g, weights, 0).rgb;
+    float3 colour = OpenShimPaintDiffuse(tex, sam, g).rgb;
     if (openShimPaintMacro.x > 0)
     {
         // Two octaves of soft noise per channel, roughly -1..1.
@@ -696,8 +731,7 @@ float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, Op
 }
 float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
-    OpenShimPaintMix weights = OpenShimPaintWeights(tex, sam, g);
-    return OpenShimPaintLayers(tex, sam, g, weights, 0).aaa;
+    return OpenShimPaintDiffuse(tex, sam, g).aaa;
 }
 #endif
 )HLSL";
