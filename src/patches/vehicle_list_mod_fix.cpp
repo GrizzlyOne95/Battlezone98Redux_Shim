@@ -312,12 +312,205 @@ namespace BZROpenShim
         Log(L"[VXT] index-check call 0x%08X -> map-folder gap check (thunk %p)\n", site, target);
     }
 
+    // Where a map pack's own files can sit: the game's addon folder, then
+    // every content root (Workshop items included).
+    static std::vector<std::filesystem::path> MapFolderRoots()
+    {
+        std::vector<std::filesystem::path> roots;
+        const auto gameDir = Assets::ResolveAssetRuntimeEnvironment().gameDir;
+        roots.push_back(gameDir / "addon");
+        for (auto& root : Assets::GetContentRootCandidates(gameDir))
+            roots.push_back(std::move(root));
+        return roots;
+    }
+
+    static std::string LowerKey(const std::string& s)
+    {
+        std::string key = s;
+        for (char& c : key)
+            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        return key;
+    }
+
+    // ---------------------------------------------------------------------
+    // Waiting-room <stem>.mpdes (see map_folder_items.h)
+    // ---------------------------------------------------------------------
+
+    // The folder holding <base>.mpdes beside <base>.bzn, cached per map: the
+    // lobby re-reads the description on every data change.
+    static std::filesystem::path MpDescriptionFolderFor(const std::string& base)
+    {
+        static std::unordered_map<std::string, std::filesystem::path> s_folders;
+        const std::string key = LowerKey(base);
+        auto it = s_folders.find(key);
+        if (it != s_folders.end())
+            return it->second;
+        std::filesystem::path folder;
+        try
+        {
+            folder = MapFolderItems::FindMpDescriptionFolder(MapFolderRoots(), base);
+        }
+        catch (...)
+        {
+            folder.clear();
+        }
+        if (folder.empty())
+            Log(L"[MPDES] no map folder holds '%hs.mpdes' beside '%hs.bzn'; the waiting room reads stock '%hs.des'\n",
+                base.c_str(), base.c_str(), base.c_str());
+        else
+            Log(L"[MPDES] '%hs.mpdes' found in '%ls'; the waiting room reads it for '%hs.des'\n",
+                base.c_str(), folder.wstring().c_str(), base.c_str());
+        return s_folders.emplace(key, std::move(folder)).first->second;
+    }
+
+    // FUN_0076EB90 builds "<stem>.des" and reads it through the item trio.
+    // The thunk replaces the waiting room's own call to it and brackets the
+    // call, so only that caller sees <stem>.mpdes. The loader is __thiscall
+    // with a hidden result pointer and a by-value std::string; the thunk
+    // moves only the return address, so ecx, the arguments and the callee's
+    // stack cleanup pass through untouched. Not re-entrant, and it need not
+    // be: the loader calls nothing that comes back here.
+    static void* g_OrigWaitingRoomDescLoad = nullptr;
+    static uint32_t g_WaitingRoomDescReturn = 0;
+
+    static void __cdecl WaitingRoomDescEnter()
+    {
+        MapFolderItems::BeginMpDescription();
+    }
+
+    static void __cdecl WaitingRoomDescLeave()
+    {
+        MapFolderItems::EndMpDescription();
+    }
+
+    static __declspec(naked) void WaitingRoomDescLoadThunk()
+    {
+        __asm
+        {
+            pop dword ptr [g_WaitingRoomDescReturn]
+            push ecx
+            push edx
+            call WaitingRoomDescEnter
+            pop edx
+            pop ecx
+            call dword ptr [g_OrigWaitingRoomDescLoad]
+            push eax
+            push edx
+            call WaitingRoomDescLeave
+            pop edx
+            pop eax
+            push dword ptr [g_WaitingRoomDescReturn]
+            ret
+        }
+    }
+
+    // True when the routine at `loader` is FUN_0076EB90's shape: it builds
+    // ".des" from the literal (`mov edx,[".des"] / mov [edi],edx`) and calls
+    // each of the three item functions the detours sit on.
+    static bool IsDescriptionLoader(uint32_t loader)
+    {
+        uint32_t useItem = 0, getItemSize = 0, unlockItem = 0;
+        if (!OdfItemHookSites(useItem, getItemSize, unlockItem))
+            return false;
+        uint8_t code[0x260] = {};
+        if (!HookEngine::ReadMemory(loader, code, sizeof(code)))
+            return false;
+        bool desLiteral = false, callsUse = false, callsSize = false, callsUnlock = false;
+        for (size_t i = 0; i + 8 <= sizeof(code); ++i)
+        {
+            if (code[i] == 0x8B && code[i + 1] == 0x15 && code[i + 6] == 0x89 && code[i + 7] == 0x17)
+            {
+                uint32_t literal = 0;
+                std::memcpy(&literal, code + i + 2, sizeof(literal));
+                char text[5] = {};
+                if (HookEngine::ReadMemory(literal, text, sizeof(text)) &&
+                    std::memcmp(text, ".des", 5) == 0)
+                    desLiteral = true;
+            }
+            if (code[i] == 0xE8)
+            {
+                int32_t rel = 0;
+                std::memcpy(&rel, code + i + 1, sizeof(rel));
+                const uint32_t to = loader + static_cast<uint32_t>(i) + 5u + static_cast<uint32_t>(rel);
+                callsUse = callsUse || to == useItem;
+                callsSize = callsSize || to == getItemSize;
+                callsUnlock = callsUnlock || to == unlockItem;
+            }
+        }
+        return desLiteral && callsUse && callsSize && callsUnlock;
+    }
+
+    static void InstallWaitingRoomDescriptionOnce()
+    {
+        static bool s_tried = false;
+        if (s_tried)
+            return;
+        s_tried = true;
+
+        if (!OdfItemHooksInstalled())
+        {
+            Log(L"[MPDES] item detours are not all live; waiting-room .mpdes off\n");
+            return;
+        }
+
+        // The site must sit inside the description-pane routine 0x007A3F80.
+        const uint32_t site = HookEngine::ResolveNamedAddress("WaitingRoomDescription::LoadCall");
+        const uint32_t pane = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_BzrFn_VehicleListRefresh1));
+        if (site == 0 || pane == 0 || site < pane || site > pane + 0xE0)
+        {
+            Log(L"[MPDES] description call not identified (site=0x%08X pane=0x%08X); waiting-room .mpdes off\n",
+                site, pane);
+            return;
+        }
+
+        uint8_t original[5] = {};
+        if (!HookEngine::ReadMemory(site, original, sizeof(original)) || original[0] != 0xE8)
+        {
+            Log(L"[MPDES] 0x%08X is not a call; waiting-room .mpdes off\n", site);
+            return;
+        }
+        void* target = HookEngine::ResolveRelCallTarget(site);
+        const uint32_t loader = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target));
+        if (!target || !IsDescriptionLoader(loader))
+        {
+            Log(L"[MPDES] call 0x%08X does not reach the .des loader (target=%p); waiting-room .mpdes off\n",
+                site, target);
+            return;
+        }
+
+        g_OrigWaitingRoomDescLoad = target;
+        MapFolderItems::SetMpDescriptionResolver(&MpDescriptionFolderFor);
+
+        HookEngine::PatchDef def;
+        def.address = site;
+        def.type = HookEngine::PatchType::REL32;
+        def.name = "WaitingRoomDescription::LoadCall";
+        def.verified = true;
+        def.expected_original.assign(original, original + sizeof(original));
+        const int32_t rel =
+            static_cast<int32_t>(reinterpret_cast<uintptr_t>(&WaitingRoomDescLoadThunk)) -
+            static_cast<int32_t>(site + 5);
+        def.payload.assign(5, 0);
+        def.payload[0] = 0xE8;
+        std::memcpy(def.payload.data() + 1, &rel, sizeof(rel));
+        if (!HookEngine::ApplyPatch(def))
+        {
+            MapFolderItems::SetMpDescriptionResolver(nullptr);
+            g_OrigWaitingRoomDescLoad = nullptr;
+            Log(L"[MPDES] could not rewrite the description call 0x%08X; waiting-room .mpdes off\n", site);
+            return;
+        }
+        Log(L"[MPDES] waiting-room description call 0x%08X -> <map>.mpdes override (loader 0x%08X)\n",
+            site, loader);
+    }
+
     // Points the store at the selected map's own folder when the index lacks
     // its .vxt, and clears it otherwise. Folder lookups are cached per map:
     // the lobby re-selects on every data change.
     static void PrepareMapFolderItems(const std::string& base)
     {
         InstallVxtIndexCheckOnce();
+        InstallWaitingRoomDescriptionOnce();
         if (!g_OrigVxtIndexCheck || !OdfItemHooksInstalled() || base.empty())
         {
             MapFolderItems::SetFolder({});
@@ -330,21 +523,14 @@ namespace BZROpenShim
         }
 
         static std::unordered_map<std::string, std::filesystem::path> s_folders;
-        std::string key = base;
-        for (char& c : key)
-            c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        const std::string key = LowerKey(base);
         auto it = s_folders.find(key);
         if (it == s_folders.end())
         {
             std::filesystem::path folder;
             try
             {
-                const auto gameDir = Assets::ResolveAssetRuntimeEnvironment().gameDir;
-                std::vector<std::filesystem::path> roots;
-                roots.push_back(gameDir / "addon");
-                for (auto& root : Assets::GetContentRootCandidates(gameDir))
-                    roots.push_back(std::move(root));
-                folder = MapFolderItems::FindMapFolder(roots, base);
+                folder = MapFolderItems::FindMapFolder(MapFolderRoots(), base);
             }
             catch (...)
             {

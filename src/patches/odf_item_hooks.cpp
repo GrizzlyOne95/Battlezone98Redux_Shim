@@ -314,6 +314,17 @@ bool OdfItemHooksInstalled()
            SiteJumpsTo(g_UnlockItemSite, reinterpret_cast<const void*>(&OdfUnlockItemDetour));
 }
 
+bool OdfItemHookSites(uint32_t& useItem, uint32_t& getItemSize, uint32_t& unlockItem)
+{
+    useItem = getItemSize = unlockItem = 0;
+    if (!OdfItemHooksInstalled())
+        return false;
+    useItem = g_UseItemSite;
+    getItemSize = g_GetItemSizeSite;
+    unlockItem = g_UnlockItemSite;
+    return true;
+}
+
 bool OdfReadItemText(const char* name, std::string& out)
 {
     out.clear();

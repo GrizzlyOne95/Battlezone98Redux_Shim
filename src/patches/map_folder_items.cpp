@@ -35,6 +35,13 @@ std::filesystem::path g_Folder;
 std::unordered_map<std::string, Item> g_Items; // key: lowercase name
 std::unordered_set<std::string> g_Logged;
 
+// The waiting-room <stem>.mpdes override (see the header). Records live only
+// while a description load is open or a holder still has one locked.
+int g_MpDepth = 0;
+MpDescriptionFolderFn g_MpResolver = nullptr;
+std::unordered_map<std::string, Item> g_MpItems; // key: lowercase "<stem>.des"
+std::unordered_set<std::string> g_MpLogged;
+
 std::string Lower(const std::string& s)
 {
     std::string out = s;
@@ -119,6 +126,54 @@ Item* LoadLocked(const std::string& name, const std::string& key)
     return &slot;
 }
 
+// The .mpdes record for a "<stem>.des" asked for inside a waiting-room
+// description load, or null when the stock path applies.
+Item* MpLoadLocked(const std::string& name, const std::string& key)
+{
+    if (g_MpDepth <= 0 || !g_MpResolver || key.size() < 5 ||
+        key.compare(key.size() - 4, 4, ".des") != 0 || !IsBareName(name))
+        return nullptr;
+    const std::string base = name.substr(0, name.size() - 4);
+    std::filesystem::path folder;
+    try
+    {
+        folder = g_MpResolver(base);
+    }
+    catch (...)
+    {
+        folder.clear();
+    }
+    if (folder.empty())
+        return nullptr;
+
+    auto it = g_MpItems.find(key);
+    if (it != g_MpItems.end() && it->second.folder == folder)
+        return &it->second;
+    if (it != g_MpItems.end() && it->second.refcount > 0)
+        return nullptr; // a holder still has another folder's copy; never swap it out
+
+    const std::filesystem::path file = folder / (base + ".mpdes");
+    Item item;
+    if (!ReadFileBytes(file, item.bytes))
+    {
+        // The lobby re-reads the description on every data change; say it once.
+        if (g_MpLogged.insert(key + '\x02' + folder.string()).second)
+            LogShimA(LogLevel::Warn, "vehicle",
+                 "[MPDES] '%s' is unreadable, empty or over %zu bytes; '%s' stays stock",
+                 file.string().c_str(), kMaxItemBytes, name.c_str());
+        return nullptr;
+    }
+    item.size = item.bytes.size() - 1;
+    item.folder = folder;
+    if (g_MpLogged.insert(key + '\x01' + folder.string()).second)
+        LogShimA(LogLevel::Info, "vehicle",
+                 "[MPDES] waiting room reads '%s' as '%s.mpdes' (%zu bytes) from map folder '%s'",
+                 name.c_str(), base.c_str(), item.size, folder.string().c_str());
+    Item& slot = g_MpItems[key];
+    slot = std::move(item);
+    return &slot;
+}
+
 } // namespace
 
 void SetIndexCheck(IndexHasFn fn)
@@ -180,6 +235,12 @@ bool Acquire(const char* name, void*& data)
     std::lock_guard<std::recursive_mutex> lock(g_Mutex);
     const std::string n(name);
     const std::string key = Lower(n);
+    if (Item* mp = MpLoadLocked(n, key))
+    {
+        ++mp->refcount;
+        data = mp->bytes.data();
+        return true;
+    }
     auto it = g_Items.find(key);
     if (it != g_Items.end() && it->second.refcount > 0)
     {
@@ -205,6 +266,11 @@ bool Size(const char* name, std::size_t& size)
     std::lock_guard<std::recursive_mutex> lock(g_Mutex);
     const std::string n(name);
     const std::string key = Lower(n);
+    if (Item* mp = MpLoadLocked(n, key))
+    {
+        size = mp->size;
+        return true;
+    }
     auto it = g_Items.find(key);
     if (it != g_Items.end() && it->second.refcount > 0)
     {
@@ -225,7 +291,15 @@ bool Release(const char* name)
     if (!name || !name[0])
         return false;
     std::lock_guard<std::recursive_mutex> lock(g_Mutex);
-    auto it = g_Items.find(Lower(name));
+    const std::string key = Lower(name);
+    auto mp = g_MpItems.find(key);
+    if (mp != g_MpItems.end() && mp->second.refcount > 0)
+    {
+        if (--mp->second.refcount == 0 && g_MpDepth <= 0)
+            g_MpItems.erase(mp);
+        return true;
+    }
+    auto it = g_Items.find(key);
     if (it == g_Items.end() || it->second.refcount <= 0)
         return false;
     if (--it->second.refcount == 0 && it->second.folder != g_Folder)
@@ -233,10 +307,59 @@ bool Release(const char* name)
     return true;
 }
 
+void SetMpDescriptionResolver(MpDescriptionFolderFn fn)
+{
+    std::lock_guard<std::recursive_mutex> lock(g_Mutex);
+    g_MpResolver = fn;
+}
+
+std::filesystem::path FindMpDescriptionFolder(const std::vector<std::filesystem::path>& roots,
+                                              const std::string& base)
+{
+    if (base.empty() || !IsBareName(base))
+        return {};
+    for (const auto& root : roots)
+    {
+        if (root.empty())
+            continue;
+        if (FileExists(root / (base + ".mpdes")) && FileExists(root / (base + ".bzn")))
+            return root;
+    }
+    return {};
+}
+
+void BeginMpDescription()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_Mutex);
+    ++g_MpDepth;
+}
+
+void EndMpDescription()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_Mutex);
+    if (g_MpDepth > 0)
+        --g_MpDepth;
+    if (g_MpDepth > 0)
+        return;
+    for (auto it = g_MpItems.begin(); it != g_MpItems.end();)
+    {
+        if (it->second.refcount <= 0)
+            it = g_MpItems.erase(it);
+        else
+            ++it;
+    }
+}
+
 std::size_t CachedItemCount()
 {
     std::lock_guard<std::recursive_mutex> lock(g_Mutex);
     return g_Items.size();
+}
+
+std::size_t MpDescriptionItemCount()
+{
+    std::lock_guard<std::recursive_mutex> lock(g_Mutex);
+    return g_MpItems.size();
 }
 
 int Refcount(const char* name)
@@ -253,6 +376,10 @@ void ResetForTesting()
     g_Folder.clear();
     g_Items.clear();
     g_Logged.clear();
+    g_MpDepth = 0;
+    g_MpResolver = nullptr;
+    g_MpItems.clear();
+    g_MpLogged.clear();
 }
 
 } // namespace BZROpenShim::MapFolderItems

@@ -105,9 +105,6 @@
     },
     {
       "name": "ODF UseItem Hook",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 8B 45 08 50 6A 00 E8 ?? ?? ?? ?? 83 C4 08 5D C3 CC CC CC CC CC CC CC CC CC CC CC CC CC 55 8B EC 83 EC 08 83 7D 08 00 74 08 8B 45 08 89 45 FC EB 07 C7 45 FC ?? ?? ?? ?? 83 7D 0C 00 74 13 B9 01 00 00 00 6B D1 00 8B 45 0C 0F BE 0C 10 85 C9 75 04 33 C0 EB 32 6A 04 68 ?? ?? ?? ??",
       "offset": 0,
       "expected_size": 5,
@@ -117,9 +114,6 @@
     },
     {
       "name": "ODF GetItemSize Hook",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 8B 45 08 50 6A 00 E8 ?? ?? ?? ?? 83 C4 08 5D C3 CC CC CC CC CC CC CC CC CC CC CC CC CC 55 8B EC 83 EC 0C 83 7D 08 00 74 08 8B 45 08 89 45 FC EB 07 C7 45 FC ?? ?? ?? ?? 83 7D 0C 00 74 13 B9 01 00 00 00 6B D1 00 8B 45 0C 0F BE 0C 10 85 C9 75 04 33 C0 EB 33 8B 55 0C 52 8B 45 FC 50 E8 ?? ?? ?? ??",
       "offset": 0,
       "expected_size": 5,
@@ -129,9 +123,6 @@
     },
     {
       "name": "ODF UnlockItem Hook",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 8B 45 08 50 6A 00 E8 ?? ?? ?? ?? 83 C4 08 5D C3 CC CC CC CC CC CC CC CC CC CC CC CC CC 55 8B EC 51 83 7D 08 00 74 08 8B 45 08 89 45 FC EB 07 C7 45 FC ?? ?? ?? ?? 8B 4D 0C 51 8B 55 FC 52 E8 ?? ?? ?? ?? 83 C4 08 8B E5 5D C3",
       "offset": 0,
       "expected_size": 5,
@@ -1203,6 +1194,16 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "The `call FUN_00481F10` inside the vehicle-list loader FUN_00766900 on exact GOG Redux 2.2.301 that asks the file index whether the requested pool (<mission>.vxt or netveh.odf) exists; `test eax,eax / jnz` then skips the `push \"netveh.odf\"` fallback, so only zero versus non-zero is read. FUN_00481F10 is a cdecl thunk over the index bsearch FUN_00829390 (global table 0x009468CC, count 0x009468C0). The pattern covers `lea ecx,[ebp-0x28] / call c_str / push eax`, the call, `add esp,4 / test eax,eax / jnz +0x0D` and the netveh push. Single match by whole-image scan on 2026-10-21. Install also requires the site to lie in the first 0x80 bytes of the resolved VehicleListLoad and the call target to hold the thunk bytes 55 8B EC 51 8B 45 08 50 E8."
+    },
+    {
+      "name": "WaitingRoomDescription::LoadCall",
+      "pattern": "8D 55 D8 52 E8 ?? ?? ?? ?? C7 45 FC FF FF FF FF 8B C8 E8 ?? ?? ?? ?? 89 45 C8",
+      "offset": 18,
+      "mode": "address",
+      "fallback": "0x007A4012",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call FUN_0076EB90` inside the multiplayer waiting room's description-pane routine FUN_007A3F80 (VehicleListRefresh1) on exact GOG Redux 2.2.301. FUN_007A3F80 takes the selected map-list entry (FUN_00752D30(index)), passes its name to FUN_0076EB90, and hands the returned text to the description box (vtbl+0x3C of [this+0x44]). FUN_0076EB90 is __thiscall on the list singleton (FUN_00764790) with a hidden result pointer and a by-value std::string: it copies the name up to the first '.', appends the \".des\" literal at 0x00876ED0, and reads it through GetItemSize 0x00481A60, UseItem 0x00481AF0 and UnlockItem 0x00481990 (capped at 0x960 bytes). It has two other callers, instant action FUN_00789910 (cUI_InstantAction) and mod select FUN_00788080, which are left alone; the single-player briefing reads <stem>.des through FUN_004889C0 instead. The pattern covers `lea edx,[ebp-0x28] / push edx / call FUN_00764790 / mov [ebp-4],-1 / mov ecx,eax`, the call and `mov [ebp-0x38],eax`; the shorter tail also matches 0x007881E2 and 0x00789A6F, the leading `lea edx / push edx` makes it unique (whole-image scan 2026-10-24). Install also requires the site to lie in the first 0xE0 bytes of VehicleListRefresh1 and the call target to load the \".des\" literal and call all three item functions the ODF detours sit on."
     },
     {
       "name": "ShellRequest",
