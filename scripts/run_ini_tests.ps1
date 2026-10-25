@@ -307,6 +307,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # DX11 Enhanced only, and any failure keeps the stock atlas.
     "Terrain/TerrainHdEnabled",
 
+    # Enhanced sun lighting baseline: render-only, Enhanced profile on DX11
+    # only, and any later Lua/EXU sun write still wins.
+    "SunBaseline/Enabled",
+    "SunBaseline/WorldColorGrading",
+
     # Stages OpenShim updates from the Workshop on the main menu (Steam only,
     # never in multiplayer); installs only at game exit. Default on by design.
     "Updater/AutoStage",
