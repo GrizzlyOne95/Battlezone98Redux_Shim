@@ -116,6 +116,28 @@ class AutoPaintTests(unittest.TestCase):
         mean = np.asarray(auto.match_mean(art, reference), dtype=np.float64).reshape(-1, 3).mean(axis=0)
         np.testing.assert_allclose(mean, (50, 80, 120), atol=1)
 
+    def test_contrast_stretches_about_the_mean(self):
+        ramp = np.tile(np.linspace(80, 120, 64, dtype=np.float64)[None, :, None], (64, 1, 3))
+        Image.fromarray(ramp.astype(np.uint8)).save(self.root / "ramp.png")
+        files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
+        stats = []
+        for contrast in (None, 2):
+            recipe = dict(self.recipe, diffuseOnly=True, layers=[dict(layer) for layer in self.recipe["layers"]])
+            recipe["layers"][0].update(file="ramp.png", seamless=False)
+            if contrast:
+                recipe["layers"][0]["contrast"] = contrast
+            out = self.root / f"outk{contrast}"
+            auto.build_pack([auto.load_map("m", files, recipe, None, 64)], recipe, self.root, out, 64, "test_auto", False)
+            with Image.open(out / "test_auto_layer0.png") as image:
+                rgb = np.asarray(image.convert("RGB"), dtype=np.float64)
+            stats.append((rgb.mean(), rgb.std()))
+        self.assertAlmostEqual(stats[1][0], stats[0][0], delta=1)
+        self.assertAlmostEqual(stats[1][1], 2 * stats[0][1], delta=1)
+        bad = dict(self.recipe, diffuseOnly=True, layers=[dict(layer) for layer in self.recipe["layers"]])
+        bad["layers"][0]["contrast"] = 9
+        with self.assertRaisesRegex(ValueError, "contrast"):
+            auto.build_pack([auto.load_map("m", files, bad, None, 64)], bad, self.root, self.root / "outkb", 64, "test_auto", False)
+
     def test_height_shade_darkens_pits_and_keeps_mean(self):
         rgb = np.full((256, 256, 3), 120, np.uint8)
         height = np.full((256, 256), 0.5)
@@ -143,6 +165,78 @@ class AutoPaintTests(unittest.TestCase):
         recipe["slope"]["fullDegrees"] = 20
         with self.assertRaisesRegex(ValueError, "slope"):
             auto.validate_recipe(recipe)
+
+    def test_normalize_array_matches_normalize(self):
+        rng = np.random.default_rng(11)
+        pixels = np.concatenate([rng.integers(0, 4, size=(400, 4)), rng.integers(0, 1000, size=(400, 4)),
+                                 np.zeros((3, 4), dtype=int), np.full((3, 4), 7)])           # ties, empties
+        expected = np.array([auto.normalize(tuple(p)) for p in pixels.tolist()], dtype=np.uint8)
+        np.testing.assert_array_equal(auto.normalize_array(pixels), expected)
+        eight = rng.integers(0, 5, size=(200, 8))
+        np.testing.assert_array_equal(auto.normalize_array(eight), [auto.normalize(tuple(p)) for p in eight.tolist()])
+
+    def test_variation_list_applies_each_rule(self):
+        cells = np.zeros((32, 32), dtype=np.uint16)
+        one = {"meters": 200, "amount": 1, "types": {"0": [0, 0, 1, 0]}}
+        two = {"meters": 90, "amount": 1, "types": {"0": [0, 0, 0, 1]}}
+        single = auto.cell_field(cells, None, dict(self.recipe, variation=one), seed=3)
+        np.testing.assert_array_equal(single, auto.cell_field(cells, None, dict(self.recipe, variation=[one]), seed=3))
+        both = auto.cell_field(cells, None, dict(self.recipe, variation=[one, two]), seed=3)
+        self.assertTrue(both[..., 3].max() > 0.99, "the second rule paints its own layer")
+        kept = (single[..., 2] > 0.99) & (both[..., 3] < 0.01)
+        self.assertTrue(kept.any() and np.all(both[kept, 2] > 0.99), "the second rule leaves the first one's patches alone")
+        np.testing.assert_allclose(both.sum(axis=2), 1)
+        with self.assertRaisesRegex(ValueError, "variation"):
+            auto.validate_recipe(dict(self.recipe, variation=[one, "bad"]))
+
+    def test_edge_layer_keeps_mat_cells_and_cuts_sharp(self):
+        cells = np.zeros((64, 128), dtype=np.uint16)
+        cells[:, 64:] = (1 << 12) | (1 << 8)                       # right zone: the "pad" type
+        cells[:, 63] = (0 << 12) | (1 << 8)                        # one column of caps 0 -> 1
+        recipe = dict(self.recipe, blurMeters=30, variation={"meters": 200, "amount": 1, "types": {"1": [0, 0, 1, 0]}})
+        recipe["layers"] = [dict(layer) for layer in self.recipe["layers"]]
+        recipe["layers"][1]["edge"] = {"meters": 8, "ragged": 0, "raggedMeters": 12}
+        auto.validate_recipe(recipe)
+        field = auto.cell_field(cells, None, recipe, seed=5)
+        np.testing.assert_allclose(field[:, 64:, 1], 1, err_msg="variation never eats the edge layer")
+        weights = auto.rasterize(cells, 2, 1, auto.terrain_bounds(2, 1), 512, recipe, None, 5)
+        pad = np.asarray(weights)[..., 1]
+        middle = pad[pad.shape[0] // 2]
+        self.assertTrue(set(np.unique(middle)) <= {0, 255} or np.count_nonzero((middle > 10) & (middle < 245)) <= 4,
+                        "the pad edge is a cut, not the 30 m blur")
+        self.assertEqual(middle[-40], 255)
+        self.assertEqual(middle[160], 0)                            # left zone; px < ~85 is the skirt
+        for bad in ({"meters": 0}, {"meters": 8, "ragged": 0.9}, {"meters": 8, "raggedMeters": 1}, "edge"):
+            broken = dict(recipe, layers=[dict(layer) for layer in recipe["layers"]])
+            broken["layers"][1]["edge"] = bad
+            with self.assertRaisesRegex(ValueError, "edge"):
+                auto.validate_recipe(broken)
+
+    def test_cell_aligned_layer_rolls_half_a_tile_and_skips_far_copy(self):
+        pixels = np.arange(16 * 16 * 4, dtype=np.uint8).reshape(16, 16, 4)
+        np.testing.assert_array_equal(auto.align(pixels, {}), pixels)
+        rolled = auto.align(pixels, {"cellAligned": True})
+        np.testing.assert_array_equal(rolled[8, 8], pixels[0, 0])
+        recipe = dict(self.recipe, layers=[dict(layer) for layer in self.recipe["layers"]])
+        recipe["layers"][2].update(cellAligned=True, repeatMeters=20)
+        auto.validate_recipe(recipe)
+        files = (self.root / "m.hg2", self.root / "m.mat", self.root / "m.trn")
+        maps = [auto.load_map("m", files, recipe, None, 64)]
+        paint = auto.build_pack(maps, recipe, self.root, self.root / "outc", 64, "test_auto", False)["materials"]["TERRAIN"]["paint"]
+        self.assertEqual(paint["nearOnly"], [0, 0, 1, 0])
+        plain = auto.build_pack(maps, self.recipe, self.root, self.root / "outp", 64, "test_auto", False)["materials"]["TERRAIN"]["paint"]
+        self.assertNotIn("nearOnly", plain)
+        for change in ({"repeatMeters": 16}, {"detile": True}, {"cellAligned": 1}):
+            broken = dict(recipe, layers=[dict(layer) for layer in recipe["layers"]])
+            broken["layers"][2].update(change)
+            with self.assertRaisesRegex(ValueError, "cellAligned"):
+                auto.validate_recipe(broken)
+
+    def test_weight_size_comes_from_the_recipe(self):
+        auto.validate_recipe(dict(self.recipe, weightSize=2048))
+        for bad in (1000, 4096, 32):
+            with self.assertRaisesRegex(ValueError, "weightSize"):
+                auto.validate_recipe(dict(self.recipe, weightSize=bad))
 
     def test_shape_reweights_hollows_and_ridges(self):
         cells = np.zeros((32, 32), dtype=np.uint16)

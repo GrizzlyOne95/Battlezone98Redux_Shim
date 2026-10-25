@@ -14,11 +14,19 @@
       1,
       0,
       0,
+      0,
+      0,
+      0,
+      0,
       0
     ],
     "1": [
       0,
       1,
+      0,
+      0,
+      0,
+      0,
       0,
       0
     ],
@@ -26,18 +34,30 @@
       0,
       0,
       1,
+      0,
+      0,
+      0,
+      0,
       0
     ],
     "3": [
       0,
       0,
       0,
-      1
+      1,
+      0,
+      0,
+      0,
+      0
     ],
     "4": [
       0,
       0,
+      0,
+      0,
       1,
+      0,
+      0,
       0
     ]
   },
@@ -45,31 +65,104 @@
     "cap": 0.3,
     "diagonal": 0.5
   },
+  "weightSize": 2048,
   "blurMeters": 14,
   "outsideWeights": [
     1,
     0,
     0,
+    0,
+    0,
+    0,
+    0,
     0
   ],
-  "variation": {
-    "meters": 200,
-    "amount": 0.4,
-    "types": {
-      "0": [
-        0,
-        1,
-        0,
-        0
-      ],
-      "1": [
-        1,
-        0,
-        0,
-        0
-      ]
+  "variation": [
+    {
+      "meters": 200,
+      "amount": 0.4,
+      "types": {
+        "0": [
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "1": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 90,
+      "amount": 0.6,
+      "types": {
+        "0": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 130,
+      "amount": 0.6,
+      "types": {
+        "1": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ],
+        "3": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 60,
+      "amount": 0.5,
+      "types": {
+        "1": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
     }
-  },
+  ],
   "shape": [
     {
       "radiusMeters": 400,
@@ -79,11 +172,19 @@
         1,
         0,
         0,
+        0,
+        0,
+        0,
+        0,
         0
       ],
       "ridge": [
         0,
         1,
+        0,
+        0,
+        0,
+        0,
         0,
         0
       ],
@@ -100,13 +201,21 @@
         1,
         0,
         0,
+        0,
+        0,
+        0,
+        0,
         0
       ],
       "ridge": [
         0,
         0,
-        1,
-        0
+        0.5,
+        0,
+        0,
+        0,
+        0,
+        0.5
       ],
       "from": [
         0,
@@ -118,9 +227,13 @@
     "talus": {
       "weights": [
         0,
-        0.4,
-        0.6,
-        0
+        0.2,
+        0.3,
+        0,
+        0,
+        0,
+        0,
+        0.5
       ],
       "amount": 0.6,
       "coverage": 0.06,
@@ -135,6 +248,10 @@
         1,
         0,
         0,
+        0,
+        0,
+        0,
+        0,
         0
       ],
       "amount": 0.5,
@@ -147,7 +264,11 @@
       "weights": [
         0,
         0,
-        1,
+        0.5,
+        0,
+        0,
+        0,
+        0.5,
         0
       ],
       "amount": 0.35,
@@ -163,7 +284,11 @@
       0,
       0,
       0,
-      1
+      0.7,
+      0,
+      0.3,
+      0,
+      0
     ],
     "startDegrees": 24,
     "fullDegrees": 38
@@ -176,6 +301,7 @@
       "archive": "desert_western_ground_sand_fine_01_xgmpdek_8k.zip",
       "member": "Desert_Western_Ground_Sand_Fine_01_xgmpdek_8K_BaseColor.jpg",
       "matchMean": "crhd_mars_ma00sa0_d.dds",
+      "contrast": 2.5,
       "heightMeters": 0.4,
       "proceduralDetail": 0.4
     },
@@ -186,6 +312,7 @@
       "archive": "desert_western_detail_sand_coarse_01_xgindh1_8k.zip",
       "member": "Desert_Western_Detail_Sand_Coarse_01_xgindh1_8K_BaseColor.jpg",
       "matchMean": "crhd_mars_ma11sa0_d.dds",
+      "contrast": 1.8,
       "heightMeters": 0.8,
       "proceduralDetail": 0.6
     },
@@ -196,6 +323,7 @@
       "archive": "arid_gravel_ground_wikdaikbw_8k.zip",
       "member": "Arid_Gravel_Ground_wikdaikbw_8K_BaseColor.jpg",
       "matchMean": "crhd_mars_ma11sa0_d.dds",
+      "contrast": 1.1,
       "heightMeters": 0.5,
       "proceduralDetail": 0.5
     },
@@ -205,8 +333,71 @@
       "repeatMeters": 24,
       "file": "rock_boulder_cracked_diff_8k.jpg",
       "matchMean": "crhd_mars_ma33sa0_d.dds",
+      "contrast": 1.6,
       "heightMeters": 2.0,
       "proceduralDetail": 1
+    },
+    {
+      "name": "Base pad",
+      "repeatMeters": 20,
+      "cellAligned": true,
+      "file": "crhd_mars_ma44sa0_d.dds",
+      "normal": "crhd_mars_ma44sa0_n.dds",
+      "heightMeters": 0.1,
+      "edge": {
+        "meters": 8,
+        "ragged": 0.12,
+        "raggedMeters": 12
+      }
+    },
+    {
+      "name": "Dark rock streaks",
+      "detile": true,
+      "repeatMeters": 18,
+      "archive": "sandy_beach_rock_udrkajbn_8k.zip",
+      "member": "Sandy_Beach_Rock_udrkajbn_8K_BaseColor.jpg",
+      "matchMean": "crhd_mars_ma11sa0_d.dds",
+      "gain": [
+        0.8,
+        0.77,
+        0.76
+      ],
+      "contrast": 1.8,
+      "heightMeters": 0.8,
+      "proceduralDetail": 0.6
+    },
+    {
+      "name": "Pale crust",
+      "detile": true,
+      "repeatMeters": 14,
+      "archive": "lava_stone_ripple_tbhofjmr_8k.zip",
+      "member": "Lava_Stone_Ripple_tbhofjmr_8K_BaseColor.jpg",
+      "saturation": 0.6,
+      "matchMean": "crhd_mars_ma00sa0_d.dds",
+      "gain": [
+        1.25,
+        1.18,
+        1.0
+      ],
+      "contrast": 1.3,
+      "heightMeters": 0.3,
+      "proceduralDetail": 0.4
+    },
+    {
+      "name": "Dark scree",
+      "detile": true,
+      "repeatMeters": 10,
+      "archive": "icelandic_rocky_ground_ve2kbizn_8k.zip",
+      "member": "Icelandic_Rocky_Ground_ve2kbizn_8K_BaseColor.jpg",
+      "matchMean": "crhd_mars_ma11sa0_d.dds",
+      "gain": [
+        0.75,
+        0.72,
+        0.7
+      ],
+      "contrast": 1.2,
+      "heightMeters": 0.6,
+      "proceduralDetail": 0.5
     }
   ],
   "heightBlend": 0.5,

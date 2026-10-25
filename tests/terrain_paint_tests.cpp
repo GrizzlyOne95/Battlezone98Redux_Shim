@@ -78,7 +78,7 @@ int main(int argc, char** argv)
         check(varied.DetailMeters() == 1 && material.DetailMeters() == 0, "detail displacement bound wrong");
         varied.parallax = {1, 40, 12, 0};
         varied.Validate();
-        for (int bad = 0; bad < 22; ++bad)
+        for (int bad = 0; bad < 24; ++bad)
         {
             TerrainPaint::Config broken = bad == 2 ? config : bad >= 4 ? varied : material;
             if (bad == 0) broken.sliceCount = 7;
@@ -103,6 +103,8 @@ int main(int argc, char** argv)
             if (bad == 19) broken.parallax[2] = 12.5f;
             if (bad == 20) broken.parallax[0] = 0;
             if (bad == 21) broken.parallax[1] = 1;
+            if (bad == 22) broken.nearOnly[1] = 0.5f;
+            if (bad == 23) broken.nearOnly[5] = 1;
             bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
             check(rejected, "invalid paint material accepted");
         }

@@ -319,13 +319,14 @@ RWStructuredBuffer<float4> testResults : register(u0);
         check(steep>count*64*0.05f,"relief slope test ground is flat");
         layers = keptLayers;
         for (unsigned s : {4u, 6u}) context->UpdateSubresource(materialTexture.Get(),s,nullptr,layers.data()+s*16,4*sizeof(Pixel),0);
-        // Distance scale, macro variation and craters: every pixel variant
+        // Distance scale (one layer near-only), macro variation and craters: every pixel variant
         // and the domain shader compile; crater slopes match their heights.
         TerrainPaint::Config varied = detiled;
         varied.farScale = {5, 40, 250, 0.6f}; varied.macro = {260, 0.12f, 0.15f, 0.35f};
         varied.craters = {6, 0.2f, 0.5f, 3}; varied.craterLayers = {1, 0, 0, 0};
         varied.detail = {40, 1, 4, 1}; varied.detailLayers = {0.5f, 0, 0, 0};
         varied.parallax = {1, 40, 12, 0};
+        varied.nearOnly = {0, 1, 0, 0};
         // Triplanar with IBL, and the top-projection material path.
         const std::pair<std::string, const char*> variants[] = {
             {triplanarRaw, "#define IBL_ENABLED\n#define ENHANCED_MODE\n"}, {materialRaw, ""}};

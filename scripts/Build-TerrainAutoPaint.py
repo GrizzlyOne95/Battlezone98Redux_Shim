@@ -193,6 +193,23 @@ def normalize(pixel):
     return tuple(result)
 
 
+def normalize_array(pixels):
+    """normalize over the last axis of an integer array, same bytes, without a per-pixel loop."""
+    pixels = np.asarray(pixels, dtype=np.int64)
+    total = pixels.sum(axis=-1, keepdims=True)
+    values = pixels * 255 / np.maximum(total, 1)
+    result = np.floor(values).astype(np.int64)
+    # Largest remainders first, lower layer first among ties (a stable sort).
+    order = np.argsort(-(values - result), axis=-1, kind="stable")
+    rank = np.empty_like(order)
+    np.put_along_axis(rank, order, np.arange(pixels.shape[-1]), axis=-1)
+    result += rank < 255 - result.sum(axis=-1, keepdims=True)
+    empty = (total == 0)[..., 0]
+    result[empty] = 0
+    result[empty, 0] = 255
+    return result.astype(np.uint8)
+
+
 def weight_images(weights):
     """The RGBA images behind a map's weights: one for four layers, a pair for eight."""
     return list(weights) if isinstance(weights, tuple) else [weights]
@@ -393,6 +410,9 @@ def cell_field(cells, plane, recipe, seed):
     variation: {"meters", "amount", "types": {type: weights}} blends each listed
     type toward its alternate weights inside noise patches about `meters` wide,
     so a map painted almost entirely with one type does not repeat one tile.
+    A list of such rules applies each in turn, each with its own noise; a later
+    rule moves weight out of whatever the earlier ones left, by its types' share
+    of each cell, so it adds patches without undoing theirs.
     shape: {"radiusMeters", "rangeMeters", "amount", "types", "hollow", "ridge"}
     blends cells of the listed types (all when omitted) toward `hollow` where the
     ground sits below its surroundings and toward `ridge` where it stands above,
@@ -406,18 +426,26 @@ def cell_field(cells, plane, recipe, seed):
     `weights` by masks from a water and sediment routing pass over the HG2.
     slope: {"weights", "startDegrees", "fullDegrees"} blends steep cells toward
     a rock layer whatever their MAT type.
+    A layer with an edge (see rasterize) keeps its MAT weight: these rules only
+    move weight among the other layers, so a base pad stays where the map put it.
     """
     types = {int(k): v for k, v in recipe["typeWeights"].items()}
     fallback = recipe.get("undefinedTypeWeights", unit_weights(len(recipe["layers"]), 1))
-    weights = cell_weights(cells, types, recipe["transition"], fallback)
-    variation = recipe.get("variation")
-    if variation:
+    weights = mat_weights = cell_weights(cells, types, recipe["transition"], fallback)
+    for k, variation in enumerate(variation_rules(recipe)):
         amount = variation.get("amount", 0.5)
-        alternate = dict(types)
+        # The first rule keeps the single-rule seed, so existing packs do not change.
+        patches = variation_noise(cells.shape, variation.get("meters", 150), seed ^ (k * 0x9E3779B1 & 0xFFFFFFFF))[..., None]
+        if k == 0:
+            alternate = dict(types)
+            for index, vector in variation["types"].items():
+                alternate[int(index)] = [(1 - amount) * a + amount * b for a, b in zip(types[int(index)], vector)]
+            weights = weights * (1 - patches) + cell_weights(cells, alternate, recipe["transition"], fallback) * patches
+            continue
+        share = cell_weights(cells, {i: np.eye(16)[i] for i in range(16)}, recipe["transition"], np.zeros(16))
         for index, vector in variation["types"].items():
-            alternate[int(index)] = [(1 - amount) * a + amount * b for a, b in zip(types[int(index)], vector)]
-        patches = variation_noise(cells.shape, variation.get("meters", 150), seed)[..., None]
-        weights = weights * (1 - patches) + cell_weights(cells, alternate, recipe["transition"], fallback) * patches
+            t = patches * amount * share[..., int(index), None]
+            weights = weights * (1 - t) + np.asarray(vector, dtype=np.float64) * t
     def type_mask(rule):
         return np.isin((cells >> 12) & 15, rule["types"]) if "types" in rule else np.ones(cells.shape, dtype=bool)
     shapes = recipe.get("shape", [])
@@ -446,7 +474,39 @@ def cell_field(cells, plane, recipe, seed):
     if slope and plane is not None:
         steep = smoothstep(slope["startDegrees"], slope["fullDegrees"], cell_slope_degrees(plane, cells.shape))[..., None]
         weights = weights * (1 - steep) + np.asarray(slope["weights"], dtype=np.float64) * steep
+    edges = edge_layers(recipe)
+    if edges:
+        def unit(w):
+            return w / np.maximum(w.sum(axis=-1, keepdims=True), 1e-12)
+        mat_weights, weights = unit(mat_weights), unit(weights)
+        keep = mat_weights[..., edges].sum(axis=-1, keepdims=True)
+        rest = weights.copy(); rest[..., edges] = 0
+        spare = mat_weights.copy(); spare[..., edges] = 0
+        # A cell the rules moved wholly into edge layers falls back to its MAT remainder.
+        rest = np.where(rest.sum(axis=-1, keepdims=True) > 1e-9, rest, spare)
+        weights = unit(rest) * (1 - keep)
+        weights[..., edges] = mat_weights[..., edges]
     return weights
+
+
+def variation_rules(recipe):
+    variation = recipe.get("variation", [])
+    return variation if isinstance(variation, list) else [variation]
+
+
+def edge_layers(recipe):
+    return [i for i, layer in enumerate(recipe["layers"]) if "edge" in layer]
+
+
+def ragged_noise(size, meters_per_pixel, meters, seed):
+    """Smooth noise about -1..1 over the weight map: two octaves, `meters` and half that."""
+    rng = np.random.default_rng(seed)
+    out = np.zeros((size, size))
+    for scale, amplitude in ((1.0, 0.65), (0.5, 0.35)):
+        cells = max(2, int(math.ceil(size * meters_per_pixel / (meters * scale))) + 1)
+        grid = (rng.random((cells, cells)) * 2 - 1).astype(np.float32)
+        out += amplitude * np.asarray(Image.fromarray(grid, "F").resize((size, size), Image.Resampling.BICUBIC), dtype=np.float64)
+    return out
 
 
 def rasterize(cells, zx, zz, bounds, size, recipe, plane=None, seed=0):
@@ -469,16 +529,33 @@ def rasterize(cells, zx, zz, bounds, size, recipe, plane=None, seed=0):
     outside = ((raw_x < 0) | (raw_x >= cells.shape[1]))[None, :] | ((raw_z < 0) | (raw_z >= cells.shape[0]))[:, None]
     field[outside] = np.asarray(recipe.get("outsideWeights", unit_weights(n, 1)), dtype=np.float64)
     meters_per_pixel = (bounds[2] - bounds[0]) / size
+    edges = edge_layers(recipe)
+    sharp = []
+    for i in edges:
+        # Edge layers skip the wide blur. A cell's MAT share (1 solid, the
+        # transition share on cap and diagonal cells) is blurred by the edge's
+        # own metres and cut at half, so the layer reaches into its transition
+        # cells as the atlas edge tiles do, with a ragged noise-moved border.
+        edge = recipe["layers"][i]["edge"]
+        reach = blur(field[..., i], edge["meters"] / meters_per_pixel)
+        if edge.get("ragged", 0) > 0:
+            reach = reach + edge["ragged"] * ragged_noise(size, meters_per_pixel, edge.get("raggedMeters", 12), seed + 1 + i)
+        sharp.append(smoothstep(0.45, 0.55, reach))
+    if edges:
+        field = field.copy()
+        field[..., edges] = 0
     field = blur(field, recipe.get("blurMeters", 12) / meters_per_pixel)
     field = np.clip(field, 0, None)
     total = field.sum(axis=2, keepdims=True)
     field = np.where(total > 1e-9, field / np.maximum(total, 1e-9), np.array(unit_weights(n, 0)))
-    pixels = [normalize(tuple(np.clip(np.rint(p * 255), 0, 255).astype(int))) for p in field.reshape(-1, n)]
+    if edges:
+        sharp = np.stack(sharp, axis=-1)
+        sharp /= np.maximum(sharp.sum(axis=-1, keepdims=True), 1)
+        field *= 1 - sharp.sum(axis=-1, keepdims=True)
+        field[..., edges] = sharp
+    packed = normalize_array(np.clip(np.rint(field * 255), 0, 255).astype(int))
     if n == 4:
-        image = Image.new("RGBA", (size, size))
-        image.putdata(pixels)
-        return image
-    packed = np.array(pixels, dtype=np.uint8).reshape(size, size, n)
+        return Image.fromarray(packed, "RGBA")
     return tuple(Image.fromarray(packed[..., k:k + 4], "RGBA") for k in range(0, n, 4))
 
 
@@ -507,13 +584,14 @@ def validate_recipe(recipe):
     for key in ("undefinedTypeWeights", "outsideWeights"):
         if key in recipe and not weight_vector(recipe[key]):
             raise ValueError(f"{key} needs {n} non-negative weights with a positive sum")
-    if "variation" in recipe:
-        variation = recipe["variation"]
-        if not 0 < variation.get("amount", 0.5) <= 1 or not 20 <= variation.get("meters", 150) <= 2000:
+    for variation in variation_rules(recipe):
+        if not isinstance(variation, dict) or not 0 < variation.get("amount", 0.5) <= 1 or not 20 <= variation.get("meters", 150) <= 2000:
             raise ValueError("variation needs amount in (0,1] and meters from 20 to 2000")
         for index, vector in variation.get("types", {}).items():
             if index not in recipe["typeWeights"] or not weight_vector(vector):
                 raise ValueError(f"variation.types[{index}] needs a mapped type and {n} weights")
+    if recipe.get("weightSize", 1024) not in (64, 128, 256, 512, 1024, 2048):
+        raise ValueError("weightSize must be a power of two from 64 to 2048")
     if not 0 <= recipe.get("heightBlend", 0.5) <= 4:
         raise ValueError("heightBlend must be 0..4")
     for layer in recipe["layers"]:
@@ -521,6 +599,14 @@ def validate_recipe(recipe):
             raise ValueError(f"layer {layer.get('name')} needs heightMeters 0..32 and specularScale in (0,4]")
         if type(layer.get("detile", False)) is not bool:
             raise ValueError(f"layer {layer.get('name')} detile must be true or false")
+        if type(layer.get("cellAligned", False)) is not bool or (
+                layer.get("cellAligned") and (layer.get("repeatMeters") != 20 or layer.get("detile"))):
+            raise ValueError(f"layer {layer.get('name')} cellAligned needs repeatMeters 20 and no detile")
+        if "edge" in layer:
+            edge = layer["edge"]
+            if not (isinstance(edge, dict) and 1 <= edge.get("meters", 0) <= 60 and 0 <= edge.get("ragged", 0) <= 0.5
+                    and 2 <= edge.get("raggedMeters", 12) <= 200):
+                raise ValueError(f"layer {layer.get('name')} edge needs meters 1..60, ragged 0..0.5 and raggedMeters 2..200")
         strength = layer.get("proceduralCraters", False)
         if type(strength) not in (bool, int, float) or not 0 <= strength <= 1:
             raise ValueError(f"layer {layer.get('name')} proceduralCraters must be true, false or 0..1")
@@ -633,7 +719,8 @@ def load_map(name, files, recipe, capture_path, weight_size, trust_capture=False
             raise ValueError(f"{name}: capture {capture['terrainFingerprint']} {capture['boundsMeters']} "
                              f"disagrees with the offline result {fingerprint} {bounds}")
         source = "offline HG2, confirmed by capture" if not trust_capture else "live capture (offline model disagrees or was bypassed)"
-    weights = rasterize(cells, zx, zz, bounds, weight_size, recipe, plane, int(fingerprint[:8], 16) ^ recipe.get("variation", {}).get("seed", 0))
+    rules = variation_rules(recipe)
+    weights = rasterize(cells, zx, zz, bounds, weight_size, recipe, plane, int(fingerprint[:8], 16) ^ (rules[0].get("seed", 0) if rules else 0))
     return {"name": name, "zones": (zx, zz), "fingerprint": fingerprint, "bounds": bounds,
             "weights": weights, "source": source,
             "histogram": {int(t): int(c) for t, c in zip(*np.unique(cells >> 12, return_counts=True))}}
@@ -880,6 +967,18 @@ def height_shade(rgb, height, amount):
     return np.clip(rgb * shade[..., None] + 0.5, 0, 255).astype(np.uint8)
 
 
+def align(pixels, layer):
+    """Shift a cellAligned layer's tile by half so its edges meet the MAT cell edges.
+
+    uv is world / repeat from the world origin and MAT cells span world
+    20c + 10 .. 20c + 30 on both axes (see MESH_SAMPLE_BIAS), so with a 20 m
+    repeat each cell starts half a tile in.
+    """
+    if not layer.get("cellAligned"):
+        return pixels
+    return np.roll(pixels, (pixels.shape[0] // 2, pixels.shape[1] // 2), axis=(0, 1))
+
+
 def build_pack(maps, recipe, source_root, output, size, prefix, force):
     output = Path(output)
     if output.exists() and any(output.iterdir()) and not force:
@@ -915,6 +1014,16 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
                 raise ValueError("layer gain needs three factors from 0.25 to 4")
             art = Image.fromarray(np.clip(np.asarray(art.convert("RGB"), dtype=np.float64) * gain + 0.5, 0, 255).astype(np.uint8))
             identity = dict(identity, gain=gain)
+        if "contrast" in layer:
+            # Photographic art downsampled to a layer is flatter than the tiles it
+            # replaces; stretch it about its mean so the mean match still holds.
+            contrast = layer["contrast"]
+            if type(contrast) not in (int, float) or not 0.25 <= contrast <= 4:
+                raise ValueError("layer contrast must be from 0.25 to 4")
+            a = np.asarray(art.convert("RGB"), dtype=np.float64)
+            mean = a.reshape(-1, 3).mean(axis=0)
+            art = Image.fromarray(np.clip(mean + (a - mean) * contrast + 0.5, 0, 255).astype(np.uint8))
+            identity = dict(identity, contrast=contrast)
         if layer.get("seamless"):
             art = make_seamless(art)
             identity = dict(identity, seamless=True)
@@ -926,10 +1035,10 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
             if "heightShade" in layer:
                 rgb = height_shade(rgb, height, layer["heightShade"])
                 identity = dict(identity, heightShade=layer["heightShade"])
-            layers.append(Image.fromarray(np.dstack((rgb, to_u8(specular))), "RGBA"))
-            normals.append(Image.fromarray(np.dstack((to_u8(normal * 0.5 + 0.5), to_u8(height))), "RGBA"))
+            layers.append(Image.fromarray(align(np.dstack((rgb, to_u8(specular))), layer), "RGBA"))
+            normals.append(Image.fromarray(align(np.dstack((to_u8(normal * 0.5 + 0.5), to_u8(height))), layer), "RGBA"))
         else:
-            layers.append(art.convert("RGBA"))
+            layers.append(Image.fromarray(align(np.asarray(art.convert("RGBA")), layer), "RGBA"))
         identities.append(identity)
         repeats.append(repeat)
     capture_material = recipe.get("material", "MA_DETAIL_ATLAS")
@@ -959,8 +1068,7 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
         if key not in controls:
             # Eight layers normalise jointly across both images.
             channels = [np.asarray(c.resize((size, size), Image.Resampling.BILINEAR)) for image in weight_images(weights) for c in image.split()]
-            stacked = np.stack(channels, axis=-1).reshape(-1, n)
-            packed = np.array([normalize(tuple(p)) for p in stacked.tolist()], dtype=np.uint8).reshape(size, size, n)
+            packed = normalize_array(np.stack(channels, axis=-1))
             names = [f"{prefix}_{info['name']}_{suffix}.png" for suffix in suffixes]
             for k, name in enumerate(names):
                 Image.fromarray(packed[..., 4 * k:4 * k + 4], "RGBA").save(output / name)
@@ -981,6 +1089,9 @@ def build_pack(maps, recipe, source_root, output, size, prefix, force):
     paint = {"schema": "bzr-openshim-terrain-paint-v1", "rowZero": "minZ", "repeatMeters": repeats, "maps": entries}
     if any(layer.get("detile") for layer in recipe["layers"]):
         paint["detile"] = [1 if layer.get("detile") else 0 for layer in recipe["layers"]]
+    if any(layer.get("cellAligned") for layer in recipe["layers"]):
+        # The far copy would scale the cell-aligned tiles off the grid.
+        paint["nearOnly"] = [1 if layer.get("cellAligned") else 0 for layer in recipe["layers"]]
     if "far" in recipe:
         far = recipe["far"]
         paint["far"] = [far["scale"], far["startMeters"], far["endMeters"], far["amount"]]
@@ -1045,7 +1156,7 @@ def main():
                         help="optional OPENSHIM_TERRAIN_HD_EXPORT capture to cross-check that map")
     parser.add_argument("--trust-capture", action="store_true", help="use --capture fingerprint/bounds instead of requiring the offline values to agree")
     parser.add_argument("--size", type=int, default=2048, help="material and control upload size")
-    parser.add_argument("--weight-size", type=int, default=1024)
+    parser.add_argument("--weight-size", type=int, help="weight map size (default: the recipe's weightSize, else 1024)")
     parser.add_argument("--prefix", default="openshim_mars_auto")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
@@ -1053,6 +1164,8 @@ def main():
         recipe = _hd.read_json(args.recipe)
         validate_recipe(recipe)
         captures = dict(item.split("=", 1) for item in args.capture)
+        if args.weight_size is None:
+            args.weight_size = recipe.get("weightSize", 1024)
         if args.size not in (64, 128, 256, 512, 1024, 2048) or args.weight_size not in (64, 128, 256, 512, 1024, 2048):
             raise ValueError("sizes must be powers of two from 64 to 2048")
         if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", args.prefix):
