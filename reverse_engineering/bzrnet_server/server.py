@@ -627,7 +627,12 @@ async def run(host: str, port: int, probe_port: int | None, server_name: str = "
         )
         LOG.info("Listening for endpoint probes on udp://%s:%d", host, probe_port)
     try:
-        async with websockets.serve(server.handler, host, port, max_size=2**20):
+        # No server keepalive: the game stops answering pings while a mission
+        # loads, and websockets' default 20 s ping timeout then drops a
+        # launched game. The client sends its own pings.
+        async with websockets.serve(
+            server.handler, host, port, max_size=2**20, ping_interval=None
+        ):
             await asyncio.Future()
     finally:
         if probe_transport is not None:
