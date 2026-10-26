@@ -29,6 +29,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed Lua Send of a 128-255 byte string or table crashing every receiving player.
 [*] Fixed Lua Send of map-placed objects (geysers, beacons, scenery) arriving as nil on other players.
 [*] Fixed the Lua Formation(unit, leader, priority) binding. Stock registered a copy of Recycle, which rejected the leader handle.
+[*] Fixed a crash when a mission script calls GetIndependence while a save is still loading.
 [*] Fixed the Lua CanBuild and IsBusy checks giving wrong answers for base producers.
 [*] Fixed the multiplayer map list jumping or resetting while browsing (Steam).
 [*] Fixed the multiplayer vehicle list using stock assets instead of the selected mod's.
