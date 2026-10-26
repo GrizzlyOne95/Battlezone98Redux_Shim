@@ -2,7 +2,7 @@
   "schema": "bzr-openshim-terrain-hd-v1",
   "materials": {
     "MA_DETAIL_ATLAS": {
-      "sliceCount": 9,
+      "sliceCount": 18,
       "diffuseResource": "mars_atlas_d.dds",
       "fallback": "openshim_mars_auto_layer0.png",
       "tiles": {
@@ -10,11 +10,20 @@
         "1": "openshim_mars_auto_layer1.png",
         "2": "openshim_mars_auto_layer2.png",
         "3": "openshim_mars_auto_layer3.png",
+        "9": "openshim_mars_auto_layer4.png",
+        "10": "openshim_mars_auto_layer5.png",
+        "11": "openshim_mars_auto_layer6.png",
+        "12": "openshim_mars_auto_layer7.png",
         "4": "openshim_mars_auto_misn04_control.png",
+        "13": "openshim_mars_auto_misn04_control2.png",
         "5": "openshim_mars_auto_layer0_n.png",
         "6": "openshim_mars_auto_layer1_n.png",
         "7": "openshim_mars_auto_layer2_n.png",
-        "8": "openshim_mars_auto_layer3_n.png"
+        "8": "openshim_mars_auto_layer3_n.png",
+        "14": "openshim_mars_auto_layer4_n.png",
+        "15": "openshim_mars_auto_layer5_n.png",
+        "16": "openshim_mars_auto_layer6_n.png",
+        "17": "openshim_mars_auto_layer7_n.png"
       },
       "paint": {
         "schema": "bzr-openshim-terrain-paint-v1",
@@ -23,7 +32,11 @@
           20,
           16,
           12,
-          24
+          24,
+          20,
+          18,
+          14,
+          10
         ],
         "maps": [
           {
@@ -34,7 +47,8 @@
               3210.0,
               2550.0
             ],
-            "control": "openshim_mars_auto_misn04_control.png"
+            "control": "openshim_mars_auto_misn04_control.png",
+            "control2": "openshim_mars_auto_misn04_control2.png"
           },
           {
             "terrainFingerprint": "73f9729303821983",
@@ -44,7 +58,8 @@
               3210.0,
               2550.0
             ],
-            "control": "openshim_mars_auto_misn04_stock_control.png"
+            "control": "openshim_mars_auto_misn04_stock_control.png",
+            "control2": "openshim_mars_auto_misn04_stock_control2.png"
           },
           {
             "terrainFingerprint": "5e4ef40b581c2c36",
@@ -54,7 +69,8 @@
               2570.0,
               2550.0
             ],
-            "control": "openshim_mars_auto_misn05_control.png"
+            "control": "openshim_mars_auto_misn05_control.png",
+            "control2": "openshim_mars_auto_misn05_control2.png"
           },
           {
             "terrainFingerprint": "04e39ffb0e80a25e",
@@ -64,7 +80,8 @@
               2570.0,
               2550.0
             ],
-            "control": "openshim_mars_auto_misn05_stock_control.png"
+            "control": "openshim_mars_auto_misn05_stock_control.png",
+            "control2": "openshim_mars_auto_misn05_stock_control2.png"
           },
           {
             "terrainFingerprint": "47910f1f7563463d",
@@ -74,7 +91,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_mars_auto_misn06_control.png"
+            "control": "openshim_mars_auto_misn06_control.png",
+            "control2": "openshim_mars_auto_misn06_control2.png"
           },
           {
             "terrainFingerprint": "9c77ccbdec3593fe",
@@ -84,14 +102,29 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_mars_auto_misn06_stock_control.png"
+            "control": "openshim_mars_auto_misn06_stock_control.png",
+            "control2": "openshim_mars_auto_misn06_stock_control2.png"
           }
         ],
         "detile": [
           1,
           1,
           1,
+          1,
+          0,
+          1,
+          1,
           1
+        ],
+        "nearOnly": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
         ],
         "far": [
           5,
@@ -109,7 +142,11 @@
           0.4,
           0.8,
           0.5,
-          2.0
+          2.0,
+          0.1,
+          0.8,
+          0.3,
+          0.6
         ],
         "detail": [
           60,
@@ -121,7 +158,11 @@
           0.4,
           0.6,
           0.5,
-          1.0
+          1.0,
+          0.0,
+          0.6,
+          0.4,
+          0.5
         ],
         "parallax": [
           1,

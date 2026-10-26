@@ -1201,6 +1201,7 @@ namespace BZROpenShim
                         binding.paint.heightBlend = paint.value("heightBlend", binding.paint.Material() ? 0.5f : 0.0f);
                         if (paint.contains("heightMeters")) layers("heightMeters", binding.paint.heightMeters);
                         if (paint.contains("detile")) layers("detile", binding.paint.detile);
+                        if (paint.contains("nearOnly")) layers("nearOnly", binding.paint.nearOnly);
                         if (paint.contains("far"))
                             binding.paint.farScale = paint.at("far").get<std::array<float, 4>>();
                         if (paint.contains("macro"))

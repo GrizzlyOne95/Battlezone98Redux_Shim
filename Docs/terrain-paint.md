@@ -227,6 +227,19 @@ Layer recipe fields:
   normal, specular, height-aware blend and tessellated displacement all use the
   same offsets. Only the fade bands take a second tap; offsets are translations,
   so normals stay valid. It is written as `paint.detile`, one 0 or 1 per layer.
+- `gain` (three factors, 0.25 to 4) trims the colour per channel after
+  `matchMean`; `contrast` (0.25 to 4) then stretches it about its mean.
+  Photographic art downsampled to a layer is much flatter than the stock tile
+  it replaces (Mars sand: luminance spread 3.6 against the tile's 13), so the
+  mean match alone reads as smooth, uniform ground.
+- `cellAligned` (true or false) puts the tile on the MAT cell grid: the art is
+  rolled half a tile so its edges fall on cell edges (world 20c + 10 on both
+  axes), and the layer skips the `far` copy at every range (`paint.nearOnly`,
+  one 0 or 1 per layer). It needs `repeatMeters` 20 and no detile. Use it for
+  stock tiles with a 20 m layout, such as base pads.
+- `edge` (`meters` 1 to 60, `ragged` 0 to 0.5, `raggedMeters` 2 to 200) gives
+  the layer its own sharp border instead of the recipe's `blurMeters`; see
+  Base pads.
 
 Three recipe-level settings vary the ground past what one tile can show:
 
@@ -237,6 +250,7 @@ Three recipe-level settings vary the ground past what one tile can show:
   beyond pay for the second set of taps. The height-aware blend and the
   displacement stay at the normal scale. Passes without view depth (the
   glow pass) keep the normal scale. Written as `paint.far`, four numbers.
+  Layers marked in `paint.nearOnly` skip the far copy.
 - `macro` (`meters`, `brightness`, `saturation`, optional `hue`) multiplies the
   final colour by soft two-octave noise about `meters` across: brightness swings
   by up to `brightness` (0 to 0.5) and saturation by up to `saturation` (0 to 1).
@@ -316,6 +330,26 @@ adaptive on, `OPENSHIM_TERRAIN_TESSELLATION_FACTOR=8` raises the cap.
 Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory;
 eighteen cost about 384 MiB.
 
+### Base pads
+
+Stock atlases have a Base type whose tiles (`ma44sa0` on Mars) are a 3 x 3 grid
+of plates per 20 m cell, with cap and diagonal tiles for the pad's border. A
+paint layer can reproduce it from the MAT alone. Map the Base type to its own
+layer, give that layer the stock tile as `cellAligned` art and add an `edge`:
+
+- The variation, shape, erosion and slope rules do not touch an edge layer: each
+  cell keeps its MAT share (1 on solid cells, the transition share on cap and
+  diagonal cells) and the rules move only the other layers' weight.
+- At raster time the share is blurred by `edge.meters` and cut at one half
+  (a smoothstep from 0.45 to 0.55). The pad therefore reaches into its
+  transition cells, as the stock edge tiles do, with a sharp border.
+  `ragged` moves the border with two octaves of noise about `raggedMeters`
+  across, so it is not a blurred rectangle. The other layers are blurred as
+  usual and fill what the pad leaves.
+- Pad edges need finer weights than the 6.25 m pixels of a 1024 map over a
+  6.4 km world, so the recipe sets `weightSize` 2048 (powers of two from 64 to
+  2048; `--weight-size` overrides it).
+
 ## World packs
 
 Each stock world (Moon, Mars, Venus, Io, Europa, Titan, Achilles) has one recipe,
@@ -330,7 +364,13 @@ hand-painted and tile-array prototypes.
 - `typeNames` and `typeWeights`: the TRN-type-to-layer mapping, plus
   `transition`, `blurMeters` and `outsideWeights`.
 - `variation`: low-frequency noise that swaps a type's weight to its partner
-  layer, so a world-sized patch of one type is not one layer.
+  layer, so a world-sized patch of one type is not one layer. A list of rules
+  applies each in turn with its own noise. A later rule moves weight out of
+  whatever the earlier ones left, scaled by its types' share of each cell, so
+  it adds its patches without undoing theirs. The first rule keeps the
+  single-rule formula and seed, so a one-rule recipe builds the same bytes.
+- `weightSize`: the weight map size when `--weight-size` is not given
+  (default 1024).
 - `slope`: steep cells go to a rock layer.
 - `shape` (`radiusMeters`, `rangeMeters`, `amount`, optional `types`, `hollow`,
   `ridge`): each cell's height against its surroundings, about `radiusMeters`
@@ -364,8 +404,8 @@ hand-painted and tile-array prototypes.
   `shape` and before `slope`. The stock maps were not built with drainage in
   mind, so channels are rare (under 1% of cells). Talus, deposit and scour do
   most of the work, following every hill.
-- `layers`: four layers with art, `repeatMeters`, `matchMean` (the stock tile
-  whose mean colour the layer is matched to), height and specular.
+- `layers`: four or eight layers with art, `repeatMeters`, `matchMean` (the
+  stock tile whose mean colour the layer is matched to), height and specular.
 - `heightBlend`, `far`, `macro` and (Moon only) `craters`.
 
 All seven worlds use detile on every layer, plus `far` {5, 40, 250, 0.6} and
@@ -396,17 +436,31 @@ Achilles also uses erosion:
 A second, 40 m shape rule darkens crevices toward forest floor and wears small
 crests toward earth.
 
-Mars layers are fine dune sand (Sandy), coarse sand with stones (Rocky), arid
-gravel (Geyser and Base) and cracked boulder rock (Rock mountain, slopes from 24
-degrees). The three ground layers are Megascans desert scans no other world
-uses; the rock is the Poly Haven boulder Venus also uses. Every layer is matched
-to a CR Mars tile. Two shape rules apply.
-A wide one (400 m) sends sand into hollows and rocky soil onto high ground. A
-narrow one (40 m) puts sand in crevices and gravel on small crests. Erosion
-puts talus on gravel and rocky soil (6%, 0.6), deposits sand on Rocky ground
-(8%, 0.5) and scours sand and soil to gravel (6%, 0.35). CR overrides only
-`misn05.hg2`, so `build-world-packs.sh` takes each of a map's HG2, MAT and TRN
-from CR when present and from the stock folder otherwise.
+Mars has eight layers. The first four are fine dune sand (Sandy), coarse sand
+with stones (Rocky), arid gravel (Geyser) and cracked boulder rock (Rock
+mountain). The three ground layers are Megascans desert scans no other world
+uses; the rock is the Poly Haven boulder Venus also uses. Layer 4 is the base
+pad: the CR HD `ma44sa0` tile and its normal, `cellAligned`, with an `edge` of
+8 m, ragged 0.12 over 12 m (see Base pads). No Mars MAT has Geyser cells (the
+geysers are objects), so Base no longer borrows the gravel layer. The last three
+bring back the stock atlas's mid-scale variety:
+
+- dark rock streaks (Megascans sandy beach rock, darkened);
+- pale ochre crust (Megascans lava stone ripple, desaturated and warmed);
+- dark scree (Megascans Icelandic rocky ground).
+
+Every layer but the pad is matched to a CR Mars tile and given `contrast`
+(2.5 on sand, 1.8 on rocky soil and streaks, 1.1 to 1.6 on the rest). Four
+variation rules apply: the original 200 m sand/rocky swap, pale crust on sand
+(90 m), streaks on rocky ground and rock mountain (130 m) and scree on rocky
+ground (60 m). Slopes from 24 degrees turn to rock with some streaks.
+Two shape rules apply. A wide one (400 m) sends sand into hollows and rocky soil
+onto high ground. A narrow one (40 m) puts sand in crevices and gravel and
+scree on small crests. Erosion puts talus on scree, gravel and rocky soil
+(6%, 0.6), deposits sand on Rocky ground (8%, 0.5) and scours sand and soil to
+gravel and crust (6%, 0.35). The weight maps are 2048 for the pad edges. CR
+overrides only `misn05.hg2`, so `build-world-packs.sh` takes each of a map's
+HG2, MAT and TRN from CR when present and from the stock folder otherwise.
 
 **Build.**
 

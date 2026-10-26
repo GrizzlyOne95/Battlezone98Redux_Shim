@@ -31,6 +31,9 @@ namespace BZROpenShim::TerrainPaint
         // Per layer, 0 or 1: break up the repeat with noise-chosen tile
         // offsets (diffuse, normal, height and displacement alike).
         std::array<float, 8> detile = {};
+        // Per layer, 0 or 1: skip the far copy below, so a layer whose tiles
+        // sit on the MAT cell grid (a base pad) keeps them at every range.
+        std::array<float, 8> nearOnly = {};
         // Two scales by distance: scale, start metres, end metres, amount.
         // Past start every layer cross-fades toward a copy scale times
         // larger, so the repeat stops reading at range. Scale 0 is off.
@@ -93,7 +96,7 @@ namespace BZROpenShim::TerrainPaint
                 const bool used = i < Layers();
                 if (used ? !std::isfinite(repeatMeters[i]) || repeatMeters[i] < 1 || repeatMeters[i] > 4096 : repeatMeters[i] != 0)
                     throw std::runtime_error("paint material repeats must be 1..4096 metres");
-                if (!used && (heightMeters[i] != 0 || detile[i] != 0 || craterLayers[i] != 0 || detailLayers[i] != 0))
+                if (!used && (heightMeters[i] != 0 || detile[i] != 0 || nearOnly[i] != 0 || craterLayers[i] != 0 || detailLayers[i] != 0))
                     throw std::runtime_error("paint per-layer values must match the layer count");
             }
             if (!std::isfinite(heightBlend) || heightBlend < 0 || heightBlend > 4)
@@ -104,6 +107,8 @@ namespace BZROpenShim::TerrainPaint
                 throw std::runtime_error("paint heightMeters needs the 9-slice material form");
             for (float v : detile) if (v != 0 && v != 1)
                 throw std::runtime_error("paint detile must be 0 or 1 per layer");
+            for (float v : nearOnly) if (v != 0 && v != 1)
+                throw std::runtime_error("paint nearOnly must be 0 or 1 per layer");
             for (float v : farScale) if (!std::isfinite(v))
                 throw std::runtime_error("paint far must be finite");
             if (farScale[0] != 0 && (farScale[0] < 2 || farScale[0] > 16 || farScale[1] < 0 || farScale[2] <= farScale[1] ||
@@ -364,6 +369,7 @@ OpenShimCrater OpenShimDetailField(float2 p, float4 params, float foot)
         list("openShimPaintRepeats", config.repeatMeters);
         list("openShimPaintHeightMeters", config.heightMeters);
         list("openShimPaintDetile", config.detile);
+        list("openShimPaintNearOnly", config.nearOnly);
         list("openShimPaintCraterLayers", config.craterLayers);
         list("openShimPaintDetailLayers", config.detailLayers);
         out << "static const float openShimPaintHeightBlend = " << config.heightBlend << ";\n";
@@ -649,13 +655,20 @@ OpenShimPaintGeo OpenShimPaintParallax(Texture2DArray tex, SamplerState sam, Ope
     return g;
 }
 #endif
+// A near-only layer keeps its own scale at every range.
+OpenShimPaintGeo OpenShimPaintLayerGeo(OpenShimPaintGeo g, int i)
+{
+    if (openShimPaintNearOnly[i] > 0) g.farMix = 0;
+    return g;
+}
 // Layers the blend left out cost nothing.
 float4 OpenShimPaintLayers(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, OpenShimPaintMix m, int part)
 {
     float4 sum = 0;
     [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
         [branch] if (m.w[i] > 0)
-            sum += OpenShimPaintTap(tex, sam, g, openShimPaintRepeats[i], OpenShimPaintSlice(i, part), openShimPaintDetile[i] > 0) * m.w[i];
+            sum += OpenShimPaintTap(tex, sam, OpenShimPaintLayerGeo(g, i), openShimPaintRepeats[i],
+                OpenShimPaintSlice(i, part), openShimPaintDetile[i] > 0) * m.w[i];
     return sum;
 }
 static bool openShimPaintDiffuseReady = false;
@@ -729,6 +742,7 @@ float3 OpenShimPaintWorldNormal(OpenShimPaintTaps t, OpenShimPaintGeo g)
 // OpenShimPaintWeights with the same geometry.
 OpenShimPaintTaps OpenShimPaintNormalTaps(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, int i)
 {
+    g = OpenShimPaintLayerGeo(g, i);
     float s = 1.0 / openShimPaintRepeats[i], slice = OpenShimPaintSlice(i, 5);
     bool detile = openShimPaintDetile[i] > 0;
     OpenShimPaintTaps nearTaps = (OpenShimPaintTaps)0, farTaps = (OpenShimPaintTaps)0;
