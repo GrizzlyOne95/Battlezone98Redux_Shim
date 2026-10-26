@@ -750,6 +750,39 @@ int main()
               "6j: flash and recoil off chosen after the revision are respected");
     }
 
+    // 6k. Revision 10 -> 11: the startup backend seam behind the Renderer row
+    // is enabled. The shipped 0 moves once; Renderer itself is untouched.
+    {
+        fs::path canonical = tmpRoot / "canonical6k.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        fs::path off = tmpRoot / "rev10_backend_off.ini";
+        WriteLines(off, {
+            "; OpenShimPresetRevision = 10",
+            "",
+            "[Startup]",
+            "BackendTransport = 0",
+            "",
+            "[Graphics]",
+            "Renderer = DX9",
+        });
+        auto r = MigratePresetFileIfNeeded(off, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 10,
+              "6k: revision 10 file is migrated");
+        Check(FileContains(off, "BackendTransport = 1") && FileContains(off, "Renderer = DX9"),
+              "6k: shipped backend transport off becomes on; renderer kept");
+
+        fs::path chosen = tmpRoot / "rev11_backend_off.ini";
+        WriteLines(chosen, {
+            "; " + CurrentRevisionMarker(),
+            "",
+            "[Startup]",
+            "BackendTransport = 0",
+        });
+        auto again = MigratePresetFileIfNeeded(chosen, canonical);
+        Check(again.action == MigrationAction::None && FileContains(chosen, "BackendTransport = 0"),
+              "6k: backend transport off chosen after the revision is respected");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";

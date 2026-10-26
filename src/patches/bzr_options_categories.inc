@@ -16,14 +16,14 @@ constexpr const char* kShimRowRadar = "Radar Fading";
 constexpr const char* kShimRowMenuTheme = "Menu Colors";
 
 static const char* const kShimCategoryVideo[] = {
-    "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
-    "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
+    "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Jet Flames",
+    "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
     "HD Terrain Tiles", "Terrain Micro Detail", "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "GPU Skinning",
     kShimRowMenuTheme };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
-    "Explosion Flash" };
+    "Explosion Flash", "Sun Flashbang", "Empty Craft Lights" };
 static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
 static const char* const kShimCategoryHud[] = {
@@ -84,7 +84,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     BZR_SHIM_CATEGORY("Video", "VIDEO",
         "Render profile, the DX11 Enhanced passes, and visual effects.", kShimCategoryVideo),
     BZR_SHIM_CATEGORY("Lighting", "LIGHTING",
-        "Vehicle headlights and the pilot flashlight.", kShimCategoryLighting),
+        "Headlights, the pilot flashlight, explosion and sun flashes, and empty-craft lights.", kShimCategoryLighting),
     BZR_SHIM_CATEGORY("Audio", "AUDIO",
         "Sound channels, background music, unit voices and alerts.", kShimCategoryAudio),
     BZR_SHIM_CATEGORY("HUD", "HUD",

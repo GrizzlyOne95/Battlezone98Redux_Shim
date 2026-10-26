@@ -337,7 +337,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Authored muzzle flashes and recoil, on at the user's request on
     # 2026-10-26 (preset revision 10). Inert unless a mod's ODFs configure them.
     "SinglePlayer/MuzzleFlash",
-    "SinglePlayer/MeshRecoil"
+    "SinglePlayer/MeshRecoil",
+
+    # The startup backend seam behind the Video page's Renderer row, on since
+    # 2026-10-26 (preset revision 11). Inert while Graphics/Renderer = Auto.
+    "Startup/BackendTransport"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(

@@ -377,6 +377,13 @@ namespace BZROpenShim
             { "SinglePlayer", "MeshRecoil", "0", "1" },
         };
 
+        // Revision 10 -> 11: the Renderer row reached the Video page on
+        // 2026-10-26, so the startup backend seam it drives is enabled. Inert
+        // while Graphics/Renderer stays Auto. Only the shipped 0 moves.
+        const SurgicalEntry kRevision10SurgicalTable[] = {
+            { "Startup", "BackendTransport", "0", "1" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -417,6 +424,9 @@ namespace BZROpenShim
             if (fromRevision <= 9)
                 append(kRevision9SurgicalTable,
                        sizeof(kRevision9SurgicalTable) / sizeof(kRevision9SurgicalTable[0]));
+            if (fromRevision <= 10)
+                append(kRevision10SurgicalTable,
+                       sizeof(kRevision10SurgicalTable) / sizeof(kRevision10SurgicalTable[0]));
             return entries;
         }
 

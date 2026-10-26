@@ -76,6 +76,12 @@
 //              Both stay inert unless a mod's ODFs configure them. Only the
 //              old shipped 0 moves. ShellCasings stays opt-in.
 //
+//   Revision 11: the Renderer row reached the Video page on 2026-10-26, so
+//              the startup backend seam it drives is enabled:
+//                 Startup/BackendTransport        = 1  (was 0)
+//              Inert while Graphics/Renderer stays Auto. Only the old
+//              shipped 0 moves.
+//
 // Migration policy is implemented here so it works for:
 //   - Campaign Reimagined Workshop users
 //   - standalone OpenShim releases
@@ -90,7 +96,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 10;
+    constexpr int kCurrentPresetRevision = 11;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset as a Windows checkout

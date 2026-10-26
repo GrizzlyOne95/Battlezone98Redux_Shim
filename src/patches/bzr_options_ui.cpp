@@ -2947,6 +2947,14 @@ namespace BZROpenShim
         static_assert(std::size(kShimCategoryFading) <= kShimCategoryMaxRows, "fading controls must fit the page");
         static_assert(std::size(kShimCategoryMeters) <= kShimCategoryMaxRows, "meter controls must fit the page");
         static_assert(std::size(kShimCategoryRadar) <= kShimCategoryMaxRows, "radar controls must fit the page");
+        // The row loop stops at kShimCategoryMaxRows, so an overfull page drops its last rows silently.
+        static_assert(std::size(kShimCategoryVideo) <= kShimCategoryMaxRows, "video controls must fit the page");
+        static_assert(std::size(kShimCategoryLighting) <= kShimCategoryMaxRows, "lighting controls must fit the page");
+        static_assert(std::size(kShimCategoryAudio) <= kShimCategoryMaxRows, "audio controls must fit the page");
+        static_assert(std::size(kShimCategoryControls) <= kShimCategoryMaxRows, "control rows must fit the page");
+        static_assert(std::size(kShimCategoryFixes) <= kShimCategoryMaxRows, "fix rows must fit the page");
+        static_assert(std::size(kShimCategoryNetwork) <= kShimCategoryMaxRows, "network rows must fit the page");
+        static_assert(std::size(kShimCategorySystem) <= kShimCategoryMaxRows, "system rows must fit the page");
 
         // Hub geometry (HUB_LAYOUT).
         constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };

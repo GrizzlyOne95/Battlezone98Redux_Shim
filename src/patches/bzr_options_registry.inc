@@ -57,6 +57,8 @@ static const char* const kShimSettingsTargetPolicyAltKeys[] = { "TargetReticle" 
 static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
 static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
 static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
+static const char* const kShimSettingsRendererValues[] = { "Auto", "DX11", "DX9" };
+static const char* const kShimSettingsRendererLabels[] = { "Auto", "DirectX 11", "DirectX 9" };
 static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
 static const char* const kShimSettingsFovValues[] = { "0", "60", "70", "80", "90", "100", "110", "120" };
 static const char* const kShimSettingsFovLabels[] = { "Stock (80)", "60", "70", "80", "90", "100", "110", "120" };
@@ -296,13 +298,15 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Cockpit and chase base FOV in degrees (4:3 reference); widescreen expands horizontally. "
       "Stock is 80. Satellite and target cameras keep their own angles. Restart required." },
-    // Deliberately NO Renderer (DX9/DX11) row: the runtime only parses
-    // the [Graphics] Renderer preference and reports requested-vs-
-    // effective divergence; it does not yet steer which render system
-    // the game starts on. Exposing it as a restart-required selector
-    // would promise a control that cannot deliver, so the row stays
-    // hidden until startup renderer selection is actually implemented
-    // (hand-edited openshim.ini values remain parsed and reported).
+    // Read once at startup by the backend seam (startup_backend_seam.cpp),
+    // which rewrites Ogre.cfg's "Render System=" before the game reads it.
+    // Stock builds its own renderer row and hides it (FUN_007AF4A0), so this
+    // is the only in-game control. Auto writes nothing and keeps whatever
+    // Ogre.cfg last held. Inert if [Startup] BackendTransport = 0.
+    { "Renderer", "Graphics", "Renderer", nullptr, 0,
+      kShimSettingsRendererValues, kShimSettingsRendererLabels, 3, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Graphics API the game starts on. Auto keeps the game's last choice. The Enhanced profile and the DX11 rows need DirectX 11. Restart required." },
     { "Render Profile", "Graphics", "RenderProfile", nullptr, 0,
       kShimSettingsRenderProfileValues, kShimSettingsRenderProfileValues, 3, 2,
       ShimSettingApplyGroup::RenderProfile,

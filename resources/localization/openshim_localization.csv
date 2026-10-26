@@ -130,6 +130,8 @@ openshim_opt:UnitEmptyColor:label~Empty Bars~~~~~~
 openshim_opt:UnitEmptyColor:desc~Unfilled portions of command and selection health/ammo bars. Does not affect cockpit textures. Default follows the base palette.~~~~~~
 openshim_opt:FieldOfView:label~Field of View~~~~~~
 openshim_opt:FieldOfView:desc~Cockpit and chase base FOV in degrees (4:3 reference); widescreen expands horizontally. Stock is 80. Satellite and target cameras keep their own angles. Restart required.~~~~~~
+openshim_opt:Renderer:label~Renderer~~~~~~
+openshim_opt:Renderer:desc~Graphics API the game starts on. Auto keeps the game's last choice. The Enhanced profile and the DX11 rows need DirectX 11. Restart required.~~~~~~
 openshim_opt:RenderProfile:label~Render Profile~~~~~~
 openshim_opt:RenderProfile:desc~Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live.~~~~~~
 openshim_opt:FXAA:label~DX11 FXAA~~~~~~
@@ -358,6 +360,9 @@ openshim_value:80~80~~~~~~
 openshim_value:90~90~~~~~~
 openshim_value:110~110~~~~~~
 openshim_value:120~120~~~~~~
+openshim_value:Auto~Auto~~~~~~
+openshim_value:DirectX 11~DirectX 11~~~~~~
+openshim_value:DirectX 9~DirectX 9~~~~~~
 openshim_value:Retro~Retro~~~~~~
 openshim_value:Redux~Redux~~~~~~
 openshim_value:Enhanced~Enhanced~~~~~~
@@ -413,7 +418,7 @@ openshim_cat:Video:title~VIDEO~~~~~~
 openshim_cat:Video:blurb~Render profile, the DX11 Enhanced passes, and visual effects.~~~~~~
 openshim_cat:Lighting:name~Lighting~~~~~~
 openshim_cat:Lighting:title~LIGHTING~~~~~~
-openshim_cat:Lighting:blurb~Vehicle headlights and the pilot flashlight.~~~~~~
+openshim_cat:Lighting:blurb~Headlights, the pilot flashlight, explosion and sun flashes, and empty-craft lights.~~~~~~
 openshim_cat:Audio:name~Audio~~~~~~
 openshim_cat:Audio:title~AUDIO~~~~~~
 openshim_cat:Audio:blurb~Sound channels, background music, unit voices and alerts.~~~~~~
