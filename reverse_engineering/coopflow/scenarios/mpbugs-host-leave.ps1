@@ -1,9 +1,14 @@
 # Stock bug pack (mpbugs map, Run-BZRMpBugs.ps1 -Case HostLeave): the host
 # closes the game mid-mission and the guests are left with no authority.
 #
-# There is no host migration (Docs\MULTIPLAYER_BUG_SOURCE_INVESTIGATION.md,
-# investigation 7): guests keep simulating and their mission never ends. The
-# mission script is stock and does nothing about the departure, unlike CR's
+# Investigation 7 (Docs\MULTIPLAYER_BUG_SOURCE_INVESTIGATION.md) predicts from
+# 1.5 that guests keep simulating and their mission never ends. Redux does not
+# reproduce that with two clients (mpbugs-hl-7): within a second the guest logs
+# "You have been elected host" and NotifyNowHost, every host-owned object is
+# deleted, and the guest is put on the Game Over screen (dialog 11,
+# RUN_WAS_QUIT). -Expect Stock checks that characterization, so a regression
+# shows; -Expect Fixed only asks that the guest leaves its mission. The mission
+# script is stock and does nothing about the departure, unlike CR's
 # leader-departure FailMission (scenarios\host-leaves.ps1). Before leaving, the
 # host spawns two AI armies it owns, so the samples also show what guests keep
 # of objects whose owner is gone: counts, health and movement.
@@ -25,16 +30,19 @@ $guests = @($C | Where-Object { $_ -ne $H })
 $script:CRFlowSkipParity = $true # Streams differ once the host has gone.
 $samplePath = Join-Path $script:CRFlowRun.runDir 'hostleave-samples.jsonl'
 
-$shimLogs, $shimMarks = @{}, @{}
+$shimLogs, $shimMarks, $gameLogs, $gameMarks = @{}, @{}, @{}, @{}
 foreach ($i in $C) {
     $shimLogs[$i] = Join-Path (Get-CRFlowClient $i).dir 'logs\openshim.log'
     $shimMarks[$i] = if (Test-Path -LiteralPath $shimLogs[$i]) { (Get-Item -LiteralPath $shimLogs[$i]).Length } else { 0 }
+    $gameLogs[$i] = Join-Path (Get-CRFlowClient $i).dir 'logs\BZLogger.txt'
+    $gameMarks[$i] = if (Test-Path -LiteralPath $gameLogs[$i]) { (Get-Item -LiteralPath $gameLogs[$i]).Length } else { 0 }
 }
-function Get-MissionLeft([int]$Client) {
-    if (-not (Test-Path -LiteralPath $shimLogs[$Client])) { return @() }
-    $text = (Read-CRFlowShared $shimLogs[$Client] $shimMarks[$Client]).Text
-    @([regex]::Matches($text, '(?m)^.*\[MISSION\] Mission left simulation.*$') | ForEach-Object { $_.Value.Trim() })
+function Get-LogLines([hashtable]$Logs, [hashtable]$Marks, [int]$Client, [string]$Pattern) {
+    if (-not (Test-Path -LiteralPath $Logs[$Client])) { return @() }
+    $text = (Read-CRFlowShared $Logs[$Client] $Marks[$Client]).Text
+    @([regex]::Matches($text, "(?m)^.*(?:$Pattern).*$") | ForEach-Object { $_.Value.Trim() })
 }
+function Get-MissionLeft([int]$Client) { Get-LogLines $shimLogs $shimMarks $Client '\[MISSION\] Mission left simulation' }
 function Get-BugState([int]$Client, [string]$Phase) {
     $s = $null
     try {
@@ -93,13 +101,15 @@ foreach ($series in @($samples)) {
     $alive = [bool](Get-Process -Id (Get-CRFlowClient $g).pid -ErrorAction SilentlyContinue)
     Add-CRFlowCheck "guest c$g survives the host leaving" $alive
 
-    $running = -not $left.Count -and $first -and $last -and $last.time -gt $first.time + 10
-    $detail = [ordered]@{ missionLeft = $left; answered = $states.Count; samples = @($series.samples).Count
-        timeFirst = $first.time; timeLast = $last.time
+    $elected = @(Get-LogLines $gameLogs $gameMarks $g 'You have been elected host|NotifyNowHost')
+    $gameOver = @(Get-LogLines $gameLogs $gameMarks $g 'escape/in game UI wrapper with dialog 11')
+    $detail = [ordered]@{ missionLeft = $left; elected = $elected; gameOver = $gameOver
+        answered = $states.Count; samples = @($series.samples).Count; timeFirst = $first.time; timeLast = $last.time
         deletedPlayers = $last.deletedPlayers; rosterBefore = $pre.roster; rosterAfter = $last.roster
         leaderDeparted = $last.leaderDeparted }
     if ($Expect -eq 'Stock') {
-        Add-CRFlowCheck "stock defect reproduces: guest c$g keeps simulating with no host for ${WatchSeconds}s" $running $detail
+        Add-CRFlowCheck "stock: guest c$g is elected host, then put on Game Over (dialog 11) and leaves its mission" `
+            ([bool]($elected.Count -and $gameOver.Count -and $left.Count)) $detail
     } else {
         Add-CRFlowCheck "guest c$g leaves its mission after the host is gone" ([bool]$left.Count) $detail
     }
