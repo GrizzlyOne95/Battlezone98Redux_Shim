@@ -1,3 +1,4 @@
+#include "openshim_surface_reactions.hlsl"
 // DX11 SM4 terrain shader path for the OpenShim canonical Enhanced renderer.
 // Enhanced mode uses the experimental legacy-compatible GGX direct-lighting model.
 // IBL_ENABLED layers static split-sum image-based lighting onto that DX11 path.
@@ -1192,6 +1193,13 @@ void terrain_fragment(
     uniform SamplerState brdfLutSam : register(s7),
 #endif
     uniform float4x4 inverseViewMatrix,
+#elif defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    // World-up and world position for the snow layer.
+    uniform float4x4 inverseViewMatrix,
+#endif
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    // See openshim_surface_reactions.hlsl. Zero leaves the terrain untouched.
+    uniform float4 surfaceSnow,
 #endif
 
     uniform float4 sceneAmbient,
@@ -1371,6 +1379,9 @@ void terrain_fragment(
 #else
 
     float3 viewPos = vViewPosition;
+#if defined(ENHANCED_MODE)
+    float snowCover = 0.0;
+#endif
 
 #if defined(NORMALMAP_ENABLED)
     float3 geometryNormal = safe_normalize(vViewNormal);
@@ -1425,6 +1436,19 @@ void terrain_fragment(
 #endif
 #else
     float3 viewNormal = safe_normalize(vViewNormal);
+#endif
+
+#if defined(ENHANCED_MODE)
+    // Uniform-only branch. Noise runs on world XZ so drifts stay put on the
+    // ground; the geometric normal decides cover so ridgelines stay bare.
+    if (surfaceSnow.x > 0.002)
+    {
+        float3 snowGeometric = safe_normalize(vViewNormal);
+        float snowUp = mul(inverseViewMatrix, float4(lerp(snowGeometric, viewNormal, 0.5), 0.0)).y;
+        float3 snowWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz;
+        snowCover = ose_snow_cover(snowUp, ose_snow_noise(snowWorld.xz * 0.11), surfaceSnow.x);
+        viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.5));
+    }
 #endif
 
 #if defined(NORMALMAP_ENABLED) && (OSE_TERRAIN_NORMAL_DEBUG_MODE != 0)
@@ -1494,9 +1518,10 @@ void terrain_fragment(
 #endif
 
 #if defined(ENHANCED_MODE)
+    surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), snowCover);
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = max(
-        derive_legacy_roughness(materialShininess, specularMask),
+        lerp(derive_legacy_roughness(materialShininess, specularMask), 0.75, snowCover),
         OSE_TERRAIN_PBR_MIN_ROUGHNESS);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
@@ -1715,7 +1740,16 @@ void terrain_fragment(
     vertexTint = srgb_to_linear(vertexTint);
 #endif
 
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    // Snow replaces the albedo; the detail multiply below still textures it.
+    float3 snowAlbedo = ose_snow_albedo(surfaceSnow);
+#if !OSE_LINEAR_LIGHT_ACTIVE
+    snowAlbedo = sqrt(snowAlbedo);
+#endif
+    oColor.xyz = lightResult.xyz * lerp(vertexTint * diffuseTex.xyz, snowAlbedo, snowCover);
+#else
     oColor.xyz = lightResult.xyz * vertexTint * diffuseTex.xyz;
+#endif
 
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     oColor.xyz += specularResult.xyz;

@@ -1177,6 +1177,10 @@ void base_fragment(
 #endif
 #endif
 
+#if defined(ENHANCED_MODE)
+    float snowCover = 0.0;
+#endif
+
 #if defined(VERTEX_LIGHTING)
 
 #if defined(OG_RETRO_MODE)
@@ -1233,6 +1237,19 @@ void base_fragment(
                                  surfaceViewToLocal, surfaceRainTime, reactiveWater);
 #endif
 
+#if defined(ENHANCED_MODE)
+    // Uniform-only branch: zero snow costs nothing and keeps the source.
+    if (surfaceSnow.x > 0.002)
+    {
+        float3 snowGeometric = safe_normalize(vViewNormal);
+        float snowUp = mul(inverseViewMatrix, float4(lerp(snowGeometric, viewNormal, 0.35), 0.0)).y;
+        float3 snowLocal = mul(surfaceViewToLocal, float4(viewPos, 1.0)).xyz;
+        snowCover = ose_snow_cover(snowUp, ose_snow_noise(snowLocal.xz * 0.7 + snowLocal.y * 0.5), surfaceSnow.x);
+        // Snow fills panel lines: flatten the mapped normal under it.
+        viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.6));
+    }
+#endif
+
 #if defined(SPECULARMAP_ENABLED)
     float3 specularTex = specularMap.Sample(specularSam, vTexCoord).xyz;
     float specularMask = saturate(luminance_legacy(specularTex));
@@ -1247,9 +1264,11 @@ void base_fragment(
 #endif
 
 #if defined(ENHANCED_MODE)
+    surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), snowCover);
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = derive_legacy_roughness(materialShininess, specularMask);
     surfaceRoughness = lerp(surfaceRoughness, max(0.13, surfaceRoughness * 0.48), saturate(surfaceState.x));
+    surfaceRoughness = lerp(surfaceRoughness, 0.75, snowCover);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
 #endif
@@ -1488,7 +1507,15 @@ void base_fragment(
     // diffuseTex.a is coverage and stays in its numerical space.
     diffuseTex.rgb = srgb_to_linear(diffuseTex.rgb);
 #endif
+#if defined(ENHANCED_MODE)
+    float3 snowAlbedo = ose_snow_albedo(surfaceSnow);
+#if !OSE_LINEAR_LIGHT_ACTIVE
+    snowAlbedo = sqrt(snowAlbedo);
+#endif
+    oColor.xyz = lightResult.xyz * lerp(diffuseTex.xyz * diffuseColor.xyz, snowAlbedo, snowCover);
+#else
     oColor.xyz = lightResult.xyz * diffuseTex.xyz * diffuseColor.xyz;
+#endif
 
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     oColor.xyz += specularResult.xyz;

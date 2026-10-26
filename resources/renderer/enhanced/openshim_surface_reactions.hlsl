@@ -12,7 +12,8 @@
     uniform float4 surfaceImpactWeights, \
     uniform float4 surfaceMuzzle0, uniform float4 surfaceMuzzle1, \
     uniform float4 surfaceBarrel0, uniform float4 surfaceBarrel1, \
-    uniform float4x4 surfaceViewToLocal, uniform float surfaceRainTime,
+    uniform float4x4 surfaceViewToLocal, uniform float surfaceRainTime, \
+    uniform float4 surfaceSnow,
 #else
 #define OSE_SURFACE_UNIFORMS
 #endif
@@ -95,6 +96,39 @@ float3 ose_water_normal(float3 viewPosition, float3 normal, float wetness,
     float3 result = normal - gradient;
     if (nearFade <= 0.0) { water = 0.0; return normal; }
     return result * rsqrt(max(dot(result, result), 0.000001));
+}
+
+// Procedural snow on upward faces. surfaceSnow: x cover amount, y snow albedo
+// (linear, 0 = default 0.85), z blue tint, w reserved. Zero keeps the source.
+float ose_snow_value(float2 p)
+{
+    float2 i = floor(p), f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(ose_water_hash(i).x, ose_water_hash(i + float2(1, 0)).x, f.x),
+                lerp(ose_water_hash(i + float2(0, 1)).x, ose_water_hash(i + float2(1, 1)).x, f.x), f.y);
+}
+
+// Two octaves, centred on zero. The caller picks the plane: object-local
+// position for craft and buildings, the world-tiling UV for terrain.
+float ose_snow_noise(float2 p)
+{
+    return ose_snow_value(p) * 0.65 + ose_snow_value(p * 3.7 + 0.37) * 0.35 - 0.5;
+}
+
+// up is the world-space normal's Y. More snow lowers the threshold so cover
+// creeps from flat tops down onto slopes; noise breaks the line up.
+float ose_snow_cover(float up, float noise, float amount)
+{
+    amount = saturate(amount);
+    if (amount < 0.002) return 0.0;
+    float threshold = lerp(1.05, 0.15, amount);
+    return smoothstep(threshold, threshold + 0.25, up + noise * 0.30) * min(1.0, amount * 4.0);
+}
+
+float3 ose_snow_albedo(float4 snow)
+{
+    float brightness = snow.y > 0.0 ? snow.y : 0.85;
+    return brightness * lerp(float3(1.0, 1.0, 1.0), float3(0.86, 0.93, 1.0), saturate(snow.z));
 }
 
 float ose_surface_mask(float3 position, float4 anchor)
