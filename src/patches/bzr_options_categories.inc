@@ -18,7 +18,7 @@ constexpr const char* kShimRowMenuTheme = "Menu Colors";
 static const char* const kShimCategoryVideo[] = {
     "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Sun Flashbang", "Jet Flames",
     "Empty Craft Lights", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
-    "HD Terrain Tiles", "Terrain Micro Detail", "Muzzle Flashes", "Muzzle Recoil", "GPU Skinning",
+    "HD Terrain Tiles", "Terrain Micro Detail", "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "GPU Skinning",
     kShimRowMenuTheme };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",

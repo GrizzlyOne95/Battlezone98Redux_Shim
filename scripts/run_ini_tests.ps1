@@ -329,7 +329,12 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/DX11LegacyMaterialCompat",
     "SinglePlayer/PilotTeamRestore",
     "ODF/CrashValueGuards",
-    "ODF/LegacySectionRemap"
+    "ODF/LegacySectionRemap",
+
+    # Authored muzzle flashes and recoil, on at the user's request on
+    # 2026-10-26 (preset revision 10). Inert unless a mod's ODFs configure them.
+    "SinglePlayer/MuzzleFlash",
+    "SinglePlayer/MeshRecoil"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(

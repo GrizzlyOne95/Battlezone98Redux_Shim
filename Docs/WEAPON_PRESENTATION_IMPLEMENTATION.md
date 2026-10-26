@@ -3,8 +3,9 @@
 Implementation milestone: 2026-10-01.
 
 **Current status (2026-10-20): the bounded authored-ODF GOG/SP cannon path is
-opt-in through OpenShim Settings > Video > Muzzle Flashes / Muzzle Recoil.
-Both default OFF, require restart and require authored ODF/assets. Mesh/node
+switched through OpenShim Settings > Video > Muzzle Flashes / Muzzle Recoil.
+Both default ON since preset revision 10 (2026-10-26), require restart and act
+only on authored ODF/assets. Mesh/node
 smoke evidence and remaining gates are recorded in `ODF_MUZZLE_FLASH.md` and
 `ODF_RECOIL_TRIAL.md`. This document also retains the original native candidate
 research and its broader qualification checklist.**

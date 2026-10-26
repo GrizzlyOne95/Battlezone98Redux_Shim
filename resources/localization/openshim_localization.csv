@@ -208,6 +208,8 @@ openshim_opt:MuzzleFlash:label~Muzzle Flashes~~~~~~
 openshim_opt:MuzzleFlash:desc~Enable authored weapon ODF mesh flashes and muzzle render effects (smoke/light). Requires mod assets and ODF configuration; no generic fallback. Experimental GOG single-player cannons. Restart required.~~~~~~
 openshim_opt:MeshRecoil:label~Muzzle Recoil~~~~~~
 openshim_opt:MeshRecoil:desc~Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required.~~~~~~
+openshim_opt:ShellCasings:label~Shell Casings~~~~~~
+openshim_opt:ShellCasings:desc~Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required.~~~~~~
 openshim_opt:GpuSkinning:label~GPU Skinning~~~~~~
 openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, which frees CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Takes effect on the next mission load.~~~~~~
 openshim_opt:PlayerReticleConvergence:label~Reticle Convergence~~~~~~
