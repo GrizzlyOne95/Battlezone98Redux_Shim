@@ -1381,6 +1381,8 @@ void terrain_fragment(
     float3 viewPos = vViewPosition;
 #if defined(ENHANCED_MODE)
     float snowCover = 0.0;
+    float iceMask = 0.0;
+    float2 iceOffset = float2(0.0, 0.0);
 #endif
 
 #if defined(NORMALMAP_ENABLED)
@@ -1447,8 +1449,18 @@ void terrain_fragment(
         float snowUp = mul(inverseViewMatrix, float4(lerp(snowGeometric, viewNormal, 0.5), 0.0)).y;
         float3 snowWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz;
         snowCover = ose_snow_cover(snowUp, ose_snow_noise(snowWorld.xz * 0.11), surfaceSnow.x);
-        viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.5));
+        viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.25));
     }
+#if !defined(VERTEX_LIGHTING)
+    // Ice under the snow line gets a refracted sub-surface layer (albedo stage).
+    if (surfaceSnow.w > 0.002)
+    {
+        float3 iceGeometric = safe_normalize(vViewNormal);
+        iceOffset = ose_ice_parallax_uv(iceGeometric, viewPos, vTexCoord, surfaceSnow.w);
+        float3 iceProbe = diffuseMap.SampleGrad(diffuseSam, vTexCoord, ddx(vTexCoord), ddy(vTexCoord)).xyz;
+        iceMask = ose_ice_mask(iceProbe) * (1.0 - snowCover);
+    }
+#endif
 #endif
 
 #if defined(NORMALMAP_ENABLED) && (OSE_TERRAIN_NORMAL_DEBUG_MODE != 0)
@@ -1521,7 +1533,8 @@ void terrain_fragment(
     surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), snowCover);
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = max(
-        lerp(derive_legacy_roughness(materialShininess, specularMask), 0.75, snowCover),
+        lerp(lerp(derive_legacy_roughness(materialShininess, specularMask), 0.28, iceMask * 0.8),
+             0.75, snowCover),
         OSE_TERRAIN_PBR_MIN_ROUGHNESS);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
@@ -1746,7 +1759,28 @@ void terrain_fragment(
 #if !OSE_LINEAR_LIGHT_ACTIVE
     snowAlbedo = sqrt(snowAlbedo);
 #endif
-    oColor.xyz = lightResult.xyz * lerp(vertexTint * diffuseTex.xyz, snowAlbedo, snowCover);
+    float3 surfaceAlbedo = vertexTint * diffuseTex.xyz;
+    if (surfaceSnow.w > 0.002)
+    {
+        // Two layers at 1x and 2.2x depth, darker and bluer with depth, seen
+        // through the surface; the detail multiply below scratches over them.
+        float2 iceDx = ddx(vTexCoord);
+        float2 iceDy = ddy(vTexCoord);
+        float3 iceNear = diffuseMap.SampleGrad(diffuseSam, vTexCoord + iceOffset, iceDx, iceDy).xyz;
+        float3 iceFar = diffuseMap.SampleGrad(diffuseSam, vTexCoord + iceOffset * 2.2, iceDx, iceDy).xyz;
+#if OSE_LINEAR_LIGHT_ACTIVE
+        iceNear = srgb_to_linear(iceNear);
+        iceFar = srgb_to_linear(iceFar);
+#endif
+        float3 iceDeep = (iceNear * 0.6 + iceFar * 0.4) * OSE_ICE_DEEP_TINT;
+#if defined(DETAILMAP_ENABLED)
+        iceDeep *= lerp(float3(1.0, 1.0, 1.0),
+            detail_modulation(detailMap.SampleGrad(detailSam, (vTexCoord + iceOffset * 1.6) * 32.0,
+                iceDx * 32.0, iceDy * 32.0).xyz), 0.8);
+#endif
+        surfaceAlbedo = lerp(surfaceAlbedo, vertexTint * iceDeep, iceMask * 0.45);
+    }
+    oColor.xyz = lightResult.xyz * ose_snow_blend(surfaceAlbedo, snowAlbedo, snowCover);
 #else
     oColor.xyz = lightResult.xyz * vertexTint * diffuseTex.xyz;
 #endif

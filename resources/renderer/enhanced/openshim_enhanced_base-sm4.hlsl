@@ -870,6 +870,10 @@ void ComputeSpotlightTerms(
 void base_vertex(
     uniform float4x4 wvpMat,
     uniform float4x4 worldViewMat,
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    uniform float4x4 worldMat,
+    uniform float4 surfaceSnow,
+#endif
 
 #if defined(SHADOWRECEIVER)
     uniform float4x4 texWorldViewProj1,
@@ -925,6 +929,17 @@ void base_vertex(
     out float4 oPosition : SV_POSITION
 )
 {
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    // Snow thickness: faces the fragment stage covers are pushed out along
+    // their normal by the same cover term, so drifts stand off the hull.
+    if (surfaceSnow.x > 0.002 && dot(iNormal, iNormal) > 1e-8)
+    {
+        float3 snowNormal = normalize(iNormal);
+        float snowUp = normalize(mul(worldMat, float4(snowNormal, 0.0)).xyz).y;
+        float cover = ose_snow_cover(snowUp, ose_snow_noise(iPosition.xz * 0.7 + iPosition.y * 0.5), surfaceSnow.x);
+        iPosition.xyz += snowNormal * (OSE_SNOW_THICKNESS * cover);
+    }
+#endif
     oPosition = mul(wvpMat, iPosition);
     vTexCoord = iTexCoord;
 
@@ -1246,7 +1261,7 @@ void base_fragment(
         float3 snowLocal = mul(surfaceViewToLocal, float4(viewPos, 1.0)).xyz;
         snowCover = ose_snow_cover(snowUp, ose_snow_noise(snowLocal.xz * 0.7 + snowLocal.y * 0.5), surfaceSnow.x);
         // Snow fills panel lines: flatten the mapped normal under it.
-        viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.6));
+        viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.3));
     }
 #endif
 
@@ -1512,7 +1527,7 @@ void base_fragment(
 #if !OSE_LINEAR_LIGHT_ACTIVE
     snowAlbedo = sqrt(snowAlbedo);
 #endif
-    oColor.xyz = lightResult.xyz * lerp(diffuseTex.xyz * diffuseColor.xyz, snowAlbedo, snowCover);
+    oColor.xyz = lightResult.xyz * ose_snow_blend(diffuseTex.xyz * diffuseColor.xyz, snowAlbedo, snowCover);
 #else
     oColor.xyz = lightResult.xyz * diffuseTex.xyz * diffuseColor.xyz;
 #endif

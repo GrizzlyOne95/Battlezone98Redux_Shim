@@ -1943,6 +1943,8 @@ vertex_program OSE_BaseENHighPSSMV2_vertex unified
 		param_named_auto texWorldViewProj1 texture_worldviewproj_matrix 0
 		param_named_auto texWorldViewProj2 texture_worldviewproj_matrix 1
 		param_named_auto texWorldViewProj3 texture_worldviewproj_matrix 2
+		param_named_auto worldMat world_matrix
+		param_named surfaceSnow float4 0 0 0 0
 	}
 }
 

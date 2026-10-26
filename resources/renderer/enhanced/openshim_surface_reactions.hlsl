@@ -125,11 +125,55 @@ float ose_snow_cover(float up, float noise, float amount)
     return smoothstep(threshold, threshold + 0.25, up + noise * 0.30) * min(1.0, amount * 4.0);
 }
 
+// Object-space push (metres) for fully covered vertices.
+static const float OSE_SNOW_THICKNESS = 0.07;
+
 float3 ose_snow_albedo(float4 snow)
 {
     float brightness = snow.y > 0.0 ? snow.y : 0.85;
     return brightness * lerp(float3(1.0, 1.0, 1.0), float3(0.86, 0.93, 1.0), saturate(snow.z));
 }
+
+// Snow over a surface: never a full white-out. Cover tops out at 80% and the
+// snow keeps 40% of the surface luminance pattern, so diffuse detail, decals
+// and seams still read through it.
+float3 ose_snow_blend(float3 surface, float3 snowAlbedo, float cover)
+{
+    float luma = dot(surface, float3(0.299, 0.587, 0.114));
+    float3 snowTex = snowAlbedo * lerp(1.0, saturate(luma * 2.5), 0.4);
+    return lerp(surface, snowTex, cover * 0.8);
+}
+
+// Parallax ice: surfaceSnow.w is the ice depth in metres (0 = off). The UV
+// offset is where the view ray, entering a flat surface at p, reaches that
+// depth: the plane vector is mapped to UV through the screen-space gradients
+// of uv (same basis as cotangent_frame). N and p are view space.
+float2 ose_ice_parallax_uv(float3 N, float3 p, float2 uv, float depth)
+{
+    float3 dp1 = ddx(p);
+    float3 dp2 = ddy(p);
+    float2 duv1 = ddx(uv);
+    float2 duv2 = ddy(uv);
+    float3 dp2perp = cross(N, dp2);
+    float3 dp1perp = cross(dp1, N);
+    float det = dot(dp1, dp2perp);
+    if (abs(det) < 1e-12) return float2(0.0, 0.0);
+    float3 gradU = (dp2perp * duv1.x + dp1perp * duv2.x) / det;
+    float3 gradV = (dp2perp * duv1.y + dp1perp * duv2.y) / det;
+    float3 V = normalize(-p);
+    float NdotV = dot(V, N);
+    // Grazing views would slide the layer off the cell; 0.3 caps it at ~3x depth.
+    float3 shift = -(V - N * NdotV) * (depth / max(NdotV, 0.3));
+    return float2(dot(gradU, shift), dot(gradV, shift));
+}
+
+// Blue-dominant albedo reads as ice; rock, scorch and base pads stay opaque.
+float ose_ice_mask(float3 albedo)
+{
+    return saturate((albedo.b - max(albedo.r, albedo.g * 0.92)) * 9.0);
+}
+
+static const float3 OSE_ICE_DEEP_TINT = float3(0.66, 0.82, 1.0);
 
 float ose_surface_mask(float3 position, float4 anchor)
 {
