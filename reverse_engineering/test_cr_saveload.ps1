@@ -45,7 +45,8 @@ param(
     [Parameter(Mandatory)][string]$EvidenceDirectory,
     [string]$GameRoot='C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux',
     # Default: every missionBZN in the game copy's crcampgn.ini, in campaign order.
-    [ValidatePattern('^[A-Za-z0-9_-]+\.bzn$')][string[]]$Missions,
+    # Comma-separated also works, since pwsh -File binds only one array value.
+    [ValidatePattern('^[A-Za-z0-9_,.-]+$')][string[]]$Missions,
     [ValidateSet('autoload','menuload')][string[]]$Loads=@('autoload','menuload'),
     [string]$CrRepo=(Join-Path $env:USERPROFILE 'Documents\GIT\Campaign-Reimagined'),
     [ValidateSet('dx9','dx11')][string]$Renderer='dx11',
@@ -55,6 +56,8 @@ param(
     [int]$LockTimeoutSeconds=7200
 )
 $ErrorActionPreference='Stop'
+$missionList=@($Missions | ForEach-Object { $_ -split ',' } | Where-Object { $_ })
+foreach($m in $missionList){if($m -notmatch '^[A-Za-z0-9_-]+\.bzn$'){throw "Not a mission basename: $m"}}
 $GameRoot=(Resolve-Path -LiteralPath $GameRoot).Path.TrimEnd('\')
 $campaignRoot=Join-Path $GameRoot 'mods\3686673790'
 $campaignIni=Join-Path $campaignRoot 'crcampgn.ini'
@@ -301,9 +304,9 @@ try {
     Save-AuditFile $campaignIni
     @($snapshot.Values) | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $auditRoot 'before.json')
 
-    if(-not $Missions){
-        $Missions=@(Select-String -LiteralPath $campaignIni -Pattern '^\s*missionBZN\s*=\s*"([^"]+)"' | ForEach-Object { $_.Matches[0].Groups[1].Value })
-        if(-not $Missions.Count){throw 'No missionBZN entries in crcampgn.ini'}
+    if(-not $missionList){
+        $missionList=@(Select-String -LiteralPath $campaignIni -Pattern '^\s*missionBZN\s*=\s*"([^"]+)"' | ForEach-Object { $_.Matches[0].Groups[1].Value })
+        if(-not $missionList.Count){throw 'No missionBZN entries in crcampgn.ini'}
     }
     [IO.File]::WriteAllText((Join-Path $GameRoot 'modEnabled.dat'),$campaignRoot+"`r`n",[Text.UTF8Encoding]::new($false))
     $ini=[IO.File]::ReadAllText($campaignIni)
@@ -316,7 +319,7 @@ try {
     $ogre=Join-Path $GameRoot 'ogre.cfg'
     $renderName=if($Renderer -eq 'dx11'){'Direct3D11 Rendering Subsystem'}else{'Direct3D9 Rendering Subsystem'}
     [IO.File]::WriteAllText($ogre,([IO.File]::ReadAllText($ogre)-replace '(?m)^Render System=.*$',"Render System=$renderName"))
-    [pscustomobject]@{Missions=$Missions;Loads=$Loads;Renderer=$Renderer;AutosaveDelaySeconds=$AutosaveDelaySeconds;HoldSeconds=$HoldSeconds
+    [pscustomobject]@{Missions=$missionList;Loads=$Loads;Renderer=$Renderer;AutosaveDelaySeconds=$AutosaveDelaySeconds;HoldSeconds=$HoldSeconds
         Exe=(Get-FileHash -LiteralPath $exe).Hash;Shim=(Get-Item -LiteralPath (Join-Path $GameRoot 'plugins\openshim.dll')).VersionInfo.FileVersion} |
         ConvertTo-Json | Set-Content -LiteralPath (Join-Path $auditRoot 'run.json')
 
@@ -324,7 +327,7 @@ try {
     $auto2=Join-Path $saveRoot 'auto2.sav'
     $menuSave=Join-Path $saveRoot 'game1.sav'
     $common=@('/nointro',"/renderer:$Renderer")
-    foreach($mission in $Missions){
+    foreach($mission in $missionList){
         # The stock autoload resumes the newer of auto.sav and auto2.sav.
         if(Test-Path -LiteralPath $auto2){Remove-Item -LiteralPath $auto2}
         $start=Invoke-SaveLoadRun -Mission $mission -Avenue 'start' -Arguments (@($mission)+$common+'/saveafterload')
