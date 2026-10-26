@@ -4903,6 +4903,30 @@
       "identity": "Lua registration table row { \"Formation\" (0x0087CF64), 0x005079B0 } on exact GOG Redux 2.2.301, in .rdata between { Recycle, 0x00507970 } at 0x00872368 and { 0x0087D02C, 0x00507A00 } at 0x00872378. The installer reads the row at patch time and requires the name string to read Formation and the function pointer to equal the byte-guarded stock binding before it rewrites the pointer at +4."
     },
     {
+      "name": "LuaGetIndependenceBinding",
+      "address": "0x005041F0",
+      "expected": "55 8B EC 51 6A 01 8B 45 08 50 E8 51 B5 FF FF 83 C4 08 89 45 FC 8B 4D FC 51 E8 52 74 0C 00 83 C4 04 50 8B 55 08 52 E8 AF 8A 32 00 83 C4 08",
+      "identity": "Stock Lua binding for GetIndependence(h) on GOG Redux 2.2.301 (Steam 2.2.301 shares the layout): h = GetHandle(L, 1) via 0x004FF750 (call at 0x005041FA), v = native GetIndependence(h) via 0x005CB660 (call at 0x00504209), lua_pushinteger(L, v) via 0x0082CCCA (call at 0x00504216), return 1. The lua_getindependence_guard.cpp installer requires the registration row to hold exactly this address and these bytes before it swaps in the guarded binding."
+    },
+    {
+      "name": "LuaPushInteger",
+      "address": "0x0082CCCA",
+      "expected": "55 8B EC 8B 4D 08 66 0F 6E 45 0C F3 0F E6 C0 8B 41 08 C7 40 08 03 00 00 00 F2 0F 11 00 83 41 08 10 5D C3",
+      "identity": "lua_pushinteger(L, n) cdecl in the statically linked Lua 5.1: converts the int to a double (cvtdq2pd), stores it at L->top with type tag 3 (LUA_TNUMBER) and advances L->top by 16. Called by the stock GetIndependence binding at 0x00504216."
+    },
+    {
+      "name": "GameGetIndependence",
+      "address": "0x005CB660",
+      "expected": "55 8B EC 83 EC 08 8B 45 08 50 E8 C1 6F E9 FF 83 C4 04 89 45 FC 83 7D FC 00 75 04 33 C0 EB 1B 8B 4D FC E8 69 07 E9 FF 89 45 F8 83 7D F8 00 75 04 33 C0 EB 06 8B 4D F8 8B 41 18 8B E5 5D C3",
+      "identity": "Native GetIndependence(Handle) cdecl: obj = GameObjectHandle::GetObj(h) (0x00462630), 0 if null; process = [obj+0xFC] through 0x0045BDF0, 0 if null; returns [process+0x18] (mov eax,[ecx+0x18] at 0x005CB697). During a save load the field holds the GameObject::Load placeholder until PostLoadAll attaches the real AiProcess; a Lua Load() callback calling GetIndependence then faults at 0x005CB697 (Campaign Reimagined misn02b, Steam/Proton, 2026-10-26: ecx = 2, read of 0x1A). The guarded binding validates the process pointer first and only then calls this function."
+    },
+    {
+      "name": "LuaGetIndependenceRegistration",
+      "address": "0x008720B8",
+      "kind": "data",
+      "identity": "Lua registration table row { \"GetIndependence\" (0x0087CC24), 0x005041F0 } on GOG Redux 2.2.301, in .rdata between { 0x0087CB48, 0x005041B0 } at 0x008720B0 and { 0x0087CC34, 0x00504230 } at 0x008720C0. The installer reads the row at patch time and requires the name string to read GetIndependence and the function pointer to equal the byte-guarded stock binding before it rewrites the pointer at +4."
+    },
+    {
       "name": "ScavengerProcessGetScrapPosition",
       "address": "0x005C40B0",
       "expected": "55 8B EC 83 EC 24 A1 00 70 8E 00 33 C5 89 45 FC 89 4D EC 8B 45 EC 83 C0 38"

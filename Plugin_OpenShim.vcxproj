@@ -257,6 +257,7 @@
     <ClCompile Include="src\patches\gpu_skinning.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\lua_formation_fix.cpp" />
+    <ClCompile Include="src\patches\lua_getindependence_guard.cpp" />
     <ClCompile Include="src\patches\lua_send_length.cpp" />
     <ClCompile Include="src\patches\lua_handle_sync.cpp" />
     <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
@@ -447,6 +448,8 @@
     <ClInclude Include="include\iat_patch.h" />
     <ClInclude Include="include\lua_formation_fix.h" />
     <ClInclude Include="include\lua_formation_fix_install.h" />
+    <ClInclude Include="include\lua_getindependence_guard.h" />
+    <ClInclude Include="include\lua_getindependence_guard_install.h" />
     <ClInclude Include="include\lua_send_length.h" />
     <ClInclude Include="include\lua_send_length_install.h" />
     <ClInclude Include="include\lua_handle_sync.h" />

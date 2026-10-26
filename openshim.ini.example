@@ -515,6 +515,18 @@ ScavengerNetProcessGuard = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_FORMATION_FIX
 LuaFormationBinding = 1
 
+; Make Lua GetIndependence(h) fail closed. Stock reads [aiProcess+0x18] after a
+; null test only. While a save loads, the AI process field still holds the save
+; placeholder until the engine attaches the real process, so a mission Load()
+; callback that calls GetIndependence crashes the game (pcall cannot catch it).
+; The guarded binding returns 0 -- what stock returns for a unit with no AI
+; process -- for any process that is not a real object, and logs it. Real
+; processes take the stock path unchanged. Stands down on any build where the
+; registration row or a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_GETINDEPENDENCE_GUARD
+LuaGetIndependenceGuard = 1
+
 ; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
 ; stores a length above 30 in one extension byte, and the stock decoders read it
 ; signed: a Send string of 128..255 bytes faults every receiving peer (access

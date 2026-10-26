@@ -418,6 +418,10 @@ openshim_add_test(lua_formation_fix_tests STD 14 SOURCES
     lua_formation_fix_tests.cpp
 )
 
+openshim_add_test(lua_getindependence_guard_tests STD 14 SOURCES
+    lua_getindependence_guard_tests.cpp
+)
+
 openshim_add_test(lua_send_length_tests STD 14 SOURCES
     lua_send_length_tests.cpp
 )
