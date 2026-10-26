@@ -239,7 +239,50 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
             check(retained==psSentinel,"domain texture changed pixel shader resources"); if(retained)retained->Release();
             ++runs;
         }
-        std::cout<<"PASS: "<<runs<<" actual height-domain/SO runs; signed geometry, UV rotation/reflection, camera translation, normals/tangents/depth/shadow receivers, zero seams, invalid/missing textures and PS retention\n";
+        // Hull off-screen cull: with no hull matrices bound it must never cull;
+        // with them bound it culls only patches whose relief sweep stays outside.
+        const auto hullPrimitives=[&](float x0,float y,bool bindHull)
+        {
+            std::vector<Vertex> input;
+            const float corners[6][2]={{0,0},{20,0},{0,20},{20,0},{20,20},{0,20}};
+            for (const auto& corner:corners)
+                input.push_back({{x0+corner[0],y,corner[1],1},{x0+corner[0],y,corner[1]},{corner[0]/20,corner[1]/20},{0,1,0},{1,0,0}});
+            ComPtr<ID3D11Buffer> hullCb;
+            if (bindHull)
+            {
+                ComPtr<ID3D11ShaderReflection> reflection;
+                ok(D3DReflect(hs->GetBufferPointer(),hs->GetBufferSize(),IID_ID3D11ShaderReflection,&reflection));
+                auto* block=reflection->GetConstantBufferByName("$Globals");
+                D3D11_SHADER_BUFFER_DESC desc{}; ok(block->GetDesc(&desc));
+                std::vector<unsigned char> bytes((desc.Size+15)&~15u);
+                for (const char* name:{"reliefView","reliefProjection"})
+                {
+                    D3D11_SHADER_VARIABLE_DESC variable{}; ok(block->GetVariableByName(name)->GetDesc(&variable));
+                    check(variable.Size==64&&variable.StartOffset+64<=bytes.size(),"hull cull matrix reflection contract changed");
+                    auto matrix=identity(); std::memcpy(bytes.data()+variable.StartOffset,matrix.data(),64);
+                }
+                D3D11_BUFFER_DESC buffer{}; buffer.ByteWidth=static_cast<UINT>(bytes.size()); buffer.Usage=D3D11_USAGE_IMMUTABLE; buffer.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
+                D3D11_SUBRESOURCE_DATA data{bytes.data(),0,0}; ok(device->CreateBuffer(&buffer,&data,&hullCb));
+            }
+            ID3D11Buffer* hullRaw=hullCb.Get(); context->HSSetConstantBuffers(0,1,&hullRaw);
+            D3D11_BUFFER_DESC inDesc{}; inDesc.ByteWidth=static_cast<UINT>(input.size()*sizeof(Vertex)); inDesc.Usage=D3D11_USAGE_IMMUTABLE; inDesc.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            D3D11_SUBRESOURCE_DATA inData{input.data(),0,0}; ComPtr<ID3D11Buffer> buffer; ok(device->CreateBuffer(&inDesc,&inData,&buffer));
+            ID3D11Buffer* vb=buffer.Get(); UINT stride=sizeof(Vertex),offset=0; context->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+            ID3D11Buffer* so=output.Get(); context->SOSetTargets(1,&so,&offset);
+            D3D11_QUERY_DESC queryDesc{D3D11_QUERY_SO_STATISTICS,0}; ComPtr<ID3D11Query> query;
+            ok(device->CreateQuery(&queryDesc,&query)); context->Begin(query.Get()); context->Draw(6,0); context->End(query.Get());
+            so=nullptr; context->SOSetTargets(1,&so,&offset); hullRaw=nullptr; context->HSSetConstantBuffers(0,1,&hullRaw);
+            D3D11_QUERY_DATA_SO_STATISTICS statistics{};
+            while (context->GetData(query.Get(),&statistics,sizeof(statistics),0)==S_FALSE) {}
+            return statistics.NumPrimitivesWritten;
+        };
+        const float amplitude=normalizedHeight ? .625f : 1.f;
+        check(hullPrimitives(-320,0,false)>2,"hull culled without bound matrices");
+        check(hullPrimitives(-320,0,true)==0,"hull kept a patch left of the screen");
+        check(hullPrimitives(0,0,true)>2,"hull culled a patch on screen");
+        check(hullPrimitives(0,-1.1f-amplitude*.5f,true)>2,"hull culled a patch relief can raise into view");
+        check(hullPrimitives(0,-1.1f-amplitude*1.5f,true)==0,"hull kept a patch below its relief reach");
+        std::cout<<"PASS: "<<runs<<" actual height-domain/SO runs; signed geometry, UV rotation/reflection, camera translation, normals/tangents/depth/shadow receivers, zero seams, invalid/missing textures, PS retention and hull off-screen cull\n";
         return 0;
     }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
