@@ -805,6 +805,14 @@ D3D11DeviceLossRecovery = 1
 ;   OPENSHIM_DXGI_FLIP_WAITABLE=0 keeps flip model without the waitable object.
 DxgiFlipModel = 0
 
+; Sun shadow reach for the DX11 Enhanced receiver, in the OpenShim Video page
+; as Shadow Distance. Restart required.
+; Accepted: a distance in metres (16 to 4096), or stock/off for the stock 128 m
+;   clip. The in-game page offers 256 and stock; the receiver's outer cascade
+;   split is 256 m, so larger values add no real coverage.
+; Default: 256 (absent behaves the same). Env: OPENSHIM_SHADOW_FAR_DISTANCE.
+ShadowFarDistance = 256
+
 
 [Terrain]
 ; Terrain Micro Detail in the OpenShim settings page. Off by default (opt-in):

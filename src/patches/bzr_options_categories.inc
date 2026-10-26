@@ -14,12 +14,15 @@ constexpr const char* kShimRowFading = "HUD Fading";
 constexpr const char* kShimRowMeters = "Meter Fading";
 constexpr const char* kShimRowRadar = "Radar Fading";
 constexpr const char* kShimRowMenuTheme = "Menu Colors";
+constexpr const char* kShimRowEffects = "Visual Effects";
 
 static const char* const kShimCategoryVideo[] = {
-    "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "Jet Flames",
-    "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
-    "HD Terrain Tiles", "Terrain Micro Detail", "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "GPU Skinning",
-    kShimRowMenuTheme };
+    "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
+    "Shadow Distance", "HD Terrain Tiles", "Terrain Micro Detail", "GPU Skinning",
+    kShimRowEffects, kShimRowMenuTheme };
+static const char* const kShimCategoryEffects[] = {
+    "Jet Flames", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
+    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Skinned Gibs" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
@@ -52,21 +55,23 @@ static const char* const kShimCategoryPalette[] = {
     "Unit Critical", "Unit Ammo", "Empty Bars" };
 static const char* const kShimCategoryControls[] = {
     kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
-    "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse" };
+    "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse",
+    "Run in Background" };
 static const char* const kShimCategoryGameplay[] = {
     "Weapon Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog Of War", "Neutral Attack Orders",
     "Smart Scavengers", "Turret AA Pitch", "Bomber AI Range", "AI Howitzer Volley",
-    "AI Mine Volley", "AutoSave", "AutoSave Interval", "Vehicle Geometry" };
+    "AI Mine Volley", "Vehicle Geometry" };
 static const char* const kShimCategoryFixes[] = {
     "AI Multi-Producer", "APC Allied Deploy", "Splinter Undead Fix", "Howitzer Deploy Fix",
     "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard" };
 static const char* const kShimCategoryNetwork[] = {
-    "Net Route", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
+    "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
     "MP Setup Screen" };
 static const char* const kShimCategorySystem[] = {
-    kShimRowUpdateCheck, "Auto-Install Updates", "Career Stats", "Reset Career Stats" };
+    kShimRowUpdateCheck, "Auto-Install Updates", "Career Stats", "Reset Career Stats",
+    "AutoSave", "AutoSave Interval", "AutoSave Backups" };
 
 struct ShimSettingsCategory
 {
@@ -82,7 +87,7 @@ struct ShimSettingsCategory
 static const ShimSettingsCategory kShimSettingsCategories[] =
 {
     BZR_SHIM_CATEGORY("Video", "VIDEO",
-        "Render profile, the DX11 Enhanced passes, and visual effects.", kShimCategoryVideo),
+        "Renderer, render profile, the DX11 Enhanced passes, shadows and terrain; visual effects open from here.", kShimCategoryVideo),
     BZR_SHIM_CATEGORY("Lighting", "LIGHTING",
         "Headlights, the pilot flashlight, explosion and sun flashes, and empty-craft lights.", kShimCategoryLighting),
     BZR_SHIM_CATEGORY("Audio", "AUDIO",
@@ -93,7 +98,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
         "Key bindings, raw mouse input, control smoothing and the satellite view.",
         kShimCategoryControls),
     BZR_SHIM_CATEGORY("Gameplay", "GAMEPLAY",
-        "Single-player aiming, AI behaviour, turbo and AutoSave.", kShimCategoryGameplay),
+        "Single-player aiming, AI behaviour and turbo.", kShimCategoryGameplay),
     BZR_SHIM_CATEGORY("Fixes", "FIXES",
         "Switches for confirmed Redux engine defects. Leave these on unless "
         "you are chasing a regression.", kShimCategoryFixes),
@@ -101,7 +106,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
         "Connection route, the socket layer, lobby features and map lists.",
         kShimCategoryNetwork),
     BZR_SHIM_CATEGORY("System", "SYSTEM",
-        "OpenShim updates and career statistics.", kShimCategorySystem),
+        "OpenShim updates, career statistics and AutoSave.", kShimCategorySystem),
     // Subpage reached from HUD; the existing nine-tile hub stays intact.
     BZR_SHIM_CATEGORY("Reticle", "RETICLE / HIT FEEDBACK",
         "Custom reticle appearance and single-player feedback.", kShimCategoryReticle),
@@ -115,5 +120,8 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
         "Independent cockpit hull and ammo fading; critical warnings stay visible.", kShimCategoryMeters),
     BZR_SHIM_CATEGORY("Radar Fading", "RADAR FADING",
         "Cockpit radar opacity and timing, with an independent compass exception.", kShimCategoryRadar),
+    BZR_SHIM_CATEGORY("Effects", "VISUAL EFFECTS",
+        "Jet flames, emissive pulse, star twinkle, death chunks, muzzle effects, shell casings and skinned gibs.",
+        kShimCategoryEffects),
 };
 #undef BZR_SHIM_CATEGORY

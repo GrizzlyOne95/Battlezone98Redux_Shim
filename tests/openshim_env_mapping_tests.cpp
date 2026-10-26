@@ -141,6 +141,10 @@ namespace
         Check(Mapped(ini, "OPENSHIM_DISABLE_SHELL_CASINGS") == "1", "ShellCasings = 0 reads as DISABLE=1");
         ini.Set("General", "ShellCasings", "on");
         Check(Mapped(ini, "BZR_DISABLE_SHELL_CASINGS") == "0", "ShellCasings = on reads as DISABLE=0");
+        // ShadowFarDistance: raw text, parsed by the shadow policy.
+        Check(Mapped(ini, "OPENSHIM_SHADOW_FAR_DISTANCE") == "<none>", "unset ShadowFarDistance keeps the code default");
+        ini.Set("Graphics", "ShadowFarDistance", "stock");
+        Check(Mapped(ini, "OPENSHIM_SHADOW_FAR_DISTANCE") == "stock", "ShadowFarDistance passes through raw");
         ini.Set("General", "ShellCasingsMax", "64");
         Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_MAX") == "64", "casing pool size passes through raw");
         ini.Set("General", "ShellCasingsClasses", "cannon,-gquake");
