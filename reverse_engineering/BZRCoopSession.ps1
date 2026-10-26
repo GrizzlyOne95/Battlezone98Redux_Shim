@@ -176,6 +176,9 @@ function New-BZRCoopInstance {
         # Multiplayer opens the pre-lobby setup screen when the install enables it;
         # the lobby script clicks straight from the title screen into the lounge.
         $ini = [regex]::Replace($ini, '(?m)^(\s*PreLobby\s*=\s*)\S+', '${1}0')
+        # A Nickname set in the install would name every client alike; blank
+        # means the Goldberg account name (BZRCoopN), which the lobby matches.
+        $ini = [regex]::Replace($ini, '(?m)^([ \t]*Nickname[ \t]*=)[^\r\n]*', '${1}')
         [IO.File]::WriteAllText($shimIni, $ini)
     }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'scripts') -Destination $dir -Recurse

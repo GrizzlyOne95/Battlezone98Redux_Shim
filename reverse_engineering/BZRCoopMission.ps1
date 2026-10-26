@@ -232,6 +232,13 @@ function Assert-CRFlowClientsAlive {
         if (Get-Process -Id $c.pid -ErrorAction SilentlyContinue) { continue }
         $log = Get-CRFlowLogPath $c
         $last = if ($log) { Get-Content -LiteralPath $log -Tail 1 } else { '' }
+        # The GPU driver can drop every instance's D3D11 device at once (nvlddmkm
+        # event 153); each then dies at its next GPU allocation, which says
+        # nothing about the case under test.
+        $ogre = Join-Path $c.dir 'logs\BZOgreLogfile.log'
+        if ((Test-Path -LiteralPath $ogre) -and (Get-Content -LiteralPath $ogre -Tail 400 | Select-String -SimpleMatch '(-2005270523:' -Quiet)) {
+            throw "client $($c.index) (pid $($c.pid)) exited unexpectedly: its GPU device was removed (DXGI 0x887A0005; check System log nvlddmkm), so this run says nothing about the case. Last log: $last"
+        }
         throw "client $($c.index) (pid $($c.pid)) exited unexpectedly (crash?). Last log: $last"
     }
 }
