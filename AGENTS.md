@@ -42,5 +42,6 @@ Native `winmm.dll` shim for Battlezone 98 Redux. This repository owns low-level 
 ## Publication routing
 
 - `Docs/STEAM_ROADMAP_BBCODE.txt` is the canonical Roadmap source. Update it when roadmap-relevant OpenShim/EXU/runtime status changes.
-- CR owns the complete Workshop publication checklist. A real CR Workshop upload is incomplete until the Roadmap discussion is synchronized; dry runs are exempt.
+- `Docs/STEAM_STOCK_FIXES_BBCODE.txt` is the canonical source for the Steam stock-bug-fixes discussion. Add an entry when a fix for a confirmed stock defect merges.
+- CR owns the complete Workshop publication checklist. A real CR Workshop upload is incomplete until the Roadmap and stock-fixes discussions are synchronized; dry runs are exempt.
 - Keep the validated multiplayer map hop/refresh behavior intact. Map list filtering is the stock-filter extension in `src/patches/mp_map_filter_extras.cpp`; the old clean-room filter/sort port was deleted and should not be revived.
