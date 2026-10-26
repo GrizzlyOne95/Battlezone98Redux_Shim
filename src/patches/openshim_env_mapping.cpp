@@ -297,6 +297,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "LuaFormationBinding", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_GETINDEPENDENCE_GUARD") ||
+            Equals(name, "BZR_DISABLE_GETINDEPENDENCE_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "LuaGetIndependenceGuard", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX") ||
             Equals(name, "BZR_DISABLE_LUA_SEND_LENGTH_FIX"))
         {

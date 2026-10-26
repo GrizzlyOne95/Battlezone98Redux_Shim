@@ -55,6 +55,7 @@
 #include "ui_performance_hooks.h"
 #include "ui_file_scan_hooks.h"
 #include "lua_formation_fix_install.h"
+#include "lua_getindependence_guard_install.h"
 #include "lua_send_length_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
@@ -157,6 +158,13 @@ static unsigned __stdcall PatchThreadProc(void*)
     // binding. Byte-guarded and fail-closed; [Fixes] LuaFormationBinding = 0 leaves
     // the engine untouched.
     PATCH_STAGE(BZROpenShim::LuaFormation::InstallLuaFormationFixIfPossible());
+
+    // Stock Lua GetIndependence reads [aiProcess+0x18] after a null test only, and
+    // faults when a mission Load() callback calls it before PostLoadAll has
+    // replaced the save placeholder. Swaps the registration row for a binding that
+    // answers 0 for a process that is not a real object. Byte-guarded and
+    // fail-closed; [Fixes] LuaGetIndependenceGuard = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::LuaGetIndependence::InstallLuaGetIndependenceGuardIfPossible());
 
     // Lua Send strings and tables longer than 127 entries crash every receiver:
     // the packet decoders sign-extend the length byte. Two decoder loads become

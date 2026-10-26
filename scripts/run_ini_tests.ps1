@@ -212,6 +212,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Repairs a stock Lua binding that always raised for its documented
     # arguments; scripts that worked keep the stock reading.
     "Fixes/LuaFormationBinding",
+    # Lua GetIndependence returns 0 instead of faulting on a save-load
+    # placeholder AI process; real processes keep the stock path.
+    "Fixes/LuaGetIndependenceGuard",
     # Lua Send lengths 128..255 decode unsigned; lengths above 255 are refused
     # by the sender instead of wrapping. Unpatched receivers still crash.
     "Fixes/LuaSendLengthUnsigned",
@@ -432,6 +435,7 @@ $shippingPolicyChecks = @{
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"
+    "Fixes/LuaGetIndependenceGuard" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/RestoreCraftBounds" = "1"
