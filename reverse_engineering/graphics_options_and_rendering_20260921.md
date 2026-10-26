@@ -288,8 +288,9 @@ change = `exit(0)`.
 OpenShim settings page (`src/patches/bzr_options_ui.cpp:2828`): Render
 Profile Retro/Redux/Enhanced (live), DX11 FXAA + Local Lights (restart,
 DX11-only, fail-closed), Sun Flashbang (live), headlight brightness/color/beam
-(50–150%), Radar Size, HUD/target/alert rows. No Renderer row by design
-(parses `[Graphics] Renderer`, steers via the `Ogre.cfg` transport seam).
+(50–150%), Radar Size, HUD/target/alert rows. A restart-required Renderer
+row was added 2026-10-26 (writes `[Graphics] Renderer`; the `Ogre.cfg`
+transport seam applies it at the next launch).
 EXU: read-only Lua (`GetFullscreen` `0x009183B8`, `GetGameResolution` from
 mainCam, `GetUIScaling` `/5`; live Ogre shadow toggles, no persisted UI).
 

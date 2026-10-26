@@ -301,8 +301,9 @@ transition matrix, restart persistence through the actual UI.
 4. **Renderer forcing**: implemented as of the backend-selection seam
    (Seam A): `Renderer=DX9/DX11` steers startup via the pre-read Ogre.cfg
    transport, with requested/effective/reason diagnostics and a hard opt-out
-   (`[Startup] BackendTransport=0`). The settings-UI backend row stays hidden
-   until the runtime matrix has soaked across releases; see §2 and
+   (`[Startup] BackendTransport=0`). Since 2026-10-26 the Video page has a
+   restart-required Renderer row and the shipped ini enables the transport
+   (preset revision 11); see §2 and
    `reverse_engineering/renderer_startup_backend_selection_20260825.md` for
    the ownership contract and validation evidence. A profile change made on
    the game thread (every EXU mission request) is applied to the window's

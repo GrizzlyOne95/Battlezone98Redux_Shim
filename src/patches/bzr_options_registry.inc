@@ -52,11 +52,17 @@ static const char* const kShimSettingsHeadlightBrightnessLabels[] =
     { "50%", "75%", "100%", "125%", "150%" };
 static const char* const kShimSettingsNetRouteValues[] = { "Stock", "Direct", "Relay" };
 static const char* const kShimSettingsGovernorTuningValues[] = { "OpenShim", "Stock" };
+static const char* const kShimSettingsUdpPortValues[] = { "0", "17770", "17771", "17772", "17773" };
+static const char* const kShimSettingsUdpPortLabels[] = { "Automatic", "17770", "17771", "17772", "17773" };
+static const char* const kShimSettingsShadowFarValues[] = { "256", "stock" };
+static const char* const kShimSettingsShadowFarLabels[] = { "Full (256 m)", "Stock (128 m)" };
 static const char* const kShimSettingsNetRouteLabels[] = { "Stock", "Prefer Direct", "Force Relay" };
 static const char* const kShimSettingsTargetPolicyAltKeys[] = { "TargetReticle" };
 static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
 static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
 static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
+static const char* const kShimSettingsRendererValues[] = { "Auto", "DX11", "DX9" };
+static const char* const kShimSettingsRendererLabels[] = { "Auto", "DirectX 11", "DirectX 9" };
 static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
 static const char* const kShimSettingsFovValues[] = { "0", "60", "70", "80", "90", "100", "110", "120" };
 static const char* const kShimSettingsFovLabels[] = { "Stock (80)", "60", "70", "80", "90", "100", "110", "120" };
@@ -296,13 +302,15 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Cockpit and chase base FOV in degrees (4:3 reference); widescreen expands horizontally. "
       "Stock is 80. Satellite and target cameras keep their own angles. Restart required." },
-    // Deliberately NO Renderer (DX9/DX11) row: the runtime only parses
-    // the [Graphics] Renderer preference and reports requested-vs-
-    // effective divergence; it does not yet steer which render system
-    // the game starts on. Exposing it as a restart-required selector
-    // would promise a control that cannot deliver, so the row stays
-    // hidden until startup renderer selection is actually implemented
-    // (hand-edited openshim.ini values remain parsed and reported).
+    // Read once at startup by the backend seam (startup_backend_seam.cpp),
+    // which rewrites Ogre.cfg's "Render System=" before the game reads it.
+    // Stock builds its own renderer row and hides it (FUN_007AF4A0), so this
+    // is the only in-game control. Auto writes nothing and keeps whatever
+    // Ogre.cfg last held. Inert if [Startup] BackendTransport = 0.
+    { "Renderer", "Graphics", "Renderer", nullptr, 0,
+      kShimSettingsRendererValues, kShimSettingsRendererLabels, 3, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Graphics API the game starts on. Auto keeps the game's last choice. The Enhanced profile and the DX11 rows need DirectX 11. Restart required." },
     { "Render Profile", "Graphics", "RenderProfile", nullptr, 0,
       kShimSettingsRenderProfileValues, kShimSettingsRenderProfileValues, 3, 2,
       ShimSettingApplyGroup::RenderProfile,
@@ -315,6 +323,18 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "FXAA 3.11 anti-aliasing pass on the DX11 Enhanced pipeline. DX11 only. Restart required." },
+    // Absent key = off (DiagnosticSwitch::Requested), so defaultIndex 1 selects "0" (Off).
+    { "DX11 Flip Model", "Graphics", "DxgiFlipModel", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::RestartRequired,
+      "Present through a flip-model swap chain with a frame-latency wait, to even out frame pacing. "
+      "Experimental. DX11 windowed only. Restart required." },
+    // Read once when the shadow far-distance detour installs; absent = 256 m.
+    { "Shadow Distance", "Graphics", "ShadowFarDistance", nullptr, 0,
+      kShimSettingsShadowFarValues, kShimSettingsShadowFarLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "How far sun shadows reach. Full covers the 256 m the shadow shader was built for; "
+      "Stock clips at 128 m for slightly sharper near shadows. Restart required." },
     { "DX11 Local Lights", "DX11Enhanced", "EnhancedLightSelectionV2", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -458,6 +478,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsAutoSaveIntervalValues, kShimSettingsAutoSaveIntervalLabels, 5, 1,
       ShimSettingApplyGroup::AutoSave,
       "How often OpenShim refreshes the rolling AutoSave recovery slot." },
+    // Absent key = on (autosave.cpp default 1), so defaultIndex 0 selects "1" (On).
+    { "AutoSave Backups", "AutoSave", "BackupExisting", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::AutoSave,
+      "Before OpenShim first replaces Save\\auto.sav, keep one copy of the file that was already there." },
     { "Weapon Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -475,6 +500,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required." },
+    // Absent key = on (inverted env mapping OPENSHIM_DISABLE_SKINNED_GIBS), so defaultIndex 0 selects "1" (On).
+    { "Skinned Gibs", "General", "SkinnedGibs", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from "
+      "the posed model (visual only). Restart required." },
     // Absent key = on, so defaultIndex 0 selects "1" (On).
     { "GPU Skinning", "Experimental", "GpuSkinning", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -598,6 +629,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Stop Redux clipping and re-centring the mouse while it is minimized or in the background. Restart required." },
+    // Absent key = off, so defaultIndex 1 selects "0" (Off).
+    { "Run in Background", "Testing", "RunInBackground", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::RestartRequired,
+      "Keep a single-player windowed game running while it is unfocused, without taking the mouse. "
+      "Inert in fullscreen and network games. Restart required." },
     { "Thread Scheduling", "Fixes", "ThreadScheduling", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -658,6 +695,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::BzrNetRoute,
       "Preferred peer path: try LAN then direct WAN, or force the BZRNet relay. "
       "Does not add LAN or direct-IP hosting." },
+    // Parsed once at startup (0 = Winsock picks an ephemeral port); a hand-set port shows as Custom.
+    { "UDP Port", "Network", "UdpPort", nullptr, 0,
+      kShimSettingsUdpPortValues, kShimSettingsUdpPortLabels, 5, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Fixed local UDP port for multiplayer peer traffic, for hosts who forward a port on their router. "
+      "Automatic lets Windows choose. Any other port can be set in openshim.ini. Restart required." },
     { "Net Improvements", "Network", "NetImprovements", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,

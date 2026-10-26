@@ -130,10 +130,16 @@ openshim_opt:UnitEmptyColor:label~Empty Bars~~~~~~
 openshim_opt:UnitEmptyColor:desc~Unfilled portions of command and selection health/ammo bars. Does not affect cockpit textures. Default follows the base palette.~~~~~~
 openshim_opt:FieldOfView:label~Field of View~~~~~~
 openshim_opt:FieldOfView:desc~Cockpit and chase base FOV in degrees (4:3 reference); widescreen expands horizontally. Stock is 80. Satellite and target cameras keep their own angles. Restart required.~~~~~~
+openshim_opt:Renderer:label~Renderer~~~~~~
+openshim_opt:Renderer:desc~Graphics API the game starts on. Auto keeps the game's last choice. The Enhanced profile and the DX11 rows need DirectX 11. Restart required.~~~~~~
 openshim_opt:RenderProfile:label~Render Profile~~~~~~
 openshim_opt:RenderProfile:desc~Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live.~~~~~~
 openshim_opt:FXAA:label~DX11 FXAA~~~~~~
 openshim_opt:FXAA:desc~FXAA 3.11 anti-aliasing pass on the DX11 Enhanced pipeline. DX11 only. Restart required.~~~~~~
+openshim_opt:DxgiFlipModel:label~DX11 Flip Model~~~~~~
+openshim_opt:DxgiFlipModel:desc~Present through a flip-model swap chain with a frame-latency wait, to even out frame pacing. Experimental. DX11 windowed only. Restart required.~~~~~~
+openshim_opt:ShadowFarDistance:label~Shadow Distance~~~~~~
+openshim_opt:ShadowFarDistance:desc~How far sun shadows reach. Full covers the 256 m the shadow shader was built for; Stock clips at 128 m for slightly sharper near shadows. Restart required.~~~~~~
 openshim_opt:EnhancedLightSelectionV2:label~DX11 Local Lights~~~~~~
 openshim_opt:EnhancedLightSelectionV2:desc~Contribution-ranked per-object local-light ordering. DX11 only. Restart required.~~~~~~
 openshim_opt:TerrainHdEnabled:label~HD Terrain Tiles~~~~~~
@@ -202,6 +208,8 @@ openshim_opt:Enabled:label~AutoSave~~~~~~
 openshim_opt:Enabled:desc~Rolling recovery save for single-player missions; manual saves remain your checkpoints.~~~~~~
 openshim_opt:IntervalSeconds:label~AutoSave Interval~~~~~~
 openshim_opt:IntervalSeconds:desc~How often OpenShim refreshes the rolling AutoSave recovery slot.~~~~~~
+openshim_opt:BackupExisting:label~AutoSave Backups~~~~~~
+openshim_opt:BackupExisting:desc~Before OpenShim first replaces Save\auto.sav, keep one copy of the file that was already there.~~~~~~
 openshim_opt:WeaponConvergence:label~Weapon Convergence~~~~~~
 openshim_opt:WeaponConvergence:desc~Walker-style convergence on an explicitly targeted craft. Single player only.~~~~~~
 openshim_opt:MuzzleFlash:label~Muzzle Flashes~~~~~~
@@ -210,6 +218,8 @@ openshim_opt:MeshRecoil:label~Muzzle Recoil~~~~~~
 openshim_opt:MeshRecoil:desc~Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required.~~~~~~
 openshim_opt:ShellCasings:label~Shell Casings~~~~~~
 openshim_opt:ShellCasings:desc~Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required.~~~~~~
+openshim_opt:SkinnedGibs:label~Skinned Gibs~~~~~~
+openshim_opt:SkinnedGibs:desc~When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from the posed model (visual only). Restart required.~~~~~~
 openshim_opt:GpuSkinning:label~GPU Skinning~~~~~~
 openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, which frees CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Takes effect on the next mission load.~~~~~~
 openshim_opt:PlayerReticleConvergence:label~Reticle Convergence~~~~~~
@@ -256,6 +266,8 @@ openshim_opt:PilotFlashlightBeam:label~Pilot Light Beam~~~~~~
 openshim_opt:PilotFlashlightBeam:desc~Pilot flashlight beam shape: Stock, Focused (narrow), or Wide.~~~~~~
 openshim_opt:UnfocusedMouseRelease:label~Background Mouse~~~~~~
 openshim_opt:UnfocusedMouseRelease:desc~Stop Redux clipping and re-centring the mouse while it is minimized or in the background. Restart required.~~~~~~
+openshim_opt:RunInBackground:label~Run in Background~~~~~~
+openshim_opt:RunInBackground:desc~Keep a single-player windowed game running while it is unfocused, without taking the mouse. Inert in fullscreen and network games. Restart required.~~~~~~
 openshim_opt:ThreadScheduling:label~Thread Scheduling~~~~~~
 openshim_opt:ThreadScheduling:desc~Give the frame thread MMCSS Games priority and opt out of Windows power throttling. Restart required.~~~~~~
 openshim_opt:VehicleGeometryContact:label~Vehicle Geometry~~~~~~
@@ -284,6 +296,8 @@ openshim_opt:DynamicGeometryFastSort:label~Effect Sort~~~~~~
 openshim_opt:DynamicGeometryFastSort:desc~Sort effect-sprite batches without calling into Ogre for every compare. Same order, same pixels. Restart required.~~~~~~
 openshim_opt:RoutePreference:label~Net Route~~~~~~
 openshim_opt:RoutePreference:desc~Preferred peer path: try LAN then direct WAN, or force the BZRNet relay. Does not add LAN or direct-IP hosting.~~~~~~
+openshim_opt:UdpPort:label~UDP Port~~~~~~
+openshim_opt:UdpPort:desc~Fixed local UDP port for multiplayer peer traffic, for hosts who forward a port on their router. Automatic lets Windows choose. Any other port can be set in openshim.ini. Restart required.~~~~~~
 openshim_opt:NetImprovements:label~Net Improvements~~~~~~
 openshim_opt:NetImprovements:desc~OpenShim's socket layer as a whole. Off gives stock networking; turn it off to rule the shim out of a connection problem.~~~~~~
 openshim_opt:GovernorTuning:label~Net Tuning~~~~~~
@@ -358,9 +372,14 @@ openshim_value:80~80~~~~~~
 openshim_value:90~90~~~~~~
 openshim_value:110~110~~~~~~
 openshim_value:120~120~~~~~~
+openshim_value:Auto~Auto~~~~~~
+openshim_value:DirectX 11~DirectX 11~~~~~~
+openshim_value:DirectX 9~DirectX 9~~~~~~
 openshim_value:Retro~Retro~~~~~~
 openshim_value:Redux~Redux~~~~~~
 openshim_value:Enhanced~Enhanced~~~~~~
+openshim_value:Full (256 m)~Full (256 m)~~~~~~
+openshim_value:Stock (128 m)~Stock (128 m)~~~~~~
 openshim_value:Soft~Soft~~~~~~
 openshim_value:Minimal~Minimal~~~~~~
 openshim_value:None~None~~~~~~
@@ -395,6 +414,11 @@ openshim_value:Focused~Focused~~~~~~
 openshim_value:Wide~Wide~~~~~~
 openshim_value:Prefer Direct~Prefer Direct~~~~~~
 openshim_value:Force Relay~Force Relay~~~~~~
+openshim_value:Automatic~Automatic~~~~~~
+openshim_value:17770~17770~~~~~~
+openshim_value:17771~17771~~~~~~
+openshim_value:17772~17772~~~~~~
+openshim_value:17773~17773~~~~~~
 openshim_value:OpenShim~OpenShim~~~~~~
 openshim_value:Reset~Reset~~~~~~
 openshim_value:Confirm?~Confirm?~~~~~~
@@ -408,12 +432,13 @@ openshim_ui:row:HUDFading:label~HUD Fading~~~~~~
 openshim_ui:row:MeterFading:label~Meter Fading~~~~~~
 openshim_ui:row:RadarFading:label~Radar Fading~~~~~~
 openshim_ui:row:MenuColors:label~Menu Colors~~~~~~
+openshim_ui:row:VisualEffects:label~Visual Effects~~~~~~
 openshim_cat:Video:name~Video~~~~~~
 openshim_cat:Video:title~VIDEO~~~~~~
-openshim_cat:Video:blurb~Render profile, the DX11 Enhanced passes, and visual effects.~~~~~~
+openshim_cat:Video:blurb~Renderer, render profile, the DX11 Enhanced passes, shadows and terrain; visual effects open from here.~~~~~~
 openshim_cat:Lighting:name~Lighting~~~~~~
 openshim_cat:Lighting:title~LIGHTING~~~~~~
-openshim_cat:Lighting:blurb~Vehicle headlights and the pilot flashlight.~~~~~~
+openshim_cat:Lighting:blurb~Headlights, the pilot flashlight, explosion and sun flashes, and empty-craft lights.~~~~~~
 openshim_cat:Audio:name~Audio~~~~~~
 openshim_cat:Audio:title~AUDIO~~~~~~
 openshim_cat:Audio:blurb~Sound channels, background music, unit voices and alerts.~~~~~~
@@ -425,7 +450,7 @@ openshim_cat:Controls:title~CONTROLS~~~~~~
 openshim_cat:Controls:blurb~Key bindings, raw mouse input, control smoothing and the satellite view.~~~~~~
 openshim_cat:Gameplay:name~Gameplay~~~~~~
 openshim_cat:Gameplay:title~GAMEPLAY~~~~~~
-openshim_cat:Gameplay:blurb~Single-player aiming, AI behaviour, turbo and AutoSave.~~~~~~
+openshim_cat:Gameplay:blurb~Single-player aiming, AI behaviour and turbo.~~~~~~
 openshim_cat:Fixes:name~Fixes~~~~~~
 openshim_cat:Fixes:title~FIXES~~~~~~
 openshim_cat:Fixes:blurb~Switches for confirmed Redux engine defects. Leave these on unless you are chasing a regression.~~~~~~
@@ -434,7 +459,7 @@ openshim_cat:Network:title~NETWORK~~~~~~
 openshim_cat:Network:blurb~Connection route, the socket layer, lobby features and map lists.~~~~~~
 openshim_cat:System:name~System~~~~~~
 openshim_cat:System:title~SYSTEM~~~~~~
-openshim_cat:System:blurb~OpenShim updates and career statistics.~~~~~~
+openshim_cat:System:blurb~OpenShim updates, career statistics and AutoSave.~~~~~~
 openshim_cat:Reticle:name~Reticle~~~~~~
 openshim_cat:Reticle:title~RETICLE / HIT FEEDBACK~~~~~~
 openshim_cat:Reticle:blurb~Custom reticle appearance and single-player feedback.~~~~~~
@@ -453,6 +478,9 @@ openshim_cat:MeterFading:blurb~Independent cockpit hull and ammo fading; critica
 openshim_cat:RadarFading:name~Radar Fading~~~~~~
 openshim_cat:RadarFading:title~RADAR FADING~~~~~~
 openshim_cat:RadarFading:blurb~Cockpit radar opacity and timing, with an independent compass exception.~~~~~~
+openshim_cat:Effects:name~Effects~~~~~~
+openshim_cat:Effects:title~VISUAL EFFECTS~~~~~~
+openshim_cat:Effects:blurb~Jet flames, emissive pulse, star twinkle, death chunks, muzzle effects, shell casings and skinned gibs.~~~~~~
 ~~~~~~~
 openshim_ui:hub_saved_note~Changes are saved to openshim.ini as you make them. ~~~~~~
 openshim_ui:hub_title~OPENSHIM OPTIONS~~~~~~
@@ -474,6 +502,7 @@ openshim_ui:row:HUDFading:desc~Fade weapons, resource meters and the command int
 openshim_ui:row:MeterFading:desc~Fade cockpit hull and ammo independently, including labels and shot-cost markers. Critical warnings stay visible.~~~~~~
 openshim_ui:row:MenuColors:desc~Live RGB sliders for the main menu image artwork. Apply saves; Stock restores original colors.~~~~~~
 openshim_ui:row:RadarFading:desc~Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.~~~~~~
+openshim_ui:row:VisualEffects:desc~Jet flames, emissive pulse, star twinkle, death chunks, muzzle flashes and recoil, shell casings and skinned gibs.~~~~~~
 openshim_ui:render_profile_dx9_desc~Enhanced requires DX11; on DX9 it falls back to Redux (Stock). Retro and Redux work on both. Your choice is kept for DX11.~~~~~~
 openshim_ui:category_hint~Click a value to change it. Point at a setting to read what it does.~~~~~~
 openshim_ui:restart_note~* Takes effect after restarting Battlezone.~~~~~~

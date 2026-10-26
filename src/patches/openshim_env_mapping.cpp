@@ -188,6 +188,9 @@ namespace
         // list and numeric keys are read raw and parsed by the feature.
         if (Equals(name, "OPENSHIM_DISABLE_SHELL_CASINGS") || Equals(name, "BZR_DISABLE_SHELL_CASINGS"))
             return TryReadMappedBool(ini, "General", "ShellCasings", true, out);
+        // Shadow far distance: the raw text is parsed by DecideFarDistance (a distance, or stock/off).
+        if (Equals(name, "OPENSHIM_SHADOW_FAR_DISTANCE"))
+            return ini(IniFile::Main, "Graphics", "ShadowFarDistance", out);
         if (Equals(name, "OPENSHIM_SHELL_CASINGS_MAX"))
             return ini(IniFile::Main, "General", "ShellCasingsMax", out);
         if (Equals(name, "OPENSHIM_SHELL_CASINGS_LINGER"))

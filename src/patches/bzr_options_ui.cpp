@@ -2918,6 +2918,7 @@ namespace BZROpenShim
         constexpr size_t kShimPseudoRowMeters = kShimSettingsRegistryCount + 6;
         constexpr size_t kShimPseudoRowRadar = kShimSettingsRegistryCount + 7;
         constexpr size_t kShimPseudoRowMenuTheme = kShimSettingsRegistryCount + 8;
+        constexpr size_t kShimPseudoRowEffects = kShimSettingsRegistryCount + 9;
         constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
@@ -2927,13 +2928,17 @@ namespace BZROpenShim
 
         constexpr size_t kShimSettingsCategoryCount =
             sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
-        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 6;
-        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 6;
-        constexpr size_t kShimPaletteCategory = kShimSettingsCategoryCount - 5;
-        constexpr size_t kShimDamageCategory = kShimSettingsCategoryCount - 4;
-        constexpr size_t kShimFadingCategory = kShimSettingsCategoryCount - 3;
-        constexpr size_t kShimMetersCategory = kShimSettingsCategoryCount - 2;
-        constexpr size_t kShimRadarCategory = kShimSettingsCategoryCount - 1;
+        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 7;
+        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 7;
+        constexpr size_t kShimPaletteCategory = kShimSettingsCategoryCount - 6;
+        constexpr size_t kShimDamageCategory = kShimSettingsCategoryCount - 5;
+        constexpr size_t kShimFadingCategory = kShimSettingsCategoryCount - 4;
+        constexpr size_t kShimMetersCategory = kShimSettingsCategoryCount - 3;
+        constexpr size_t kShimRadarCategory = kShimSettingsCategoryCount - 2;
+        constexpr size_t kShimEffectsCategory = kShimSettingsCategoryCount - 1;
+        // Category screen ids are kOptionsCategoryScreenIdBase + index, and src/engine/shell_screens.cpp
+        // only treats 16 consecutive ids as category screens.
+        static_assert(kShimSettingsCategoryCount <= 16, "shell_screens.cpp recognises only 16 category screen ids");
         static_assert(sizeof(kShimCategoryGameplay) / sizeof(kShimCategoryGameplay[0]) <= kShimCategoryMaxRows,
                       "a category screen shows at most 16 rows");
         static_assert(sizeof(kShimCategoryHud) / sizeof(kShimCategoryHud[0]) <= kShimCategoryMaxRows,
@@ -2947,6 +2952,15 @@ namespace BZROpenShim
         static_assert(std::size(kShimCategoryFading) <= kShimCategoryMaxRows, "fading controls must fit the page");
         static_assert(std::size(kShimCategoryMeters) <= kShimCategoryMaxRows, "meter controls must fit the page");
         static_assert(std::size(kShimCategoryRadar) <= kShimCategoryMaxRows, "radar controls must fit the page");
+        static_assert(std::size(kShimCategoryEffects) <= kShimCategoryMaxRows, "effects controls must fit the page");
+        // The row loop stops at kShimCategoryMaxRows, so an overfull page drops its last rows silently.
+        static_assert(std::size(kShimCategoryVideo) <= kShimCategoryMaxRows, "video controls must fit the page");
+        static_assert(std::size(kShimCategoryLighting) <= kShimCategoryMaxRows, "lighting controls must fit the page");
+        static_assert(std::size(kShimCategoryAudio) <= kShimCategoryMaxRows, "audio controls must fit the page");
+        static_assert(std::size(kShimCategoryControls) <= kShimCategoryMaxRows, "control rows must fit the page");
+        static_assert(std::size(kShimCategoryFixes) <= kShimCategoryMaxRows, "fix rows must fit the page");
+        static_assert(std::size(kShimCategoryNetwork) <= kShimCategoryMaxRows, "network rows must fit the page");
+        static_assert(std::size(kShimCategorySystem) <= kShimCategoryMaxRows, "system rows must fit the page");
 
         // Hub geometry (HUB_LAYOUT).
         constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
@@ -3033,6 +3047,8 @@ namespace BZROpenShim
                 return kShimPseudoRowMenuTheme;
             if (std::strcmp(label, kShimRowRadar) == 0)
                 return kShimPseudoRowRadar;
+            if (std::strcmp(label, kShimRowEffects) == 0)
+                return kShimPseudoRowEffects;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
                 if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
@@ -3247,7 +3263,7 @@ namespace BZROpenShim
             }
             if (row == kShimPseudoRowKeyBindings)
                 return ShimText("openshim_ui:value_edit", "Edit");
-            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme)
+            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme || row == kShimPseudoRowEffects)
                 return ShimText("openshim_ui:value_open", "Open");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
@@ -3272,6 +3288,21 @@ namespace BZROpenShim
                 if (TryGetUserConfigString(setting.section, setting.key, configured) && !configured.empty() &&
                     (configured[0] == '#' || configured[0] == '0') && HudColors::Parse(configured))
                     text = ShimText("openshim_ui:value_custom", "Custom");
+            }
+            if (std::strcmp(setting.key, "UdpPort") == 0)
+            {
+                // A hand-set port outside the listed choices would otherwise read as "Automatic".
+                std::string configured;
+                if (TryGetUserConfigString(setting.section, setting.key, configured))
+                {
+                    char* end = nullptr;
+                    const long port = std::strtol(configured.c_str(), &end, 10);
+                    bool listed = false;
+                    for (size_t i = 0; i < setting.valueCount; ++i)
+                        listed = listed || std::strcmp(setting.values[i], configured.c_str()) == 0;
+                    if (end != configured.c_str() && *end == '\0' && port > 0 && !listed)
+                        text = ShimText("openshim_ui:value_custom", "Custom");
+                }
             }
             if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
                 text += " *";
@@ -3305,6 +3336,8 @@ namespace BZROpenShim
                 return ShimPseudoRowLabel(kShimRowMenuTheme);
             if (row == kShimPseudoRowRadar)
                 return ShimPseudoRowLabel(kShimRowRadar);
+            if (row == kShimPseudoRowEffects)
+                return ShimPseudoRowLabel(kShimRowEffects);
             return ShimSettingLabel(g_ShimSettingsRegistry[row]);
         }
 
@@ -3328,6 +3361,8 @@ namespace BZROpenShim
                 return ShimText("openshim_ui:row:MenuColors:desc", "Live RGB sliders for the main menu image artwork. Apply saves; Stock restores original colors.");
             if (row == kShimPseudoRowRadar)
                 return ShimText("openshim_ui:row:RadarFading:desc", "Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.");
+            if (row == kShimPseudoRowEffects)
+                return ShimText("openshim_ui:row:VisualEffects:desc", "Jet flames, emissive pulse, star twinkle, death chunks, muzzle flashes and recoil, shell casings and skinned gibs.");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
@@ -3524,6 +3559,12 @@ namespace BZROpenShim
             {
                 DisarmShimSettingsAction();
                 Shell::RequestScreen(ui.screen,MenuTheme::ScreenId);
+                return;
+            }
+            if (row == kShimPseudoRowEffects)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimEffectsCategory));
                 return;
             }
             if (row == kShimPseudoRowRadar)

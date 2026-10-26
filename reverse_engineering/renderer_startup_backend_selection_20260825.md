@@ -361,7 +361,10 @@ Implement **Option A** behind the existing `[Graphics] Renderer` key:
    plumbing (`Renderer=Auto`, plus an explicit `[Startup] RendererOverride`
    kill-switch defaulting to enabled-once-proven).
 3. Keep the options-UI row hidden until a full matrix re-run passes both
-   backends on GOG and Steam.
+   backends on GOG and Steam. **Met 2026-08-25** (GOG 11/11, Steam 7/7:
+   `docs/BACKEND_SELECTION_RUNTIME_QUALIFICATION_20260825.md`); the Video
+   page's restart-required Renderer row landed 2026-10-26 with shipped
+   `[Startup] BackendTransport = 1` (preset revision 11).
 4. Add regression coverage: extend `render_profile_matrix.ps1` with
    `startup-dx9`/`startup-dx11`/`startup-auto-no-touch` cases asserting the new
    diagnostic substrings and that `Auto` leaves `Ogre.cfg` byte-identical.

@@ -104,7 +104,7 @@ static void CheckShippedTable()
     const char* const pseudoRows[] = {
         Registry::kShimRowUpdateCheck, Registry::kShimRowKeyBindings, Registry::kShimRowReticle,
         Registry::kShimRowPalette, Registry::kShimRowDamage, Registry::kShimRowFading,
-        Registry::kShimRowMeters, Registry::kShimRowRadar, Registry::kShimRowMenuTheme,
+        Registry::kShimRowMeters, Registry::kShimRowRadar, Registry::kShimRowMenuTheme, Registry::kShimRowEffects,
     };
     for (const char* row : pseudoRows)
     {
