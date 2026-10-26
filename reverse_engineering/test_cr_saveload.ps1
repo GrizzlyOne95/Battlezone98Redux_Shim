@@ -21,10 +21,15 @@ anywhere but the CR folder, or an OpenShim GetIndependence guard rejection --
 the guard turns that crash into a warning, so a rejection means a script
 regressed into calling GetIndependence while a save was loading.
 
-CR mounts only for missions launched from its campaign menu (crcampgn.ini
-mapType = "campaign"), so the run temporarily sets mapType = "mod" in the game's
-copy. That loads CR's files exactly as the campaign does, but not through the
-campaign-select screen. Saves, configuration, crcampgn.ini and modEnabled.dat are
+A command-line .bzn has no campaign id, so the engine infers one from the mission
+name: stock campaigns first, then mod campaigns. With CR at mapType = "campaign"
+that infers the stock "usa" campaign for every CR mission whose name is in the
+stock table, and nothing mounts CR. For those missions the run temporarily sets
+mapType = "mod" in the game's copy, which loads CR's files exactly as the campaign
+does, but not through the campaign-select screen. misn15.bzn and misn16.bzn are
+not in the stock table (it lists misn15b/misn16b), so with "mod" nothing would
+mount; they run with crcampgn.ini as shipped, which infers CR's own campaign.
+Saves, configuration, crcampgn.ini and modEnabled.dat are
 snapshotted and restored with hash checks; every save the run creates is archived
 into the evidence folder and removed. Uses BZRHarness's machine-wide launch lock
 (waiting up to -LockTimeoutSeconds), windowed mode, and graceful shutdown.
@@ -61,6 +66,8 @@ foreach($m in $missionList){if($m -notmatch '^[A-Za-z0-9_-]+\.bzn$'){throw "Not 
 $GameRoot=(Resolve-Path -LiteralPath $GameRoot).Path.TrimEnd('\')
 $campaignRoot=Join-Path $GameRoot 'mods\3686673790'
 $campaignIni=Join-Path $campaignRoot 'crcampgn.ini'
+# CR missions the stock usa table (0x482E20) does not list; see the description.
+$stockTableLacks=@('misn15.bzn','misn16.bzn')
 $auditRoot=Join-Path ([IO.Path]::GetFullPath($EvidenceDirectory)) $Label
 if($auditRoot.StartsWith($GameRoot+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Evidence must be outside the game installation'}
 if(Test-Path -LiteralPath $auditRoot){throw 'Use a new label; never overwrite evidence'}
@@ -312,7 +319,6 @@ try {
     $ini=[IO.File]::ReadAllText($campaignIni)
     $flipped=[regex]::Replace($ini,'(?m)^(\s*mapType\s*=\s*)"campaign"','$1"mod"')
     if($flipped -eq $ini){throw 'crcampgn.ini has no mapType = "campaign" line to switch'}
-    [IO.File]::WriteAllText($campaignIni,$flipped,[Text.UTF8Encoding]::new($false))
     # One autosave per mission, AutosaveDelaySeconds in; never deferred to CR's own.
     Set-IniValues (Join-Path $GameRoot 'openshim.ini') 'AutoSave' ([ordered]@{
         Enabled=1; InitialDelaySeconds=$AutosaveDelaySeconds; IntervalSeconds=3600; RetrySeconds=5; BackupExisting=0; RespectExternalAutoSave=0})
@@ -328,9 +334,12 @@ try {
     $menuSave=Join-Path $saveRoot 'game1.sav'
     $common=@('/nointro',"/renderer:$Renderer")
     foreach($mission in $missionList){
+        $campaignMode=$stockTableLacks -contains $mission
+        [IO.File]::WriteAllText($campaignIni,$(if($campaignMode){$ini}else{$flipped}),[Text.UTF8Encoding]::new($false))
         # The stock autoload resumes the newer of auto.sav and auto2.sav.
         if(Test-Path -LiteralPath $auto2){Remove-Item -LiteralPath $auto2}
         $start=Invoke-SaveLoadRun -Mission $mission -Avenue 'start' -Arguments (@($mission)+$common+'/saveafterload')
+        if($campaignMode){$start.Notes+='crcampgn.ini as shipped (mapType campaign)'}
         $hasAuto=Test-Fresh $autoSave $start.Started
         $hasMenu=Test-Fresh $menuSave $start.Started
         if(-not $hasAuto){$start.Problems+="OpenShim autosave did not write Save\auto.sav"}
