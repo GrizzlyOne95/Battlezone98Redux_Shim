@@ -13,8 +13,9 @@ than moving a hull or whole turret. No new craft recoil keys were enabled.
 2026-10-20: experimental source on `agent/odf-recoil-trial` in OpenShim and
 EXU. This is a GOG 2.2.301 single-player cannon trial, not a release-qualified
 feature. OpenShim Settings > Video > Muzzle Recoil (INI `[SinglePlayer]
-MeshRecoil`) is the master switch, default OFF; restart required. Enabling it
-requires authored craft ODF nodes/clips and compatible model assets. It supplies
+MeshRecoil`) is the master switch, default ON in the shipped preset since
+revision 10 (2026-10-26); restart required. It acts only on authored craft ODF
+nodes/clips with compatible model assets. It supplies
 no generic animation. Model reload and scene-lifetime acceptance remain pending.
 
 OpenShim owns accepted cannon shots, slot selection and the simulation clock.

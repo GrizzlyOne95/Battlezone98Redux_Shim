@@ -23,8 +23,11 @@ logic, render-space conversion and pause-aware lifetime as `exu.flash.Spawn`.
 This remains an experimental GOG 2.2.301 single-player cannon feature.
 In OpenShim Settings > Video, **Muzzle Flashes** is the master switch for both
 the mesh flash and companion muzzle render effects. **Muzzle Recoil** controls
-recoil independently. Both default OFF and require a game restart. Their INI
-keys remain `[SinglePlayer] MuzzleFlash` and `MeshRecoil`.
+recoil independently. Both default ON in the shipped preset since revision 10
+(2026-10-26), which also migrates installs still at the old shipped 0; they do
+nothing unless a weapon or craft ODF configures them. Changes require a game
+restart. Their INI keys remain `[SinglePlayer] MuzzleFlash` and `MeshRecoil`.
+**Shell Casings** (`[General] ShellCasings`) sits beside them and stays OFF.
 
 Turning a switch on grants permission to use authored ODF configuration; it
 does not add a generic effect to stock weapons. Mesh flashes need matching

@@ -368,6 +368,15 @@ namespace BZROpenShim
             { "Terrain", "TerrainMicroRelief", "1", "0" },
         };
 
+        // Revision 9 -> 10. Authored muzzle flashes and recoil turned on by
+        // default at the user's request on 2026-10-26, so a Campaign
+        // Reimagined subscriber sees the effects its ODFs configure. Both are
+        // inert for unconfigured weapons. Only the shipped 0 moves.
+        const SurgicalEntry kRevision9SurgicalTable[] = {
+            { "SinglePlayer", "MuzzleFlash", "0", "1" },
+            { "SinglePlayer", "MeshRecoil", "0", "1" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -405,6 +414,9 @@ namespace BZROpenShim
             if (fromRevision <= 8)
                 append(kRevision8SurgicalTable,
                        sizeof(kRevision8SurgicalTable) / sizeof(kRevision8SurgicalTable[0]));
+            if (fromRevision <= 9)
+                append(kRevision9SurgicalTable,
+                       sizeof(kRevision9SurgicalTable) / sizeof(kRevision9SurgicalTable[0]));
             return entries;
         }
 

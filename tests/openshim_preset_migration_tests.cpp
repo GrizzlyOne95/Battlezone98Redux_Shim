@@ -709,6 +709,47 @@ int main()
               "6i: revision 7 file chains 0 -> 1 -> 0");
     }
 
+    // 6j. Revision 9 -> 10: authored muzzle flashes and recoil became the
+    // default. The shipped 0s move once; casings and later choices are kept.
+    {
+        fs::path canonical = tmpRoot / "canonical6j.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        fs::path off = tmpRoot / "rev9_fx_off.ini";
+        WriteLines(off, {
+            "; OpenShimPresetRevision = 9",
+            "",
+            "[General]",
+            "ShellCasings = 0",
+            "",
+            "[SinglePlayer]",
+            "MuzzleFlash = 0",
+            "MeshRecoil = 0",
+        });
+        auto r = MigratePresetFileIfNeeded(off, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 9,
+              "6j: revision 9 file is migrated");
+        Check(FileContains(off, "MuzzleFlash = 1") && FileContains(off, "MeshRecoil = 1"),
+              "6j: shipped flash and recoil off become on");
+        Check(FileContains(off, "ShellCasings = 0"),
+              "6j: casings stay off");
+        Check(FileContains(off, CurrentRevisionMarker()),
+              "6j: marker is the current revision");
+
+        fs::path chosen = tmpRoot / "rev10_fx_off.ini";
+        WriteLines(chosen, {
+            "; " + CurrentRevisionMarker(),
+            "",
+            "[SinglePlayer]",
+            "MuzzleFlash = 0",
+            "MeshRecoil = 0",
+        });
+        auto again = MigratePresetFileIfNeeded(chosen, canonical);
+        Check(again.action == MigrationAction::None &&
+                  FileContains(chosen, "MuzzleFlash = 0") &&
+                  FileContains(chosen, "MeshRecoil = 0"),
+              "6j: flash and recoil off chosen after the revision are respected");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";

@@ -470,6 +470,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required." },
+    // Absent key = off, so defaultIndex 1 selects "0" (Off).
+    { "Shell Casings", "General", "ShellCasings", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::RestartRequired,
+      "Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required." },
     // Absent key = on, so defaultIndex 0 selects "1" (On).
     { "GPU Skinning", "Experimental", "GpuSkinning", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,

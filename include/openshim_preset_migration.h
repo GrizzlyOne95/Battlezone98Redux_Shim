@@ -69,6 +69,13 @@
 //              Redux chosen after this revision is stamped, is kept. Enhanced
 //              still resolves to Redux off DX11 or without a verified set.
 //
+//   Revision 10: authored muzzle flashes and recoil turned on by default at
+//              the user's request on 2026-10-26:
+//                 SinglePlayer/MuzzleFlash        = 1  (was 0)
+//                 SinglePlayer/MeshRecoil         = 1  (was 0)
+//              Both stay inert unless a mod's ODFs configure them. Only the
+//              old shipped 0 moves. ShellCasings stays opt-in.
+//
 // Migration policy is implemented here so it works for:
 //   - Campaign Reimagined Workshop users
 //   - standalone OpenShim releases
@@ -83,7 +90,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 9;
+    constexpr int kCurrentPresetRevision = 10;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset as a Windows checkout
