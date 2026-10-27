@@ -35,6 +35,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Bug pack map staging failed.' }
 $scenarioName = @{ MissionEnd = 'mpbugs-mission-end.ps1'; HostLeave = 'mpbugs-host-leave.ps1'; Weapons = 'mpbugs-weapons.ps1' }[$Case]
 # The clients inherit this process's environment.
 if ($Case -eq 'Weapons' -and -not $NoTrace) { $env:OPENSHIM_TRACE_MPAUTH = '1' }
+# The Stock arm turns the case's OpenShim fix off in each instance's ini, so a
+# fixed build still shows the stock defect. Needs Prepare (no -SkipPrepare).
+$stockOff = @{ MissionEnd = 'Fixes.MissionEndSync=0' }[$Case]
+if ($Expect -eq 'Stock' -and $stockOff) {
+    if ($SkipPrepare) { throw "-Expect Stock for $Case writes the instance ini; drop -SkipPrepare." }
+    $env:BZRCOOP_INI_SET = (@($env:BZRCOOP_INI_SET, $stockOff) | Where-Object { $_ }) -join ';'
+}
 $scenario = Join-Path $override $scenarioName
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('coopflow\scenarios\' + $scenarioName)) -Destination $scenario
 $ScenarioArgs = $ScenarioArgs.Clone()
