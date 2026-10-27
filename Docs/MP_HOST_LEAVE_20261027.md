@@ -56,3 +56,4 @@ Only patched peers change. An unpatched guest still loses the AI.
 | --- | --- |
 | `mpbugs-hl-fixed-1` (2 players) | **Pass**, 21 checks. The host (player 1, team 1) quit. c1 kept 13 of its objects, became host, took them over, and suppressed Game Over. AI craft on c1: 7 before the leave, 7 just after, 7 at the end. The AI kept moving and fighting. |
 | `mpbugs-hl3-fixed-1` (3 players) | **Pass**, 35 checks. Both guests kept all 7 AI craft and saw them move and take damage. c1 (player 2) became host and took over. When c1 closed at the end of the run, c2 also kept c1's 8 objects, became host and took them over: migration chains. |
+| `mpbugs-hl-stock-1` (`-Expect Stock`, fix off) | **Pass**, 20 checks, 0 failed: with the fix off the stock defect still reproduces, so the fix is what changes the outcome. |
