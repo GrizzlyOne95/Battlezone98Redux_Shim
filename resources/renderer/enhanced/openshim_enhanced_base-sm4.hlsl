@@ -1276,8 +1276,30 @@ void base_fragment(
     float3 viewNormal = safe_normalize(vViewNormal);
 #endif
 
+#if defined(ACT_MAP_ENABLED) && defined(IBL_ENABLED)
+    // Baked mesh maps on UV0: r = ambient occlusion, g = curvature (0.5 flat),
+    // b = thickness. Materials without one bind a neutral (1, 0.5, 1) texture.
+    // AO fully darkens indirect light and, by OSE_ACT_DIRECT_AO, direct light;
+    // curvature adds a cavity term on top.
+    float3 actSample = actMap.Sample(actSam, vTexCoord).rgb;
+    float bakedAO = lerp(1.0, actSample.r, OSE_ACT_AO_STRENGTH);
+    float directAO = lerp(1.0, bakedAO, OSE_ACT_DIRECT_AO);
+    float actConcave = saturate((0.5 - actSample.g) * 4.0);
+    float actConvex = saturate((actSample.g - 0.5) * 4.0);
+    float cavity = 1.0 - OSE_ACT_CAVITY * actConcave;
+    // Weather exposure: open faces take full rain/snow, sheltered ones less.
+    float actExposure = lerp(0.3, 1.0, smoothstep(0.3, 0.85, actSample.r));
+#else
+    float bakedAO = 1.0;
+    float directAO = 1.0;
+    float cavity = 1.0;
+    float actConcave = 0.0;
+    float actConvex = 0.0;
+    float actExposure = 1.0;
+#endif
+
 #if defined(ENHANCED_MODE) && OSE_ENHANCED_LOD_TIER == 0
-    viewNormal = ose_water_normal(viewPos, viewNormal, saturate(surfaceState.x),
+    viewNormal = ose_water_normal(viewPos, viewNormal, saturate(surfaceState.x) * actExposure,
                                  surfaceViewToLocal, surfaceRainTime, reactiveWater);
 #endif
 
@@ -1289,8 +1311,21 @@ void base_fragment(
         float snowUp = mul(inverseViewMatrix, float4(lerp(snowGeometric, viewNormal, 0.35), 0.0)).y;
         float3 snowLocal = mul(surfaceViewToLocal, float4(viewPos, 1.0)).xyz;
         snowCover = ose_snow_cover(snowUp, ose_snow_noise(snowLocal.xz * 0.7 + snowLocal.y * 0.5), surfaceSnow.x);
+        // Little reaches under overhangs, and wind strips sharp edges.
+        snowCover *= actExposure * (1.0 - 0.5 * actConvex);
         // Snow fills panel lines: flatten the mapped normal under it.
         viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.3));
+    }
+    // Dust settles on tops and, with an ACT map, in occluded corners and
+    // creases; rain washes it off.
+    float dustCover = 0.0;
+    if (surfaceDust.w > 0.002)
+    {
+        float dustUp = mul(inverseViewMatrix, float4(safe_normalize(vViewNormal), 0.0)).y;
+        float3 dustLocal = mul(surfaceViewToLocal, float4(viewPos, 1.0)).xyz;
+        float dustNoise = ose_snow_noise(dustLocal.xz * 1.3 + dustLocal.y * 0.9);
+        dustCover = ose_dust_cover(dustUp, dustNoise, 1.0 - actExposure, actConcave, surfaceDust.w);
+        dustCover *= 1.0 - saturate(surfaceState.x);
     }
 #endif
 
@@ -1309,10 +1344,13 @@ void base_fragment(
 
 #if defined(ENHANCED_MODE)
     surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), snowCover);
+    surfaceF0 = lerp(surfaceF0, float3(0.03, 0.03, 0.03), dustCover);
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = derive_legacy_roughness(materialShininess, specularMask);
-    surfaceRoughness = lerp(surfaceRoughness, max(0.13, surfaceRoughness * 0.48), saturate(surfaceState.x));
+    surfaceRoughness = lerp(surfaceRoughness, max(0.13, surfaceRoughness * 0.48),
+                            saturate(surfaceState.x * (actExposure + actConcave)));
     surfaceRoughness = lerp(surfaceRoughness, 0.75, snowCover);
+    surfaceRoughness = lerp(surfaceRoughness, 0.9, dustCover);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
 #endif
@@ -1323,21 +1361,6 @@ void base_fragment(
 #endif
 
     float3 eyeDir = safe_normalize(-viewPos);
-
-#if defined(ACT_MAP_ENABLED) && defined(IBL_ENABLED)
-    // Baked mesh maps on UV0: r = ambient occlusion, g = curvature (0.5 flat),
-    // b = thickness. Materials without one bind a neutral (1, 0.5, 1) texture.
-    // AO fully darkens indirect light and, by OSE_ACT_DIRECT_AO, direct light;
-    // curvature adds a cavity term on top.
-    float3 actSample = actMap.Sample(actSam, vTexCoord).rgb;
-    float bakedAO = lerp(1.0, actSample.r, OSE_ACT_AO_STRENGTH);
-    float directAO = lerp(1.0, bakedAO, OSE_ACT_DIRECT_AO);
-    float cavity = 1.0 - OSE_ACT_CAVITY * saturate((0.5 - actSample.g) * 4.0);
-#else
-    float bakedAO = 1.0;
-    float directAO = 1.0;
-    float cavity = 1.0;
-#endif
 
 #if defined(OG_RETRO_MODE)
     float sunTerm = 0.0;
@@ -1579,7 +1602,14 @@ void base_fragment(
 #if !OSE_LINEAR_LIGHT_ACTIVE
     snowAlbedo = sqrt(snowAlbedo);
 #endif
-    oColor.xyz = lightResult.xyz * ose_snow_blend(diffuseTex.xyz * diffuseColor.xyz, snowAlbedo, snowCover);
+    float3 dustAlbedo = surfaceDust.rgb;
+#if !OSE_LINEAR_LIGHT_ACTIVE
+    dustAlbedo = sqrt(dustAlbedo);
+#endif
+    float3 weathered = ose_dust_blend(diffuseTex.xyz * diffuseColor.xyz, dustAlbedo, dustCover);
+    // Standing water darkens the creases it collects in.
+    weathered *= 1.0 - 0.2 * saturate(surfaceState.x) * actConcave;
+    oColor.xyz = lightResult.xyz * ose_snow_blend(weathered, snowAlbedo, snowCover);
 #else
     oColor.xyz = lightResult.xyz * diffuseTex.xyz * diffuseColor.xyz;
 #endif

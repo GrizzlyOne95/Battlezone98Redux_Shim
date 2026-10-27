@@ -13,7 +13,7 @@
     uniform float4 surfaceMuzzle0, uniform float4 surfaceMuzzle1, \
     uniform float4 surfaceBarrel0, uniform float4 surfaceBarrel1, \
     uniform float4x4 surfaceViewToLocal, uniform float surfaceRainTime, \
-    uniform float4 surfaceSnow,
+    uniform float4 surfaceSnow, uniform float4 surfaceDust,
 #else
 #define OSE_SURFACE_UNIFORMS
 #endif
@@ -123,6 +123,25 @@ float ose_snow_cover(float up, float noise, float amount)
     if (amount < 0.002) return 0.0;
     float threshold = lerp(1.05, 0.15, amount);
     return smoothstep(threshold, threshold + 0.25, up + noise * 0.30) * min(1.0, amount * 4.0);
+}
+
+// Dust: surfaceDust rgb is the linear dust colour, w the amount. Up-facing
+// faces collect it first; sheltered (1 - AO exposure) and concave texels
+// collect it even on slopes. Tops out at 75% so markings still read.
+float ose_dust_cover(float up, float noise, float shelter, float concave, float amount)
+{
+    amount = saturate(amount);
+    if (amount < 0.002) return 0.0;
+    float settle = smoothstep(lerp(0.9, 0.1, amount), 1.0, up + noise * 0.35);
+    float trapped = saturate(shelter * 1.2 + concave * 0.8) * smoothstep(-0.6, 0.3, up);
+    return saturate(max(settle, trapped) * (0.55 + noise * 0.45)) * min(1.0, amount * 3.0) * 0.75;
+}
+
+// The dust keeps a third of the surface luminance pattern.
+float3 ose_dust_blend(float3 surface, float3 dustColour, float cover)
+{
+    float luma = dot(surface, float3(0.299, 0.587, 0.114));
+    return lerp(surface, dustColour * lerp(1.0, saturate(luma * 2.2), 0.33), cover);
 }
 
 // Object-space push (metres) for fully covered vertices.
