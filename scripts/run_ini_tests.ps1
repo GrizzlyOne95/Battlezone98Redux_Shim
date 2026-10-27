@@ -300,6 +300,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # lost reliable message is resent at once. Same wire format. Default on
     # 2026-10-19 at the user's request after the 2026-10-10 matrices.
     "Network/EarlyNakAccept",
+    # Keeps the match when only the lobby websocket drops while P2P is live;
+    # inert unless the websocket closes mid-mission, and a real P2P loss still
+    # ends the session through the stock ping check. Added 2026-10-26.
+    "Network/LobbyDropKeepsMatch",
     # Editor-only: routes World Builder saves to the map's source folder
     # behind an actual-destination prompt. Inert outside /edit saves.
     "General/EditorSaveToSourceFolder",
@@ -414,6 +418,7 @@ $stockValueChecks = @{
     "Network/EarlyNakAccept" = "1"
     "Network/EarlyNakHoldoffMs" = "300"
     "Network/EarlyNakReorderMs" = "0"
+    "Network/LobbyDropKeepsMatch" = "1"
     "SinglePlayer/HeadlightColor" = "Stock"
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightBrightness" = "1.00"

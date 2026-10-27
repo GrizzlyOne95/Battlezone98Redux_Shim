@@ -20,6 +20,7 @@
 #include "cli_multiparam_parser.h"
 #include "redux_compatibility.h"
 #include "p2p_reliable_send_fix.h"
+#include "lobby_drop_keeps_match.h"
 #include "shell_casing_config.h"
 #include "weapon_presentation_call_bridges.h"
 #include "weapon_presentation_native.h"
@@ -1206,6 +1207,12 @@ namespace BZROpenShim
                 target = static_cast<uint32_t>(
                     reinterpret_cast<uintptr_t>(Hooks::GetShellCasingShotBridgeAddress()));
                 Log(L"[SHELLCASINGS] %hs redirected site=0x%08X factory=%p\n", p.name.c_str(), p.address - 1, original);
+            }
+            else if (Hooks::IsLobbyDropKeepsMatchPatchName(p.name.c_str())) {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                target = Hooks::PrepareLobbyDropKeepsMatchHook(p.name.c_str(), p.address - 1, original);
             }
             else if (p.name == "HoverCraft Turbo Sound Stop Guard") {
                 void* original = isSteam

@@ -949,8 +949,13 @@ function Restore-BZROgreConfig {
 # invokes another (run_shim_ab_presentmon.ps1 calls run_live_combat_benchmark.ps1):
 # the inner call inherits the variable and skips acquisition, so the outer run
 # keeps the single lock for its whole duration.
+#
+# BZR_LAUNCH_LOCK_TIMEOUT_SECONDS lets a long batch queue behind another one
+# instead of failing after the default 30 minutes.
 if (-not $env:BZR_LAUNCH_LOCK_HELD) {
-    $global:BZRAutoLock = Enter-BZRLaunchLock
+    $lockTimeout = 1800
+    if ($env:BZR_LAUNCH_LOCK_TIMEOUT_SECONDS -match '^\d+$') { $lockTimeout = [int]$env:BZR_LAUNCH_LOCK_TIMEOUT_SECONDS }
+    $global:BZRAutoLock = Enter-BZRLaunchLock -TimeoutSeconds $lockTimeout
     $env:BZR_LAUNCH_LOCK_HELD = $PID
 }
 

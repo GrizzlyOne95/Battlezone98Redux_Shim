@@ -467,6 +467,23 @@ static const float OSE_IBL_SCENE_TINT_STRENGTH = 0.18;
 // openshim_ibl_neutral_prefilter.dds is authored at 128px with mips 0..7.
 static const float OSE_IBL_MAX_SPECULAR_MIP = 7.0;
 
+// ACT_MAP_ENABLED (set by a mod's own program wrapper, e.g. Campaign
+// Reimagined) binds one more texture after brdfLut: baked AO/curvature/
+// thickness. 1 = full baked AO on indirect light, 0 = ignore it.
+#ifndef OSE_ACT_AO_STRENGTH
+#define OSE_ACT_AO_STRENGTH 1.0
+#endif
+// Share of the baked AO also applied to direct (sun/local) light. Not
+// physical, but without it crevices on sunlit faces never read.
+#ifndef OSE_ACT_DIRECT_AO
+#define OSE_ACT_DIRECT_AO 0.4
+#endif
+// Cavity darkening from the curvature channel (concave texels, g < 0.5)
+// on the whole lit surface, specular included.
+#ifndef OSE_ACT_CAVITY
+#define OSE_ACT_CAVITY 0.35
+#endif
+
 // -----------------------------------------------------------------------------
 // DX11 Enhanced Atmospheric Calibration
 // -----------------------------------------------------------------------------
@@ -870,6 +887,10 @@ void ComputeSpotlightTerms(
 void base_vertex(
     uniform float4x4 wvpMat,
     uniform float4x4 worldViewMat,
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    uniform float4x4 worldMat,
+    uniform float4 surfaceSnow,
+#endif
 
 #if defined(SHADOWRECEIVER)
     uniform float4x4 texWorldViewProj1,
@@ -925,6 +946,17 @@ void base_vertex(
     out float4 oPosition : SV_POSITION
 )
 {
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    // Snow thickness: faces the fragment stage covers are pushed out along
+    // their normal by the same cover term, so drifts stand off the hull.
+    if (surfaceSnow.x > 0.002 && dot(iNormal, iNormal) > 1e-8)
+    {
+        float3 snowNormal = normalize(iNormal);
+        float snowUp = normalize(mul(worldMat, float4(snowNormal, 0.0)).xyz).y;
+        float cover = ose_snow_cover(snowUp, ose_snow_noise(iPosition.xz * 0.7 + iPosition.y * 0.5), surfaceSnow.x);
+        iPosition.xyz += snowNormal * (OSE_SNOW_THICKNESS * cover);
+    }
+#endif
     oPosition = mul(wvpMat, iPosition);
     vTexCoord = iTexCoord;
 
@@ -1022,6 +1054,10 @@ void base_fragment(
     uniform SamplerState prefilteredEnvSam : register(s8),
     uniform Texture2D brdfLut : register(t9),
     uniform SamplerState brdfLutSam : register(s9),
+#if defined(ACT_MAP_ENABLED)
+    uniform Texture2D actMap : register(t10),
+    uniform SamplerState actSam : register(s10),
+#endif
 #elif defined(SHADOWRECEIVER)
     uniform TextureCube irradianceMap : register(t5),
     uniform SamplerState irradianceSam : register(s5),
@@ -1029,6 +1065,10 @@ void base_fragment(
     uniform SamplerState prefilteredEnvSam : register(s6),
     uniform Texture2D brdfLut : register(t7),
     uniform SamplerState brdfLutSam : register(s7),
+#if defined(ACT_MAP_ENABLED)
+    uniform Texture2D actMap : register(t8),
+    uniform SamplerState actSam : register(s8),
+#endif
 #else
     uniform TextureCube irradianceMap : register(t4),
     uniform SamplerState irradianceSam : register(s4),
@@ -1036,6 +1076,10 @@ void base_fragment(
     uniform SamplerState prefilteredEnvSam : register(s5),
     uniform Texture2D brdfLut : register(t6),
     uniform SamplerState brdfLutSam : register(s6),
+#if defined(ACT_MAP_ENABLED)
+    uniform Texture2D actMap : register(t7),
+    uniform SamplerState actSam : register(s7),
+#endif
 #endif
     uniform float4x4 inverseViewMatrix,
 #elif defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
@@ -1177,6 +1221,10 @@ void base_fragment(
 #endif
 #endif
 
+#if defined(ENHANCED_MODE)
+    float snowCover = 0.0;
+#endif
+
 #if defined(VERTEX_LIGHTING)
 
 #if defined(OG_RETRO_MODE)
@@ -1228,9 +1276,57 @@ void base_fragment(
     float3 viewNormal = safe_normalize(vViewNormal);
 #endif
 
+#if defined(ACT_MAP_ENABLED) && defined(IBL_ENABLED)
+    // Baked mesh maps on UV0: r = ambient occlusion, g = curvature (0.5 flat),
+    // b = thickness. Materials without one bind a neutral (1, 0.5, 1) texture.
+    // AO fully darkens indirect light and, by OSE_ACT_DIRECT_AO, direct light;
+    // curvature adds a cavity term on top.
+    float3 actSample = actMap.Sample(actSam, vTexCoord).rgb;
+    float bakedAO = lerp(1.0, actSample.r, OSE_ACT_AO_STRENGTH);
+    float directAO = lerp(1.0, bakedAO, OSE_ACT_DIRECT_AO);
+    float actConcave = saturate((0.5 - actSample.g) * 4.0);
+    float actConvex = saturate((actSample.g - 0.5) * 4.0);
+    float cavity = 1.0 - OSE_ACT_CAVITY * actConcave;
+    // Weather exposure: open faces take full rain/snow, sheltered ones less.
+    float actExposure = lerp(0.3, 1.0, smoothstep(0.3, 0.85, actSample.r));
+#else
+    float bakedAO = 1.0;
+    float directAO = 1.0;
+    float cavity = 1.0;
+    float actConcave = 0.0;
+    float actConvex = 0.0;
+    float actExposure = 1.0;
+#endif
+
 #if defined(ENHANCED_MODE) && OSE_ENHANCED_LOD_TIER == 0
-    viewNormal = ose_water_normal(viewPos, viewNormal, saturate(surfaceState.x),
+    viewNormal = ose_water_normal(viewPos, viewNormal, saturate(surfaceState.x) * actExposure,
                                  surfaceViewToLocal, surfaceRainTime, reactiveWater);
+#endif
+
+#if defined(ENHANCED_MODE)
+    // Uniform-only branch: zero snow costs nothing and keeps the source.
+    if (surfaceSnow.x > 0.002)
+    {
+        float3 snowGeometric = safe_normalize(vViewNormal);
+        float snowUp = mul(inverseViewMatrix, float4(lerp(snowGeometric, viewNormal, 0.35), 0.0)).y;
+        float3 snowLocal = mul(surfaceViewToLocal, float4(viewPos, 1.0)).xyz;
+        snowCover = ose_snow_cover(snowUp, ose_snow_noise(snowLocal.xz * 0.7 + snowLocal.y * 0.5), surfaceSnow.x);
+        // Little reaches under overhangs, and wind strips sharp edges.
+        snowCover *= actExposure * (1.0 - 0.5 * actConvex);
+        // Snow fills panel lines: flatten the mapped normal under it.
+        viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.3));
+    }
+    // Dust settles on tops and, with an ACT map, in occluded corners and
+    // creases; rain washes it off.
+    float dustCover = 0.0;
+    if (surfaceDust.w > 0.002)
+    {
+        float dustUp = mul(inverseViewMatrix, float4(safe_normalize(vViewNormal), 0.0)).y;
+        float3 dustLocal = mul(surfaceViewToLocal, float4(viewPos, 1.0)).xyz;
+        float dustNoise = ose_snow_noise(dustLocal.xz * 1.3 + dustLocal.y * 0.9);
+        dustCover = ose_dust_cover(dustUp, dustNoise, 1.0 - actExposure, actConcave, surfaceDust.w);
+        dustCover *= 1.0 - saturate(surfaceState.x);
+    }
 #endif
 
 #if defined(SPECULARMAP_ENABLED)
@@ -1247,9 +1343,14 @@ void base_fragment(
 #endif
 
 #if defined(ENHANCED_MODE)
+    surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), snowCover);
+    surfaceF0 = lerp(surfaceF0, float3(0.03, 0.03, 0.03), dustCover);
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = derive_legacy_roughness(materialShininess, specularMask);
-    surfaceRoughness = lerp(surfaceRoughness, max(0.13, surfaceRoughness * 0.48), saturate(surfaceState.x));
+    surfaceRoughness = lerp(surfaceRoughness, max(0.13, surfaceRoughness * 0.48),
+                            saturate(surfaceState.x * (actExposure + actConcave)));
+    surfaceRoughness = lerp(surfaceRoughness, 0.75, snowCover);
+    surfaceRoughness = lerp(surfaceRoughness, 0.9, dustCover);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
 #endif
@@ -1272,7 +1373,7 @@ void base_fragment(
 #elif defined(IBL_ENABLED)
     // Keep a small amount of the legacy flat ambient as a safety floor while the
     // directional irradiance cubemap becomes the primary ambient source.
-    float3 lightResult = sceneAmbient.xyz * OSE_IBL_LEGACY_AMBIENT_RETAIN;
+    float3 lightResult = sceneAmbient.xyz * OSE_IBL_LEGACY_AMBIENT_RETAIN * bakedAO;
 #else
     float3 lightResult = sceneAmbient.xyz;
 #endif
@@ -1412,6 +1513,12 @@ void base_fragment(
 
 #endif
 
+    // Ambient and lights so far; the IBL terms below carry their own AO.
+    lightResult.xyz *= directAO;
+#if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
+    specularResult.xyz *= directAO;
+#endif
+
 #if defined(IBL_ENABLED) && (defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED))
     // Split-sum static IBL. Direct-light GGX remains unchanged above; this only
     // replaces most of the flat ambient/grazing approximation with directional
@@ -1426,7 +1533,7 @@ void base_fragment(
 
     float3 environmentTint = ibl_scene_tint(sceneAmbient.xyz, fogColour.xyz);
     float3 irradiance = irradianceMap.Sample(irradianceSam, worldNormal).xyz * environmentTint;
-    lightResult.xyz += irradiance * diffuseEnergy * OSE_IBL_DIFFUSE_INTENSITY;
+    lightResult.xyz += irradiance * diffuseEnergy * OSE_IBL_DIFFUSE_INTENSITY * bakedAO;
 
     float specularMip = saturate(surfaceRoughness) * OSE_IBL_MAX_SPECULAR_MIP;
     float3 prefilteredEnvironment = prefilteredEnvMap.SampleLevel(
@@ -1437,9 +1544,11 @@ void base_fragment(
         brdfLutSam,
         float2(NdotVForIBL, saturate(surfaceRoughness))).rg;
 
+    // Lagarde specular occlusion: crevices stop reflecting the open sky.
+    float specularAO = saturate(pow(max(NdotVForIBL + bakedAO, 1e-4), exp2(-16.0 * surfaceRoughness - 1.0)) - 1.0 + bakedAO);
     specularResult.xyz += prefilteredEnvironment
                         * (surfaceF0 * environmentBRDF.x + environmentBRDF.y)
-                        * OSE_IBL_SPECULAR_INTENSITY;
+                        * OSE_IBL_SPECULAR_INTENSITY * specularAO;
 #if OSE_ENHANCED_LOD_TIER == 0
     if (reactiveWater.w > 0.002)
     {
@@ -1488,10 +1597,28 @@ void base_fragment(
     // diffuseTex.a is coverage and stays in its numerical space.
     diffuseTex.rgb = srgb_to_linear(diffuseTex.rgb);
 #endif
+#if defined(ENHANCED_MODE)
+    float3 snowAlbedo = ose_snow_albedo(surfaceSnow);
+#if !OSE_LINEAR_LIGHT_ACTIVE
+    snowAlbedo = sqrt(snowAlbedo);
+#endif
+    float3 dustAlbedo = surfaceDust.rgb;
+#if !OSE_LINEAR_LIGHT_ACTIVE
+    dustAlbedo = sqrt(dustAlbedo);
+#endif
+    float3 weathered = ose_dust_blend(diffuseTex.xyz * diffuseColor.xyz, dustAlbedo, dustCover);
+    // Standing water darkens the creases it collects in.
+    weathered *= 1.0 - 0.2 * saturate(surfaceState.x) * actConcave;
+    oColor.xyz = lightResult.xyz * ose_snow_blend(weathered, snowAlbedo, snowCover);
+#else
     oColor.xyz = lightResult.xyz * diffuseTex.xyz * diffuseColor.xyz;
+#endif
 
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     oColor.xyz += specularResult.xyz;
+#endif
+#if defined(ACT_MAP_ENABLED) && defined(IBL_ENABLED)
+    oColor.xyz *= cavity;
 #endif
 
     float3 emissiveContribution = float3(0.0, 0.0, 0.0);
