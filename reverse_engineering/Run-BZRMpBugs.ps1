@@ -24,6 +24,8 @@ param([Parameter(Mandatory)][ValidateSet('MissionEnd','HostLeave','Weapons')][st
       [switch]$NoTrace,
       # Reuse the prepared C:\BZRCoop instances instead of re-mirroring the install.
       [switch]$SkipPrepare,
+      # Deploy this repository's Release build into the instances (with Prepare).
+      [string]$OpenShimRepo = '',
       [string]$RunName = ('mpbugs-' + $Case.ToLower() + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss')),
       [int]$InheritedLaunchLockOwner = 0)
 $ErrorActionPreference = 'Stop'
@@ -41,6 +43,6 @@ $ScenarioArgs.Expect = $Expect
     -MapListY 99 -ContentOverride $override -Clients $Clients -SkipPrepare:$SkipPrepare -MuteClients `
     -MaxNetworkLogging:$MaxNetworkLogging -RunName $RunName -Python $Python -Impair $Impair `
     -AllowNoAudioEndpoint:$AllowNoAudioEndpoint -AllowOtherGames:$AllowOtherGames `
-    -InheritedLaunchLockOwner $InheritedLaunchLockOwner -HardTimeoutSeconds 1500 `
+    -InheritedLaunchLockOwner $InheritedLaunchLockOwner -HardTimeoutSeconds 1500 -OpenShimRepo $OpenShimRepo `
     -ScenarioArgs $ScenarioArgs
 exit $LASTEXITCODE

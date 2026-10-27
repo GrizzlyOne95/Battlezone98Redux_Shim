@@ -37,6 +37,9 @@
 // the file is deleted as the loss fires, so each write is one loss), and
 // OPENSHIM_TEST_D3D11_UNSTABLE_MS (default 4000) makes probes fail for that
 // long afterwards, so the settle loop has a reset to wait out.
+// OPENSHIM_TEST_D3D11_DEBUG_LAYER=1 creates the renderer's devices with the
+// D3D11 debug layer, logs the messages it stores (the first few of each ID)
+// and logs GetDeviceRemovedReason once the device reports itself removed.
 #include "bool_token.h"
 #include "com_vtable_patch.h"
 #include "d3d11_buffer_restore.h"
@@ -54,6 +57,8 @@
 #include <cstdlib>
 #include <mutex>
 #include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -104,6 +109,12 @@ namespace BZROpenShim
         FnGetDeviceRemovedReason g_RealGetDeviceRemovedReason = nullptr;
 
         uintptr_t g_DiscoveryThread = 0;
+
+        // Debug-layer test state.
+        constexpr DWORD kDebugPollMs = 200;
+        constexpr unsigned kDebugRepeatsPerId = 3;
+        constexpr unsigned kDebugMessageCap = 2000;
+        bool g_TestDebugLayer = false;
 
         DWORD ReadEnvMs(const char* name, DWORD fallback)
         {
@@ -326,6 +337,94 @@ namespace BZROpenShim
                      g_TestLossFile[0] ? " or once this file exists: " : "", g_TestLossFile);
         }
 
+        const char* DebugSeverityName(D3D11_MESSAGE_SEVERITY severity)
+        {
+            switch (severity)
+            {
+            case D3D11_MESSAGE_SEVERITY_CORRUPTION: return "CORRUPTION";
+            case D3D11_MESSAGE_SEVERITY_ERROR: return "ERROR";
+            case D3D11_MESSAGE_SEVERITY_WARNING: return "WARNING";
+            case D3D11_MESSAGE_SEVERITY_INFO: return "INFO";
+            default: return "MESSAGE";
+            }
+        }
+
+        const char* RemovedReasonName(HRESULT hr)
+        {
+            switch (hr)
+            {
+            case DXGI_ERROR_DEVICE_HUNG: return "DXGI_ERROR_DEVICE_HUNG";
+            case DXGI_ERROR_DEVICE_REMOVED: return "DXGI_ERROR_DEVICE_REMOVED";
+            case DXGI_ERROR_DEVICE_RESET: return "DXGI_ERROR_DEVICE_RESET";
+            case DXGI_ERROR_DRIVER_INTERNAL_ERROR: return "DXGI_ERROR_DRIVER_INTERNAL_ERROR";
+            case DXGI_ERROR_INVALID_CALL: return "DXGI_ERROR_INVALID_CALL";
+            default: return "unknown";
+            }
+        }
+
+        // Polls the device Ogre kept last. The info queue is drained from this
+        // thread while the game renders; this is test-only, so that is accepted.
+        unsigned __stdcall DebugLayerMonitorProc(void*)
+        {
+            std::unordered_map<int, unsigned> seen;
+            std::vector<char> buffer;
+            unsigned logged = 0;
+            unsigned suppressed = 0;
+            ID3D11Device* reportedRemoved = nullptr;  // compared only, never dereferenced
+            for (;;)
+            {
+                Sleep(kDebugPollMs);
+                ID3D11Device* device = nullptr;
+                {
+                    std::lock_guard<std::mutex> lock(g_Mutex);
+                    device = g_LastDevice;
+                    if (device)
+                        device->AddRef();
+                }
+                if (!device)
+                    continue;
+
+                ID3D11InfoQueue* queue = nullptr;
+                if (SUCCEEDED(device->QueryInterface(__uuidof(ID3D11InfoQueue), reinterpret_cast<void**>(&queue))))
+                {
+                    const UINT64 count = queue->GetNumStoredMessagesAllowedByRetrievalFilter();
+                    for (UINT64 i = 0; i < count; ++i)
+                    {
+                        SIZE_T length = 0;
+                        if (FAILED(queue->GetMessage(i, nullptr, &length)) || length < sizeof(D3D11_MESSAGE))
+                            continue;
+                        buffer.resize(length);
+                        auto* message = reinterpret_cast<D3D11_MESSAGE*>(buffer.data());
+                        if (FAILED(queue->GetMessage(i, message, &length)))
+                            continue;
+                        if (++seen[message->ID] > kDebugRepeatsPerId || logged >= kDebugMessageCap)
+                        {
+                            ++suppressed;
+                            continue;
+                        }
+                        ++logged;
+                        LogShimA(message->Severity <= D3D11_MESSAGE_SEVERITY_ERROR ? LogLevel::Warn : LogLevel::Info,
+                                 kComponent, "[DX11 Debug] %s #%d (category %d): %.*s",
+                                 DebugSeverityName(message->Severity), static_cast<int>(message->ID),
+                                 static_cast<int>(message->Category), static_cast<int>(message->DescriptionByteLength),
+                                 message->pDescription ? message->pDescription : "");
+                    }
+                    queue->ClearStoredMessages();
+                    queue->Release();
+                }
+
+                const HRESULT reason = device->GetDeviceRemovedReason();
+                if (reason != S_OK && device != reportedRemoved)
+                {
+                    reportedRemoved = device;
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "[DX11 Debug] device 0x%p removed: GetDeviceRemovedReason 0x%08lX (%s); %u debug messages logged, %u repeats suppressed",
+                             device, static_cast<unsigned long>(reason), RemovedReasonName(reason), logged, suppressed);
+                }
+                device->Release();
+            }
+        }
+
         HRESULT WINAPI HookD3D11CreateDevice(
             IDXGIAdapter* adapter, D3D_DRIVER_TYPE driverType, HMODULE software, UINT flags,
             const D3D_FEATURE_LEVEL* featureLevels, UINT featureLevelCount, UINT sdkVersion,
@@ -384,11 +483,34 @@ namespace BZROpenShim
                 }
             }
 
-            const HRESULT hr = substitute
-                ? g_RealCreateDevice(substitute, D3D_DRIVER_TYPE_UNKNOWN, nullptr, flags, featureLevels,
-                                     featureLevelCount, sdkVersion, device, featureLevel, immediateContext)
-                : g_RealCreateDevice(adapter, driverType, software, flags, featureLevels, featureLevelCount,
-                                     sdkVersion, device, featureLevel, immediateContext);
+            auto create = [&](UINT createFlags) {
+                return substitute
+                    ? g_RealCreateDevice(substitute, D3D_DRIVER_TYPE_UNKNOWN, nullptr, createFlags, featureLevels,
+                                         featureLevelCount, sdkVersion, device, featureLevel, immediateContext)
+                    : g_RealCreateDevice(adapter, driverType, software, createFlags, featureLevels, featureLevelCount,
+                                         sdkVersion, device, featureLevel, immediateContext);
+            };
+            HRESULT hr;
+            if (g_TestDebugLayer && !(flags & D3D11_CREATE_DEVICE_DEBUG))
+            {
+                hr = create(flags | D3D11_CREATE_DEVICE_DEBUG);
+                if (FAILED(hr))
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "[DX11 Debug] TEST: debug-layer device creation #%u failed hr=0x%08lX; creating without it",
+                             g_Creations, static_cast<unsigned long>(hr));
+                    hr = create(flags);
+                }
+                else
+                {
+                    LogShimA(LogLevel::Info, kComponent, "[DX11 Debug] TEST: device creation #%u uses the debug layer (flags 0x%X)",
+                             g_Creations, flags | D3D11_CREATE_DEVICE_DEBUG);
+                }
+            }
+            else
+            {
+                hr = create(flags);
+            }
             if (substitute)
                 substitute->Release();
 
@@ -463,6 +585,14 @@ namespace BZROpenShim
                             LogShimA(LogLevel::Info, kComponent,
                                      "[DX11 Recovery] installed: device recreation waits for the hardware adapter to settle (limit %lu ms)%s",
                                      kSettleLimitMs, (g_TestLossAfterMs || g_TestLossFile[0]) ? "; TEST injector enabled" : "");
+                            if (g_TestDebugLayer)
+                            {
+                                const uintptr_t monitor = _beginthreadex(nullptr, 0, DebugLayerMonitorProc, nullptr, 0, nullptr);
+                                if (monitor)
+                                    CloseHandle(reinterpret_cast<HANDLE>(monitor));
+                                LogShimA(LogLevel::Warn, kComponent,
+                                         "[DX11 Debug] TEST: D3D11 debug layer requested for the renderer's devices");
+                            }
                             return 0;
                         }
                         if (result == IatPatch::Result::NotFound)
@@ -498,6 +628,10 @@ namespace BZROpenShim
         if (fileLen == 0 || fileLen >= sizeof(g_TestLossFile))
             g_TestLossFile[0] = '\0';
         g_TestUnstableMs = ReadEnvMs("OPENSHIM_TEST_D3D11_UNSTABLE_MS", 4000);
+        char debugLayer[16] = {};
+        const DWORD debugLen = GetEnvironmentVariableA("OPENSHIM_TEST_D3D11_DEBUG_LAYER", debugLayer,
+                                                       static_cast<DWORD>(sizeof(debugLayer)));
+        g_TestDebugLayer = debugLen > 0 && debugLen < sizeof(debugLayer) && BoolToken::IsTruthy(debugLayer, debugLen);
         g_DiscoveryThread = _beginthreadex(nullptr, 0, DiscoveryThreadProc, nullptr, 0, nullptr);
     }
 }

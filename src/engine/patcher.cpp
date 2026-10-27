@@ -1601,6 +1601,7 @@ namespace BZROpenShim
         auto findAddr = [&patches](const char* n) -> uint32_t { for (const auto& p : patches) { if (p.name == n) return p.address; } return 0; };
         ResolvePointers(findAddr("Map Sorting"), findAddr("Map List Rewrite for Hop-Fix 1/3"), findAddr("Map List Rewrite for Hop-Fix 2/3"), findAddr("Map List Rewrite for Hop-Fix 3/3"), findAddr("Map List Fix Support 1/3"), findAddr("TurretCraft Aim Pitch Multiplier"), findAddr("TurretTank Aim Pitch Multiplier"), findAddr("Under Attack Alert Hook 1/2"), findAddr("Under Attack Alert Hook 2/2"), findAddr("Offensive Attack Reveal Hook"), findAddr("TurretTank Attack Reveal Hook"), isSteam);
         ResolveStaticReturnPointers();
+        TestInitDelayPoint("ResolveBzrHooks");
         ResolveBzrHooks(isSteam); InitBzrHookStrings(); SuppressStartupShellAutoLoad();
         // Fail closed on engine addresses that did not bind: drop every patch
         // whose trampoline or hook needs one before any payload is filled.
@@ -1618,6 +1619,7 @@ namespace BZROpenShim
         // Steam input binding UI hooks, and the game may crash during that
         // window if critical fixes (e.g. AutoSave +0x150 null callback) are
         // not yet installed.
+        TestInitDelayPoint("ApplyPatches");
         int app = ApplyReduxCompatibilityPatches(patches, compatibilityGate);
         patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& patch) {
             return IsReduxCompatibilityPatchName(patch.name.c_str());
@@ -1682,6 +1684,7 @@ namespace BZROpenShim
             }
         }
         SetPatchingComplete(true); SetAppliedPatchCount(app);
+        TestInitDelayPoint("PostApply");
         InstallBriefingAssetOverrides();
         if (ShouldEnableOgreMaterialCollisionGuard()) {
             InstallOgreMaterialCollisionGuard();

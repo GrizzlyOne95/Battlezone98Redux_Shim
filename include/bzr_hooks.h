@@ -32,6 +32,10 @@ namespace BZROpenShim
     // Runtime-resolved BZR pointers and helpers.
     void ResolveBzrHooks(bool isSteam);
     void RetryDeferredRuntimeHooks();
+    // Test seam: sleeps the patch thread when OPENSHIM_TEST_INIT_DELAY_AT names
+    // `point`, for OPENSHIM_TEST_INIT_DELAY_MS (1..60000). Reproduces a slow
+    // startup, which lands the installs after `point` while the shell renders.
+    void TestInitDelayPoint(const char* point);
     // OPENSHIM_NEVER_ACTIVATE: process-wide user32 activation hooks. Idempotent
     // (each call re-sweeps loaded modules); a no-op unless the flag is set.
     // See src/patches/never_activate.cpp.

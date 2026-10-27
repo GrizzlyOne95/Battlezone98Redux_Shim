@@ -157,12 +157,20 @@ function New-BZRCoopInstance {
     New-Item -ItemType Directory -Path $dir | Out-Null
 
     # openshim\ is always a per-instance copy without the install's cache:
-    # OpenShim writes its chunk mesh cache there, and a shared cache let stale
-    # entries remove every client's D3D11 device (2026-10-26). Each instance
-    # starts empty and regenerates what it needs.
+    # OpenShim writes its chunk mesh cache there, and a junction shared it with
+    # the install, other sessions and every instance. Each instance starts
+    # empty and regenerates what it needs.
     $linked = $LinkedDirs | Where-Object { $_ -ne 'openshim' }
     robocopy (Join-Path $SourceRoot 'openshim') (Join-Path $dir 'openshim') /E /XD (Join-Path $SourceRoot 'openshim\cache') /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "robocopy of openshim resources failed ($LASTEXITCODE)" }
+    # BZRCOOP_SEED_CHUNK_CACHE=<chunks dir> starts every instance from a copy of
+    # that cache instead of empty (to retest a saved cache).
+    $seed = $env:BZRCOOP_SEED_CHUNK_CACHE
+    if ($seed) {
+        if (-not (Test-Path -LiteralPath $seed -PathType Container)) { throw "BZRCOOP_SEED_CHUNK_CACHE not found: $seed" }
+        robocopy $seed (Join-Path $dir 'openshim\cache\chunks') /E /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "robocopy of the seed chunk cache failed ($LASTEXITCODE)" }
+    }
     if ($OpenShimRepo) {
         # Per-instance copies, so staging a build never writes the real install.
         $linked = $linked | Where-Object { $_ -ne 'plugins' }
