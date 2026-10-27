@@ -5967,8 +5967,33 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         ++renderFrames;
         if (next >= frames.size() || renderFrames < frames[next])
             return;
-        if (!g_ogre.getRoot || !g_ogre.getAutoCreatedWindow || !g_ogre.writeContentsToFile)
+        // The terrain worker resolves g_ogre only when a terrain feature is on,
+        // so resolve these three here too; stock runs capture as well.
+        static FnGetSingleton getRoot = nullptr;
+        static FnGetAutoCreatedWindow getAutoCreatedWindow = nullptr;
+        static FnWriteContentsToFile writeContentsToFile = nullptr;
+        if (!writeContentsToFile)
         {
+            getRoot = g_ogre.getRoot;
+            getAutoCreatedWindow = g_ogre.getAutoCreatedWindow;
+            writeContentsToFile = g_ogre.writeContentsToFile;
+        }
+        if (!writeContentsToFile)
+        {
+            if (HMODULE ogre = GetModuleHandleW(L"OgreMain.dll"))
+            {
+                getRoot = Resolve<FnGetSingleton>(ogre,
+                    "?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
+                getAutoCreatedWindow = Resolve<FnGetAutoCreatedWindow>(ogre,
+                    "?getAutoCreatedWindow@Root@Ogre@@QAEPAVRenderWindow@2@XZ");
+                writeContentsToFile = Resolve<FnWriteContentsToFile>(ogre,
+                    "?writeContentsToFile@RenderTarget@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            }
+        }
+        if (!getRoot || !getAutoCreatedWindow || !writeContentsToFile)
+        {
+            LogShimA(LogLevel::Warn, "terrain-proxy",
+                "[FRAME-CAPTURE] Ogre render-window exports unresolved; capture off");
             state = 2;
             return;
         }
@@ -5984,10 +6009,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         ++next;
         try
         {
-            void* root = g_ogre.getRoot();
-            void* window = root ? g_ogre.getAutoCreatedWindow(root) : nullptr;
+            void* root = getRoot();
+            void* window = root ? getAutoCreatedWindow(root) : nullptr;
             if (window)
-                g_ogre.writeContentsToFile(window, path);
+                writeContentsToFile(window, path);
             LogShimA(LogLevel::Info, "terrain-proxy",
                 "[FRAME-CAPTURE] frame=%u window=%d path=\"%s\"",
                 renderFrames, window ? 1 : 0, path.c_str());
