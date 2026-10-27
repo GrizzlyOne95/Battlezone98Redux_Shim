@@ -235,6 +235,9 @@ if ($MapListY) {
 if ($SyncJoin) {
     # The setting can persist from an earlier session; only toggle it on.
     $s = Get-GameSettings
+    # The value the host advertised before any click: OpenShim's
+    # [Fixes] SyncJoinDefaultOn starts every new lobby at 1.
+    Write-Host "[lobby] host advertised syncJoin=$(if ($s) { $s[4] } else { 'unknown' }) before toggling"
     if (-not $s -or $s[4] -ne '1') { Click $hostClient $UI.SyncJoinToggle }
     $null = Wait-Until 'host-sync-join' { $s = Get-GameSettings; if ($s -and $s[4] -eq '1') { $s -join '*' } }
     Start-Sleep -Milliseconds 500

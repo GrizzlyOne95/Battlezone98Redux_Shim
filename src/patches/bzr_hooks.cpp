@@ -827,11 +827,30 @@ namespace BZROpenShim
         void (*run)();
     };
 
+    void TestInitDelayPoint(const char* point)
+    {
+        char at[96] = {};
+        const DWORD n = GetEnvironmentVariableA("OPENSHIM_TEST_INIT_DELAY_AT", at, static_cast<DWORD>(sizeof(at)));
+        if (n == 0 || n >= sizeof(at) || !point || _stricmp(at, point) != 0)
+            return;
+        char ms[16] = {};
+        const DWORD m = GetEnvironmentVariableA("OPENSHIM_TEST_INIT_DELAY_MS", ms, static_cast<DWORD>(sizeof(ms)));
+        const unsigned long delay = (m > 0 && m < sizeof(ms)) ? strtoul(ms, nullptr, 10) : 0;
+        static std::atomic<bool> s_fired{false};
+        if (delay == 0 || delay > 60000 || s_fired.exchange(true))
+            return;
+        Log(L"[TEST] init delay %lu ms before %hs\n", delay, point);
+        Sleep(delay);
+    }
+
     template <size_t N>
     void RunInitSteps(const InitStep (&steps)[N])
     {
         for (const InitStep& step : steps)
+        {
+            TestInitDelayPoint(step.name);
             step.run();
+        }
     }
 
     const char* FindUnboundEngineHelperForPatch(const char* patchName)
@@ -1082,6 +1101,7 @@ namespace BZROpenShim
         // External payload packs remain a fallback, not a prerequisite.
         g_EnableChunkMeshProxy = configWantsChunkMeshProxy;
         PruneNativeChunkCache();
+        TestInitDelayPoint("WarmNativeChunkCaches");
         WarmNativeChunkCaches();
         if (configWantsChunkMeshProxy && !chunkAssetsAvailable)
         {

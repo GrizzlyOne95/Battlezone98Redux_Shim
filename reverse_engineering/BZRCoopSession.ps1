@@ -122,6 +122,20 @@ function Install-OpenShimBuild([string]$Dir) {
     if (Test-Path -LiteralPath $assets) { Copy-Item -LiteralPath $assets -Destination (Join-Path $Dir 'openshim') -Force }
 }
 
+function Copy-BZRCoopClientLogs {
+    # An instance's logs\ keeps every crash dump it ever wrote (~70 MB each);
+    # copying them all into every run filled 145 GB by 2026-10-26. Copy the
+    # text logs, and only the dumps written during this run.
+    param([string]$LogsDir, [string]$Dest, [datetime]$Since)
+    if (-not (Test-Path -LiteralPath $LogsDir)) { return }
+    $out = Join-Path $Dest 'logs'
+    robocopy $LogsDir $out /E /XF *.dmp /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { Write-Warning "robocopy of $LogsDir failed ($LASTEXITCODE)" }
+    Get-ChildItem -LiteralPath $LogsDir -Filter *.dmp -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since } |
+        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $out -Force }
+}
+
 function New-BZRCoopInstance {
     param([int]$Index)
     $dir = [IO.Path]::GetFullPath((Get-InstanceDir $Index))
@@ -142,13 +156,25 @@ function New-BZRCoopInstance {
     }
     New-Item -ItemType Directory -Path $dir | Out-Null
 
-    $linked = $LinkedDirs
+    # openshim\ is always a per-instance copy without the install's cache:
+    # OpenShim writes its chunk mesh cache there, and a junction shared it with
+    # the install, other sessions and every instance. Each instance starts
+    # empty and regenerates what it needs.
+    $linked = $LinkedDirs | Where-Object { $_ -ne 'openshim' }
+    robocopy (Join-Path $SourceRoot 'openshim') (Join-Path $dir 'openshim') /E /XD (Join-Path $SourceRoot 'openshim\cache') /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "robocopy of openshim resources failed ($LASTEXITCODE)" }
+    # BZRCOOP_SEED_CHUNK_CACHE=<chunks dir> starts every instance from a copy of
+    # that cache instead of empty (to retest a saved cache).
+    $seed = $env:BZRCOOP_SEED_CHUNK_CACHE
+    if ($seed) {
+        if (-not (Test-Path -LiteralPath $seed -PathType Container)) { throw "BZRCOOP_SEED_CHUNK_CACHE not found: $seed" }
+        robocopy $seed (Join-Path $dir 'openshim\cache\chunks') /E /NFL /NDL /NJH /NJS /NP | Out-Null
+        if ($LASTEXITCODE -ge 8) { throw "robocopy of the seed chunk cache failed ($LASTEXITCODE)" }
+    }
     if ($OpenShimRepo) {
         # Per-instance copies, so staging a build never writes the real install.
-        $linked = $LinkedDirs | Where-Object { $_ -notin 'plugins', 'openshim' }
+        $linked = $linked | Where-Object { $_ -ne 'plugins' }
         New-Item -ItemType Directory -Path (Join-Path $dir 'plugins') | Out-Null
-        robocopy (Join-Path $SourceRoot 'openshim') (Join-Path $dir 'openshim') /E /NFL /NDL /NJH /NJS /NP | Out-Null
-        if ($LASTEXITCODE -ge 8) { throw "robocopy of openshim resources failed ($LASTEXITCODE)" }
     }
     foreach ($name in $linked) {
         $target = Join-Path $SourceRoot $name
@@ -176,7 +202,16 @@ function New-BZRCoopInstance {
         # Multiplayer opens the pre-lobby setup screen when the install enables it;
         # the lobby script clicks straight from the title screen into the lounge.
         $ini = [regex]::Replace($ini, '(?m)^(\s*PreLobby\s*=\s*)\S+', '${1}0')
+        # A Nickname set in the install would name every client alike; blank
+        # means the Goldberg account name (BZRCoopN), which the lobby matches.
+        $ini = [regex]::Replace($ini, '(?m)^([ \t]*Nickname[ \t]*=)[^\r\n]*', '${1}')
         [IO.File]::WriteAllText($shimIni, $ini)
+        # BZRCOOP_INI_SET="Section.Key=Value;..." sets keys in this instance's
+        # copy only, for A/B runs on a setting; the install's file is untouched.
+        foreach ($pair in @(($env:BZRCOOP_INI_SET -split ';') | Where-Object { $_ -match '^\s*([^.=]+)\.([^=]+)=(.*)$' })) {
+            $null = $pair -match '^\s*([^.=]+)\.([^=]+)=(.*)$'
+            Set-BZRCoopIniValue $shimIni $Matches[1].Trim() $Matches[2].Trim() $Matches[3].Trim()
+        }
     }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'scripts') -Destination $dir -Recurse
     if ($OpenShimRepo -and -not $NoOpenShim) { Install-OpenShimBuild $dir }
@@ -398,8 +433,7 @@ function Stop-BZRCoopClients {
         foreach ($f in 'openshim.ini', 'net.ini') {
             Copy-Item -LiteralPath (Join-Path $c.dir $f) -Destination $dest -ErrorAction SilentlyContinue
         }
-        $logs = Join-Path $c.dir 'logs'
-        if (Test-Path -LiteralPath $logs) { Copy-Item -LiteralPath $logs -Destination $dest -Recurse -Force }
+        Copy-BZRCoopClientLogs -LogsDir (Join-Path $c.dir 'logs') -Dest $dest -Since (Get-Item -LiteralPath $session.runDir).CreationTime
     }
     if ($hung.Count) { throw "Clients still running after WM_CLOSE (left for capture): $($hung -join ', ')" }
     [IO.File]::Delete($SessionFile) # another orderly stopper may already have removed it

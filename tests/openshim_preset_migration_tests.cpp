@@ -783,6 +783,36 @@ int main()
               "6k: backend transport off chosen after the revision is respected");
     }
 
+    // 6l. revision 11 -> 12: the multiplayer setup screen turns on
+    {
+        fs::path canonical = tmpRoot / "canonical6l.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        fs::path off = tmpRoot / "rev11_prelobby_off.ini";
+        WriteLines(off, {
+            "; OpenShimPresetRevision = 11",
+            "",
+            "[Network]",
+            "PreLobby = 0",
+            "Server = Custom",
+        });
+        auto r = MigratePresetFileIfNeeded(off, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 11,
+              "6l: revision 11 file is migrated");
+        Check(FileContains(off, "PreLobby = 1") && FileContains(off, "Server = Custom"),
+              "6l: shipped setup screen off becomes on; server kept");
+
+        fs::path chosen = tmpRoot / "rev12_prelobby_off.ini";
+        WriteLines(chosen, {
+            "; " + CurrentRevisionMarker(),
+            "",
+            "[Network]",
+            "PreLobby = 0",
+        });
+        auto again = MigratePresetFileIfNeeded(chosen, canonical);
+        Check(again.action == MigrationAction::None && FileContains(chosen, "PreLobby = 0"),
+              "6l: setup screen off chosen after the revision is respected");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";

@@ -1,8 +1,8 @@
 # Multiplayer pre-lobby: design
 
-Status: **nickname + flag + server selection (Rebellion / Custom, host only)
+Status: **nickname + flag + server selection (Rebellion / Custom / Local, host only)
 implemented** as an OpenShim shell screen (`src/patches/prelobby_screen.cpp`,
-opt-in `[Network] PreLobby = 1`). LAN and non-default ports are not built. Static RE for the GOG build
+on by default, `[Network] PreLobby = 0` turns it off). LAN and non-default ports are not built. Static RE for the GOG build
 (sha256 `8d71f56c…3377413`, byte-identical to the decompile corpus). The live
 checks listed at the end have not run.
 
@@ -141,7 +141,12 @@ authorised and nothing re-authenticates (CONFIRMED in code; confirm live).
   `[OpenShimSocket] MatchmakingRedirectAddress`), is **INFERRED**: the call is
   inside the networking library.
 - **UDP probe target:** the websocket's remote address at port+1, so it follows
-  the endpoint (INFERRED from code; check live).
+  the endpoint (CONFIRMED in the GOG exe: on websocket open, `FUN_006bee20`
+  takes `remote_endpoint()` (getpeername) and adds 1 to its port; nothing is
+  hardcoded). The relay port comes from the server (`OnP2PRoute`).
+- **Lookup:** asio's resolver calls `getaddrinfo(host, service)` with the URL's
+  host and port strings (`FUN_00706610` -> `FUN_006afec0`), so the service is
+  `"1337"` for the stock URL.
 - **No teardown path:** there is no teardown or re-create path for the net
   objects after startup (HIGH, not exhaustive).
 
@@ -205,11 +210,13 @@ will use, whatever happens to the live session.
      (`CreateFlagButtonCommon`), borrowed from `lobby_ui.cpp` and parented to
      the centre panel
    - CONNECTION box: `Network: Ready | Connecting... | Status unknown`, and a
-     `Server:` row with two stock-style option slots, **Rebellion** and
-     **Custom** (the selected one is captioned `> Rebellion <`), plus a text
-     entry for the custom host that exists only while Custom is selected. A
-     note under it reads "Custom servers never receive your sign-in
-     ticket." When a test redirect is active
+     `Server:` row with three stock-style option slots, **Rebellion**,
+     **Custom** and **Local** (the selected one is captioned `> Rebellion <`),
+     plus a text entry for the custom host that exists only while Custom is
+     selected. Local is 127.0.0.1, a dedicated server on this PC. A note
+     under the row reads "Custom servers never receive your sign-in
+     ticket." (Custom) or "Start the dedicated server on this PC first."
+     (Local). When a test redirect is active
      (`GetMatchmakingRedirectTarget`) the row is instead the read-only label
      `Server: <addr> (test redirect)` and no toggle or entry is built.
    - Back (top corner) and Continue (bottom centre)
@@ -221,8 +228,8 @@ will use, whatever happens to the live session.
    stock update). Both run under SEH.
 5. **Continue:**
    1. End both edits. Resolve the selector to a host (Rebellion's, or the
-      validated custom host); an empty or malformed address, or any port other
-      than 1337, stops here with a note and no recycle. If the host differs
+      validated custom `host[:port]`); an empty or malformed address, or a
+      port outside 1-65534, stops here with a note and no recycle. If the host differs
       from the one in effect (live override, else the launch server), persist
       `[Network] Server` / `CustomServer` and set the live override. This runs
       before the nickname step so the reconnect's lookup sees the new host.
@@ -249,13 +256,17 @@ while a lounge is registered, which is the unknown case above.
 
 ### Endpoint switching
 
-The redirect at `getaddrinfo` swaps the **host** only. The URL, its port (1337)
-and the path come from `client+0xC`.
+The redirect at `getaddrinfo` swaps the **host**, and the **port** when the
+selected server names one. The URL and its path still come from `client+0xC`.
 
-**Implemented, host only:**
-1. Set the live override (`SetMatchmakingServerOverride`, net_optimizer).
+**Implemented:**
+1. Set the live override (`SetMatchmakingServerOverride`, net_optimizer), a
+   canonical `host` or `host:port`.
 2. Recycle the websocket.
-3. The reconnect resolves the new host.
+3. The reconnect resolves the new host. For a non-default port the hook also
+   passes that port as the `service` (only when the game asked for `"1337"`
+   or none), so the websocket connects there and the probe follows to
+   port + 1.
 
 The reconnect calling `getaddrinfo` again is live-confirmed (the redirect log
 line repeats after a recycle).
@@ -265,8 +276,8 @@ line repeats after a recycle).
    `BZ_MATCHMAKING_ADDRESS` / `OPENSHIM_MATCHMAKING_ADDRESS`). Fail-closed guard
    for the test harness: it redirects the official host as before, nothing
    below applies while it is set, and the pre-lobby selector is read-only.
-2. The saved choice: `[Network] Server = Rebellion | Custom` with
-   `CustomServer = <host or IP>[:1337]`, loaded at startup into the live
+2. The saved choice: `[Network] Server = Rebellion | Custom | Local` with
+   `CustomServer = <host or IP>[:port]`, loaded at startup into the live
    override (so the first connection and invites use it) and updated by
    Continue. Absent or blank means no override.
 3. The `/bzrserver=` launch switch.
@@ -278,12 +289,18 @@ override is a mutex-guarded runtime value; the hook logs each substitution.
 Parsing and validation live in `include/matchmaking_server.h` (unit-tested).
 This needs the socket hooks, i.e. `[Network] NetImprovements` on.
 
-**A different port or path** needs `client+0xC` rewritten. That is an MSVC
-`std::string` inside the client object, owned by the game's CRT. Writing it
-from OpenShim means matching that layout and allocator exactly, which is the
-`StableId`/`BzrString` overlay mistake waiting to happen. **Do not do this in
-the first version.** For non-default ports, persist the endpoint and apply it
-as `/bzrserver=` on the next launch, with OpenShim offering a relaunch.
+**A different path** would still need `client+0xC` rewritten. That is an MSVC
+`std::string` inside the client object, owned by the game's CRT; writing it
+from OpenShim means matching that layout and allocator exactly. Do not. The
+port does not need it (above). The HTTP `Host` header still says `:1337`;
+the DedicatedServer does not check it.
+
+OpenShim's own port checks (socket classification, ticket withholding, the
+recycle's socket match, relay datagram logging) accept 1337/1338 and the
+last non-1337 port a BZRNet lookup resolved for (a selected port, or a
+/bzrserver= port), plus that port + 1. It is kept after the selection
+changes so the recycle still finds a socket on the old port. On that port
+the recycle only closes sockets whose peer a BZRNet lookup resolved.
 
 **Security: the platform ticket is withheld from non-official servers.** The
 `Authorization` body carries the Steam/Galaxy ticket; a malicious server could
@@ -293,7 +310,8 @@ OpenShim never lets it leave for any host other than
 (`[Network] Server=Custom`, `/bzrserver=`, or the test redirect):
 
 - A BZRNet lookup that resolves to a non-official host records its addresses.
-  On every send, a connected TCP socket whose peer is one of them (port 1337)
+  On every send, a connected TCP socket whose peer is one of them (port 1337
+  or the selected port)
   withholds; the verdict comes from `getpeername` each time, so it also covers
   the sockets the game's IOCP library creates and connects outside our
   `socket()`/`connect()` hooks. Its outbound WebSocket call is scrubbed in place
@@ -364,7 +382,9 @@ endpoint pointing at a LAN machine running the dev server.
 5. Does setting `client+4 = 1` and posting `SendAuthorization` produce a second
    `Authorization` on the same socket, and does the service accept it? This
    would be an alternative to recycling; it is not proposed.
-6. Does `/bzrserver=ws://host:port` correctly move the UDP probe to port+1?
+6. ~~Does `/bzrserver=ws://host:port` correctly move the UDP probe to
+   port+1?~~ Yes from code (see "Where the endpoint lives"); a non-default selected port
+   relies on it.
 7. Does a second client see the renamed player? This is still open from the
    lobby nickname work.
 8. How does `-flagfile:` reach `0x00917FAC`?

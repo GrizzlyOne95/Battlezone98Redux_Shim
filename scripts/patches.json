@@ -30,6 +30,15 @@
       "identity": "GOG 2.2.301 P2P send 0x0075BEB0 queues and increments reliable sequence before this connected-state/retransmit-pending test at 0x0075C71B. Only the second JNE at 0x0075C730 skips immediate send to 0x0075C972 when peer+0x1A is set. The retry pump 0x0075AAF0 still owns acknowledgements and retransmission; receive 0x0075D800 rejects updates stamped beyond unreceived reliable messages. The exact whole test occurs once in the shipped GOG image and the recorded four-player replay reproduces native drop counts within three packets. Preserve the connected-state branch and remove only the backlog branch; no fallback on a signature miss. See reverse_engineering/p2p_reliable_send_backlog_20261007.md."
     },
     {
+      "name": "Sync Join Default On",
+      "pattern": "74 14 8B 55 BC 0F BE 02 83 F8 31 75 09 C7 45 B4 01 00 00 00 EB 07 C7 45 B4 00 00 00 00 8B 4D 08 8A 55 B4 88 91 14 01 00 00",
+      "offset": 25,
+      "expected_size": 1,
+      "fallback": "0x00000000",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 hosted-lobby game-info loader 0x00742090 (called for every new hosted lobby via 0x007436C0 from CNetGameLobby::OnLobbyCreated 0x0073DF60) reads multi.ini [multi] syncJoin (default \"1\" at 0x00873EF0) and stores 1 if it starts with '1', else the immediate 0 at 0x0074216E, into lobby game-info +0x114. The UI toggle 0x0079B880 flips +0x114 and writes multi.ini, so one host who turns Sync Join off keeps it off in every later game. At launch 0x00742DF0 reads +0x114 and locks the lobby through backend vtable +0x34 (Steam 0x00750BD0, Galaxy 0x0074DF20, BZRNet 0x0074B540). Writing 01 over the else-arm immediate starts every new lobby with Sync Join on; the toggle still works for that game. Whole test unique in the shipped image; no fallback on a miss."
+    },
+    {
       "name": "P2P Reliable First Retry",
       "pattern": "6A 00 68 E8 03 00 00 8D 8D FC FE FF FF E8 9A 34 00 00",
       "offset": 3,
@@ -1750,6 +1759,56 @@
       "identity": "The buffer-room check on the extension path of Redux's Lua table packer FUN_00505A10 on exact GOG Redux 2.2.301, reached by `cmp [ebp-4],0x1F / jge` after lua_next counted the entries. The packer stores only the low byte of the count, so 256+ wraps. lua_send_length.cpp detours the first 8 bytes (no relative operands) to a stub that rejects counts above 255 through the check's own `xor al,al` exit at +0x0D, then replays them. Verified by whole-image scan on 2026-10-18: one match. Rewritten by lua_send_length.cpp."
     },
     {
+      "name": "AiMission::End",
+      "pattern": "55 8B EC 83 EC 14 89 4D F8 8B 45 F8 C6 40 10 01 8B 4D F8 F3 0F 10 45 08 F3 0F 11 41 14",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0045DAF0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "AiMission::End on exact GOG Redux 2.2.301, __thiscall(AiMission* this, float shutdownTime, const char* name, char failed), callee-clean `ret 0xC`: sets this+0x10 done=1, this+0x14 shutdownTime, this+0x18 failed and copies the name into this+0x19 (13 bytes). It is the single funnel for the Lua SucceedMission/FailMission callers 0x0045BE60 and 0x0045BE30 (each pushes failed, name, time and calls it). mp_mission_end_sync.cpp detours the first 9 bytes (push ebp / mov ebp,esp / sub esp,0x14 / mov [ebp-8],ecx; no relative operands). Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
+      "name": "Net::Receive",
+      "pattern": "55 8B EC 81 EC 40 02 00 00 A1 ?? ?? ?? ?? 33 C5 89 45 FC 89 8D 68 FE FF FF",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00570500",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Network message dispatcher on exact GOG Redux 2.2.301, __thiscall(Net* this, int arg0, unsigned short senderId, const unsigned short* buf, unsigned len), callee-clean `ret 0x10`, single exit at 0x00571579. It switches on the first two payload bytes read as a little-endian tag (the 'PP' and 'GA' cases consult Net::IsPlayerHost); an unknown tag falls through without a reply, so a new tag is invisible to unpatched peers. The stack-cookie load wildcards the __security_cookie address. mp_mission_end_sync.cpp detours the first 9 bytes (push ebp / mov ebp,esp / sub esp,0x240; no relative operands). Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
+      "name": "Net::BroadcastSend",
+      "pattern": "55 8B EC 83 EC 10 83 3D ?? ?? ?? ?? 00 74 17 A1 ?? ?? ?? ?? 83 78 08 05 74 0C",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00575890",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Network send on exact GOG Redux 2.2.301, __cdecl(const void* buf, unsigned len, int p3, char p4) returning char: returns 0 while the session pointer (Net::Session) is null or its state at +8 is 6, otherwise hands the buffer to the transport. The Lua Send binding calls it as (buf, len, 1, 1) for a reliable broadcast, which mp_mission_end_sync.cpp reuses. Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
+      "name": "Net::Session",
+      "pattern": "55 8B EC 83 EC 10 83 3D ?? ?? ?? ?? 00 74 17 A1 ?? ?? ?? ?? 83 78 08 05 74 0C",
+      "offset": 8,
+      "mode": "abs32_operand",
+      "fallback": "0x00917F48",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global holding the pointer to the live network session object on exact GOG Redux 2.2.301, taken from the `cmp dword [imm32],0` that opens Net::BroadcastSend (the same pattern, operand at +8). The session's state dword at +8 is 4 while in a game; the send routine rejects 6. Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
+      "name": "Net::IsPlayerHost",
+      "pattern": "55 8B EC 51 0F B7 45 08 85 C0 74 20 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 0F B7 C8 0F B7 55 08 3B CA",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0056FC40",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Host test on exact GOG Redux 2.2.301, __cdecl(short playerId) returning bool in AL, no `this`: returns 0 for id 0, otherwise compares the id (movzx word [ebp+8]) with the host player id obtained from two internal calls (the second returns it in AX). Net::Receive uses it for the 'PP' and 'GA' messages. mp_mission_end_sync.cpp asks it whether a message sender is the host. Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
       "name": "DistributedObject::GetLocalID",
       "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 64 8B E5 5D C3",
       "offset": 0,
@@ -3256,6 +3315,72 @@
       "identity": "SprayBuilding::Simulate, SprayBuildingVtable slot 15"
     },
     {
+      "name": "SprayBuildingDtor",
+      "address": "0x005DA680",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 21 00 00 00 8B 45 08 83 E0 01",
+      "identity": "SprayBuilding scalar deleting destructor on exact GOG Redux 2.2.301, SprayBuildingVtable slot 0: __thiscall(SprayBuilding* this, int flags) returning this, callee-clean `ret 4`; runs the real destructor then operator delete when flags & 1. mp_splinter_sync.cpp replaces the slot to drop its building<->bomb-key map entry. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "GameObjectUpdatePosition",
+      "address": "0x004DB100",
+      "expected": "55 8B EC 81 EC 60 01 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "GameObject::UpdatePosition on exact GOG Redux 2.2.301, __thiscall(complete GameObject* this) with no stack arguments (plain `ret`): reads this+0xF0 (ent) and this+0xF4 (OBJ76), recomputes the cached position from the OBJ76 matrix posit and updates the ent bounding box from the bounding sphere. Stock SprayBuilding::Simulate calls it each frame (0x005DA862); mp_splinter_sync.cpp calls it after writing a launcher's deploy position. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetPlayerDtor",
+      "address": "0x00575BF0",
+      "expected": "55 8B EC 6A FF 68 26 B9 84 00",
+      "identity": "NetPlayer destructor on exact GOG Redux 2.2.301, __thiscall(NetPlayer* this) with no stack arguments (plain `ret`): this+0x28 is the u16 player id, this+0x68 the team byte. It first zeroes the session host id (*(u16*)(*0x00917F48 + 4)) when it equals the leaver, then loops every game object and destroys or localizes those the leaver owned. mp_host_leave.cpp detours the first 10 bytes (push ebp / mov ebp,esp / push -1 / push imm32 SEH handler, absolute operand only). Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetPlayerDtorOwnerCall",
+      "address": "0x00575CDC",
+      "expected": "E8 1F 3B F4 FF 0F B7 C8",
+      "identity": "The `call 0x004B9800` (Distributed owner accessor) in the NetPlayer destructor's per-object loop, after `mov ecx,[ebp-0x14] / add ecx,0x18` (GameObject -> Distributed). The u16 result is compared with the leaver id. mp_host_leave.cpp redirects it through a wrapper that returns 0 for the leaving host's objects. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetDistributedOwner",
+      "address": "0x004B9800",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 66 8B 40 62",
+      "identity": "Distributed owner accessor on exact GOG Redux 2.2.301, __thiscall(Distributed* this) returning the u16 owner player id from this+0x62 in AX. Original target of the call at NetPlayerDtorOwnerCall. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetNotifyNowHost",
+      "address": "0x00578760",
+      "expected": "55 8B EC 56 83 3D 48 7F 91 00 00",
+      "identity": "NotifyNowHost on exact GOG Redux 2.2.301, __cdecl(void), runs on the newly elected host. Its takeover `if (host id != 0) { TakeOwnership(0); TakeOwnership(hostId); }` never fires after a host leave because the NetPlayer destructor already zeroed the host id. mp_host_leave.cpp detours the first 11 bytes (push ebp / mov ebp,esp / push esi / cmp dword [0x00917F48],0; absolute operand only). Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetTakeOwnership",
+      "address": "0x004BAAD0",
+      "expected": "55 8B EC 6A FF 68 88 9A 84 00",
+      "identity": "TakeOwnership on exact GOG Redux 2.2.301, __cdecl(short id), caller pops: looks up the NetPlayer for id (0x005771B0), then for every object whose id is in [id<<16, id<<16|0xFFFF] destroys dynamic ones on the player's team and localizes the rest. mp_host_leave.cpp calls it for the departed host from the NotifyNowHost hook. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetTakeOwnershipLookupCall",
+      "address": "0x004BAB2A",
+      "expected": "E8 81 C6 0B 00 83 C4 04",
+      "identity": "The `call 0x005771B0` (NetPlayer lookup by id, one cdecl int argument) inside TakeOwnership. mp_host_leave.cpp redirects it through a wrapper that answers the departed host's id with a stand-in NetPlayer (id and team), because the real one is already destroyed. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetFindPlayer",
+      "address": "0x005771B0",
+      "expected": "55 8B EC 83 EC 08 8D 45 08 50 8D 4D FC 51 B9 B8",
+      "identity": "NetPlayer lookup on exact GOG Redux 2.2.301, __cdecl(int id) returning NetPlayer* or 0 (same address as the BanLookup row). Original target of the call at NetTakeOwnershipLookupCall. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetOnePlayerLeftCheck",
+      "address": "0x00577D50",
+      "expected": "55 8B EC 83 EC 1C C7 45 F8 00 00 00 00 0F B6 05",
+      "identity": "Last-player-standing test on exact GOG Redux 2.2.301, __cdecl(void) returning bool in AL: exactly one player with lives left. True leads to dialog 11 (Game Over) half a second later. Original target of the call at NetExecuteOnePlayerCall. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetExecuteOnePlayerCall",
+      "address": "0x0057191A",
+      "expected": "E8 31 64 00 00 0F B6 C0",
+      "identity": "The `call 0x00577D50` in Net::Execute (0x005715D0) whose AL result starts the Game Over timer. mp_host_leave.cpp redirects it through a wrapper that suppresses a lone-player state caused by a host leave. Bytes read from the shipped image 2026-10-27."
+    },
+    {
       "name": "BuildingSimulate",
       "address": "0x0047FCB0",
       "expected": "55 8B EC 83 EC 68 A1 00 70 8E 00",
@@ -3866,6 +3991,24 @@
       "address": "0x007D2E20",
       "expected": "55 8B EC 83 EC 58 89 4D FC 8D 45 C0 50 8D 4D BC",
       "identity": "cUI image widget quad rebuild, run between ManualObject beginUpdate/end"
+    },
+    {
+      "name": "DayWreckerRegCollision",
+      "address": "0x004B0610",
+      "expected": "55 8B EC 83 EC 2C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "DayWrecker::RegCollision, __thiscall(this, _OBJ76* other, CLSN_INFO*, CLSN_INFO*), ret 0xC, bool in AL; mp_daywrecker_armory_collision.cpp detours it"
+    },
+    {
+      "name": "PowerUpUnpackState",
+      "address": "0x005AACF0",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "PowerUp state unpack, Distributed vtable slot 16 (shared by 8 classes incl. DayWrecker), __thiscall(dist = complete+0x18, packet, int* remaining), ret 8; rebuilds the flags word at *(dist+0x210)+0x114; mp_daywrecker_armory_collision.cpp detours it"
+    },
+    {
+      "name": "PowerUpSimulate",
+      "address": "0x005A7D70",
+      "expected": "55 8B EC 81 EC A4 04 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "PowerUp::Simulate, __thiscall(this, float dt), ret 4; DayWrecker::Simulate calls it while flag 4 (in flight) is set; mp_daywrecker_armory_collision.cpp calls it for a remote bomb with no state yet"
     },
     {
       "name": "DayWreckerSimulate",

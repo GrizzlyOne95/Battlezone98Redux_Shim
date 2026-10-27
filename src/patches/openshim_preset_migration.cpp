@@ -384,6 +384,13 @@ namespace BZROpenShim
             { "Startup", "BackendTransport", "0", "1" },
         };
 
+        // Revision 11 -> 12: the multiplayer setup screen turned on by
+        // default at the user's request on 2026-10-27. Rebellion stays the
+        // default server. Only the shipped 0 moves.
+        const SurgicalEntry kRevision11SurgicalTable[] = {
+            { "Network", "PreLobby", "0", "1" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -427,6 +434,9 @@ namespace BZROpenShim
             if (fromRevision <= 10)
                 append(kRevision10SurgicalTable,
                        sizeof(kRevision10SurgicalTable) / sizeof(kRevision10SurgicalTable[0]));
+            if (fromRevision <= 11)
+                append(kRevision11SurgicalTable,
+                       sizeof(kRevision11SurgicalTable) / sizeof(kRevision11SurgicalTable[0]));
             return entries;
         }
 

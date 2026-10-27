@@ -232,6 +232,13 @@ function Assert-CRFlowClientsAlive {
         if (Get-Process -Id $c.pid -ErrorAction SilentlyContinue) { continue }
         $log = Get-CRFlowLogPath $c
         $last = if ($log) { Get-Content -LiteralPath $log -Tail 1 } else { '' }
+        # The GPU driver can drop every instance's D3D11 device at once (nvlddmkm
+        # event 153); each then dies at its next GPU allocation, which says
+        # nothing about the case under test.
+        $ogre = Join-Path $c.dir 'logs\BZOgreLogfile.log'
+        if ((Test-Path -LiteralPath $ogre) -and (Get-Content -LiteralPath $ogre -Tail 400 | Select-String -SimpleMatch '(-2005270523:' -Quiet)) {
+            throw "client $($c.index) (pid $($c.pid)) exited unexpectedly: its GPU device was removed (DXGI 0x887A0005; check System log nvlddmkm), so this run says nothing about the case. Last log: $last"
+        }
         throw "client $($c.index) (pid $($c.pid)) exited unexpectedly (crash?). Last log: $last"
     }
 }
@@ -433,22 +440,25 @@ function Save-CRFlowShots([string]$Name) {
 
 function Invoke-CRFlowStep {
     param([Parameter(Mandatory)][string]$Name, [Parameter(Mandatory)][scriptblock]$Body, [switch]$Soft)
-    $run = $script:CRFlowRun
-    $t0 = $run.clock.Elapsed.TotalSeconds
-    $status, $detail, $result = 'ok', $null, $null
-    try { $result = & $Body }
-    catch { $status = if ($Soft) { 'warn' } else { 'fail' }; $detail = $_.Exception.Message }
-    $rec = [ordered]@{
-        step = $Name; status = $status; startS = [math]::Round($t0, 1)
-        seconds = [math]::Round($run.clock.Elapsed.TotalSeconds - $t0, 1)
-        result = $result; detail = $detail; shots = @(Save-CRFlowShots $Name)
+    # $Body runs in a child of this scope, so a local here hides the scenario's
+    # variable of the same name (case-insensitive): a plain $result once turned
+    # mpbugs-mission-end's -Result fail into ''. Keep the locals prefixed.
+    $stepRun = $script:CRFlowRun
+    $stepT0 = $stepRun.clock.Elapsed.TotalSeconds
+    $stepStatus, $stepDetail, $stepResult = 'ok', $null, $null
+    try { $stepResult = & $Body }
+    catch { $stepStatus = if ($Soft) { 'warn' } else { 'fail' }; $stepDetail = $_.Exception.Message }
+    $stepRec = [ordered]@{
+        step = $Name; status = $stepStatus; startS = [math]::Round($stepT0, 1)
+        seconds = [math]::Round($stepRun.clock.Elapsed.TotalSeconds - $stepT0, 1)
+        result = $stepResult; detail = $stepDetail; shots = @(Save-CRFlowShots $Name)
     }
-    [void]$run.steps.Add($rec)
-    ($rec | ConvertTo-Json -Compress -Depth 8) | Add-Content -LiteralPath $run.stepLog
-    $color = @{ ok = 'Green'; warn = 'Yellow'; fail = 'Red' }[$status]
-    Write-Host ("[flow] {0,7:N1}s {1,-4} {2}{3}" -f $run.clock.Elapsed.TotalSeconds, $status, $Name, $(if ($detail) { " -- $detail" } else { '' })) -ForegroundColor $color
-    if ($status -eq 'fail') { throw "Step '$Name' failed: $detail" }
-    $result
+    [void]$stepRun.steps.Add($stepRec)
+    ($stepRec | ConvertTo-Json -Compress -Depth 8) | Add-Content -LiteralPath $stepRun.stepLog
+    $stepColor = @{ ok = 'Green'; warn = 'Yellow'; fail = 'Red' }[$stepStatus]
+    Write-Host ("[flow] {0,7:N1}s {1,-4} {2}{3}" -f $stepRun.clock.Elapsed.TotalSeconds, $stepStatus, $Name, $(if ($stepDetail) { " -- $stepDetail" } else { '' })) -ForegroundColor $stepColor
+    if ($stepStatus -eq 'fail') { throw "Step '$Name' failed: $stepDetail" }
+    $stepResult
 }
 
 function Add-CRFlowCheck {
@@ -635,6 +645,18 @@ function Test-CRFlowLogErrors([int[]]$Clients) {
                 Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() })
         } else { @() }
         Add-CRFlowCheck "c$i no Ogre rendering exceptions" ($renderHits.Count -eq 0) $renderHits
+        # A removed D3D11 device (DXGI 0x887A0005) is logged only by Ogre. The
+        # client keeps simulating and answering probes, so the run can look
+        # healthy while nothing draws (mpbugs-wp-* on 2026-10-26).
+        $deviceHits = @()
+        if ($log) {
+            $ogreLog = Join-Path (Split-Path $log -Parent) 'BZOgreLogfile.log'
+            if (Test-Path -LiteralPath $ogreLog) {
+                $deviceHits = @(Select-String -LiteralPath $ogreLog -SimpleMatch -Pattern '(-2005270523:' |
+                    Select-Object -First 3 | ForEach-Object { $_.Line.Trim() })
+            }
+        }
+        Add-CRFlowCheck "c$i D3D11 device not removed" ($deviceHits.Count -eq 0) $deviceHits
         # CR's guest-side marker/label resolution (CR #186) logs "[coop] unresolved ..."
         # and bumps M.coopUnresolved when a leader-sent label never resolves in 15 s.
         $unresolved = @()

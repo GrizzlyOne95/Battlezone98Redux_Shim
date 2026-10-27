@@ -275,7 +275,7 @@ openshim_opt:VehicleGeometryContact:desc~Experimental vehicle contact against le
 openshim_opt:ApcAlliedTargetDeploy:label~APC Allied Deploy~~~~~~
 openshim_opt:ApcAlliedTargetDeploy:desc~Let APC AI accept allied deploy targets. Single player only. Restart required.~~~~~~
 openshim_opt:SplinterUndead:label~Splinter Undead Fix~~~~~~
-openshim_opt:SplinterUndead:desc~Stop a destroyed splinter from spawning payload ordnance. Single player only. Restart required.~~~~~~
+openshim_opt:SplinterUndead:desc~Stop a destroyed splinter from spawning payload ordnance. Single player, and multiplayer while Splinter Sync is on. Restart required.~~~~~~
 openshim_opt:HowitzerUndeployedRetaliation:label~Howitzer Deploy Fix~~~~~~
 openshim_opt:HowitzerUndeployedRetaliation:desc~Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required.~~~~~~
 openshim_opt:TugCargoPostLoad:label~Tug Cargo Deploy~~~~~~
@@ -313,7 +313,7 @@ openshim_opt:LobbyReadouts:desc~Nickname field and route readout in the waiting-
 openshim_opt:ReauthOnNicknameChange:label~Live Nickname~~~~~~
 openshim_opt:ReauthOnNicknameChange:desc~Experimental: recycle the lounge BZRNet connection after a nickname edit so stock reconnects and authorizes the new name. Expect a brief lounge drop / possible Not Ready flicker. In-match remains persist-only.~~~~~~
 openshim_opt:PreLobby:label~MP Setup Screen~~~~~~
-openshim_opt:PreLobby:desc~Multiplayer opens a setup screen first (nickname, flag, matchmaking server: Rebellion or Custom) instead of going straight to the lobby. While on, the nickname and flag pickers move to that screen and are no longer built in the lobby. Read when Multiplayer is clicked.~~~~~~
+openshim_opt:PreLobby:desc~Multiplayer opens a setup screen first (nickname, flag, matchmaking server: Rebellion, Custom or Local) instead of going straight to the lobby. While on, the nickname and flag pickers move to that screen and are no longer built in the lobby. Read when Multiplayer is clicked.~~~~~~
 openshim_opt:AutoStage:label~Auto-Install Updates~~~~~~
 openshim_opt:AutoStage:desc~Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim to install when you quit. Never runs in multiplayer.~~~~~~
 openshim_opt:StatsTracking:label~Career Stats~~~~~~

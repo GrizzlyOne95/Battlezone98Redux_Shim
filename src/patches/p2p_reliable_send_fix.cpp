@@ -118,5 +118,41 @@ namespace BZROpenShim
                 Log(L"[P2PSEND] %hs requested %u ms (stock %u); guarded write follows\n", key, ms, stockMs);
             }
         }
+
+        // -----------------------------------------------------------------
+        // Sync Join default on
+        // -----------------------------------------------------------------
+        //
+        // Sync Join locks a lobby once the game starts, so nobody joins
+        // mid-game. A late joiner loads the mission's BZN and pushes its own
+        // starting units to the host, which duplicates them and desyncs the
+        // game. Stock reads the setting from multi.ini for every hosted lobby
+        // (0x00742090, default "1"), but the in-lobby toggle saves its last
+        // value there, so a host who turned it off once hosts every later game
+        // unlocked. The patch writes 1 over the loader's "off" immediate
+        // (0x0074216E): each new lobby starts with Sync Join on and the host
+        // can still turn it off for that game.
+        void ConfigureSyncJoinDefaultPatch(std::vector<HookEngine::PatchDef>& patches)
+        {
+            bool enabled = true;
+            TryGetUserConfigBool("Fixes", "SyncJoinDefaultOn", enabled);
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_SYNC_JOIN_DEFAULT_ON"))
+                enabled = false;
+            for (auto& patch : patches)
+            {
+                if (patch.name != "Sync Join Default On") continue;
+                if (!enabled)
+                {
+                    Log(L"[SYNCJOIN] Default-on disabled; lobbies keep the saved multi.ini value\n");
+                    continue;
+                }
+                if (!patch.verified || !patch.address)
+                {
+                    Log(L"[SYNCJOIN] Lobby loader signature unavailable; saved multi.ini value kept\n");
+                    continue;
+                }
+                patch.payload = { 0x01 };
+            }
+        }
     }
 }

@@ -1,23 +1,36 @@
-"""Stage the authored lcbench terrain as a private four-player combat map."""
+"""Stage the authored lcbench terrain as a private four-player network map.
+
+The default stages nbattle (battle load). --map mpbugs stages the stock
+multiplayer bug pack instead: same terrain and spawns, its own mission script.
+"""
 import argparse
 import re
 import shutil
 from pathlib import Path
 
+MAPS = {
+    "nbattle": ("A Network Battle Load",
+                "Private four-player network test: two AI armies, native combat, destruction and scrap."),
+    # Sorts above "A Network Battle Load" in the lobby's map list.
+    "mpbugs": ("A Multiplayer Bug Pack",
+               "Private network test: stock multiplayer bug reproductions (mission end, host leave, weapons)."),
+}
 
-def prepare(output: Path) -> None:
+
+def prepare(output: Path, map_name: str = "nbattle") -> None:
+    title, description = MAPS[map_name]
     here = Path(__file__).resolve().parent
     fixture = here.parents[1] / "test_missions" / "live_combat_scaling"
     output.mkdir(parents=True, exist_ok=True)
     # Reuse existing authored terrain unchanged; no retail terrain extraction.
     for name in ("lcbench.trn", "lcbench.hg2", "lcbench.mat", "lcbench.lgt",
                  "earthgood.dds", "earthgood.material"):
-        shutil.copyfile(fixture / name, output / name.replace("lcbench.", "nbattle."))
+        shutil.copyfile(fixture / name, output / name.replace("lcbench.", map_name + "."))
     source = (fixture / "lcbench.bzn").read_text()
     header, rest = source.split("[GameObject]", 1)
     player, tail = rest.split("name = LuaMission", 1)
-    header = header.replace("lcbench.bzn", "nbattle.bzn")
-    header = header.replace("TerrainName = lcbench", "TerrainName = nbattle")
+    header = header.replace("lcbench.bzn", map_name + ".bzn")
+    header = header.replace("TerrainName = lcbench", "TerrainName = " + map_name)
     header = re.sub(r"seq_count \[1\] =\s*2", "seq_count [1] =\n6", header)
     header = re.sub(r"size \[1\] =\s*1", "size [1] =\n5", header)
     blocks = [player]
@@ -45,18 +58,19 @@ def prepare(output: Path) -> None:
     # Strategy multiplayer must construct the native multiplayer mission class
     # to initialize its spawn powerup registry before network startup sync.
     bzn += "name = MultSTMission" + tail.replace("00000002", "00000006")
-    (output / "nbattle.bzn").write_text(bzn, encoding="ascii")
-    (output / "nbattle.ini").write_text(
-        '[DESCRIPTION]\nmissionName = "A Network Battle Load"\n'
+    (output / (map_name + ".bzn")).write_text(bzn, encoding="ascii")
+    (output / (map_name + ".ini")).write_text(
+        f'[DESCRIPTION]\nmissionName = "{title}"\n'
         '[WORKSHOP]\nmapType = "multiplayer"\ncustomtags = "Coop,Testing"\n'
         '[MULTIPLAYER]\nminPlayers = "2"\nmaxPlayers = "4"\ngameType = "S"\n', encoding="ascii")
-    (output / "nbattle.vxt").write_text("asuser aspilo.des\tanims\\aspil.avi NSDF Pilot\n", encoding="ascii")
-    (output / "nbattle.des").write_text(
-        "Private four-player network test: two AI armies, native combat, destruction and scrap.\n", encoding="ascii")
-    shutil.copyfile(here / "nbattle.lua", output / "nbattle.lua")
+    (output / (map_name + ".vxt")).write_text("asuser aspilo.des\tanims\\aspil.avi NSDF Pilot\n", encoding="ascii")
+    (output / (map_name + ".des")).write_text(description + "\n", encoding="ascii")
+    shutil.copyfile(here / (map_name + ".lua"), output / (map_name + ".lua"))
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    prepare(parser.parse_args().output)
+    parser.add_argument("--map", choices=sorted(MAPS), default="nbattle")
+    arguments = parser.parse_args()
+    prepare(arguments.output, arguments.map)

@@ -38,6 +38,21 @@ class MapFixture(unittest.TestCase):
             for extension in ("trn","hg2","mat","lgt"):
                 self.assertEqual((fixture / ("lcbench." + extension)).read_bytes(), (output / ("nbattle." + extension)).read_bytes())
 
+    def test_bug_pack_map_is_renamed_throughout(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            prepare(output, "mpbugs")
+            text = (output / "mpbugs.bzn").read_text()
+            self.assertIn("TerrainName = mpbugs", text)
+            self.assertIn("name = MultSTMission", text)
+            self.assertNotIn("nbattle", text)
+            self.assertNotIn("lcbench", text)
+            self.assertIn('missionName = "A Multiplayer Bug Pack"', (output / "mpbugs.ini").read_text())
+            lua = (output / "mpbugs.lua").read_text()
+            for entry in ("BugEnd", "BugState", "BugPlaceWitnesses", "BugLaunchDaywrecker", "BugFireSplinter", "BugSite"):
+                self.assertIn("function " + entry + "(", lua)
+            self.assertFalse(list(output.glob("nbattle.*")))
+
 
 if __name__ == "__main__":
     unittest.main()

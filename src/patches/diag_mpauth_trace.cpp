@@ -280,6 +280,19 @@ namespace BZROpenShim
         static FnMpauthOrdinaryReader g_MpauthOrdinaryReaderOrig = nullptr;
         static FnMpauthPermanentReader g_MpauthPermanentReaderOrig = nullptr;
 
+        // Vehicle flags (bit 4 clear = detonate this frame) and owner handle.
+        static void MpauthReadDwFlagsOwner(void* thisPtr, uint32_t& flags, uint32_t& owner)
+        {
+            flags = 0xFFFFFFFF;
+            owner = 0xFFFFFFFF;
+            __try
+            {
+                owner = *(uint32_t*)((uint8_t*)thisPtr + 0x224);
+                flags = *(uint32_t*)(*(uint8_t**)((uint8_t*)thisPtr + 0x228) + 0x114);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+
         void __fastcall MpauthDwSimulateHook(void* thisPtr, void* /*edx*/, float dt)
         {
             uint8_t consumedBefore = MpauthReadDwConsumedComplete(thisPtr);
@@ -291,8 +304,11 @@ namespace BZROpenShim
                 {
                     uint16_t netId = MpauthLocalNetId();
                     const char* role = MpauthPeerRole();
-                    Log(L"[MPAUTH_DW_DETONATE] sim peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X consumed_before=%u type=%u act=0x%04X dt=%f\n",
-                        role, netId, dwId, (uint32_t)(uintptr_t)thisPtr, (unsigned)consumedBefore, (unsigned)objType, (unsigned)act, dt);
+                    uint32_t dwFlags, dwOwner;
+                    MpauthReadDwFlagsOwner(thisPtr, dwFlags, dwOwner);
+                    Log(L"[MPAUTH_DW_DETONATE] sim peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X consumed_before=%u type=%u act=0x%04X dt=%f flags=0x%X owner=0x%08X ret=0x%08X\n",
+                        role, netId, dwId, (uint32_t)(uintptr_t)thisPtr, (unsigned)consumedBefore, (unsigned)objType, (unsigned)act, dt, dwFlags, dwOwner,
+                        (uint32_t)(uintptr_t)_ReturnAddress());
                     Log(L"MPAUTH_DW_DETONATE peer=%hs id=0x%08X ptr=0x%08X consumed_before=%u\n",
                         role, dwId, (uint32_t)(uintptr_t)thisPtr, (unsigned)consumedBefore);
                 }
@@ -336,9 +352,16 @@ namespace BZROpenShim
         }
         void __fastcall MpauthGoRemoveHook(void* thisPtr, void* /*edx*/)
         {
-            bool isDw = MpauthIsDayWreckerObject(thisPtr);
+            // thisPtr is the distributed subobject (complete + 0x18).
+            void* complete = (uint8_t*)thisPtr - kDayWreckerDistributedOffset;
+            bool isDw = MpauthIsDayWreckerObject(complete);
             uint32_t dwId = 0; uint8_t objType = 0xFF; uint16_t act = 0xFFFF;
-            MpauthReadDwIdentity(thisPtr, dwId, objType, act);
+            if (!MpauthReadDwIdentity(complete, dwId, objType, act))
+            {
+                complete = thisPtr;
+                isDw = isDw || MpauthIsDayWreckerObject(thisPtr);
+                MpauthReadDwIdentity(thisPtr, dwId, objType, act);
+            }
             int deletedRecord = 0;
             if (objType == 1) deletedRecord = 1;
             else if (objType == 2 && dwId < 0x10000) deletedRecord = 1;
@@ -350,9 +373,9 @@ namespace BZROpenShim
                     uint16_t netId = MpauthLocalNetId();
                     const char* role = MpauthPeerRole();
                     Log(L"[MPAUTH_DW_REMOVE] peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X type=%u act=0x%04X deleted_record=%d\n",
-                        role, netId, dwId, (uint32_t)(uintptr_t)thisPtr, (unsigned)objType, (unsigned)act, deletedRecord);
+                        role, netId, dwId, (uint32_t)(uintptr_t)complete, (unsigned)objType, (unsigned)act, deletedRecord);
                     Log(L"MPAUTH_DW_REMOVE peer=%hs id=0x%08X ptr=0x%08X deleted_record=%d\n",
-                        role, dwId, (uint32_t)(uintptr_t)thisPtr, deletedRecord);
+                        role, dwId, (uint32_t)(uintptr_t)complete, deletedRecord);
                     g_MpauthRecentDwRemovedIds.insert(dwId);
                     g_MpauthDwRemoveTick[dwId] = GetTickCount64();
                     g_MpauthDwDeletedRecord[dwId] = deletedRecord;
@@ -372,6 +395,8 @@ namespace BZROpenShim
             uint32_t dwId = 0; uint8_t objType = 0xFF; uint16_t act = 0xFFFF;
             bool preHas = MpauthReadDwIdentity((uint8_t*)thisPtr - kDayWreckerDistributedOffset, dwId, objType, act);
             if (!preHas) MpauthReadDwIdentity(thisPtr, dwId, objType, act);
+            uint32_t flagsBefore, ownerBefore;
+            MpauthReadDwFlagsOwner((uint8_t*)thisPtr - kDayWreckerDistributedOffset, flagsBefore, ownerBefore);
             if (g_MpauthSetRemoteOrig)
                 g_MpauthSetRemoteOrig(thisPtr);
             else if (g_DistributedCreateDetour.trampoline)
@@ -391,8 +416,11 @@ namespace BZROpenShim
                 {
                     uint16_t netId = MpauthLocalNetId();
                     const char* role = MpauthPeerRole();
-                    Log(L"[MPAUTH_DW_CREATE] peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X type=%u->%u revived=%d\n",
-                        role, netId, logId, (uint32_t)(uintptr_t)complete, (unsigned)objType, (unsigned)postType, revived);
+                    uint32_t flagsAfter, ownerAfter;
+                    MpauthReadDwFlagsOwner(complete, flagsAfter, ownerAfter);
+                    Log(L"[MPAUTH_DW_CREATE] peer=%hs netId=0x%04X id=0x%08X ptr=0x%08X type=%u->%u revived=%d flags=0x%X->0x%X owner=0x%08X ret=0x%08X\n",
+                        role, netId, logId, (uint32_t)(uintptr_t)complete, (unsigned)objType, (unsigned)postType, revived,
+                        flagsBefore, flagsAfter, ownerAfter, (uint32_t)(uintptr_t)_ReturnAddress());
                     Log(L"MPAUTH_DW_CREATE peer=%hs id=0x%08X ptr=0x%08X revived=%d\n",
                         role, logId, (uint32_t)(uintptr_t)complete, revived);
                 }
