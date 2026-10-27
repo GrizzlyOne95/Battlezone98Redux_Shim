@@ -200,7 +200,7 @@ namespace BZROpenShim
             return ComVtablePatch::Succeeded(result);
         }
 
-        bool PatchIatFunction(
+        IatPatch::Result PatchIatFunction(
             HMODULE module,
             const char* importedDll,
             const char* functionName,
@@ -208,9 +208,8 @@ namespace BZROpenShim
             void** original)
         {
             if (!original)
-                return false;
-            return IatPatch::PatchImport(module, importedDll, functionName, replacement, original) ==
-                IatPatch::Result::Patched;
+                return IatPatch::Result::Faulted;
+            return IatPatch::PatchImport(module, importedDll, functionName, replacement, original);
         }
 
         class EmbeddedFxaaInclude final : public ID3DInclude
@@ -1585,27 +1584,41 @@ namespace BZROpenShim
             return hr;
         }
 
-        void PatchRendererImports(HMODULE renderer)
+        bool PatchRendererImports(HMODULE renderer)
         {
+            // Retrying the other import must not overwrite a later observer's
+            // hook that already chains through our successfully installed one.
+            static bool deviceInstalled = false;
+            static bool deviceAndChainInstalled = false;
             unsigned installed = 0;
-            installed += PatchIatFunction(
-                renderer,
-                "d3d11.dll",
+            unsigned faulted = 0;
+            const auto install = [&](bool& complete, const char* name, void* hook, void** original) {
+                const auto result = complete ? IatPatch::Result::Patched :
+                    PatchIatFunction(renderer, "d3d11.dll", name, hook, original);
+                complete = result == IatPatch::Result::Patched;
+                installed += result == IatPatch::Result::Patched ? 1u : 0u;
+                faulted += result == IatPatch::Result::Faulted ? 1u : 0u;
+            };
+            install(deviceInstalled,
                 "D3D11CreateDevice",
                 reinterpret_cast<void*>(&HookD3D11CreateDevice),
-                reinterpret_cast<void**>(&g_RealD3D11CreateDevice)) ? 1u : 0u;
-            installed += PatchIatFunction(
-                renderer,
-                "d3d11.dll",
+                reinterpret_cast<void**>(&g_RealD3D11CreateDevice));
+            install(deviceAndChainInstalled,
                 "D3D11CreateDeviceAndSwapChain",
                 reinterpret_cast<void*>(&HookD3D11CreateDeviceAndSwapChain),
-                reinterpret_cast<void**>(&g_RealD3D11CreateDeviceAndSwapChain)) ? 1u : 0u;
+                reinterpret_cast<void**>(&g_RealD3D11CreateDeviceAndSwapChain));
+
+            // The released renderer need not import both entry points. A fault
+            // or no creation import at all is not a completed installation.
+            if (faulted || !installed)
+                return false;
 
             LogShimA(
-                installed ? LogLevel::Info : LogLevel::Warn,
+                LogLevel::Info,
                 kComponent,
                 "[DX11 Enhanced FXAA] D3D11 creation hooks installed=%u; DX9 and default-off stock paths remain untouched",
                 installed);
+            return true;
         }
 
         unsigned __stdcall DiscoveryThreadProc(void*)
@@ -1616,6 +1629,8 @@ namespace BZROpenShim
                 "[DX11 presentation] requested FXAA=%u FrameBridge=%u; waiting for RenderSystem_Direct3D11.dll (DX9 is never hooked)",
                 g_FxaaEnabled.load() ? 1u : 0u, g_FrameBridgeEnabled.load() ? 1u : 0u);
 
+            HMODULE readyRenderer = nullptr;
+            DWORD loaderError = 0;
             for (unsigned attempt = 0;
                  attempt < kDiscoveryAttempts &&
                  !g_ShutdownRequested.load(std::memory_order_acquire);
@@ -1624,13 +1639,21 @@ namespace BZROpenShim
                 HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
                 if (renderer)
                 {
-                    LogShimA(
-                        LogLevel::Info,
-                        kComponent,
-                        "[DX11 presentation] Direct3D11 renderer found module=0x%p; installing requested presentation experiments",
-                        renderer);
-                    PatchRendererImports(renderer);
-                    return 0;
+                    // Visibility in the module list is earlier than import
+                    // snapping. Fail closed if the load cannot be completed;
+                    // the successful wait also pins our patched module.
+                    if (renderer != readyRenderer &&
+                        IatPatch::WaitForModuleLoadToFinish(renderer, &loaderError))
+                    {
+                        readyRenderer = renderer;
+                        LogShimA(LogLevel::Info, kComponent,
+                            "[DX11 presentation] renderer load complete module=0x%p; installing requested presentation experiments",
+                            renderer);
+                    }
+                    if (g_ShutdownRequested.load(std::memory_order_acquire))
+                        break;
+                    if (renderer == readyRenderer && PatchRendererImports(renderer))
+                        return 0;
                 }
                 Sleep(kDiscoverySleepMs);
             }
@@ -1638,9 +1661,10 @@ namespace BZROpenShim
             if (!g_ShutdownRequested.load(std::memory_order_acquire))
             {
                 LogShimA(
-                    LogLevel::Info,
+                    readyRenderer ? LogLevel::Warn : LogLevel::Info,
                     kComponent,
-                    "[DX11 Enhanced FXAA] Direct3D11 renderer not observed; no hooks installed (DX9 or renderer initialization not reached)");
+                    "[DX11 presentation] creation hook discovery incomplete (readyRenderer=0x%p loaderError=%lu); renderer absent or imports not ready",
+                    readyRenderer, loaderError);
             }
             return 0;
         }
