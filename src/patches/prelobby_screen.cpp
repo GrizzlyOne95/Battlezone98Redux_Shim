@@ -97,7 +97,11 @@ namespace BZROpenShim
         // Continue: the stock 369x68 "to main menu" skin, bottom-centre.
         constexpr Shell::Rect kContinueRect = { (1440.0f - 369.0f) * 0.5f, 900.0f, 369.0f, 68.0f };
 
-        constexpr ULONGLONG kConnectTimeoutMs = 20000;
+        // Longer than one stock engine retry cycle: after a failed connect the
+        // engine waits DAT_0260b0a0 (30 s stock, 5 s with OpenShim's
+        // ReconnectDelaySeconds) before its next attempt, and a server change
+        // made while disconnected has no socket to recycle.
+        constexpr ULONGLONG kConnectTimeoutMs = 45000;
         // After a recycle the old authorisation is still readable until the
         // socket's close handler runs; wait for it to drop (or this long)
         // before trusting a non-zero isNetworkInit.
@@ -392,7 +396,9 @@ namespace BZROpenShim
             g_Pending = true;
             g_AwaitDrop = recycled;
             g_PendingSince = GetTickCount64();
-            SetNote("Connecting...");
+            // No socket to recycle: the new server is used on the engine's
+            // next retry ([Network] ReconnectDelaySeconds, stock 30 s).
+            SetNote(serverChanged && !recycled ? "Switching server, retrying..." : "Connecting...");
             Log(L"[PRELOBBY] continue pending (recycled=%d)\n", recycled ? 1 : 0);
             RefreshStatus(true);
         }
@@ -710,7 +716,7 @@ namespace BZROpenShim
     void __fastcall PreLobbyClickMultiPlayerHook(void* thisPtr, void* /*edx*/)
     {
         bool requested = false;
-        if (!g_InContinue && thisPtr && PreLobbyIniEnabled())
+        if (!g_InContinue && thisPtr && (PreLobbyIniEnabled() || QueryStockIsNetworkInit() == 0))
         {
             __try
             {
@@ -728,13 +734,16 @@ namespace BZROpenShim
     }
 
     // Stock MP-status refresh first (label, status text, enabled byte), then
-    // the button is made clickable again while the pre-lobby is on.
+    // the button is made clickable again while the pre-lobby is on or the
+    // network is not ready.
     void __fastcall PreLobbyMpStatusRefreshHook(void* thisPtr, void* /*edx*/)
     {
         using FnRefresh = void(__thiscall*)(void*);
         reinterpret_cast<FnRefresh>(kMainScreenMpStatusRefreshAddr)(thisPtr);
 
-        if (!thisPtr || !PreLobbyIniEnabledThrottled())
+        // Not ready = the screen is the only way to switch server or watch a
+        // retry, so it opens then even with [Network] PreLobby off.
+        if (!thisPtr || (!PreLobbyIniEnabledThrottled() && QueryStockIsNetworkInit() != 0))
             return;
         __try
         {

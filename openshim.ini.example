@@ -1977,6 +1977,11 @@ LobbyBanButton = 1
 ; read-only, showing "<address> (test redirect)", when [OpenShimSocket]
 ; MatchmakingRedirectAddress is set.
 PreLobby = 0
+; Seconds the game waits between matchmaking connect retries (stock 30). A
+; custom server that does not answer falls back to Rebellion for the session;
+; the saved Server choice is kept.
+; Accepted: integer seconds, 0 = stock. Default: 5. Read at startup.
+ReconnectDelaySeconds = 5
 
 ; Matchmaking server: Rebellion's official one or a community/custom one.
 ; Accepted: Rebellion, Custom. Blank/absent = no override: stock behaviour,
