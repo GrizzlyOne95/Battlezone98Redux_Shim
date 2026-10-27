@@ -2062,9 +2062,11 @@ PreLobby = 1
 ; Server =
 
 ; Host name or IP of the custom server, used when Server = Custom.
-; Accepted: a bare host or IPv4 address, optionally with a ":1337" suffix. No
-; scheme (ws://), path or spaces. Only port 1337 is supported; any other port
-; is refused. Blank = none (Server = Custom then has no effect).
+; Accepted: a bare host or IPv4 address, optionally with a ":port" suffix
+; (1-65534, default 1337). No scheme (ws://), path or spaces. The lobby
+; websocket goes to that TCP port and the game probes UDP on port + 1, so a
+; server on ws 1437 needs UDP 1438. Blank = none (Server = Custom then has no
+; effect).
 ; CustomServer =
 
 ; Remember muted players across sessions.

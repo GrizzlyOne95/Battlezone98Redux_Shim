@@ -152,7 +152,7 @@ namespace BZROpenShim
         // the /bzrserver= launch host, else the official one.
         std::string CurrentServerHost()
         {
-            char host[256] = {};
+            char host[MatchmakingServer::kMaxHostLength + 8] = {};  // host:65534
             if (!GetMatchmakingServerOverride(host, sizeof(host)))
                 GetLaunchServerHost(host, sizeof(host));
             return host;
@@ -250,7 +250,7 @@ namespace BZROpenShim
             case MS::HostStatus::Ok:
                 return true;
             case MS::HostStatus::UnsupportedPort:
-                SetNote("Only port 1337 is supported");
+                SetNote("Port must be 1 to 65534");
                 break;
             case MS::HostStatus::Invalid:
                 SetNote("Enter a host name or IP address only");
