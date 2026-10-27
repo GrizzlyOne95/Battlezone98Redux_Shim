@@ -951,6 +951,8 @@ namespace BZROpenShim
         static void* g_LastSunLight = nullptr;
         static void* g_LastSunSceneManager = nullptr;
         static uint32_t g_SunReplacements = 0;
+        static uint32_t g_RejectedSunLights = 0;
+        static const void* g_LastRejectedSunLight = nullptr;
         static constexpr uint32_t kSunReplacementLogLimit = 20;
 
         static bool BindSunWatch()
@@ -981,6 +983,39 @@ namespace BZROpenShim
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 return nullptr;
+            }
+        }
+
+        // TerrainMasterLight can outlive the light it names: a co-op crash dump
+        // had it pointing at a recycled allocation (a D3D11 shader resource
+        // view), and the Light setters below wrote the restored sun into it.
+        // SEH cannot catch a write that lands in readable memory, so the sun is
+        // only touched while both of its vtable pointers are Ogre::Light's. A
+        // destroyed Light carries its base classes' vtables after the
+        // destructor runs, so this also rejects a freed, not yet reused sun.
+        static bool IsLiveOgreLight(const void* light)
+        {
+            static const void* s_ShadowCasterVtable = nullptr;
+            static const void* s_AnimableVtable = nullptr;
+            static int s_Bound = 0;
+            if (s_Bound == 0)
+            {
+                s_ShadowCasterVtable = ResolveOgreProc<const void*>("??_7Light@Ogre@@6BShadowCaster@1@@");
+                s_AnimableVtable = ResolveOgreProc<const void*>("??_7Light@Ogre@@6BAnimableObject@1@@");
+                s_Bound = s_ShadowCasterVtable && s_AnimableVtable ? 1 : -1;
+                if (s_Bound < 0)
+                    Log(L"[SUNWATCH] Ogre::Light vtables unresolved; the sun is never read or written\n");
+            }
+            if (s_Bound < 0 || !light)
+                return false;
+            __try
+            {
+                const void* const* const vptrs = static_cast<const void* const*>(light);
+                return vptrs[0] == s_ShadowCasterVtable && vptrs[1] == s_AnimableVtable;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
             }
         }
 
@@ -1521,6 +1556,22 @@ namespace BZROpenShim
             // pointer so the rebuilt one still reads as a change.
             if (!sceneManager || !sun)
                 return;
+            // A stale global is handled like a null one: keep the last pointer
+            // and wait for the engine to name a live light again.
+            if (!IsLiveOgreLight(sun))
+            {
+                if (sun != g_LastRejectedSunLight && ++g_RejectedSunLights <= kSunReplacementLogLimit)
+                {
+                    char type[96] = {};
+                    const char* const name = TryGetRttiClassName(sun, type, sizeof(type));
+                    Log(L"[SUNWATCH] sun global 0x%08X is not a live Ogre::Light (%hs); not touched (#%u)\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sun)),
+                        name ? name : "unknown type",
+                        static_cast<unsigned>(g_RejectedSunLights));
+                }
+                g_LastRejectedSunLight = sun;
+                return;
+            }
             const bool restoreOn = BindSunRestore();
             if (sun == g_LastSunLight && sceneManager == g_LastSunSceneManager)
             {

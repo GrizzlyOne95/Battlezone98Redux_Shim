@@ -206,6 +206,12 @@ function New-BZRCoopInstance {
         # means the Goldberg account name (BZRCoopN), which the lobby matches.
         $ini = [regex]::Replace($ini, '(?m)^([ \t]*Nickname[ \t]*=)[^\r\n]*', '${1}')
         [IO.File]::WriteAllText($shimIni, $ini)
+        # BZRCOOP_INI_SET="Section.Key=Value;..." sets keys in this instance's
+        # copy only, for A/B runs on a setting; the install's file is untouched.
+        foreach ($pair in @(($env:BZRCOOP_INI_SET -split ';') | Where-Object { $_ -match '^\s*([^.=]+)\.([^=]+)=(.*)$' })) {
+            $null = $pair -match '^\s*([^.=]+)\.([^=]+)=(.*)$'
+            Set-BZRCoopIniValue $shimIni $Matches[1].Trim() $Matches[2].Trim() $Matches[3].Trim()
+        }
     }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'scripts') -Destination $dir -Recurse
     if ($OpenShimRepo -and -not $NoOpenShim) { Install-OpenShimBuild $dir }
