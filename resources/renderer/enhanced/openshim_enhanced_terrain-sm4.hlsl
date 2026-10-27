@@ -1192,6 +1192,30 @@ void terrain_fragment(
     uniform Texture2D brdfLut : register(t7),
     uniform SamplerState brdfLutSam : register(s7),
 #endif
+#if defined(TERRAIN_SHAPE_ENABLED)
+    // Hollows (r) and ridges (g) baked from the map's heightfield, read by
+    // world XZ: uv = xz * surfaceTerrain.xy + surfaceTerrain.zw; x = 0 is off.
+#if defined(PSSM_ENABLED)
+    uniform Texture2D terrainShapeMap : register(t11),
+    uniform SamplerState terrainShapeSam : register(s11),
+#elif defined(SHADOWRECEIVER)
+    uniform Texture2D terrainShapeMap : register(t9),
+    uniform SamplerState terrainShapeSam : register(s9),
+#else
+    uniform Texture2D terrainShapeMap : register(t8),
+    uniform SamplerState terrainShapeSam : register(s8),
+#endif
+    uniform float4 surfaceTerrain,
+    // The camera's world position: inverseViewMatrix is camera-relative.
+    uniform float4 surfaceCamera,
+    // Thruster wash: world x, z, radius, strength per hovering craft; w = 0 is off.
+    uniform float4 surfaceWash0,
+    uniform float4 surfaceWash1,
+    uniform float4 surfaceWash2,
+    uniform float4 surfaceWash3,
+    uniform float4 surfaceWash4,
+    uniform float4 surfaceWash5,
+#endif
     uniform float4x4 inverseViewMatrix,
 #elif defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
     // World-up and world position for the snow layer.
@@ -1200,6 +1224,7 @@ void terrain_fragment(
 #if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
     // See openshim_surface_reactions.hlsl. Zero leaves the terrain untouched.
     uniform float4 surfaceSnow,
+    uniform float4 surfaceDust,
 #endif
 
     uniform float4 sceneAmbient,
@@ -1382,6 +1407,9 @@ void terrain_fragment(
 #if defined(ENHANCED_MODE)
     float snowCover = 0.0;
     float iceMask = 0.0;
+    float dustCover = 0.0;
+    float terrainHollow = 0.0;
+    float terrainRidge = 0.0;
     float2 iceOffset = float2(0.0, 0.0);
 #endif
 
@@ -1441,15 +1469,55 @@ void terrain_fragment(
 #endif
 
 #if defined(ENHANCED_MODE)
+    float3 worldOrigin = 0.0;
+#if defined(TERRAIN_SHAPE_ENABLED)
+    worldOrigin = surfaceCamera.xyz;
+    if (surfaceTerrain.x != 0.0)
+    {
+        float3 shapeWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz + worldOrigin;
+        float2 shape = terrainShapeMap.Sample(terrainShapeSam,
+            shapeWorld.xz * surfaceTerrain.xy + surfaceTerrain.zw).rg;
+        terrainHollow = shape.x;
+        terrainRidge = shape.y;
+    }
+    // Craft blow snow and dust away beneath them; the edge is ragged.
+    float terrainWash = 0.0;
+    if (surfaceWash0.w > 0.0)
+    {
+        float2 washXZ = mul(inverseViewMatrix, float4(viewPos, 1.0)).xz + worldOrigin.xz;
+        float washEdge = ose_snow_noise(washXZ * 0.6) * 0.35;
+        terrainWash = max(max(ose_wash(surfaceWash0, washXZ, washEdge), ose_wash(surfaceWash1, washXZ, washEdge)),
+            max(max(ose_wash(surfaceWash2, washXZ, washEdge), ose_wash(surfaceWash3, washXZ, washEdge)),
+                max(ose_wash(surfaceWash4, washXZ, washEdge), ose_wash(surfaceWash5, washXZ, washEdge))));
+    }
+#endif
     // Uniform-only branch. Noise runs on world XZ so drifts stay put on the
     // ground; the geometric normal decides cover so ridgelines stay bare.
     if (surfaceSnow.x > 0.002)
     {
         float3 snowGeometric = safe_normalize(vViewNormal);
         float snowUp = mul(inverseViewMatrix, float4(lerp(snowGeometric, viewNormal, 0.5), 0.0)).y;
-        float3 snowWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz;
-        snowCover = ose_snow_cover(snowUp, ose_snow_noise(snowWorld.xz * 0.11), surfaceSnow.x);
+        float3 snowWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz + worldOrigin;
+        float snowNoise = ose_snow_noise(snowWorld.xz * 0.11);
+        snowCover = ose_snow_cover(snowUp, snowNoise, surfaceSnow.x);
+        // Wind piles snow into hollows and scours it off ridges.
+        snowCover = lerp(snowCover, 1.0, terrainHollow * 0.75 * smoothstep(0.2, 0.7, snowUp + snowNoise * 0.2));
+        snowCover *= 1.0 - 0.8 * terrainRidge;
+#if defined(TERRAIN_SHAPE_ENABLED)
+        snowCover *= 1.0 - 0.9 * terrainWash;
+#endif
         viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.25));
+    }
+    // Dust drifts into the same hollows; the open ground keeps its own colour.
+    if (surfaceDust.w > 0.002 && terrainHollow > 0.0)
+    {
+        float3 dustWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz + worldOrigin;
+        float dustNoise = ose_snow_noise(dustWorld.xz * 0.15);
+        dustCover = saturate(terrainHollow * 1.3 - terrainRidge) * (0.55 + dustNoise * 0.45)
+            * min(1.0, surfaceDust.w * 3.0) * 0.6 * (1.0 - snowCover);
+#if defined(TERRAIN_SHAPE_ENABLED)
+        dustCover *= 1.0 - terrainWash;
+#endif
     }
 #if !defined(VERTEX_LIGHTING)
     // Ice under the snow line gets a refracted sub-surface layer (albedo stage).
@@ -1530,11 +1598,11 @@ void terrain_fragment(
 #endif
 
 #if defined(ENHANCED_MODE)
-    surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), snowCover);
+    surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), max(snowCover, dustCover));
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = max(
-        lerp(lerp(derive_legacy_roughness(materialShininess, specularMask), 0.28, iceMask * 0.8),
-             0.75, snowCover),
+        lerp(lerp(lerp(derive_legacy_roughness(materialShininess, specularMask), 0.28, iceMask * 0.8),
+             0.9, dustCover), 0.75, snowCover),
         OSE_TERRAIN_PBR_MIN_ROUGHNESS);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
@@ -1779,6 +1847,14 @@ void terrain_fragment(
                 iceDx * 32.0, iceDy * 32.0).xyz), 0.8);
 #endif
         surfaceAlbedo = lerp(surfaceAlbedo, vertexTint * iceDeep, iceMask * 0.45);
+    }
+    if (dustCover > 0.0)
+    {
+        float3 dustAlbedo = surfaceDust.rgb;
+#if !OSE_LINEAR_LIGHT_ACTIVE
+        dustAlbedo = sqrt(dustAlbedo);
+#endif
+        surfaceAlbedo = ose_dust_blend(surfaceAlbedo, dustAlbedo, dustCover);
     }
     oColor.xyz = lightResult.xyz * ose_snow_blend(surfaceAlbedo, snowAlbedo, snowCover);
 #else

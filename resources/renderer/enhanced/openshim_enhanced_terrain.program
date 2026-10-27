@@ -2546,6 +2546,7 @@ fragment_program OSE_TerrainENHighNoShadow_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
 
@@ -2559,6 +2560,7 @@ fragment_program OSE_TerrainENHighShadow_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
 
@@ -2572,6 +2574,7 @@ fragment_program OSE_TerrainENHighPSSM_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
 
@@ -2883,6 +2886,7 @@ fragment_program OSE_TerrainENMediumNoShadow_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
 
@@ -2897,6 +2901,7 @@ fragment_program OSE_TerrainENMediumShadow_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
 
@@ -2911,6 +2916,7 @@ fragment_program OSE_TerrainENMediumPSSM_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
 
@@ -2925,6 +2931,7 @@ fragment_program OSE_TerrainENLowNoShadow_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
 
@@ -2939,6 +2946,7 @@ fragment_program OSE_TerrainENLowShadow_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
 
@@ -2953,5 +2961,6 @@ fragment_program OSE_TerrainENLowPSSM_fragmentHLSL4 hlsl
 	{
 		param_named_auto inverseViewMatrix inverse_view_matrix
 		param_named surfaceSnow float4 0 0 0 0
+		param_named surfaceDust float4 0 0 0 0
 	}
 }
