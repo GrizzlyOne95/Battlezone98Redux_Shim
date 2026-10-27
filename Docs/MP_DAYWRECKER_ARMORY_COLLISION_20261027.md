@@ -93,3 +93,34 @@ host launcher, 2 clients:
 
 The Armory exemption (part 2) did not fire in either fixed run; with part 1
 no copy is rebuilt at the Armory. It stays as a backstop.
+
+## Two Daywreckers launched at the Armory itself
+
+The report also says two Daywreckers launched at the Armory collide overhead
+for double damage. `-ScenarioArgs @{ Weapon = 'daywrecker'; Burst = 2; Target = 'armory' }`
+(witnesses at 150/180 m), against a one-bomb baseline (80/120 m):
+
+| Run | Peer | Bomb ends | Own witness loss |
+| --- | --- | --- | --- |
+| `mpbugs-wp-self2-stock-1` | c0 launcher | both at y 54-55 (ground 13), same frame | 1378, 1599 @150 m; 483, 511 @180 m |
+| | c1 | both at y 54-55, same frame | x1.00 of c0 |
+| `mpbugs-wp-self2-stock-2` | c1 | the same two, **plus one at the spawn point (y 13) 2.8 s earlier** | x1.41 of c0 |
+| `mpbugs-wp-self2-fixed-1` | c0 / c1 | both at y 54-55, same frame, on both | x1.00 |
+| `mpbugs-wp-self1-fixed-1` | c0 / c1 | one, on the ground | 1836 @80 m, 1395 @120 m |
+
+So:
+- The second bomb, still climbing, meets the first coming down about 42 m
+  above the Armory. Each one's RegCollision clears the other's in-flight bit,
+  and both detonate in the same frame. Normalised for distance
+  (loss / (200 - d), with the 42 m height), that is about twice one bomb's
+  damage: two full blasts, not one bomb destroying the other.
+- Every peer simulates the same collision and applies the same damage to its
+  own units, so it is not a multiplayer desync. It is stock gameplay: a
+  Daywrecker treats any non-owner object, including a sibling bomb, as a hit.
+- The multiplayer part was the phantom: in `stock-2` the receiver got a third
+  blast at the spawn point (the create-before-state case above). The fix
+  removes it (`fixed-1`: 2 blasts on each peer, x1.00).
+
+Not covered: these runs are on loopback (ping 2-3 ms). Under real latency a
+receiver's copy of the second bomb is created later, so the pair may miss
+each other and land separately; the count of blasts stays two.
