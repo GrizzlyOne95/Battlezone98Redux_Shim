@@ -1208,6 +1208,13 @@ void terrain_fragment(
     uniform float4 surfaceTerrain,
     // The camera's world position: inverseViewMatrix is camera-relative.
     uniform float4 surfaceCamera,
+    // Thruster wash: world x, z, radius, strength per hovering craft; w = 0 is off.
+    uniform float4 surfaceWash0,
+    uniform float4 surfaceWash1,
+    uniform float4 surfaceWash2,
+    uniform float4 surfaceWash3,
+    uniform float4 surfaceWash4,
+    uniform float4 surfaceWash5,
 #endif
     uniform float4x4 inverseViewMatrix,
 #elif defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
@@ -1473,6 +1480,16 @@ void terrain_fragment(
         terrainHollow = shape.x;
         terrainRidge = shape.y;
     }
+    // Craft blow snow and dust away beneath them; the edge is ragged.
+    float terrainWash = 0.0;
+    if (surfaceWash0.w > 0.0)
+    {
+        float2 washXZ = mul(inverseViewMatrix, float4(viewPos, 1.0)).xz + worldOrigin.xz;
+        float washEdge = ose_snow_noise(washXZ * 0.6) * 0.35;
+        terrainWash = max(max(ose_wash(surfaceWash0, washXZ, washEdge), ose_wash(surfaceWash1, washXZ, washEdge)),
+            max(max(ose_wash(surfaceWash2, washXZ, washEdge), ose_wash(surfaceWash3, washXZ, washEdge)),
+                max(ose_wash(surfaceWash4, washXZ, washEdge), ose_wash(surfaceWash5, washXZ, washEdge))));
+    }
 #endif
     // Uniform-only branch. Noise runs on world XZ so drifts stay put on the
     // ground; the geometric normal decides cover so ridgelines stay bare.
@@ -1486,6 +1503,9 @@ void terrain_fragment(
         // Wind piles snow into hollows and scours it off ridges.
         snowCover = lerp(snowCover, 1.0, terrainHollow * 0.75 * smoothstep(0.2, 0.7, snowUp + snowNoise * 0.2));
         snowCover *= 1.0 - 0.8 * terrainRidge;
+#if defined(TERRAIN_SHAPE_ENABLED)
+        snowCover *= 1.0 - 0.9 * terrainWash;
+#endif
         viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.25));
     }
     // Dust drifts into the same hollows; the open ground keeps its own colour.
@@ -1495,6 +1515,9 @@ void terrain_fragment(
         float dustNoise = ose_snow_noise(dustWorld.xz * 0.15);
         dustCover = saturate(terrainHollow * 1.3 - terrainRidge) * (0.55 + dustNoise * 0.45)
             * min(1.0, surfaceDust.w * 3.0) * 0.6 * (1.0 - snowCover);
+#if defined(TERRAIN_SHAPE_ENABLED)
+        dustCover *= 1.0 - terrainWash;
+#endif
     }
 #if !defined(VERTEX_LIGHTING)
     // Ice under the snow line gets a refracted sub-surface layer (albedo stage).

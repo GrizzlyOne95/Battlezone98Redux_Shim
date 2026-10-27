@@ -115,6 +115,14 @@ float ose_snow_noise(float2 p)
     return ose_snow_value(p) * 0.65 + ose_snow_value(p * 3.7 + 0.37) * 0.35 - 0.5;
 }
 
+// Thruster wash w = (x, z, radius, strength): full inside half the radius,
+// fading to the rim; edge (about -0.2..0.2) roughens the rim.
+float ose_wash(float4 w, float2 xz, float edge)
+{
+    float d = length(xz - w.xy) / max(w.z, 0.001) + edge;
+    return w.w * (1.0 - smoothstep(0.5, 1.0, d));
+}
+
 // up is the world-space normal's Y. More snow lowers the threshold so cover
 // creeps from flat tops down onto slopes; noise breaks the line up.
 float ose_snow_cover(float up, float noise, float amount)
