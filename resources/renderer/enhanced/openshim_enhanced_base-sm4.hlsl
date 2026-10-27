@@ -467,6 +467,13 @@ static const float OSE_IBL_SCENE_TINT_STRENGTH = 0.18;
 // openshim_ibl_neutral_prefilter.dds is authored at 128px with mips 0..7.
 static const float OSE_IBL_MAX_SPECULAR_MIP = 7.0;
 
+// ACT_MAP_ENABLED (set by a mod's own program wrapper, e.g. Campaign
+// Reimagined) binds one more texture after brdfLut: baked AO/curvature/
+// thickness. 1 = full baked AO on indirect light, 0 = ignore it.
+#ifndef OSE_ACT_AO_STRENGTH
+#define OSE_ACT_AO_STRENGTH 1.0
+#endif
+
 // -----------------------------------------------------------------------------
 // DX11 Enhanced Atmospheric Calibration
 // -----------------------------------------------------------------------------
@@ -1037,6 +1044,10 @@ void base_fragment(
     uniform SamplerState prefilteredEnvSam : register(s8),
     uniform Texture2D brdfLut : register(t9),
     uniform SamplerState brdfLutSam : register(s9),
+#if defined(ACT_MAP_ENABLED)
+    uniform Texture2D actMap : register(t10),
+    uniform SamplerState actSam : register(s10),
+#endif
 #elif defined(SHADOWRECEIVER)
     uniform TextureCube irradianceMap : register(t5),
     uniform SamplerState irradianceSam : register(s5),
@@ -1044,6 +1055,10 @@ void base_fragment(
     uniform SamplerState prefilteredEnvSam : register(s6),
     uniform Texture2D brdfLut : register(t7),
     uniform SamplerState brdfLutSam : register(s7),
+#if defined(ACT_MAP_ENABLED)
+    uniform Texture2D actMap : register(t8),
+    uniform SamplerState actSam : register(s8),
+#endif
 #else
     uniform TextureCube irradianceMap : register(t4),
     uniform SamplerState irradianceSam : register(s4),
@@ -1051,6 +1066,10 @@ void base_fragment(
     uniform SamplerState prefilteredEnvSam : register(s5),
     uniform Texture2D brdfLut : register(t6),
     uniform SamplerState brdfLutSam : register(s6),
+#if defined(ACT_MAP_ENABLED)
+    uniform Texture2D actMap : register(t7),
+    uniform SamplerState actSam : register(s7),
+#endif
 #endif
     uniform float4x4 inverseViewMatrix,
 #elif defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
@@ -1295,6 +1314,16 @@ void base_fragment(
 
     float3 eyeDir = safe_normalize(-viewPos);
 
+#if defined(ACT_MAP_ENABLED) && defined(IBL_ENABLED)
+    // Baked mesh maps on UV0: r = ambient occlusion, g = curvature (0.5 flat),
+    // b = thickness. Materials without one bind a neutral (1, 0.5, 1) texture.
+    // AO only darkens indirect light; the sun is already shadowed by PSSM.
+    float3 actSample = actMap.Sample(actSam, vTexCoord).rgb;
+    float bakedAO = lerp(1.0, actSample.r, OSE_ACT_AO_STRENGTH);
+#else
+    float bakedAO = 1.0;
+#endif
+
 #if defined(OG_RETRO_MODE)
     float sunTerm = 0.0;
     if (lightCount > 0.0)
@@ -1306,7 +1335,7 @@ void base_fragment(
 #elif defined(IBL_ENABLED)
     // Keep a small amount of the legacy flat ambient as a safety floor while the
     // directional irradiance cubemap becomes the primary ambient source.
-    float3 lightResult = sceneAmbient.xyz * OSE_IBL_LEGACY_AMBIENT_RETAIN;
+    float3 lightResult = sceneAmbient.xyz * OSE_IBL_LEGACY_AMBIENT_RETAIN * bakedAO;
 #else
     float3 lightResult = sceneAmbient.xyz;
 #endif
@@ -1460,7 +1489,7 @@ void base_fragment(
 
     float3 environmentTint = ibl_scene_tint(sceneAmbient.xyz, fogColour.xyz);
     float3 irradiance = irradianceMap.Sample(irradianceSam, worldNormal).xyz * environmentTint;
-    lightResult.xyz += irradiance * diffuseEnergy * OSE_IBL_DIFFUSE_INTENSITY;
+    lightResult.xyz += irradiance * diffuseEnergy * OSE_IBL_DIFFUSE_INTENSITY * bakedAO;
 
     float specularMip = saturate(surfaceRoughness) * OSE_IBL_MAX_SPECULAR_MIP;
     float3 prefilteredEnvironment = prefilteredEnvMap.SampleLevel(
@@ -1471,9 +1500,11 @@ void base_fragment(
         brdfLutSam,
         float2(NdotVForIBL, saturate(surfaceRoughness))).rg;
 
+    // Lagarde specular occlusion: crevices stop reflecting the open sky.
+    float specularAO = saturate(pow(max(NdotVForIBL + bakedAO, 1e-4), exp2(-16.0 * surfaceRoughness - 1.0)) - 1.0 + bakedAO);
     specularResult.xyz += prefilteredEnvironment
                         * (surfaceF0 * environmentBRDF.x + environmentBRDF.y)
-                        * OSE_IBL_SPECULAR_INTENSITY;
+                        * OSE_IBL_SPECULAR_INTENSITY * specularAO;
 #if OSE_ENHANCED_LOD_TIER == 0
     if (reactiveWater.w > 0.002)
     {
