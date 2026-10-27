@@ -236,8 +236,8 @@ function Assert-CRFlowClientsAlive {
         # event 153); each then dies at its next GPU allocation, which says
         # nothing about the case under test.
         $ogre = Join-Path $c.dir 'logs\BZOgreLogfile.log'
-        if ((Test-Path -LiteralPath $ogre) -and (Get-Content -LiteralPath $ogre -Tail 400 | Select-String -SimpleMatch '(-2005270523:' -Quiet)) {
-            throw "client $($c.index) (pid $($c.pid)) exited unexpectedly: its GPU device was removed (DXGI 0x887A0005; check System log nvlddmkm), so this run says nothing about the case. Last log: $last"
+        if ((Test-Path -LiteralPath $ogre) -and (Get-Content -LiteralPath $ogre -Tail 400 | Select-String -Pattern $script:CRFlowDeviceLossOgrePattern -Quiet)) {
+            throw "client $($c.index) (pid $($c.pid)) exited unexpectedly: its GPU device was lost (DXGI removed/hung/reset; check System log nvlddmkm), so this run says nothing about the case. Last log: $last"
         }
         throw "client $($c.index) (pid $($c.pid)) exited unexpectedly (crash?). Last log: $last"
     }
@@ -251,6 +251,32 @@ function Test-CRFlowClientLiveness {
         Add-CRFlowCheck 'all expected client processes survive validation' $true
     } catch {
         Add-CRFlowCheck 'all expected client processes survive validation' $false $_.Exception.Message
+    }
+}
+
+# DXGI_ERROR_DEVICE_REMOVED (0x887A0005), _HUNG (0x887A0006) and _RESET
+# (0x887A0007), as Ogre prints them in exceptions ("(-2005270523:") or by name.
+$script:CRFlowDeviceLossOgrePattern = '\((-2005270523|-2005270522|-2005270521):|DXGI_ERROR_DEVICE_(REMOVED|HUNG|RESET)'
+# OpenShim's device monitor (debug-layer test switch) and its device recreation,
+# which only runs after a loss.
+$script:CRFlowDeviceLossShimPattern = '\[DX11 Debug\] device 0x[0-9A-Fa-f]+ removed:|\[DX11 Recovery\] device recreation #'
+
+# Lines showing a lost D3D11 device in the logs next to $BZLoggerPath; a
+# missing or empty renderer log is reported as evidence too, since it proves
+# nothing about the device.
+function Get-CRFlowDeviceLossEvidence([string]$BZLoggerPath) {
+    if (-not $BZLoggerPath) { return 'no BZLogger.txt; D3D11 device health unknown' }
+    $dir = Split-Path $BZLoggerPath -Parent
+    $ogreLog = Join-Path $dir 'BZOgreLogfile.log'
+    if (-not (Test-Path -LiteralPath $ogreLog) -or (Get-Item -LiteralPath $ogreLog).Length -eq 0) {
+        return "no renderer log at $ogreLog; D3D11 device health unknown"
+    }
+    @(Select-String -LiteralPath $ogreLog -Pattern $script:CRFlowDeviceLossOgrePattern |
+        Select-Object -First 3 | ForEach-Object { $_.Line.Trim() })
+    $shimLog = Join-Path $dir 'openshim.log'
+    if (Test-Path -LiteralPath $shimLog) {
+        @(Select-String -LiteralPath $shimLog -Pattern $script:CRFlowDeviceLossShimPattern |
+            Select-Object -First 3 | ForEach-Object { $_.Line.Trim() })
     }
 }
 
@@ -645,17 +671,11 @@ function Test-CRFlowLogErrors([int[]]$Clients) {
                 Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() })
         } else { @() }
         Add-CRFlowCheck "c$i no Ogre rendering exceptions" ($renderHits.Count -eq 0) $renderHits
-        # A removed D3D11 device (DXGI 0x887A0005) is logged only by Ogre. The
-        # client keeps simulating and answering probes, so the run can look
-        # healthy while nothing draws (mpbugs-wp-* on 2026-10-26).
-        $deviceHits = @()
-        if ($log) {
-            $ogreLog = Join-Path (Split-Path $log -Parent) 'BZOgreLogfile.log'
-            if (Test-Path -LiteralPath $ogreLog) {
-                $deviceHits = @(Select-String -LiteralPath $ogreLog -SimpleMatch -Pattern '(-2005270523:' |
-                    Select-Object -First 3 | ForEach-Object { $_.Line.Trim() })
-            }
-        }
+        # A lost D3D11 device is logged only by Ogre and OpenShim. The client
+        # keeps simulating and answering probes, so the run can look healthy
+        # while nothing draws (mpbugs-wp-* on 2026-10-26). A missing renderer
+        # log is no evidence of a healthy device, so it fails too.
+        $deviceHits = @(Get-CRFlowDeviceLossEvidence $log)
         Add-CRFlowCheck "c$i D3D11 device not removed" ($deviceHits.Count -eq 0) $deviceHits
         # CR's guest-side marker/label resolution (CR #186) logs "[coop] unresolved ..."
         # and bumps M.coopUnresolved when a leader-sent label never resolves in 15 s.

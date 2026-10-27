@@ -82,6 +82,8 @@ namespace HookEngine
         ~FrameThreadSitesScope();
         FrameThreadSitesScope(const FrameThreadSitesScope&) = delete;
         FrameThreadSitesScope& operator=(const FrameThreadSitesScope&) = delete;
+        // False off the frame thread or before NoteFrameThread has run.
+        bool Engaged() const { return m_engaged; }
     private:
         bool m_engaged;
     };

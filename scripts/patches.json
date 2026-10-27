@@ -3789,6 +3789,12 @@
       "identity": "Ogre::Light* terrain_masterlight (the sun); built by 0x0067DF70, destroyed and nulled by 0x0067E550, rebuilt lazily by the frame render 0x00682540"
     },
     {
+      "name": "TerrainMasterLightBuild",
+      "address": "0x0067DF70",
+      "expected": "55 8B EC 6A FF 68 78 B7 84 00 64 A1 00 00 00 00",
+      "identity": "void __cdecl(void) sun builder: createLight(\"terrain_masterlight\"), setType directional, direction from SunDirectionState, shadow far 128; every sun is built here, called by RefreshTerrainMasterLight 0x0067E0E0 and lazily by the frame render 0x00682540"
+    },
+    {
       "name": "SunDirectionState",
       "address": "0x02CEB830",
       "kind": "data",

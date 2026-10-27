@@ -61,6 +61,7 @@ try {
     Test-CRFlowPresentationParity
     Check (@($script:CRFlowRun.checks | Where-Object status -eq fail).Count -eq 1) 'missing fourth-client presentation rejected'
     foreach ($client in 0..3) { [IO.File]::WriteAllText((Join-Path $fixtureRoot "c$client.log"), '') }
+    [IO.File]::WriteAllText((Join-Path $fixtureRoot 'BZOgreLogfile.log'), 'Start main loop') # a healthy renderer log
     [IO.File]::WriteAllText((Join-Path $fixtureRoot 'c3.log'), 'Lua error: fourth client')
     Reset-Checks
     Test-CRFlowLogErrors

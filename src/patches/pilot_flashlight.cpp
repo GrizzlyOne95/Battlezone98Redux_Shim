@@ -955,6 +955,54 @@ namespace BZROpenShim
         static const void* g_LastRejectedSunLight = nullptr;
         static constexpr uint32_t kSunReplacementLogLimit = 20;
 
+        // The allocator can put a rebuilt sun at the address of the one it
+        // replaced, and then the pointer alone reads as "unchanged" and the
+        // saved overrides are snapshotted away. Every sun is built by one
+        // engine function, so counting its calls gives each sun a generation.
+        // Without the detour the count stays 0 and only the address is used.
+        using FnSunBuild = void(__cdecl*)();
+        static InlineDetour32 g_SunBuildDetour = {};
+        static FnSunBuild g_SunBuildOriginal = nullptr;
+        static volatile LONG g_SunBuilds = 0;
+        static LONG g_LastSunBuild = 0;
+        static int g_SunBuildHook = 0;  // 0 untried, 1 installed, -1 stood down
+
+        static void __cdecl SunBuildHook()
+        {
+            g_SunBuildOriginal();
+            InterlockedIncrement(&g_SunBuilds);
+        }
+
+        // Called from the frame callback; the builder runs only on this
+        // thread (the frame render and the object teardown that calls
+        // RefreshTerrainMasterLight), so the write needs no thread freeze,
+        // which deadlocks from here. Waits for the first frame to be noted.
+        static void InstallSunBuildHook()
+        {
+            if (g_SunBuildHook != 0)
+                return;
+            HookEngine::FrameThreadSitesScope frameSites;
+            if (!frameSites.Engaged())
+                return;
+            uint32_t address = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "TerrainMasterLightBuild", &address },
+            };
+            static const uint8_t kPrologue[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
+            if (!HookEngine::BindEngineRows("Sun build generation", rows) ||
+                !InstallInlineDetour32(g_SunBuildDetour, address,
+                                       reinterpret_cast<void*>(SunBuildHook),
+                                       sizeof(kPrologue), kPrologue, sizeof(kPrologue)))
+            {
+                g_SunBuildHook = -1;
+                Log(L"[SUNWATCH] sun build hook unavailable; a sun rebuilt at the same address is not restored\n");
+                return;
+            }
+            g_SunBuildOriginal = reinterpret_cast<FnSunBuild>(g_SunBuildDetour.trampoline);
+            g_SunBuildHook = 1;
+            Log(L"[SUNWATCH] sun build hook installed at 0x%08X\n", static_cast<uint32_t>(address));
+        }
+
         static bool BindSunWatch()
         {
             if (g_SunWatchBound == 0)
@@ -1573,7 +1621,12 @@ namespace BZROpenShim
                 return;
             }
             const bool restoreOn = BindSunRestore();
-            if (sun == g_LastSunLight && sceneManager == g_LastSunSceneManager)
+            InstallSunBuildHook();
+            // Read once: a build between here and the bookkeeping below is
+            // seen next frame as a new generation.
+            const LONG builds = g_SunBuilds;
+            if (sun == g_LastSunLight && sceneManager == g_LastSunSceneManager &&
+                builds == g_LastSunBuild)
             {
                 // After a mission boundary the same pointer is either the
                 // outgoing sun (leave it alone) or, once the next mission is
@@ -1596,6 +1649,7 @@ namespace BZROpenShim
             const bool sameScene = sceneManager == g_LastSunSceneManager;
             g_LastSunLight = sun;
             g_LastSunSceneManager = sceneManager;
+            g_LastSunBuild = builds;
             if (!previous || !sameScene)
             {
                 // First sun of this scene: nothing cached yet. The baseline

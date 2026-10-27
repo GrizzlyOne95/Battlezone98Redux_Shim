@@ -20,8 +20,9 @@
 // mirrored too. When handleDeviceLost reaches the mesh reload, each buffer
 // that still belongs to the old device gets a new ID3D11Buffer on the new one,
 // created from its copy, and the reload is skipped. Constant and stream-output
-// buffers are left alone. If any buffer was seen that predates the hooks, the
-// copies are incomplete and the stock reload runs as before.
+// buffers are left alone. If a live buffer predates the hooks, or any buffer
+// came back empty or could not be recreated, the copies did not restore
+// everything and the stock reload runs as before.
 //
 // How: the renderer is built with incremental linking, so every call to the
 // constructor, destructor, lockImpl, unlockImpl, copyDataImpl and
@@ -104,6 +105,7 @@ namespace BZROpenShim
             uint32_t lockOffset;
             uint32_t lockLength;
             uint32_t lockOptions;
+            bool late;          // predates the hooks; counted in g_LateBuffers
         };
 
         // Never destroyed: the renderer frees buffers during process exit,
@@ -119,7 +121,8 @@ namespace BZROpenShim
 
         std::atomic<uint64_t> g_MirrorBytes{0};
         std::atomic<uint64_t> g_MirrorBytesLogged{0};
-        std::atomic<uint32_t> g_LateBuffers{0};
+        std::atomic<uint32_t> g_LateBuffers{0};     // live buffers that predate the hooks
+        std::atomic<uint32_t> g_LateBuffersSeen{0}; // every such buffer, for the log
         std::atomic<uint32_t> g_Invalidated{0};
         std::atomic<uint32_t> g_AllocFailures{0};
         std::atomic<uint32_t> g_UploadFailures{0};
@@ -208,7 +211,7 @@ namespace BZROpenShim
                              "[DX11 Buffers] no memory for a %zu-byte CPU copy; that buffer will come back empty after a device loss",
                              size);
             }
-            Insert(buffer, new Mirror{data, size, data != nullptr, false, 0, 0, 0});
+            Insert(buffer, new Mirror{data, size, data != nullptr, false, 0, 0, 0, false});
             if (data)
             {
                 g_MirrorBytes.fetch_add(size);
@@ -218,15 +221,17 @@ namespace BZROpenShim
 
         // A buffer created before the hooks, met at its first lock or copy.
         // It is recreated empty after a loss, and its presence means the
-        // copies are incomplete, so the stock mesh reload stays on.
+        // copies are incomplete, so the stock mesh reload stays on until it is
+        // destroyed.
         Mirror* TrackLate(const void* buffer)
         {
             if (!g_Active.load(std::memory_order_acquire) || !g_BufferVtable ||
                 *reinterpret_cast<const void* const*>(buffer) != g_BufferVtable || !IsMirrorable(buffer))
                 return nullptr;
-            auto* mirror = new Mirror{nullptr, Field<uint32_t>(buffer, kOffSizeInBytes), false, false, 0, 0, 0};
+            auto* mirror = new Mirror{nullptr, Field<uint32_t>(buffer, kOffSizeInBytes), false, false, 0, 0, 0, true};
             Insert(buffer, mirror);
-            if (g_LateBuffers.fetch_add(1) == 0)
+            g_LateBuffers.fetch_add(1);
+            if (g_LateBuffersSeen.fetch_add(1) == 0)
                 LogShimA(LogLevel::Warn, kComponent,
                          "[DX11 Buffers] buffer 0x%p predates the hooks; a device loss will use Ogre's mesh reload", buffer);
             return mirror;
@@ -245,6 +250,8 @@ namespace BZROpenShim
             ReleaseSRWLockExclusive(&g_MapLock);
             if (!mirror)
                 return;
+            if (mirror->late)
+                g_LateBuffers.fetch_sub(1);
             if (mirror->data)
             {
                 g_MirrorBytes.fetch_sub(mirror->size);
@@ -450,14 +457,17 @@ namespace BZROpenShim
                     LogShimA(LogLevel::Warn, kComponent,
                              "[DX11 Buffers] first CreateBuffer failure hr=0x%08lX; the next device loss retries them",
                              static_cast<unsigned long>(s.firstFailure));
-                if (late == 0)
+                if (late == 0 && s.withoutData == 0 && s.failed == 0)
                 {
                     LogShimA(LogLevel::Info, kComponent,
                              "[DX11 Buffers] skipped Ogre's mesh reload: entities keep their skeletons, bones and materials");
                     return;
                 }
+                // An empty or old-device buffer is not restored; only the stock
+                // reload rebuilds mesh contents, at the cost of the bones above.
                 LogShimA(LogLevel::Warn, kComponent,
-                         "[DX11 Buffers] %u buffers predate the hooks; running Ogre's mesh reload as stock", late);
+                         "[DX11 Buffers] restore incomplete (%u buffers predate the hooks, %u empty, %u failed); running Ogre's mesh reload as stock",
+                         late, s.withoutData, s.failed);
             }
             reinterpret_cast<FnReloadAll>(g_RealReloadAll)(manager, nullptr, flags);
         }
