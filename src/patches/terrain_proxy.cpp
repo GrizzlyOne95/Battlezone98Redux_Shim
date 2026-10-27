@@ -4073,7 +4073,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                             }
                             g_ogre.setStringParameter(generatedFragmentProgram.rep,
                                 std::string("preprocessor_defines"),
-                                fragmentDefines);
+                                hdDiffuseReady ? fragmentDefines + ",OPENSHIM_TERRAIN_HD=1"
+                                               : fragmentDefines);
                             g_ogre.loadResource(generatedFragmentProgram.rep, true);
                             if (!bindFragmentProgram(pass, fragmentProgramName))
                             {

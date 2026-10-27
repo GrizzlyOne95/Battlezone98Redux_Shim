@@ -202,6 +202,43 @@ float ose_ice_mask(float3 albedo)
 
 static const float3 OSE_ICE_DEEP_TINT = float3(0.66, 0.82, 1.0);
 
+// Refracted world-space layers under the ice. The view ray (V toward the eye,
+// N the surface normal, P the surface point, all world space) bends into the
+// ice and crosses three depths; each adds fracture sheets (thin ridged-noise
+// lines) and trapped bubbles from world XZ, so the layers stay put and slide
+// against the surface as the view moves. rgb is the Beer-Lambert transmittance
+// along the deepest path (red goes first), a the brightness of the inclusions.
+// footprint (metres per pixel) fades detail before it can shimmer.
+float4 ose_ice_depth_layers(float3 P, float3 V, float3 N, float depth, float footprint)
+{
+    float3 R = refract(-V, N, 1.0 / 1.31);
+    float cosR = max(dot(-R, N), 0.35);
+    float inclusions = 0.0;
+    [unroll] for (int k = 0; k < 3; k++)
+    {
+        float layerDepth = depth * (0.35 + 0.9 * k);
+        float2 xz = (P + R * (layerDepth / cosR)).xz + k * 37.1;
+        float fade = 1.0 / (1.0 + k * 0.8);
+        // Fracture sheets: the zero crossings of value noise, about 3-6 m apart.
+        float scale = 0.22 / (1.0 + k * 0.35);
+        float n = ose_snow_value(xz * scale) * 0.7 + ose_snow_value(xz * scale * 2.9 + 5.3) * 0.3 - 0.5;
+        float lineWidth = max(0.03, footprint * scale * 1.5);
+        float crack = (1.0 - smoothstep(0.0, lineWidth, abs(n))) * saturate(1.0 - footprint * scale * 4.0);
+        // Bubbles: one candidate per 1.6 m cell, a third of them present.
+        float2 cellXZ = xz * 0.62;
+        float2 cell = floor(cellXZ);
+        float2 h = ose_water_hash(cell + k * 13.0);
+        float2 centre = cell + 0.2 + h * 0.6;
+        float radius = 0.05 + 0.09 * frac(h.x * 7.13);
+        float speck = (1.0 - smoothstep(radius * 0.4, radius, length(cellXZ - centre)))
+            * step(0.67, h.y) * saturate(1.0 - footprint * 2.5);
+        inclusions += (crack * 0.9 + speck) * fade;
+    }
+    float path = depth * 2.15 / cosR;
+    float3 transmittance = exp(-path * float3(0.30, 0.11, 0.04));
+    return float4(transmittance, saturate(inclusions));
+}
+
 float ose_surface_mask(float3 position, float4 anchor)
 {
     float3 delta = position - anchor.xyz;
