@@ -57,6 +57,7 @@
 #include "lua_formation_fix_install.h"
 #include "lua_getindependence_guard_install.h"
 #include "lua_send_length_install.h"
+#include "mp_mission_end_sync_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
 #include "mp_ready_diagnostic.h"
@@ -171,6 +172,13 @@ static unsigned __stdcall PatchThreadProc(void*)
     // movzx and the encoders refuse lengths above 255. Byte-guarded and
     // fail-closed; [Fixes] LuaSendLengthUnsigned = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::LuaSendLength::InstallLuaSendLengthFixIfPossible());
+
+    // Stock multiplayer carries no mission-end message: when only the host's
+    // script calls SucceedMission/FailMission, guests run on forever. The host
+    // broadcasts a small "ME" packet from AiMission::End and guests apply it
+    // through the same End. Byte-guarded and fail-closed (both detours or
+    // neither); [Fixes] MissionEndSync = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::MissionEndSync::InstallMissionEndSyncIfPossible());
 
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and

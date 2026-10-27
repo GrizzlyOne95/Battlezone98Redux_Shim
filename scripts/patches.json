@@ -1732,6 +1732,56 @@
       "identity": "The buffer-room check on the extension path of Redux's Lua table packer FUN_00505A10 on exact GOG Redux 2.2.301, reached by `cmp [ebp-4],0x1F / jge` after lua_next counted the entries. The packer stores only the low byte of the count, so 256+ wraps. lua_send_length.cpp detours the first 8 bytes (no relative operands) to a stub that rejects counts above 255 through the check's own `xor al,al` exit at +0x0D, then replays them. Verified by whole-image scan on 2026-10-18: one match. Rewritten by lua_send_length.cpp."
     },
     {
+      "name": "AiMission::End",
+      "pattern": "55 8B EC 83 EC 14 89 4D F8 8B 45 F8 C6 40 10 01 8B 4D F8 F3 0F 10 45 08 F3 0F 11 41 14",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0045DAF0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "AiMission::End on exact GOG Redux 2.2.301, __thiscall(AiMission* this, float shutdownTime, const char* name, char failed), callee-clean `ret 0xC`: sets this+0x10 done=1, this+0x14 shutdownTime, this+0x18 failed and copies the name into this+0x19 (13 bytes). It is the single funnel for the Lua SucceedMission/FailMission callers 0x0045BE60 and 0x0045BE30 (each pushes failed, name, time and calls it). mp_mission_end_sync.cpp detours the first 9 bytes (push ebp / mov ebp,esp / sub esp,0x14 / mov [ebp-8],ecx; no relative operands). Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
+      "name": "Net::Receive",
+      "pattern": "55 8B EC 81 EC 40 02 00 00 A1 ?? ?? ?? ?? 33 C5 89 45 FC 89 8D 68 FE FF FF",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00570500",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Network message dispatcher on exact GOG Redux 2.2.301, __thiscall(Net* this, int arg0, unsigned short senderId, const unsigned short* buf, unsigned len), callee-clean `ret 0x10`, single exit at 0x00571579. It switches on the first two payload bytes read as a little-endian tag (the 'PP' and 'GA' cases consult Net::IsPlayerHost); an unknown tag falls through without a reply, so a new tag is invisible to unpatched peers. The stack-cookie load wildcards the __security_cookie address. mp_mission_end_sync.cpp detours the first 9 bytes (push ebp / mov ebp,esp / sub esp,0x240; no relative operands). Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
+      "name": "Net::BroadcastSend",
+      "pattern": "55 8B EC 83 EC 10 83 3D ?? ?? ?? ?? 00 74 17 A1 ?? ?? ?? ?? 83 78 08 05 74 0C",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00575890",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Network send on exact GOG Redux 2.2.301, __cdecl(const void* buf, unsigned len, int p3, char p4) returning char: returns 0 while the session pointer (Net::Session) is null or its state at +8 is 6, otherwise hands the buffer to the transport. The Lua Send binding calls it as (buf, len, 1, 1) for a reliable broadcast, which mp_mission_end_sync.cpp reuses. Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
+      "name": "Net::Session",
+      "pattern": "55 8B EC 83 EC 10 83 3D ?? ?? ?? ?? 00 74 17 A1 ?? ?? ?? ?? 83 78 08 05 74 0C",
+      "offset": 8,
+      "mode": "abs32_operand",
+      "fallback": "0x00917F48",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global holding the pointer to the live network session object on exact GOG Redux 2.2.301, taken from the `cmp dword [imm32],0` that opens Net::BroadcastSend (the same pattern, operand at +8). The session's state dword at +8 is 4 while in a game; the send routine rejects 6. Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
+      "name": "Net::IsPlayerHost",
+      "pattern": "55 8B EC 51 0F B7 45 08 85 C0 74 20 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 0F B7 C8 0F B7 55 08 3B CA",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0056FC40",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Host test on exact GOG Redux 2.2.301, __cdecl(short playerId) returning bool in AL, no `this`: returns 0 for id 0, otherwise compares the id (movzx word [ebp+8]) with the host player id obtained from two internal calls (the second returns it in AX). Net::Receive uses it for the 'PP' and 'GA' messages. mp_mission_end_sync.cpp asks it whether a message sender is the host. Verified by whole-image scan on 2026-10-27: one match."
+    },
+    {
       "name": "DistributedObject::GetLocalID",
       "pattern": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 64 8B E5 5D C3",
       "offset": 0,

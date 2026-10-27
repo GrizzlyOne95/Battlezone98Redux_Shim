@@ -310,6 +310,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "LuaSendLengthUnsigned", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_MISSION_END_SYNC") ||
+            Equals(name, "BZR_DISABLE_MP_MISSION_END_SYNC"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "MissionEndSync", true, out);
+        }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
             Equals(name, "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"))

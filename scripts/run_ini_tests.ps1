@@ -218,6 +218,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Lua Send lengths 128..255 decode unsigned; lengths above 255 are refused
     # by the sender instead of wrapping. Unpatched receivers still crash.
     "Fixes/LuaSendLengthUnsigned",
+    # Host mission end is broadcast as one new tag that stock peers ignore;
+    # guests apply it only from the host, once, to a live mission.
+    "Fixes/MissionEndSync",
     # Client-side cursor handling only; no simulation or wire effect.
     "Fixes/UnfocusedMouseRelease",
     # Renderer-only: restores the asset bounding box on craft meshes Redux
@@ -441,6 +444,7 @@ $shippingPolicyChecks = @{
     "Fixes/LuaFormationBinding" = "1"
     "Fixes/LuaGetIndependenceGuard" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
+    "Fixes/MissionEndSync" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/RestoreCraftBounds" = "1"
     "Fixes/DynamicGeometryPieceReuse" = "1"
