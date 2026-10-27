@@ -315,6 +315,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "MissionEndSync", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION") ||
+            Equals(name, "BZR_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "DaywreckerArmoryCollision", true, out);
+        }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
             Equals(name, "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"))

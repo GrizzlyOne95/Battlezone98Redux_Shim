@@ -221,6 +221,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Host mission end is broadcast as one new tag that stock peers ignore;
     # guests apply it only from the host, once, to a live mission.
     "Fixes/MissionEndSync",
+    # Remote-copy collision filter only; an ownerless in-flight Daywrecker
+    # ignores the Armory, as the launching peer's own copy already does.
+    "Fixes/DaywreckerArmoryCollision",
     # Client-side cursor handling only; no simulation or wire effect.
     "Fixes/UnfocusedMouseRelease",
     # Renderer-only: restores the asset bounding box on craft meshes Redux
@@ -445,6 +448,7 @@ $shippingPolicyChecks = @{
     "Fixes/LuaGetIndependenceGuard" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/MissionEndSync" = "1"
+    "Fixes/DaywreckerArmoryCollision" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/RestoreCraftBounds" = "1"
     "Fixes/DynamicGeometryPieceReuse" = "1"

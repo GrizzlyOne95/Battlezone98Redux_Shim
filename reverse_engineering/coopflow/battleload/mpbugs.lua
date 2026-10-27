@@ -225,14 +225,16 @@ end
 
 -- The launch the player makes: this peer's Armory builds a Daywrecker and
 -- lobs it at (tx, tz). The Armory is on this peer's own team, so the
--- cross-team targeting defect stays out of the way.
-function BugLaunchDaywrecker(tx, tz, count)
+-- cross-team targeting defect stays out of the way. (ax, az) places the
+-- Armory (default: beside the player); atSelf makes it the target, as
+-- aiCore's self-launch does, instead of a Drop Point at (tx, tz).
+function BugLaunchDaywrecker(tx, tz, count, ax, az, atSelf)
     local team = GetTeamNum(GetPlayerHandle())
     local p = GetPosition(GetPlayerHandle())
     -- An Armory draws power from an unoccupied geyser within about 10 m. Without
     -- one it packs up as soon as it deploys and never builds (wp-host-4..8).
     -- lcbench has no geysers, so place one and put the Armory on it.
-    local site = SetVector(p.x + 40, 0, p.z + 60)
+    local site = ax and SetVector(ax, 0, az) or SetVector(p.x + 40, 0, p.z + 60)
     site.y = GetTerrainHeightAndNormal(site)
     local geyser = exu.BuildSyncObject("eggeizr1", 0, site)
     assert(geyser and IsAlive(geyser), "geyser failed to spawn")
@@ -243,13 +245,16 @@ function BugLaunchDaywrecker(tx, tz, count)
     SetScrap(team, 100)
     -- aiCore always targets a handle (a Recycler, or the Armory itself). An inert
     -- Drop Point marks the site.
-    local ground = GetTerrainHeightAndNormal(SetVector(tx, 0, tz))
-    local mark = exu.BuildSyncObject("apdrop", team, SetVector(tx, ground, tz))
-    assert(mark and IsAlive(mark), "drop point failed to spawn")
+    local mark = armory
+    if not atSelf then
+        local ground = GetTerrainHeightAndNormal(SetVector(tx, 0, tz))
+        mark = exu.BuildSyncObject("apdrop", team, SetVector(tx, ground, tz))
+        assert(mark and IsAlive(mark), "drop point failed to spawn")
+    end
     pendingLaunch = {armory = armory, where = mark, deployDeadline = GetTime() + 10,
                      nextOrder = 0, orders = 0, deployed = false, count = count or 1, seen = 0, acked = 0}
     M.launch = {team = team, at = GetTime(), tx = tx, tz = tz, count = count or 1, orderLog = {},
-                deployFlips = {}, seenTimes = {},
+                deployFlips = {}, seenTimes = {}, ax = round(site.x), az = round(site.z), atSelf = atSelf and true or false,
                 geyserDist = GetDistance(armory, geyser)}
     return M.launch
 end

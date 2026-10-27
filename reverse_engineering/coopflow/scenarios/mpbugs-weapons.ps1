@@ -18,10 +18,22 @@
 # design, so one Splinter lifetime per peer is expected; its deploy point and
 # the damage per owner are recorded as observations.
 #
+# Also reported (veteran player, 2026-10-27): after an Armory launches, other
+# players sometimes see a Daywrecker blow up AT THE ARMORY and take its damage,
+# while the launcher sees nothing. So the Armory stands at a fixed site ~525 m
+# from the aim point with its own witness rings, owned per peer as above: a
+# Daywrecker lifetime ending there, or damage on a peer's own witnesses there,
+# is that phantom. -Target armory launches at the Armory itself instead (the
+# report says two self-launched Daywreckers collide overhead for double
+# damage); the aim point is then the Armory site and the burst checks apply.
+#
 # -Expect Stock records a duplicate as a warning (what stock does is the
 # question); -Expect Fixed fails on one.
 param([ValidateSet('host','guest')][string]$Launcher = 'host',
       [ValidateSet('both','daywrecker','splinter')][string]$Weapon = 'both',
+      [ValidateSet('site','armory')][string]$Target = 'site',
+      # Witness rings around the Armory for the phantom (with -Target site).
+      [int[]]$ArmoryDistances = @(60, 100),
       [ValidateSet('Stock','Fixed')][string]$Expect = 'Stock',
       [int]$HostClient = 0,
       # Daywreckers the launcher's Armory lobs back to back (1 to 5; the team holds 100 scrap).
@@ -42,8 +54,10 @@ $receivers = @($C | Where-Object { $_ -ne $L })
 $script:CRFlowSkipParity = $true # Not a presentation-stream case.
 $samplePath = Join-Path $script:CRFlowRun.runDir 'weapons-samples.jsonl'
 # Aim points ~440 m and more from the human spawns (z 2560), 400 m apart.
-$sites = [ordered]@{ daywrecker = @{ x = 2560; z = 3000 }; splinter = @{ x = 2960; z = 3000 } }
+$sites = [ordered]@{ daywrecker = @{ x = 2560; z = 3000 }; splinter = @{ x = 2960; z = 3000 }; armory = @{ x = 2160; z = 2660 } }
 $weapons = if ($Weapon -eq 'both') { @('daywrecker', 'splinter') } else { @($Weapon) }
+if ($Target -eq 'armory') { $sites.daywrecker = $sites.armory }
+$watchArmory = $Target -eq 'site' -and $weapons -contains 'daywrecker'
 
 $shimLogs, $shimMarks = @{}, @{}
 foreach ($i in $C) {
@@ -98,14 +112,31 @@ Invoke-CRFlowStep "every peer places its witnesses ($($Distances -join '/') m)" 
             $site = $sites[$w]
             Invoke-CRFlow $ranked[$r] "return BugPlaceWitnesses($($site.x), $($site.z), $distanceList, $angles)" | Out-Null
         }
+        if ($watchArmory) {
+            $site = $sites.armory
+            Invoke-CRFlow $ranked[$r] "return BugPlaceWitnesses($($site.x), $($site.z), {$($ArmoryDistances -join ',')}, $angles)" | Out-Null
+        }
     }
     foreach ($i in $C) {
         foreach ($w in $weapons) {
             $s = Wait-Site $i $w 20 { param($s) @($s.witnesses | Where-Object { $_ }).Count -ge $expectedWitnesses }
             if (-not $s) { throw "c$i never sees all $expectedWitnesses witnesses at the $w site" }
         }
+        if ($watchArmory) {
+            $n = $ranked.Count * $ArmoryDistances.Count * 2
+            $s = Wait-Site $i 'armory' 20 { param($s) @($s.witnesses | Where-Object { $_ }).Count -ge $n }
+            if (-not $s) { throw "c$i never sees all $n witnesses at the Armory site" }
+        }
     }
-    @{ perSite = $expectedWitnesses; owners = $ranked }
+    @{ perSite = $expectedWitnesses; owners = $ranked; armoryRings = $(if ($watchArmory) { $ArmoryDistances } else { @() }) }
+}
+
+$armoryBefore = if ($watchArmory) {
+    Invoke-CRFlowStep 'every peer at the Armory site before' {
+        $out = @{}
+        foreach ($i in $C) { $out["c$i"] = Get-Site $i 'armory' 'before' }
+        $out
+    }
 }
 
 foreach ($w in $weapons) {
@@ -118,7 +149,8 @@ foreach ($w in $weapons) {
     Invoke-CRFlowStep "${w}: c$L launches" {
         $site = $sites[$w]
         if ($w -eq 'daywrecker') {
-            Invoke-CRFlow $L "return BugLaunchDaywrecker($($site.x), $($site.z), $Burst)" | Out-Null
+            $atSelf = if ($Target -eq 'armory') { 'true' } else { 'false' }
+            Invoke-CRFlow $L "return BugLaunchDaywrecker($($site.x), $($site.z), $Burst, $($sites.armory.x), $($sites.armory.z), $atSelf)" | Out-Null
             # The Armory deploys, builds, lobs, and each bomb detonates and is removed.
             $done = Wait-Site $L $w (120 + 30 * ($Burst - 1)) { param($s) @(Get-Lifetimes $s 'daywrecker' | Where-Object { $_.gone }).Count -ge $Burst }
             if (-not $done) { throw "$Burst Daywrecker(s) did not all detonate on the launcher c$L in time (launch $((Get-Site $L $w 'poll').launch | ConvertTo-Json -Compress))" }
@@ -193,5 +225,30 @@ foreach ($w in $weapons) {
             $ratio = if ($norm[$L] -and $norm[$r]) { [math]::Round($norm[$r] / $norm[$L], 2) } else { $null }
             Add-DuplicateCheck "no doubled Daywrecker damage on receiver c$r's witnesses (x$ratio of launcher c$L)" ($null -ne $ratio -and $ratio -lt 1.5) ([ordered]@{ ratio = $ratio; damage = $damage })
         }
+    }
+}
+
+# The phantom: with the aim point ~525 m away, nothing should end or hurt
+# anything at the Armory. Each peer is judged on what it alone applies: its
+# own witnesses' damage, plus the Daywrecker lifetimes it saw end there.
+if ($watchArmory) {
+    $armoryAfter = Invoke-CRFlowStep 'every peer at the Armory site after' {
+        $out = @{}
+        foreach ($i in $C) { $out["c$i"] = Get-Site $i 'armory' 'after' }
+        $out
+    }
+    foreach ($i in $C) {
+        $pre, $post = $armoryBefore["c$i"], $armoryAfter["c$i"]
+        $ended = @(Get-Lifetimes $post 'daywrecker' | Where-Object { $_.gone })
+        $own = @()
+        foreach ($wb in @($pre.witnesses | Where-Object { $_ -and $_.mine })) {
+            $wa = @($post.witnesses | Where-Object { $_ -and $_.id -eq $wb.id }) | Select-Object -First 1
+            $own += [ordered]@{ id = $wb.id; before = $wb.health; loss = $(if ($wa) { $wb.health - $wa.health } else { $wb.health }); killed = -not $wa }
+        }
+        $loss = [math]::Round((@($own | ForEach-Object { $_.loss }) | Measure-Object -Sum).Sum, 1)
+        $role = if ($i -eq $L) { 'launcher' } else { 'receiver' }
+        $detail = [ordered]@{ role = $role; ended = $ended; ownWitnesses = $own; launch = $post.launch; mpauth = (Get-MpauthCounts $i) }
+        Add-DuplicateCheck "no Daywrecker ends at the Armory on $role c$i ($($ended.Count))" ($ended.Count -eq 0) $detail
+        Add-DuplicateCheck "no blast damage on $role c$i's own Armory witnesses (loss $loss)" ($loss -lt 1) $detail
     }
 }

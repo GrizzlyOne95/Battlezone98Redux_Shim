@@ -3825,6 +3825,24 @@
       "identity": "cUI image widget quad rebuild, run between ManualObject beginUpdate/end"
     },
     {
+      "name": "DayWreckerRegCollision",
+      "address": "0x004B0610",
+      "expected": "55 8B EC 83 EC 2C",
+      "identity": "DayWrecker::RegCollision, __thiscall(this, _OBJ76* other, CLSN_INFO*, CLSN_INFO*), ret 0xC, bool in AL; mp_daywrecker_armory_collision.cpp detours it"
+    },
+    {
+      "name": "PowerUpUnpackState",
+      "address": "0x005AACF0",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "PowerUp state unpack, Distributed vtable slot 16 (shared by 8 classes incl. DayWrecker), __thiscall(dist = complete+0x18, packet, int* remaining), ret 8; rebuilds the flags word at *(dist+0x210)+0x114; mp_daywrecker_armory_collision.cpp detours it"
+    },
+    {
+      "name": "PowerUpSimulate",
+      "address": "0x005A7D70",
+      "expected": "55 8B EC 81 EC A4 04 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "PowerUp::Simulate, __thiscall(this, float dt), ret 4; DayWrecker::Simulate calls it while flag 4 (in flight) is set; mp_daywrecker_armory_collision.cpp calls it for a remote bomb with no state yet"
+    },
+    {
       "name": "DayWreckerSimulate",
       "address": "0x004B0460",
       "expected": "55 8B EC 83 EC 4C A1 00 70 8E 00 33 C5 89 45 FC",

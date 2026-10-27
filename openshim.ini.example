@@ -554,6 +554,19 @@ LuaSendLengthUnsigned = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_MISSION_END_SYNC
 MissionEndSync = 1
 
+; Stop a Daywrecker exploding on its own Armory on remote peers. A remote
+; copy is created with no flags and can run a frame before its first network
+; state marks it in flight; that frame detonated it where it spawned, inside
+; the Armory: a phantom blast and damage on that peer only. With this on, a
+; remote copy holds detonation until its first state arrives, and a rebuilt
+; copy with no recorded launcher ignores collisions with an Armory, as the
+; launcher's own copy does. Local to each patched peer; sends nothing.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION
+DaywreckerArmoryCollision = 1
+
 ; Stop Redux pinning the OS cursor while it is minimized or in the
 ; background. In mouse-look the stock look reader re-clips the cursor and
 ; warps it to the window centre every frame, guarded only by a per-thread
