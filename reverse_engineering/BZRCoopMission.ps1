@@ -642,6 +642,18 @@ function Test-CRFlowLogErrors([int[]]$Clients) {
                 Select-Object -Last 10 | ForEach-Object { $_.Line.Trim() })
         } else { @() }
         Add-CRFlowCheck "c$i no Ogre rendering exceptions" ($renderHits.Count -eq 0) $renderHits
+        # A removed D3D11 device (DXGI 0x887A0005) is logged only by Ogre. The
+        # client keeps simulating and answering probes, so the run can look
+        # healthy while nothing draws (mpbugs-wp-* on 2026-10-26).
+        $deviceHits = @()
+        if ($log) {
+            $ogreLog = Join-Path (Split-Path $log -Parent) 'BZOgreLogfile.log'
+            if (Test-Path -LiteralPath $ogreLog) {
+                $deviceHits = @(Select-String -LiteralPath $ogreLog -SimpleMatch -Pattern '(-2005270523:' |
+                    Select-Object -First 3 | ForEach-Object { $_.Line.Trim() })
+            }
+        }
+        Add-CRFlowCheck "c$i D3D11 device not removed" ($deviceHits.Count -eq 0) $deviceHits
         # CR's guest-side marker/label resolution (CR #186) logs "[coop] unresolved ..."
         # and bumps M.coopUnresolved when a leader-sent label never resolves in 15 s.
         $unresolved = @()

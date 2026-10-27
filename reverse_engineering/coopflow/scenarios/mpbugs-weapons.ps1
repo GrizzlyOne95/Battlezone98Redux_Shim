@@ -24,12 +24,16 @@ param([ValidateSet('host','guest')][string]$Launcher = 'host',
       [ValidateSet('both','daywrecker','splinter')][string]$Weapon = 'both',
       [ValidateSet('Stock','Fixed')][string]$Expect = 'Stock',
       [int]$HostClient = 0,
+      # Daywreckers the launcher's Armory lobs back to back (1 to 5; the team holds 100 scrap).
+      [ValidateRange(1, 5)][int]$Burst = 1,
       # Witness rings (metres from the aim point); the Daywrecker blast reaches 200 m.
+      # A burst defaults to wider rings so the witnesses survive several blasts.
       [int[]]$Distances = @(80, 120),
       # Seconds to wait after the launcher's explosive is gone, for late
       # reconstruction on the receivers.
       [int]$SettleSeconds = 20)
 
+if ($Burst -gt 1 -and -not $PSBoundParameters.ContainsKey('Distances')) { $Distances = @(150, 180) }
 $H = $HostClient
 $C = @(Get-CRFlowClientIndices)
 $guests = @($C | Where-Object { $_ -ne $H })
@@ -114,10 +118,10 @@ foreach ($w in $weapons) {
     Invoke-CRFlowStep "${w}: c$L launches" {
         $site = $sites[$w]
         if ($w -eq 'daywrecker') {
-            Invoke-CRFlow $L "return BugLaunchDaywrecker($($site.x), $($site.z))" | Out-Null
-            # The Armory deploys, builds, lobs, and the bomb detonates and is removed.
-            $done = Wait-Site $L $w 120 { param($s) @(Get-Lifetimes $s 'daywrecker' | Where-Object { $_.gone }).Count }
-            if (-not $done) { throw "no Daywrecker detonated on the launcher c$L within 120 s (launch $((Get-Site $L $w 'poll').launch | ConvertTo-Json -Compress))" }
+            Invoke-CRFlow $L "return BugLaunchDaywrecker($($site.x), $($site.z), $Burst)" | Out-Null
+            # The Armory deploys, builds, lobs, and each bomb detonates and is removed.
+            $done = Wait-Site $L $w (120 + 30 * ($Burst - 1)) { param($s) @(Get-Lifetimes $s 'daywrecker' | Where-Object { $_.gone }).Count -ge $Burst }
+            if (-not $done) { throw "$Burst Daywrecker(s) did not all detonate on the launcher c$L in time (launch $((Get-Site $L $w 'poll').launch | ConvertTo-Json -Compress))" }
         } else {
             $fire = Invoke-CRFlow $L "return BugFireSplinter($($site.x), $($site.z))"
             if ($fire.weapon -notmatch 'gsplint') { throw "shooter has no Splinter in slot 3 ($($fire.weapon))" }
@@ -161,8 +165,15 @@ foreach ($w in $weapons) {
             heightsVsHostBefore = (Get-MaxAbsDiff $hostBeforeHeights $hb); heightsVsHostAfter = (Get-MaxAbsDiff $hostAfterHeights $ha)
             ownWitnesses = $own; mpauth = (Get-MpauthCounts $i) }
         Add-CRFlowCheck "${w} reached c$i ($($lives.Count) lifetime(s))" ([bool]$lives.Count) $detail
+        $launched = if ($w -eq 'daywrecker') { $Burst } else { 1 }
         if ($i -ne $L) {
-            Add-DuplicateCheck "no duplicate ${w} lifetime on receiver c$i" ($lives.Count -le 1) $detail
+            Add-DuplicateCheck "no duplicate ${w} lifetime on receiver c$i ($($lives.Count) for $launched launched)" ($lives.Count -le $launched) $detail
+        }
+        if ($w -eq 'daywrecker' -and $Burst -gt 1) {
+            # Each peer should see exactly one detonation per Daywrecker launched.
+            $blasts = @($lives | Where-Object { $_.gone }).Count
+            Add-DuplicateCheck "c$i saw $blasts Daywrecker detonation(s) for $Burst launched" ($blasts -eq $Burst) ([ordered]@{
+                detonations = @($lives | ForEach-Object { $_.gone }); launch = $post.launch })
         }
         if ($w -eq 'splinter' -and $impact -and $lives.Count) {
             $spread = [math]::Round([math]::Sqrt([math]::Pow($lives[0].lastX - $impact.lastX, 2) + [math]::Pow($lives[0].lastZ - $impact.lastZ, 2)), 1)

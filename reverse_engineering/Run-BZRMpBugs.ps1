@@ -18,6 +18,8 @@ param([Parameter(Mandatory)][ValidateSet('MissionEnd','HostLeave','Weapons')][st
       [string]$Impair = '',
       [string]$Python = 'python',
       [switch]$AllowNoAudioEndpoint,
+      # Run beside another session's game (see Run-BZRCoopMission.ps1).
+      [switch]$AllowOtherGames,
       [switch]$MaxNetworkLogging,
       [switch]$NoTrace,
       # Reuse the prepared C:\BZRCoop instances instead of re-mirroring the install.
@@ -38,7 +40,7 @@ $ScenarioArgs.Expect = $Expect
 & (Join-Path $PSScriptRoot 'Run-BZRCoopMission.ps1') -Mission mpbugs -Scenario $scenario `
     -MapListY 99 -ContentOverride $override -Clients $Clients -SkipPrepare:$SkipPrepare -MuteClients `
     -MaxNetworkLogging:$MaxNetworkLogging -RunName $RunName -Python $Python -Impair $Impair `
-    -AllowNoAudioEndpoint:$AllowNoAudioEndpoint `
+    -AllowNoAudioEndpoint:$AllowNoAudioEndpoint -AllowOtherGames:$AllowOtherGames `
     -InheritedLaunchLockOwner $InheritedLaunchLockOwner -HardTimeoutSeconds 1500 `
     -ScenarioArgs $ScenarioArgs
 exit $LASTEXITCODE

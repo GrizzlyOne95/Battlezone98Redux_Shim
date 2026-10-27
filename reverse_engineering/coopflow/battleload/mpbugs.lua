@@ -20,8 +20,8 @@ local units = {}
 -- Daywreckers (apwrck) and deployed Splinters (splintb2).
 local EXPLOSIVES = {apwrck = "daywrecker", splintb2 = "splinter"}
 local tracked, lifetimes = {}, {}
--- The Armory deploys, builds, then takes its Dropoff one update after Build;
--- the Splinter shooter fires until its ammunition drops.
+-- The Armory deploys on its geyser, then BuildAt-launches its Daywreckers one
+-- after another; the Splinter shooter fires until its ammunition drops.
 local pendingLaunch, pendingFire
 local WITNESS_TEAM = 7
 
@@ -59,6 +59,7 @@ local function trackExplosives()
                      x = round(p.x), y = round(p.y), z = round(p.z)}
                 tracked[h] = r
                 lifetimes[#lifetimes + 1] = r
+                if kind == "daywrecker" and pendingLaunch then pendingLaunch.seen = pendingLaunch.seen + 1 end
             end
             r.last, r.lastX, r.lastY, r.lastZ = now, round(p.x), round(p.y), round(p.z)
         end
@@ -73,18 +74,36 @@ local function serviceLaunches()
     if l then
         if not IsAlive(l.armory) then
             M.launch.lost = GetTime(); pendingLaunch = nil
-        elseif not l.built then
-            -- A producer builds only once deployed; go ahead anyway after 15 s.
-            if IsDeployed(l.armory) or GetTime() > l.deployDeadline then
-                M.launch.deployed = IsDeployed(l.armory)
-                Build(l.armory, "apwrck")
-                M.launch.buildAt = GetTime()
-                l.built = true
+        elseif l.seen > l.acked then
+            -- A Daywrecker appeared: note it, and order the next one at once.
+            l.acked = l.seen
+            M.launch.seenTimes[#M.launch.seenTimes + 1] = GetTime()
+            M.launch.seenAt = M.launch.seenAt or GetTime()
+            if l.seen >= l.count then pendingLaunch = nil else l.orders, l.nextOrder = 0, 0 end
+        elseif l.deployed ~= IsDeployed(l.armory) then
+            l.deployed = IsDeployed(l.armory)
+            M.launch.deployFlips[#M.launch.deployFlips + 1] = {t = GetTime(), deployed = l.deployed}
+        elseif not l.deployed and not l.kicked and GetTime() > l.deployDeadline then
+            -- Deploy toggles, so it is a fallback only: on a geyser the Armory deploys itself.
+            Deploy(l.armory); l.kicked = true; M.launch.kicked = GetTime()
+        elseif l.deployed and GetTime() >= l.nextOrder and not IsBusy(l.armory) then
+            -- CR aiCore's order: once the deployed Armory CanBuild (timeDeploy, and a
+            -- Daywrecker's 20 scrap), BuildAt a target handle at priority 1.
+            -- Reissue while idle and this Daywrecker has not appeared.
+            local ready = CanBuild(l.armory)
+            if ready then
+                if l.orders < 3 then
+                    M.launch.orderLog[#M.launch.orderLog + 1] = {t = GetTime(), deployed = IsDeployed(l.armory),
+                        canBuild = ready, scrap = GetScrap(GetTeamNum(l.armory)), cmd = GetCurrentCommand(l.armory)}
+                    BuildAt(l.armory, "apwrck", l.where, 1)
+                    l.orders = l.orders + 1
+                    M.launch.orders = l.orders
+                    M.launch.buildAt = M.launch.buildAt or GetTime()
+                    l.nextOrder = GetTime() + 15
+                else
+                    M.launch.gaveUp = GetTime(); pendingLaunch = nil
+                end
             end
-        else
-            Dropoff(l.armory, l.where)
-            M.launch.dropoffAt = GetTime()
-            pendingLaunch = nil
         end
     end
     if pendingFire then
@@ -207,15 +226,31 @@ end
 -- The launch the player makes: this peer's Armory builds a Daywrecker and
 -- lobs it at (tx, tz). The Armory is on this peer's own team, so the
 -- cross-team targeting defect stays out of the way.
-function BugLaunchDaywrecker(tx, tz)
+function BugLaunchDaywrecker(tx, tz, count)
     local team = GetTeamNum(GetPlayerHandle())
     local p = GetPosition(GetPlayerHandle())
-    local armory = exu.BuildSyncObject("avslf", team, SetVector(p.x + 40, 0, p.z + 60))
+    -- An Armory draws power from an unoccupied geyser within about 10 m. Without
+    -- one it packs up as soon as it deploys and never builds (wp-host-4..8).
+    -- lcbench has no geysers, so place one and put the Armory on it.
+    local site = SetVector(p.x + 40, 0, p.z + 60)
+    site.y = GetTerrainHeightAndNormal(site)
+    local geyser = exu.BuildSyncObject("eggeizr1", 0, site)
+    assert(geyser and IsAlive(geyser), "geyser failed to spawn")
+    local armory = exu.BuildSyncObject("avslf", team, site)
     assert(armory and IsAlive(armory), "armory failed to spawn")
+    -- Raise the cap first: with SetScrap alone the team held 5 scrap (wp-host-4); a Daywrecker costs 20.
+    SetMaxScrap(team, 100)
     SetScrap(team, 100)
-    Deploy(armory)
-    pendingLaunch = {armory = armory, where = SetVector(tx, 0, tz), deployDeadline = GetTime() + 15}
-    M.launch = {team = team, at = GetTime(), tx = tx, tz = tz}
+    -- aiCore always targets a handle (a Recycler, or the Armory itself). An inert
+    -- Drop Point marks the site.
+    local ground = GetTerrainHeightAndNormal(SetVector(tx, 0, tz))
+    local mark = exu.BuildSyncObject("apdrop", team, SetVector(tx, ground, tz))
+    assert(mark and IsAlive(mark), "drop point failed to spawn")
+    pendingLaunch = {armory = armory, where = mark, deployDeadline = GetTime() + 10,
+                     nextOrder = 0, orders = 0, deployed = false, count = count or 1, seen = 0, acked = 0}
+    M.launch = {team = team, at = GetTime(), tx = tx, tz = tz, count = count or 1, orderLog = {},
+                deployFlips = {}, seenTimes = {},
+                geyserDist = GetDistance(armory, geyser)}
     return M.launch
 end
 

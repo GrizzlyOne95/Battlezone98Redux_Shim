@@ -182,8 +182,15 @@ function Watch-BZRCoopRun {
                 foreach ($f in 'BZLogger.txt', 'BZOgreLogfile.log', 'openshim.log', 'bzloader.log', 'BZChatLog.txt', 'openshim.ini', 'net.ini') {
                     Copy-Item -LiteralPath (Join-Path $c.dir $f) -Destination $dest -ErrorAction SilentlyContinue
                 }
+                # Text logs plus only this run's dumps (see Copy-BZRCoopClientLogs).
                 $logs = Join-Path $c.dir 'logs'
-                if (Test-Path -LiteralPath $logs) { Copy-Item -LiteralPath $logs -Destination $dest -Recurse -Force -ErrorAction SilentlyContinue }
+                if (Test-Path -LiteralPath $logs) {
+                    robocopy $logs (Join-Path $dest 'logs') /E /XF *.dmp /NFL /NDL /NJH /NJS /NP | Out-Null
+                    $since = (Get-Item -LiteralPath $RunDir).CreationTime
+                    Get-ChildItem -LiteralPath $logs -Filter *.dmp -File -ErrorAction SilentlyContinue |
+                        Where-Object { $_.LastWriteTime -ge $since } |
+                        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $dest 'logs') -Force -ErrorAction SilentlyContinue }
+                }
             }
         }
         if ($clients.Count -and (Test-Path -LiteralPath $SessionFile)) {

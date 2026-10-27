@@ -122,6 +122,20 @@ function Install-OpenShimBuild([string]$Dir) {
     if (Test-Path -LiteralPath $assets) { Copy-Item -LiteralPath $assets -Destination (Join-Path $Dir 'openshim') -Force }
 }
 
+function Copy-BZRCoopClientLogs {
+    # An instance's logs\ keeps every crash dump it ever wrote (~70 MB each);
+    # copying them all into every run filled 145 GB by 2026-10-26. Copy the
+    # text logs, and only the dumps written during this run.
+    param([string]$LogsDir, [string]$Dest, [datetime]$Since)
+    if (-not (Test-Path -LiteralPath $LogsDir)) { return }
+    $out = Join-Path $Dest 'logs'
+    robocopy $LogsDir $out /E /XF *.dmp /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { Write-Warning "robocopy of $LogsDir failed ($LASTEXITCODE)" }
+    Get-ChildItem -LiteralPath $LogsDir -Filter *.dmp -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $Since } |
+        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $out -Force }
+}
+
 function New-BZRCoopInstance {
     param([int]$Index)
     $dir = [IO.Path]::GetFullPath((Get-InstanceDir $Index))
@@ -142,13 +156,17 @@ function New-BZRCoopInstance {
     }
     New-Item -ItemType Directory -Path $dir | Out-Null
 
-    $linked = $LinkedDirs
+    # openshim\ is always a per-instance copy without the install's cache:
+    # OpenShim writes its chunk mesh cache there, and a shared cache let stale
+    # entries remove every client's D3D11 device (2026-10-26). Each instance
+    # starts empty and regenerates what it needs.
+    $linked = $LinkedDirs | Where-Object { $_ -ne 'openshim' }
+    robocopy (Join-Path $SourceRoot 'openshim') (Join-Path $dir 'openshim') /E /XD (Join-Path $SourceRoot 'openshim\cache') /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "robocopy of openshim resources failed ($LASTEXITCODE)" }
     if ($OpenShimRepo) {
         # Per-instance copies, so staging a build never writes the real install.
-        $linked = $LinkedDirs | Where-Object { $_ -notin 'plugins', 'openshim' }
+        $linked = $linked | Where-Object { $_ -ne 'plugins' }
         New-Item -ItemType Directory -Path (Join-Path $dir 'plugins') | Out-Null
-        robocopy (Join-Path $SourceRoot 'openshim') (Join-Path $dir 'openshim') /E /NFL /NDL /NJH /NJS /NP | Out-Null
-        if ($LASTEXITCODE -ge 8) { throw "robocopy of openshim resources failed ($LASTEXITCODE)" }
     }
     foreach ($name in $linked) {
         $target = Join-Path $SourceRoot $name
@@ -401,8 +419,7 @@ function Stop-BZRCoopClients {
         foreach ($f in 'openshim.ini', 'net.ini') {
             Copy-Item -LiteralPath (Join-Path $c.dir $f) -Destination $dest -ErrorAction SilentlyContinue
         }
-        $logs = Join-Path $c.dir 'logs'
-        if (Test-Path -LiteralPath $logs) { Copy-Item -LiteralPath $logs -Destination $dest -Recurse -Force }
+        Copy-BZRCoopClientLogs -LogsDir (Join-Path $c.dir 'logs') -Dest $dest -Since (Get-Item -LiteralPath $session.runDir).CreationTime
     }
     if ($hung.Count) { throw "Clients still running after WM_CLOSE (left for capture): $($hung -join ', ')" }
     [IO.File]::Delete($SessionFile) # another orderly stopper may already have removed it

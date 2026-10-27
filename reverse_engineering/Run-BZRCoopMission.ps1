@@ -3,7 +3,8 @@
 #   powershell -ExecutionPolicy Bypass -File reverse_engineering\Run-BZRCoopMission.ps1 -Mission misn03 -Scenario win
 #
 # 1. Preflight: refuses while any battlezone98redux is running (it may be
-#    someone's game) or while the lobby ports are taken.
+#    someone's game; -AllowOtherGames refuses only for games under
+#    $BZRCoopRoot) or while the lobby ports are taken.
 # 2. Mirrors the chosen Campaign Reimagined build into C:\BZRCoop\stage.
 # 3. Starts a private Battlezone98Redux_DedicatedServer bound to 127.0.0.1.
 # 4. BZRCoopSession.ps1 Prepare + probe install, then Launch (background; it
@@ -27,6 +28,9 @@ param(
     [switch]$MaxNetworkLogging,
     [switch]$MuteClients,
     [switch]$AllowNoAudioEndpoint,
+    # Run beside games started from outside $BZRCoopRoot (another session's
+    # test copy). They are never touched; only leftover co-op clients refuse.
+    [switch]$AllowOtherGames,
     [string]$RunName = '',
     # OpenShim checkout with a Release|Win32 build for the instances; empty = the install's.
     [string]$OpenShimRepo = '',
@@ -140,6 +144,10 @@ function Invoke-Child([string]$Script, [string[]]$Arguments) {
 
 # ------------------------------------------------------------ preflight --
 $running = @(Get-Process battlezone98redux -ErrorAction SilentlyContinue)
+if ($AllowOtherGames) {
+    $coopPrefix = [IO.Path]::GetFullPath($BZRCoopRoot).TrimEnd('\') + '\'
+    $running = @($running | Where-Object { -not $_.Path -or $_.Path.StartsWith($coopPrefix, [StringComparison]::OrdinalIgnoreCase) })
+}
 if ($running.Count) { throw "Battlezone is already running (pid $($running.Id -join ', ')); close it first. Nothing was changed." }
 if (Test-Path -LiteralPath (Join-Path $BZRCoopRoot 'session.json')) {
     $old = Get-Content -LiteralPath (Join-Path $BZRCoopRoot 'session.json') -Raw | ConvertFrom-Json
