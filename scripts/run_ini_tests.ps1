@@ -218,6 +218,21 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Lua Send lengths 128..255 decode unsigned; lengths above 255 are refused
     # by the sender instead of wrapping. Unpatched receivers still crash.
     "Fixes/LuaSendLengthUnsigned",
+    # Host mission end is broadcast as one new tag that stock peers ignore;
+    # guests apply it only from the host, once, to a live mission.
+    "Fixes/MissionEndSync",
+    # Remote copies hold detonation until their first state; a rebuilt
+    # ownerless in-flight Daywrecker ignores the Armory. Local only.
+    "Fixes/DaywreckerArmoryCollision",
+    # Multiplayer splinter deploy position and damage kill, as two new tags
+    # that stock peers ignore. SplinterUndead also runs in a network game
+    # while this is on.
+    "Fixes/SplinterSync",
+    # Multiplayer host leave: keeps the departed host's objects and suppresses
+    # the lone-player Game Over it causes. Network sessions only.
+    "Fixes/HostLeave",
+    # Host-side lobby default only: each new lobby starts with Sync Join on.
+    "Fixes/SyncJoinDefaultOn",
     # Client-side cursor handling only; no simulation or wire effect.
     "Fixes/UnfocusedMouseRelease",
     # Renderer-only: restores the asset bounding box on craft meshes Redux
@@ -285,6 +300,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # lost reliable message is resent at once. Same wire format. Default on
     # 2026-10-19 at the user's request after the 2026-10-10 matrices.
     "Network/EarlyNakAccept",
+    # Keeps the match when only the lobby websocket drops while P2P is live;
+    # inert unless the websocket closes mid-mission, and a real P2P loss still
+    # ends the session through the stock ping check. Added 2026-10-26.
+    "Network/LobbyDropKeepsMatch",
     # Editor-only: routes World Builder saves to the map's source folder
     # behind an actual-destination prompt. Inert outside /edit saves.
     "General/EditorSaveToSourceFolder",
@@ -341,7 +360,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
 
     # The startup backend seam behind the Video page's Renderer row, on since
     # 2026-10-26 (preset revision 11). Inert while Graphics/Renderer = Auto.
-    "Startup/BackendTransport"
+    "Startup/BackendTransport",
+
+    # The multiplayer setup screen, on at the user's request on 2026-10-27
+    # (preset revision 12). Rebellion stays the default server.
+    "Network/PreLobby"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(
@@ -395,6 +418,7 @@ $stockValueChecks = @{
     "Network/EarlyNakAccept" = "1"
     "Network/EarlyNakHoldoffMs" = "300"
     "Network/EarlyNakReorderMs" = "0"
+    "Network/LobbyDropKeepsMatch" = "1"
     "SinglePlayer/HeadlightColor" = "Stock"
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightBrightness" = "1.00"
@@ -441,6 +465,11 @@ $shippingPolicyChecks = @{
     "Fixes/LuaFormationBinding" = "1"
     "Fixes/LuaGetIndependenceGuard" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
+    "Fixes/MissionEndSync" = "1"
+    "Fixes/DaywreckerArmoryCollision" = "1"
+    "Fixes/SplinterSync" = "1"
+    "Fixes/HostLeave" = "1"
+    "Fixes/SyncJoinDefaultOn" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/RestoreCraftBounds" = "1"
     "Fixes/DynamicGeometryPieceReuse" = "1"
@@ -466,7 +495,7 @@ $shippingPolicyChecks = @{
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"
-    "Network/PreLobby" = "0"
+    "Network/PreLobby" = "1"
     "Career/StatsTracking" = "0"
     "SinglePlayer/JumpSnipeCrouch" = "1"
     "SinglePlayer/AttackRevealPerceivedTeam" = "0"

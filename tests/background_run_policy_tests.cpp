@@ -22,6 +22,11 @@ namespace
         Check(!ShouldSwallowMessage(true, kWmActivateApp, 1), "activate passes through");
         Check(!ShouldSwallowMessage(true, 0x0005, 0), "other messages pass through");
         Check(!ShouldSwallowMessage(false, kWmActivateApp, 0), "inactive passes through");
+        Check(ShouldSwallowMessage(true, kWmActivate, 0), "WA_INACTIVE is swallowed");
+        Check(ShouldSwallowMessage(true, kWmActivate, 0x00010000u), "WA_INACTIVE while minimized is swallowed");
+        Check(!ShouldSwallowMessage(true, kWmActivate, 1), "WA_ACTIVE passes through");
+        Check(!ShouldSwallowMessage(true, kWmActivate, 2), "WA_CLICKACTIVE passes through");
+        Check(!ShouldSwallowMessage(false, kWmActivate, 0), "WA_INACTIVE passes through when off");
     }
 
     void TestForceFlag()

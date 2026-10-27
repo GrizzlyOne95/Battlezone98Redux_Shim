@@ -37,6 +37,7 @@
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
 #include "hook_engine.h"
+#include "mp_splinter_sync_install.h"
 #include "ui_performance.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
@@ -510,6 +511,19 @@ namespace BZROpenShim
         return deployedEmitter;
     }
 
+    // Thin cdecl entry points for the naked wrapper below, which cannot name
+    // a namespaced function in inline asm. Both are no-ops unless
+    // [Fixes] SplinterSync is installed and this is a network game.
+    static void __cdecl SplinterSyncBeforeBuild(void* matrix, void* callerFrame)
+    {
+        SplinterSync::BeforeDeployBuild(matrix, callerFrame);
+    }
+
+    static void __cdecl SplinterSyncAfterBuild(void* building, void* callerFrame)
+    {
+        SplinterSync::AfterDeployBuild(building, callerFrame);
+    }
+
     void SetSprayEmitterBuildOriginal(void* original)
     {
         g_BzrFn_SprayEmitterBuildOriginal =
@@ -528,6 +542,13 @@ namespace BZROpenShim
             mov  ebp, esp
             sub  esp, 4
             mov  dword ptr [ebp - 4], ecx
+            // SplinterSync may rewrite the build matrix posit (a deploy
+            // position that arrived before this peer's own Hit). cdecl;
+            // ECX is reloaded below, the five argument copies are untouched.
+            push dword ptr [ebp]
+            push dword ptr [ebp + 0x08]
+            call SplinterSyncBeforeBuild
+            add  esp, 8
             push dword ptr [ebp + 0x18]
             push dword ptr [ebp + 0x14]
             push dword ptr [ebp + 0x10]
@@ -539,6 +560,14 @@ namespace BZROpenShim
             push eax
             call PreserveSprayEmitterOwner
             add  esp, 8
+            // EAX is the SprayBuilding; keep it as the return value across
+            // SplinterSync's registration / launcher broadcast.
+            push eax
+            push dword ptr [ebp]
+            push eax
+            call SplinterSyncAfterBuild
+            add  esp, 8
+            pop  eax
             mov  esp, ebp
             pop  ebp
             ret  0x14

@@ -45,6 +45,7 @@
 #include <objidl.h>
 #include <gdiplus.h>
 #include <array>
+#include <atomic>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -458,5 +459,91 @@ namespace BZROpenShim
             static_cast<double>(g_OverrideDistance),
             static_cast<unsigned long>(g_ShadowApplyAddr),
             static_cast<double>(kStockFarDistance));
+    }
+
+    // --- Effect lights stop casting shadows ---------------------------------
+    // (on by default; OPENSHIM_EFFECT_LIGHT_SHADOWS=stock opts out)
+    //
+    // LightRender's ctor (FUN_0044c840) creates every ODF effect light --
+    // muzzle flashes, explosions, ordnance glows -- as a point or spot light
+    // and never calls setCastShadows, so Ogre's MovableObject default (true)
+    // makes each one a shadow caster. Texture shadows sort casters first and
+    // hand them shadow textures, so for the ~0.1 s a flash lives it competes
+    // with the sun (terrain_masterlight, FUN_0067df70) for the PSSM maps: the
+    // shadows jump and the lit ground flickers while firing. The sun calls
+    // setCastShadows(true) itself and the headlight/flashlight spots already
+    // call setCastShadows(false), so clearing it for every non-directional
+    // light the exe types leaves only the sun as a caster.
+    //
+    // The exe reaches Light::setType through its import table; the slot is
+    // replaced with a forwarder, so no exe code bytes change.
+    namespace EffectLightShadows
+    {
+        constexpr int kLightDirectional = 1;
+
+        using FnLightSetType = void(__thiscall*)(void* light, int type);
+        using FnSetCastShadows = void(__thiscall*)(void* movable, bool enabled);
+
+        bool g_InstallAttempted = false;
+        uintptr_t g_SetTypeIat = 0;
+        FnLightSetType g_OriginalSetType = nullptr;
+        FnSetCastShadows g_SetCastShadows = nullptr;
+        std::atomic<std::uint32_t> g_Cleared = 0;
+
+        void __fastcall SetTypeHook(void* light, void* /*edx*/, int type)
+        {
+            g_OriginalSetType(light, type);
+            if (type == kLightDirectional || !light)
+                return;
+            g_SetCastShadows(light, false);
+            const std::uint32_t cleared = ++g_Cleared;
+            if (cleared == 1 || cleared == 1000)
+            {
+                LogShimA(LogLevel::Info, "FXLIGHTSHADOW",
+                    "cleared castShadows on %u non-directional light(s)",
+                    static_cast<unsigned>(cleared));
+            }
+        }
+    }
+
+    void InstallEffectLightShadowFixIfPossible()
+    {
+        using namespace EffectLightShadows;
+        if (g_InstallAttempted)
+            return;
+
+        const HMODULE ogre = GetModuleHandleA("OgreMain.dll");
+        if (!ogre)
+            return;
+        g_InstallAttempted = true;
+
+        if (const char* mode = std::getenv("OPENSHIM_EFFECT_LIGHT_SHADOWS");
+            mode && (_stricmp(mode, "stock") == 0 || _stricmp(mode, "off") == 0
+                || std::strcmp(mode, "0") == 0))
+        {
+            LogShimA(LogLevel::Info, "FXLIGHTSHADOW", "disabled by environment; stock casters kept");
+            return;
+        }
+
+        g_SetCastShadows = reinterpret_cast<FnSetCastShadows>(
+            GetProcAddress(ogre, "?setCastShadows@MovableObject@Ogre@@QAEX_N@Z"));
+        g_SetTypeIat = FindMainImageImportSlot(
+            "OgreMain.dll", "?setType@Light@Ogre@@QAEXW4LightTypes@12@@Z");
+        if (!g_SetCastShadows || !g_SetTypeIat)
+        {
+            LogShimA(LogLevel::Warn, "FXLIGHTSHADOW",
+                "Light::setType import or setCastShadows export missing; fix not installed");
+            return;
+        }
+
+        g_OriginalSetType = *reinterpret_cast<FnLightSetType*>(g_SetTypeIat);
+        if (!WritePointerValue(g_SetTypeIat, reinterpret_cast<void*>(&SetTypeHook)))
+        {
+            LogShimA(LogLevel::Warn, "FXLIGHTSHADOW", "could not write the setType import slot");
+            return;
+        }
+        LogShimA(LogLevel::Info, "FXLIGHTSHADOW",
+            "installed: non-directional lights typed by the exe no longer cast shadows (iat=0x%08lX)",
+            static_cast<unsigned long>(g_SetTypeIat));
     }
 }

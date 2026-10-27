@@ -7,7 +7,9 @@
 # "You have been elected host" and NotifyNowHost, every host-owned object is
 # deleted, and the guest is put on the Game Over screen (dialog 11,
 # RUN_WAS_QUIT). -Expect Stock checks that characterization, so a regression
-# shows; -Expect Fixed only asks that the guest leaves its mission. With two or
+# shows; -Expect Fixed (HostLeave on) asks that the guest is NOT put on Game Over
+# and that the host's AI craft still exist on it. The Stock arm turns
+# [Fixes] HostLeave off in the instance ini (Run-BZRMpBugs.ps1). With two or
 # more guests (mpbugs-hl-3c-1) the host migrates instead: one guest is elected,
 # nobody gets Game Over and the mission keeps running, so both arms check
 # that. Host-owned objects are still deleted on every guest. The mission
@@ -121,7 +123,18 @@ foreach ($series in @($samples)) {
         Add-CRFlowCheck "stock: guest c$g is elected host, then put on Game Over (dialog 11) and leaves its mission" `
             ([bool]($elected.Count -and $gameOver.Count -and $left.Count)) $detail
     } else {
-        Add-CRFlowCheck "guest c$g leaves its mission after the host is gone" ([bool]$left.Count) $detail
+        # HostLeave on: the survivor stays in the mission with no Game Over.
+        Add-CRFlowCheck "fixed: guest c$g is not put on Game Over and keeps its mission after the host left" `
+            ([bool](-not $gameOver.Count -and -not $left.Count)) $detail
+    }
+    if ($Expect -eq 'Fixed' -and $PerTeam -and $first -and $pre) {
+        # The departed host's AI (teams 5 and 6) must still exist on the guest:
+        # some of each side after the leave, compared with before it.
+        $beforeCount = [int]$pre.craft5 + [int]$pre.craft6
+        $afterCount = [int]$first.craft5 + [int]$first.craft6
+        Add-CRFlowCheck "fixed: host-owned AI still exists on c$g after the leave (craft $beforeCount before, $afterCount just after, $([int]$last.craft5 + [int]$last.craft6) at the end)" `
+            ([bool]($beforeCount -gt 0 -and $afterCount -gt 0 -and $last.craft5 + $last.craft6 -gt 0)) `
+            ([ordered]@{ before = @{ craft5 = $pre.craft5; craft6 = $pre.craft6 }; firstAfter = @{ craft5 = $first.craft5; craft6 = $first.craft6 }; lastAfter = @{ craft5 = $last.craft5; craft6 = $last.craft6 } })
     }
     if ($PerTeam -and $first -and $last) {
         # Observations, not verdicts: what happens to the departed host's objects.

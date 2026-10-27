@@ -310,6 +310,26 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "LuaSendLengthUnsigned", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_MISSION_END_SYNC") ||
+            Equals(name, "BZR_DISABLE_MP_MISSION_END_SYNC"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "MissionEndSync", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_HOST_LEAVE") ||
+            Equals(name, "BZR_DISABLE_MP_HOST_LEAVE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "HostLeave", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_SPLINTER_SYNC") ||
+            Equals(name, "BZR_DISABLE_MP_SPLINTER_SYNC"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SplinterSync", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION") ||
+            Equals(name, "BZR_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "DaywreckerArmoryCollision", true, out);
+        }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
             Equals(name, "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"))

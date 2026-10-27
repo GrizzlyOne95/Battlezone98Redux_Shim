@@ -7,6 +7,7 @@
 #include "engine_globals.h"
 #include "bzr_options_ui.h"
 #include "matchmaking_server.h"
+#include "hook_engine.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -389,10 +390,39 @@ namespace
     GetAddrInfoAFn g_RealGetAddrInfoA = nullptr;
 
     // Live matchmaking-server override (the pre-lobby's Rebellion / Custom
-    // choice). A host name or IP; empty means no override. Applied to lookups
-    // of the launch-server host only, and never while a test redirect is set.
+    // choice). A canonical "host" or "host:port"; empty means no override.
+    // Applied to lookups of the launch-server host only, and never while a
+    // test redirect is set.
     SRWLOCK g_ServerOverrideLock = SRWLOCK_INIT;
     std::string g_ServerOverrideHost;
+
+    // The last non-1337 port a BZRNet lookup resolved for (a selected port or
+    // a /bzrserver= one; 0: none). Never cleared, so a socket still on that
+    // port is recognised after the selection moves on (the recycle runs
+    // before the next lookup). The
+    // game probes UDP on the connected websocket port + 1.
+    std::atomic<uint16_t> g_SelectedWebSocketPort{ 0 };
+
+    bool IsBzrNetWebSocketPort(uint16_t port)
+    {
+        const uint16_t selected = g_SelectedWebSocketPort.load(std::memory_order_relaxed);
+        return port == kBzrNetWebSocketPort || (selected != 0 && port == selected);
+    }
+
+    bool IsBzrNetProbePort(uint16_t port)
+    {
+        const uint16_t selected = g_SelectedWebSocketPort.load(std::memory_order_relaxed);
+        return port == kBzrNetProbePort || (selected != 0 && port == selected + 1);
+    }
+
+    // A custom host that never answers strands multiplayer: the engine retries
+    // the same lookup every 30 s with no limit (FUN_006bef70 re-arms the timer
+    // from DAT_0260b0a0 = 30 s). Each redirected lookup arms an attempt; a
+    // connection that reaches the custom host marks it reached
+    // (NoteWithholdArmed). A redirected lookup that finds the previous attempt
+    // unreached drops the override for the session; the saved choice stays.
+    std::atomic<bool> g_OverrideAttemptPending{ false };
+    std::atomic<bool> g_OverrideReached{ false };
     GetQueuedCompletionStatusFn g_RealGetQueuedCompletionStatus = nullptr;
 
     enum class PendingIoKind : uint8_t
@@ -1784,9 +1814,9 @@ namespace
         uint16_t port = 0;
         if (TryGetSockaddrPort(addr, addrLen, &port))
         {
-            if (port == kBzrNetWebSocketPort)
+            if (IsBzrNetWebSocketPort(port))
                 return "bzrnet_ws";
-            if (port == kBzrNetProbePort)
+            if (IsBzrNetProbePort(port))
                 return "bzrnet_probe";
             if (port == kBzrNetRelayPort)
                 return "bzrnet_relay";
@@ -1821,7 +1851,7 @@ namespace
 
         uint16_t port = 0;
         return TryGetSockaddrPort(reinterpret_cast<const sockaddr*>(&peer), peerLen, &port) &&
-            port == kBzrNetWebSocketPort;
+            IsBzrNetWebSocketPort(port);
     }
 
     // The eight message types that decide the gameplay route: endpoint exchange
@@ -2002,7 +2032,7 @@ namespace
         uint16_t port = 0;
         if (!TryGetSockaddrPort(addr, addrLen, &port))
             return;
-        if (port != kBzrNetProbePort && port != kBzrNetRelayPort)
+        if (!IsBzrNetProbePort(port) && port != kBzrNetRelayPort)
             return;
 
         Logf("[OpenShimNet] relay_datagram sid=%u api=%s direction=%s bytes=%d port=%u peer=%s",
@@ -3758,11 +3788,11 @@ namespace
         MatchmakingServer::Mode mode = MatchmakingServer::Mode::None;
         if (!MatchmakingServer::ParseMode(modeText, mode))
         {
-            Logf("[OpenShimNet] Ignoring [Network] Server=%s (expected Rebellion or Custom)",
+            Logf("[OpenShimNet] Ignoring [Network] Server=%s (expected Rebellion, Custom or Local)",
                 modeText.c_str());
             return;
         }
-        const std::string host = MatchmakingServer::ResolveSavedHost(mode, customText);
+        const std::string host = MatchmakingServer::ResolveSavedHost(mode, customText);  // host[:port]
         if (mode == MatchmakingServer::Mode::Custom && host.empty())
         {
             Logf("[OpenShimNet] [Network] Server=Custom ignored: CustomServer is empty or invalid");
@@ -3781,7 +3811,8 @@ namespace
     //
     // The Authorization message carries the Steam/GOG app ticket. It must only
     // ever reach the official host. A socket withholds when its connected peer
-    // (port 1337) is an address a BZRNet lookup resolved from a NON-official host
+    // (port 1337, or a selected server's port) is an address a BZRNet lookup
+    // resolved from a NON-official host
     // (test redirect, saved server selection, or /bzrserver=). Each outbound call
     // is then scrubbed by ScrubWebSocketTicketsPerCall (frame-aligned, in place)
     // before it reaches ws2_32, and fails closed when it cannot be. Traffic to
@@ -3830,16 +3861,20 @@ namespace
         return false;
     }
 
+    // A lookup for the endpoint the game itself would use: the official name,
+    // or the /bzrserver= host.
+    bool IsBzrNetLookupName(PCSTR nodeName)
+    {
+        return nodeName &&
+               (MatchmakingServer::EqualsNoCase(nodeName, kBzrNetMatchmakingHost) ||
+                MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()));
+    }
+
     // Called with the result of a BZRNet-endpoint lookup. `effectiveHost` is
     // the name actually resolved after any override.
     void RecordLookupAddresses(PCSTR nodeName, PCSTR effectiveHost, const ADDRINFOA* result)
     {
-        if (!nodeName || !effectiveHost || !result)
-            return;
-        // Only lookups for the endpoint the game itself would use: the official
-        // name, or the /bzrserver= host.
-        if (!MatchmakingServer::EqualsNoCase(nodeName, kBzrNetMatchmakingHost) &&
-            !MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+        if (!effectiveHost || !result || !IsBzrNetLookupName(nodeName))
             return;
 
         const bool official = MatchmakingServer::EqualsNoCase(effectiveHost, kBzrNetMatchmakingHost);
@@ -3854,6 +3889,18 @@ namespace
         ReleaseSRWLockExclusive(&g_WithholdLock);
     }
 
+    // True for an address any BZRNet-endpoint lookup resolved (official or not).
+    bool IsRecordedLookupAddress(const sockaddr* addr, int addrLen)
+    {
+        std::string key;
+        if (!MakeAddressKey(addr, addrLen, key))
+            return false;
+        AcquireSRWLockShared(&g_WithholdLock);
+        const bool recorded = g_WithholdAddresses.count(key) || g_OfficialAddresses.count(key);
+        ReleaseSRWLockShared(&g_WithholdLock);
+        return recorded;
+    }
+
     // The verdict is NOT cached per socket: handle values are reused, and the
     // game's IOCP library closes its sockets through imports we do not patch,
     // so a cached "clear" (or "withhold") could outlive the socket it described.
@@ -3863,7 +3910,7 @@ namespace
     {
         uint16_t port = 0;
         std::string key;
-        if (!TryGetSockaddrPort(addr, addrLen, &port) || port != kBzrNetWebSocketPort ||
+        if (!TryGetSockaddrPort(addr, addrLen, &port) || !IsBzrNetWebSocketPort(port) ||
             !MakeAddressKey(addr, addrLen, key))
             return false;
 
@@ -3878,6 +3925,7 @@ namespace
     // Log-once bookkeeping per socket handle (re-armed if the peer changes).
     void NoteWithholdArmed(SOCKET s, const std::string& key, const char* how, const sockaddr* peer, int peerLen)
     {
+        g_OverrideReached.store(true);
         bool log = false;
         AcquireSRWLockExclusive(&g_WithholdLock);
         WithholdSocket& entry = g_WithholdSockets[s];
@@ -3968,6 +4016,77 @@ namespace
         return status;
     }
 
+    // 1 = written, 0 = stored value is not the stock 30 s, -1 = fault. Kept
+    // free of C++ objects for __try.
+    int WriteReconnectDelay(uint32_t init, int seconds, LONGLONG& stock)
+    {
+        __try
+        {
+            auto* const duration = *reinterpret_cast<volatile LONGLONG**>(init + 6);
+            stock = *duration;
+            LONGLONG unitsPerSecond = 0;
+            if (stock == 30LL * 1000000LL)
+                unitsPerSecond = 1000000LL;          // microsecond ticks (boost default)
+            else if (stock == 30LL * 1000000000LL)
+                unitsPerSecond = 1000000000LL;       // nanosecond ticks
+            if (unitsPerSecond == 0)
+                return 0;
+            InterlockedExchange64(duration, seconds * unitsPerSecond);
+            return 1;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+    }
+
+    // The engine waits DAT_0260b0a0 between BZRNet connect retries: a boost
+    // time_duration static-initialised to 30 s by FUN_0040f310 (push 0x1E;
+    // mov ecx,0x0260B0A0; call). After a failed connect, a server switch or a
+    // retry on the multiplayer setup screen waits that long, so
+    // [Network] ReconnectDelaySeconds (default 5, 0 = stock) shortens it. Runs
+    // at the first BZRNet lookup, after static init and before any retry is
+    // armed. Fails closed unless the initialiser bytes and the stored 30 s match.
+    void ApplyReconnectDelayOnce()
+    {
+        static std::atomic<bool> s_done{ false };
+        if (s_done.exchange(true))
+            return;
+
+        int seconds = 5;
+        std::string text;
+        if (TryGetUserConfigString("Network", "ReconnectDelaySeconds", text) && !text.empty())
+            seconds = std::atoi(text.c_str());
+        if (seconds <= 0 || seconds >= 30)
+        {
+            Logf("[OpenShimNet] BZRNet reconnect delay left at stock 30 s");
+            return;
+        }
+
+        uint32_t init = 0;
+        if (HookEngine::ResolveEngineAddress("BzrNetRetryDelayInit", init) !=
+            HookEngine::EngineAddressStatus::Bound)
+        {
+            Logf("[OpenShimNet] BZRNet reconnect delay: initialiser not bound; left at stock");
+            return;
+        }
+
+        LONGLONG stock = 0;
+        switch (WriteReconnectDelay(init, seconds, stock))
+        {
+        case 1:
+            Logf("[OpenShimNet] BZRNet reconnect delay 30 s -> %d s", seconds);
+            break;
+        case 0:
+            Logf("[OpenShimNet] BZRNet reconnect delay: unexpected stored value %lld; left at stock",
+                static_cast<long long>(stock));
+            break;
+        default:
+            Logf("[OpenShimNet] BZRNet reconnect delay: read faulted; left at stock");
+            break;
+        }
+    }
+
     INT WSAAPI Hook_getaddrinfo(
         PCSTR nodeName,
         PCSTR serviceName,
@@ -3975,7 +4094,13 @@ namespace
         PADDRINFOA* result)
     {
         PCSTR resolvedNode = nodeName;
+        PCSTR resolvedService = serviceName;
+        std::string overrideServer;
         std::string overrideHost;
+        unsigned overridePort = MatchmakingServer::kPort;
+        char overridePortText[8] = {};
+        if (nodeName && MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+            ApplyReconnectDelayOnce();
         if (nodeName &&
             !g_Config.matchmakingRedirectAddress.empty() &&
             _stricmp(nodeName, kBzrNetMatchmakingHost) == 0)
@@ -3988,16 +4113,59 @@ namespace
         }
         else if (nodeName &&
                  g_Config.matchmakingRedirectAddress.empty() &&
-                 CopyServerOverrideHost(overrideHost) &&
+                 CopyServerOverrideHost(overrideServer) &&
+                 MatchmakingServer::SplitServer(overrideServer, overrideHost, overridePort) &&
                  MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
         {
-            resolvedNode = overrideHost.c_str();
-            Logf("[OpenShimNet] Redirecting BZRNet lookup %s -> %s (server selection)",
-                nodeName,
-                resolvedNode);
+            const bool custom =
+                !MatchmakingServer::EqualsNoCase(overrideHost, kBzrNetMatchmakingHost) &&
+                !MatchmakingServer::EqualsNoCase(overrideHost, GetLaunchServerHostCached());
+            if (custom && g_OverrideAttemptPending.load() && !g_OverrideReached.load())
+            {
+                SetMatchmakingServerOverride(nullptr);
+                Logf("[OpenShimNet] Custom server %s did not answer; using %s for this session "
+                     "(saved choice kept; pick it again on the multiplayer screen to retry)",
+                    overrideHost.c_str(),
+                    nodeName);
+            }
+            else
+            {
+                if (custom)
+                {
+                    g_OverrideReached.store(false);
+                    g_OverrideAttemptPending.store(true);
+                }
+                resolvedNode = overrideHost.c_str();
+                // asio resolves (host, URL port). Swapping the port here moves the
+                // websocket; the game then probes UDP on the connected port + 1.
+                // A service other than the official port is the user's own
+                // /bzrserver= port and is left alone.
+                if (overridePort != MatchmakingServer::kPort &&
+                    (!serviceName || std::strcmp(serviceName, "1337") == 0))
+                {
+                    std::snprintf(overridePortText, sizeof(overridePortText), "%u", overridePort);
+                    resolvedService = overridePortText;
+                }
+                Logf("[OpenShimNet] Redirecting BZRNet lookup %s:%s -> %s:%s (server selection)",
+                    nodeName,
+                    serviceName ? serviceName : "-",
+                    resolvedNode,
+                    resolvedService ? resolvedService : "-");
+            }
         }
 
-        const INT rc = g_RealGetAddrInfoA(resolvedNode, serviceName, hints, result);
+        // Whatever port the websocket ends up on (a selected one, or a
+        // /bzrserver= one), ticket withholding and the recycle must know it.
+        unsigned lookupPort = 0;
+        std::string scratchHost;
+        if (IsBzrNetLookupName(nodeName) && resolvedService &&
+            MatchmakingServer::SplitServer(std::string("x:") + resolvedService, scratchHost, lookupPort) &&
+            lookupPort != MatchmakingServer::kPort)
+        {
+            g_SelectedWebSocketPort.store(static_cast<uint16_t>(lookupPort), std::memory_order_relaxed);
+        }
+
+        const INT rc = g_RealGetAddrInfoA(resolvedNode, resolvedService, hints, result);
         if (rc == 0 && result)
             RecordLookupAddresses(nodeName, resolvedNode, *result);
         return rc;
@@ -5330,6 +5498,8 @@ namespace
         AcquireSRWLockExclusive(&g_ServerOverrideLock);
         g_ServerOverrideHost = host ? host : "";
         ReleaseSRWLockExclusive(&g_ServerOverrideLock);
+        g_OverrideAttemptPending.store(false);
+        g_OverrideReached.store(false);
         Logf("[OpenShimNet] Matchmaking server override %s%s",
             host && *host ? "set to " : "cleared",
             host && *host ? host : "");
@@ -5380,7 +5550,14 @@ namespace
 
             uint16_t port = 0;
             if (!TryGetSockaddrPort(reinterpret_cast<const sockaddr*>(&peer), peerLen, &port) ||
-                port != kBzrNetWebSocketPort)
+                !IsBzrNetWebSocketPort(port))
+            {
+                continue;
+            }
+            // A selected port can be a common one (443, 8080): there, only
+            // close a socket to an address a BZRNet lookup resolved.
+            if (port != kBzrNetWebSocketPort &&
+                !IsRecordedLookupAddress(reinterpret_cast<const sockaddr*>(&peer), peerLen))
             {
                 continue;
             }

@@ -4073,7 +4073,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                             }
                             g_ogre.setStringParameter(generatedFragmentProgram.rep,
                                 std::string("preprocessor_defines"),
-                                fragmentDefines);
+                                hdDiffuseReady ? fragmentDefines + ",OPENSHIM_TERRAIN_HD=1"
+                                               : fragmentDefines);
                             g_ogre.loadResource(generatedFragmentProgram.rep, true);
                             if (!bindFragmentProgram(pass, fragmentProgramName))
                             {
@@ -5932,8 +5933,74 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         ForgetTerrainProxy(TerrainForgetReason::ProcessShutdown, false, false);
     }
 
+    // Test-only: OPENSHIM_FRAME_CAPTURE="600,1200" writes those rendered world
+    // frames next to the exe. Reads back the render window, so it still works
+    // when the desktop is locked or the session is disconnected and screen
+    // grabs come back black.
+    static void MaybeCaptureTestFrame()
+    {
+        static int state = 0; // 0 unread, 1 armed, 2 off
+        static std::vector<uint32_t> frames;
+        static uint32_t renderFrames = 0;
+        static size_t next = 0;
+        if (state == 2)
+            return;
+        if (state == 0)
+        {
+            std::string list;
+            state = 2;
+            if (!ReadEnvString("OPENSHIM_FRAME_CAPTURE", list))
+                return;
+            for (const char* p = list.c_str(); *p;)
+            {
+                char* end = nullptr;
+                const unsigned long value = strtoul(p, &end, 10);
+                if (end == p) { ++p; continue; }
+                frames.push_back(static_cast<uint32_t>(value));
+                p = end;
+            }
+            std::sort(frames.begin(), frames.end());
+            if (!frames.empty())
+                state = 1;
+            return;
+        }
+        ++renderFrames;
+        if (next >= frames.size() || renderFrames < frames[next])
+            return;
+        if (!g_ogre.getRoot || !g_ogre.getAutoCreatedWindow || !g_ogre.writeContentsToFile)
+        {
+            state = 2;
+            return;
+        }
+        char exePath[MAX_PATH] = {};
+        const DWORD length = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH)
+            return;
+        std::string path(exePath, length);
+        path = path.substr(0, path.find_last_of("\\/") + 1);
+        char name[64] = {};
+        sprintf_s(name, "openshim_frame_%05u.png", frames[next]);
+        path += name;
+        ++next;
+        try
+        {
+            void* root = g_ogre.getRoot();
+            void* window = root ? g_ogre.getAutoCreatedWindow(root) : nullptr;
+            if (window)
+                g_ogre.writeContentsToFile(window, path);
+            LogShimA(LogLevel::Info, "terrain-proxy",
+                "[FRAME-CAPTURE] frame=%u window=%d path=\"%s\"",
+                renderFrames, window ? 1 : 0, path.c_str());
+        }
+        catch (...)
+        {
+            state = 2;
+        }
+    }
+
     void TerrainProxyRenderFrameTick()
     {
+        MaybeCaptureTestFrame();
         // Cheap early-out: this runs on every rendered world frame and must
         // cost nothing when the opt-in capture is off.
         if ((g_config.semanticFrameCaptures <= 0 && g_config.surfaceManifest.empty() && g_config.geometryExport.empty() && !g_config.hdEnabled) || !g_active.load() ||

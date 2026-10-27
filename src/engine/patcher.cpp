@@ -20,6 +20,7 @@
 #include "cli_multiparam_parser.h"
 #include "redux_compatibility.h"
 #include "p2p_reliable_send_fix.h"
+#include "lobby_drop_keeps_match.h"
 #include "shell_casing_config.h"
 #include "weapon_presentation_call_bridges.h"
 #include "weapon_presentation_native.h"
@@ -1207,6 +1208,12 @@ namespace BZROpenShim
                     reinterpret_cast<uintptr_t>(Hooks::GetShellCasingShotBridgeAddress()));
                 Log(L"[SHELLCASINGS] %hs redirected site=0x%08X factory=%p\n", p.name.c_str(), p.address - 1, original);
             }
+            else if (Hooks::IsLobbyDropKeepsMatchPatchName(p.name.c_str())) {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                target = Hooks::PrepareLobbyDropKeepsMatchHook(p.name.c_str(), p.address - 1, original);
+            }
             else if (p.name == "HoverCraft Turbo Sound Stop Guard") {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
@@ -1614,6 +1621,7 @@ namespace BZROpenShim
         FillJmp5Payloads(patches); FillDwordPayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
         Hooks::ConfigureP2PReliablePatches(patches);
         Hooks::ConfigureP2PEarlyUnreliablePatches(patches);
+        Hooks::ConfigureSyncJoinDefaultPatch(patches);
         // Apply critical patches (JMP5 hooks, version notice, etc.) BEFORE the
         // deferred-hook retry loop. The retry loop can take ~25 seconds for
         // Steam input binding UI hooks, and the game may crash during that

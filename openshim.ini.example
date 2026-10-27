@@ -419,9 +419,26 @@ ApcAlliedTargetDeploy = 1
 ; Stop a destroyed splinter (spraybomb) from continuing to spawn payload
 ; ordnance. SprayBuilding::Simulate overrides Building::Simulate without
 ; preserving the base destroyed/marked-for-remove gate; this restores it.
-; Accepted: boolean. Default: ON. Stands down in a network game.
+; Accepted: boolean. Default: ON. Stands down in a network game unless
+; SplinterSync (below) is on, in which case it also runs there so a splinter
+; killed on another peer stops firing here.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX
 SplinterUndead = 1
+
+; Multiplayer only: keep a thrown splinter (spraybomb) the same object on every
+; peer. Stock gives the deployed SprayBuilding no network identity: each peer
+; builds its own where its own bomb settled (a lagging peer was seen 87 m off),
+; and killing it on one peer leaves it alive and firing on all the others. The
+; launcher broadcasts the deploy position ('SD'); a peer whose splinter dies of
+; damage broadcasts a kill ('SK'). Receivers move or kill their own copy; both
+; packets use the shared Net::Receive dispatcher, so peers without the fix
+; ignore them like any unknown tag. Needs SplinterUndead on for the kill to stop
+; the payload; with SplinterUndead off the building dies but keeps firing.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match. No effect in single player.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_SPLINTER_SYNC
+SplinterSync = 1
 
 ; Reveal the owning craft when a comet, deployed APC soldier, splinter payload
 ; or another GameObject-owned child lands a damaging hit. Redux reveals only
@@ -539,6 +556,58 @@ LuaGetIndependenceGuard = 1
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX
 LuaSendLengthUnsigned = 1
+
+; Make a mission ending on the host end for everyone. Stock Redux has no
+; network message for it: when only the host's script calls SucceedMission or
+; FailMission, guests keep playing forever. The host broadcasts a 21-byte "ME"
+; packet (failed flag, shutdown time, 13-byte name) from the engine's single
+; mission-end routine, and each guest runs that same routine with the same
+; arguments. Guests without this fix ignore the packet like any unknown tag,
+; so mixed sessions are safe but only patched guests end. Packets from a
+; non-host sender, from yourself, or for a mission already over are ignored.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_MISSION_END_SYNC
+MissionEndSync = 1
+
+; Multiplayer only: survive the host leaving. Stock deletes every object the
+; leaving host owned on every peer (all the AI in co-op), skips the ownership
+; takeover NotifyNowHost is meant to run (the NetPlayer destructor zeroes the
+; host id first), and with two players ends the match as Game Over for the
+; survivor. With this on the host's objects stay as remote copies, the newly
+; elected host takes them over (the leaver's own-team units are still removed,
+; AI teams are kept), and a lone-player state caused by a leave no longer
+; triggers Game Over; a real last-man-standing on lives still does.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match. No effect in single player.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_HOST_LEAVE
+HostLeave = 1
+
+; Stop a Daywrecker exploding on its own Armory on remote peers. A remote
+; copy is created with no flags and can run a frame before its first network
+; state marks it in flight; that frame detonated it where it spawned, inside
+; the Armory: a phantom blast and damage on that peer only. With this on, a
+; remote copy holds detonation until its first state arrives, and a rebuilt
+; copy with no recorded launcher ignores collisions with an Armory, as the
+; launcher's own copy does. Local to each patched peer; sends nothing.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION
+DaywreckerArmoryCollision = 1
+
+; Start every new hosted game with Sync Join on. Sync Join locks the game once
+; it starts so nobody joins mid-game; a late joiner loads the mission fresh
+; and pushes its own starting units to the host, which duplicates them and
+; desyncs the game. Stock remembers the host's last toggle in multi.ini, so a
+; host who switched it off once hosts every later game unlocked. With this on
+; each new lobby starts locked and the host can still turn it off for that
+; game. Host-side only; sends nothing new.
+; Accepted: boolean. Default: ON.
+; Env kill switch: OPENSHIM_DISABLE_SYNC_JOIN_DEFAULT_ON
+SyncJoinDefaultOn = 1
 
 ; Stop Redux pinning the OS cursor while it is minimized or in the
 ; background. In mouse-look the stock look reader re-clips the cursor and
@@ -1852,6 +1921,20 @@ EarlyNakHoldoffMs = 300
 ; every impaired profile). Used only with EarlyNakAccept.
 EarlyNakReorderMs = 0
 
+; Keeps a running match when only the lobby websocket drops. Gameplay is P2P;
+; stock still quits ("Lost connection to game") the moment the websocket
+; closes, even though it reconnects within a second. While a mission is
+; running and a peer answered one of the last two P2P pings (about 6 s), the
+; local lobby leave is skipped, and a remote player whose lobby session ended
+; is kept while their P2P is live (kicks and bans still drop). A real P2P
+; loss still ends the session through the stock ping check and host
+; auto-kick.
+; Accepted: boolean. Default: ON (stock behaviour is a defect; inert unless
+; the websocket drops mid-match). Restart required.
+; Kill switch: OPENSHIM_DISABLE_LOBBY_DROP_KEEPS_MATCH (or BZR_ prefix).
+; Sites: GOG 2.2.301 0x006BF11B, 0x0073F13F; a signature mismatch keeps stock.
+LobbyDropKeepsMatch = 1
+
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
 ; because it is applied by the socket layer. See net.ini for what each value
@@ -1958,29 +2041,37 @@ LobbyBanButton = 1
 ; opens the lobby exactly as stock does. While this is ON the nickname and flag
 ; pickers appear only on the setup screen and are not built in the lobby (the
 ; net-route readout stays there; /nickname works either way).
-; Accepted: boolean. Default: OFF. Read when Multiplayer is clicked.
-; The Server row picks Rebellion or a Custom host (see Server below); it is
+; Accepted: boolean. Default: ON. Read when Multiplayer is clicked.
+; The Server row picks Rebellion, a Custom host or Local (see Server below); it is
 ; read-only, showing "<address> (test redirect)", when [OpenShimSocket]
 ; MatchmakingRedirectAddress is set.
-PreLobby = 0
+PreLobby = 1
+; Seconds the game waits between matchmaking connect retries (stock 30). A
+; custom server that does not answer falls back to Rebellion for the session;
+; the saved Server choice is kept.
+; Accepted: integer seconds, 0 = stock. Default: 5. Read at startup.
+ReconnectDelaySeconds = 5
 
 ; Matchmaking server: Rebellion's official one or a community/custom one.
-; Accepted: Rebellion, Custom. Blank/absent = no override: stock behaviour,
+; Accepted: Rebellion, Custom, Local. Local is a dedicated server running on
+; this PC (127.0.0.1, port 1337). Blank/absent = no override: stock behaviour,
 ; i.e. whatever the /bzrserver= launch switch gives, else Rebellion's server.
 ; The multiplayer setup screen (PreLobby) edits this and CustomServer; Continue
 ; saves a changed choice and reconnects to it. Read at startup too, so the first
 ; connection and invites use the saved server. Needs NetImprovements on.
 ; Precedence: net.ini MatchmakingRedirectAddress (test redirect) > this >
 ; /bzrserver= > Rebellion.
-; SECURITY: a custom server receives your platform (Steam/GOG) sign-in ticket
-; in the BZRNet Authorization, exactly as Rebellion's does. Only choose a
-; server you trust.
+; SECURITY: your platform (Steam/GOG) sign-in ticket is sent only to
+; Rebellion's server. Custom, Local, /bzrserver= and test-redirect servers get
+; the BZRNet Authorization without it.
 ; Server =
 
 ; Host name or IP of the custom server, used when Server = Custom.
-; Accepted: a bare host or IPv4 address, optionally with a ":1337" suffix. No
-; scheme (ws://), path or spaces. Only port 1337 is supported; any other port
-; is refused. Blank = none (Server = Custom then has no effect).
+; Accepted: a bare host or IPv4 address, optionally with a ":port" suffix
+; (1-65534, default 1337). No scheme (ws://), path or spaces. The lobby
+; websocket goes to that TCP port and the game probes UDP on port + 1, so a
+; server on ws 1437 needs UDP 1438. Blank = none (Server = Custom then has no
+; effect).
 ; CustomServer =
 
 ; Remember muted players across sessions.

@@ -9,7 +9,9 @@
 // and sits on its load screen. This patch:
 //
 //   1. subclasses the game window and swallows WM_ACTIVATEAPP(FALSE), so the
-//      engine never pauses or minimizes;
+//      engine never pauses or minimizes, and WM_ACTIVATE(WA_INACTIVE), which
+//      the engine forwards to Ogre's window procedure: Ogre would mark the
+//      RenderWindow inactive and stop drawing it while the sim ran on;
 //   2. raises the flag to 1 if it is 0 while the window is not minimized (no
 //      pause function ran, so no resume is needed);
 //   3. no-ops ClipCursor / SetCursorPos / SetCursor whenever the game window is
@@ -54,6 +56,7 @@ namespace BZROpenShim
             std::atomic<WNDPROC> g_PrevWndProc{ nullptr };
             std::atomic<bool> g_ForcedLogged{ false };
             std::atomic<bool> g_SwallowLogged{ false };
+            std::atomic<bool> g_ActivateSwallowLogged{ false };
             std::atomic<long> g_SwallowCount{ 0 };
             std::atomic<long> g_CursorSuppressCount{ 0 };
 
@@ -165,7 +168,12 @@ namespace BZROpenShim
                         PolicyActive(), msg, static_cast<unsigned long long>(w)))
                 {
                     g_SwallowCount.fetch_add(1, std::memory_order_relaxed);
-                    if (!g_SwallowLogged.exchange(true))
+                    if (msg == BackgroundRunPolicy::kWmActivate)
+                    {
+                        if (!g_ActivateSwallowLogged.exchange(true))
+                            Log(L"[BGRUN] swallowed WM_ACTIVATE(WA_INACTIVE); render window stays active\n");
+                    }
+                    else if (!g_SwallowLogged.exchange(true))
                         Log(L"[BGRUN] swallowed WM_ACTIVATEAPP(FALSE); simulation stays running\n");
                     return 0;
                 }
@@ -312,7 +320,7 @@ namespace BZROpenShim
                 return;
             }
             g_Enabled.store(true, std::memory_order_release);
-            Log(L"[BGRUN] enabled (single-player, windowed only): WM_ACTIVATEAPP(FALSE) swallowed, "
+            Log(L"[BGRUN] enabled (single-player, windowed only): WM_ACTIVATEAPP(FALSE) and WM_ACTIVATE(WA_INACTIVE) swallowed, "
                 L"cursor calls guarded (ClipCursor/SetCursorPos/SetCursor=%d) while unfocused\n",
                 cur ? 1 : 0);
         }

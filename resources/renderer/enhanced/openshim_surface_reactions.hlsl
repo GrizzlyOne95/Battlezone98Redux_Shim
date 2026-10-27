@@ -12,7 +12,8 @@
     uniform float4 surfaceImpactWeights, \
     uniform float4 surfaceMuzzle0, uniform float4 surfaceMuzzle1, \
     uniform float4 surfaceBarrel0, uniform float4 surfaceBarrel1, \
-    uniform float4x4 surfaceViewToLocal, uniform float surfaceRainTime,
+    uniform float4x4 surfaceViewToLocal, uniform float surfaceRainTime, \
+    uniform float4 surfaceSnow, uniform float4 surfaceDust,
 #else
 #define OSE_SURFACE_UNIFORMS
 #endif
@@ -95,6 +96,147 @@ float3 ose_water_normal(float3 viewPosition, float3 normal, float wetness,
     float3 result = normal - gradient;
     if (nearFade <= 0.0) { water = 0.0; return normal; }
     return result * rsqrt(max(dot(result, result), 0.000001));
+}
+
+// Procedural snow on upward faces. surfaceSnow: x cover amount, y snow albedo
+// (linear, 0 = default 0.85), z blue tint, w reserved. Zero keeps the source.
+float ose_snow_value(float2 p)
+{
+    float2 i = floor(p), f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return lerp(lerp(ose_water_hash(i).x, ose_water_hash(i + float2(1, 0)).x, f.x),
+                lerp(ose_water_hash(i + float2(0, 1)).x, ose_water_hash(i + float2(1, 1)).x, f.x), f.y);
+}
+
+// Two octaves, centred on zero. The caller picks the plane: object-local
+// position for craft and buildings, the world-tiling UV for terrain.
+float ose_snow_noise(float2 p)
+{
+    return ose_snow_value(p) * 0.65 + ose_snow_value(p * 3.7 + 0.37) * 0.35 - 0.5;
+}
+
+// Thruster wash w = (x, z, radius, strength): full inside half the radius,
+// fading to the rim; edge (about -0.2..0.2) roughens the rim.
+float ose_wash(float4 w, float2 xz, float edge)
+{
+    float d = length(xz - w.xy) / max(w.z, 0.001) + edge;
+    return w.w * (1.0 - smoothstep(0.5, 1.0, d));
+}
+
+// up is the world-space normal's Y. More snow lowers the threshold so cover
+// creeps from flat tops down onto slopes; noise breaks the line up.
+float ose_snow_cover(float up, float noise, float amount)
+{
+    amount = saturate(amount);
+    if (amount < 0.002) return 0.0;
+    float threshold = lerp(1.05, 0.15, amount);
+    return smoothstep(threshold, threshold + 0.25, up + noise * 0.30) * min(1.0, amount * 4.0);
+}
+
+// Dust: surfaceDust rgb is the linear dust colour, w the amount. Up-facing
+// faces collect it first; sheltered (1 - AO exposure) and concave texels
+// collect it even on slopes. Tops out at 75% so markings still read.
+float ose_dust_cover(float up, float noise, float shelter, float concave, float amount)
+{
+    amount = saturate(amount);
+    if (amount < 0.002) return 0.0;
+    float settle = smoothstep(lerp(0.9, 0.1, amount), 1.0, up + noise * 0.35);
+    float trapped = saturate(shelter * 1.2 + concave * 0.8) * smoothstep(-0.6, 0.3, up);
+    return saturate(max(settle, trapped) * (0.55 + noise * 0.45)) * min(1.0, amount * 3.0) * 0.75;
+}
+
+// The dust keeps a third of the surface luminance pattern.
+float3 ose_dust_blend(float3 surface, float3 dustColour, float cover)
+{
+    float luma = dot(surface, float3(0.299, 0.587, 0.114));
+    return lerp(surface, dustColour * lerp(1.0, saturate(luma * 2.2), 0.33), cover);
+}
+
+// Object-space push (metres) for fully covered vertices.
+static const float OSE_SNOW_THICKNESS = 0.07;
+
+float3 ose_snow_albedo(float4 snow)
+{
+    float brightness = snow.y > 0.0 ? snow.y : 0.85;
+    return brightness * lerp(float3(1.0, 1.0, 1.0), float3(0.86, 0.93, 1.0), saturate(snow.z));
+}
+
+// Snow over a surface: never a full white-out. Cover tops out at 80% and the
+// snow keeps 40% of the surface luminance pattern, so diffuse detail, decals
+// and seams still read through it.
+float3 ose_snow_blend(float3 surface, float3 snowAlbedo, float cover)
+{
+    float luma = dot(surface, float3(0.299, 0.587, 0.114));
+    float3 snowTex = snowAlbedo * lerp(1.0, saturate(luma * 2.5), 0.4);
+    return lerp(surface, snowTex, cover * 0.8);
+}
+
+// Parallax ice: surfaceSnow.w is the ice depth in metres (0 = off). The UV
+// offset is where the view ray, entering a flat surface at p, reaches that
+// depth: the plane vector is mapped to UV through the screen-space gradients
+// of uv (same basis as cotangent_frame). N and p are view space.
+float2 ose_ice_parallax_uv(float3 N, float3 p, float2 uv, float depth)
+{
+    float3 dp1 = ddx(p);
+    float3 dp2 = ddy(p);
+    float2 duv1 = ddx(uv);
+    float2 duv2 = ddy(uv);
+    float3 dp2perp = cross(N, dp2);
+    float3 dp1perp = cross(dp1, N);
+    float det = dot(dp1, dp2perp);
+    if (abs(det) < 1e-12) return float2(0.0, 0.0);
+    float3 gradU = (dp2perp * duv1.x + dp1perp * duv2.x) / det;
+    float3 gradV = (dp2perp * duv1.y + dp1perp * duv2.y) / det;
+    float3 V = normalize(-p);
+    float NdotV = dot(V, N);
+    // Grazing views would slide the layer off the cell; 0.3 caps it at ~3x depth.
+    float3 shift = -(V - N * NdotV) * (depth / max(NdotV, 0.3));
+    return float2(dot(gradU, shift), dot(gradV, shift));
+}
+
+// Blue-dominant albedo reads as ice; rock, scorch and base pads stay opaque.
+float ose_ice_mask(float3 albedo)
+{
+    return saturate((albedo.b - max(albedo.r, albedo.g * 0.92)) * 9.0);
+}
+
+static const float3 OSE_ICE_DEEP_TINT = float3(0.66, 0.82, 1.0);
+
+// Refracted world-space layers under the ice. The view ray (V toward the eye,
+// N the surface normal, P the surface point, all world space) bends into the
+// ice and crosses three depths; each adds fracture sheets (thin ridged-noise
+// lines) and trapped bubbles from world XZ, so the layers stay put and slide
+// against the surface as the view moves. rgb is the Beer-Lambert transmittance
+// along the deepest path (red goes first), a the brightness of the inclusions.
+// footprint (metres per pixel) fades detail before it can shimmer.
+float4 ose_ice_depth_layers(float3 P, float3 V, float3 N, float depth, float footprint)
+{
+    float3 R = refract(-V, N, 1.0 / 1.31);
+    float cosR = max(dot(-R, N), 0.35);
+    float inclusions = 0.0;
+    [unroll] for (int k = 0; k < 3; k++)
+    {
+        float layerDepth = depth * (0.35 + 0.9 * k);
+        float2 xz = (P + R * (layerDepth / cosR)).xz + k * 37.1;
+        float fade = 1.0 / (1.0 + k * 0.8);
+        // Fracture sheets: the zero crossings of value noise, about 3-6 m apart.
+        float scale = 0.22 / (1.0 + k * 0.35);
+        float n = ose_snow_value(xz * scale) * 0.7 + ose_snow_value(xz * scale * 2.9 + 5.3) * 0.3 - 0.5;
+        float lineWidth = max(0.03, footprint * scale * 1.5);
+        float crack = (1.0 - smoothstep(0.0, lineWidth, abs(n))) * saturate(1.0 - footprint * scale * 4.0);
+        // Bubbles: one candidate per 1.6 m cell, a third of them present.
+        float2 cellXZ = xz * 0.62;
+        float2 cell = floor(cellXZ);
+        float2 h = ose_water_hash(cell + k * 13.0);
+        float2 centre = cell + 0.2 + h * 0.6;
+        float radius = 0.05 + 0.09 * frac(h.x * 7.13);
+        float speck = (1.0 - smoothstep(radius * 0.4, radius, length(cellXZ - centre)))
+            * step(0.67, h.y) * saturate(1.0 - footprint * 2.5);
+        inclusions += (crack * 0.9 + speck) * fade;
+    }
+    float path = depth * 2.15 / cosR;
+    float3 transmittance = exp(-path * float3(0.30, 0.11, 0.04));
+    return float4(transmittance, saturate(inclusions));
 }
 
 float ose_surface_mask(float3 position, float4 anchor)

@@ -23,6 +23,9 @@ local tracked, lifetimes = {}, {}
 -- The Armory deploys on its geyser, then BuildAt-launches its Daywreckers one
 -- after another; the Splinter shooter fires until its ammunition drops.
 local pendingLaunch, pendingFire
+-- The Splinter test's target tank, so BugSite can report its health on its owner.
+local splinterTarget
+local pendingShoot
 local WITNESS_TEAM = 7
 
 -- Humans are observers; the two AI teams fight each other only.
@@ -114,6 +117,27 @@ local function serviceLaunches()
             M.fire.firedAt = GetTime(); pendingFire = nil
         elseif IsAlive(f.target) then
             FireAt(f.shooter, f.target)
+        end
+    end
+    if pendingShoot then
+        local s = pendingShoot
+        if not s.target then
+            for h in AllObjects() do
+                if explosiveKind(h) == "splinter" and IsAlive(h) then
+                    s.target = h
+                    M.shoot.target, M.shoot.seen, M.shoot.health = tostring(h), GetTime(), round(GetCurHealth(h))
+                    break
+                end
+            end
+        end
+        if s.target and not IsAlive(s.target) then
+            -- lastHealth below full means the gunner's hits ended it, not its timer.
+            M.shoot.gone = GetTime(); pendingShoot = nil
+        elseif GetTime() > s.deadline or not IsAlive(s.gunner) then
+            M.shoot.timedOut = GetTime(); pendingShoot = nil
+        elseif s.target then
+            M.shoot.lastHealth = round(GetCurHealth(s.target))
+            FireAt(s.gunner, s.target)
         end
     end
 end
@@ -225,14 +249,16 @@ end
 
 -- The launch the player makes: this peer's Armory builds a Daywrecker and
 -- lobs it at (tx, tz). The Armory is on this peer's own team, so the
--- cross-team targeting defect stays out of the way.
-function BugLaunchDaywrecker(tx, tz, count)
+-- cross-team targeting defect stays out of the way. (ax, az) places the
+-- Armory (default: beside the player); atSelf makes it the target, as
+-- aiCore's self-launch does, instead of a Drop Point at (tx, tz).
+function BugLaunchDaywrecker(tx, tz, count, ax, az, atSelf)
     local team = GetTeamNum(GetPlayerHandle())
     local p = GetPosition(GetPlayerHandle())
     -- An Armory draws power from an unoccupied geyser within about 10 m. Without
     -- one it packs up as soon as it deploys and never builds (wp-host-4..8).
     -- lcbench has no geysers, so place one and put the Armory on it.
-    local site = SetVector(p.x + 40, 0, p.z + 60)
+    local site = ax and SetVector(ax, 0, az) or SetVector(p.x + 40, 0, p.z + 60)
     site.y = GetTerrainHeightAndNormal(site)
     local geyser = exu.BuildSyncObject("eggeizr1", 0, site)
     assert(geyser and IsAlive(geyser), "geyser failed to spawn")
@@ -243,13 +269,16 @@ function BugLaunchDaywrecker(tx, tz, count)
     SetScrap(team, 100)
     -- aiCore always targets a handle (a Recycler, or the Armory itself). An inert
     -- Drop Point marks the site.
-    local ground = GetTerrainHeightAndNormal(SetVector(tx, 0, tz))
-    local mark = exu.BuildSyncObject("apdrop", team, SetVector(tx, ground, tz))
-    assert(mark and IsAlive(mark), "drop point failed to spawn")
+    local mark = armory
+    if not atSelf then
+        local ground = GetTerrainHeightAndNormal(SetVector(tx, 0, tz))
+        mark = exu.BuildSyncObject("apdrop", team, SetVector(tx, ground, tz))
+        assert(mark and IsAlive(mark), "drop point failed to spawn")
+    end
     pendingLaunch = {armory = armory, where = mark, deployDeadline = GetTime() + 10,
                      nextOrder = 0, orders = 0, deployed = false, count = count or 1, seen = 0, acked = 0}
     M.launch = {team = team, at = GetTime(), tx = tx, tz = tz, count = count or 1, orderLog = {},
-                deployFlips = {}, seenTimes = {},
+                deployFlips = {}, seenTimes = {}, ax = round(site.x), az = round(site.z), atSelf = atSelf and true or false,
                 geyserDist = GetDistance(armory, geyser)}
     return M.launch
 end
@@ -264,9 +293,39 @@ function BugFireSplinter(tx, tz, range)
     SetIndependence(target, 0); SetIndependence(shooter, 0)
     GiveWeapon(shooter, "gsplint", 3)
     SetWeaponMask(shooter, 8)
+    splinterTarget = target
     pendingFire = {shooter = shooter, target = target, ammo = GetCurAmmo(shooter), deadline = GetTime() + 30}
-    M.fire = {team = team, at = GetTime(), weapon = GetWeaponClass(shooter, 3), ammo = pendingFire.ammo}
+    M.fire = {team = team, at = GetTime(), weapon = GetWeaponClass(shooter, 3), ammo = pendingFire.ammo,
+              target = tostring(target), targetHealth = round(GetCurHealth(target))}
     return M.fire
+end
+
+-- A gunner tank on this peer, placed before the Splinter deploys, that fires
+-- its cannon at the first live deployed Splinter here until it is gone. Its
+-- shots are networked ordnance, so every peer simulates them, unlike Damage.
+function BugArmSplinterGunner(tx, tz, range)
+    local gunner = exu.BuildSyncObject("avtank", GetTeamNum(GetPlayerHandle()), SetVector(tx, 0, tz + (range or 40)))
+    assert(gunner, "splinter gunner failed to spawn")
+    SetIndependence(gunner, 0)
+    pendingShoot = {gunner = gunner, deadline = GetTime() + 60}
+    M.shoot = {armed = GetTime(), gunner = tostring(gunner)}
+    return M.shoot
+end
+
+function BugShootState() return {time = GetTime(), shoot = M.shoot} end
+
+-- Lethal damage to every live deployed Splinter on this peer (0 killed when
+-- none is deployed yet, so the scenario can poll it). Returns this peer's clock
+-- at the kill and each Splinter's health before.
+function BugKillSplinter()
+    local before = {}
+    for h in AllObjects() do
+        if explosiveKind(h) == "splinter" and IsAlive(h) then
+            before[#before + 1] = {id = tostring(h), health = round(GetCurHealth(h)), mine = IsLocal(h), remote = IsRemote(h)}
+            Damage(h, 100000)
+        end
+    end
+    return {time = GetTime(), killed = #before, health = before}
 end
 
 -- One site on this peer: terrain heights and normals on a grid, every witness
@@ -293,6 +352,10 @@ function BugSite(cx, cz, radius, half, step)
                     mine = IsLocal(h), remote = IsRemote(h)}
             end
         end
+    end
+    if splinterTarget then
+        local alive = IsAlive(splinterTarget)
+        s.target = {id = tostring(splinterTarget), alive = alive, health = alive and round(GetCurHealth(splinterTarget)) or 0}
     end
     for _, r in ipairs(lifetimes) do
         if math.sqrt((r.lastX - cx) ^ 2 + (r.lastZ - cz) ^ 2) <= radius then s.lifetimes[#s.lifetimes + 1] = r end

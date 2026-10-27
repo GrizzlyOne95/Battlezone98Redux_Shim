@@ -6,7 +6,11 @@
 #   HostLeave   the host closes the game mid-mission; what the guests keep.
 #   Weapons     one Daywrecker and one Splinter, from the host or a guest
 #               (-ScenarioArgs @{ Launcher = 'guest' }): explosive lifetimes,
-#               witness damage per owner and terrain per peer. Turns on the
+#               witness damage per owner and terrain per peer. Splinter extras
+#               (-ScenarioArgs @{ SplinterDistances = 12,25; KillSplinter =
+#               'launcher'|'receiver' }): lifetimes, close-ring witness loss
+#               per owner (receiver / launcher ratio), and whether destroying
+#               the deployed Splinter on one peer ends it on the others. Turns on the
 #               MPAUTH trace (Docs\MPAUTH_* investigations) unless -NoTrace.
 #
 # -Expect Stock passes when the stock defect reproduces; -Expect Fixed passes
@@ -35,6 +39,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Bug pack map staging failed.' }
 $scenarioName = @{ MissionEnd = 'mpbugs-mission-end.ps1'; HostLeave = 'mpbugs-host-leave.ps1'; Weapons = 'mpbugs-weapons.ps1' }[$Case]
 # The clients inherit this process's environment.
 if ($Case -eq 'Weapons' -and -not $NoTrace) { $env:OPENSHIM_TRACE_MPAUTH = '1' }
+# The Stock arm turns the case's OpenShim fix off in each instance's ini, so a
+# fixed build still shows the stock defect. Needs Prepare (no -SkipPrepare).
+$stockOff = @{ MissionEnd = 'Fixes.MissionEndSync=0'; Weapons = 'Fixes.DaywreckerArmoryCollision=0;Fixes.SplinterSync=0'; HostLeave = 'Fixes.HostLeave=0' }[$Case]
+if ($Expect -eq 'Stock' -and $stockOff) {
+    if ($SkipPrepare) { throw "-Expect Stock for $Case writes the instance ini; drop -SkipPrepare." }
+    $env:BZRCOOP_INI_SET = (@($env:BZRCOOP_INI_SET, $stockOff) | Where-Object { $_ }) -join ';'
+}
 $scenario = Join-Path $override $scenarioName
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('coopflow\scenarios\' + $scenarioName)) -Destination $scenario
 $ScenarioArgs = $ScenarioArgs.Clone()

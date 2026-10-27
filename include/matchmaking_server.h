@@ -1,16 +1,18 @@
 #pragma once
 
 // Matchmaking server selection: the pure parsing and validation behind the
-// pre-lobby's Rebellion / Custom choice. Header-only and free of Windows and
-// engine calls so the tests can include it.
+// pre-lobby's Rebellion / Custom / Local choice. Header-only and free of
+// Windows and engine calls so the tests can include it.
 //
-//   openshim.ini [Network] Server       = Rebellion | Custom   (absent: no override)
-//   openshim.ini [Network] CustomServer = <host or IP>[:1337]
+//   openshim.ini [Network] Server       = Rebellion | Custom | Local   (absent: no override)
+//   openshim.ini [Network] CustomServer = <host or IP>[:port]
 //
-// Only the host is switchable. The scheme (ws) and port (1337) are the same
-// for the official and custom servers, so a CustomServer value carries
-// neither; a trailing ":1337" is accepted and dropped, any other port is
-// refused.
+// The scheme is always ws. The port defaults to 1337, the official one; any
+// other port moves the websocket there, and the game then probes UDP on that
+// port + 1 (it derives the probe from the connected peer). A server value is
+// kept canonical, "host" or "host:port" with ":1337" dropped, so two spellings
+// of one server compare equal. Local is a dedicated server on this PC, at
+// 127.0.0.1:1337.
 
 #include <cstddef>
 #include <string>
@@ -21,7 +23,9 @@ namespace BZROpenShim
 namespace MatchmakingServer
 {
     inline constexpr const char kRebellionHost[] = "battlezone98mp.webdev.rebellion.co.uk";
+    inline constexpr const char kLocalHost[] = "127.0.0.1";
     inline constexpr unsigned kPort = 1337;
+    inline constexpr unsigned kMaxPort = 65534;  // the probe goes to port + 1
     inline constexpr size_t kMaxHostLength = 253;
 
     enum class Mode
@@ -29,6 +33,7 @@ namespace MatchmakingServer
         None,       // no saved choice: stock behaviour (/bzrserver or the official host)
         Rebellion,
         Custom,
+        Local,      // a dedicated server on this PC (kLocalHost)
     };
 
     enum class HostStatus
@@ -36,7 +41,7 @@ namespace MatchmakingServer
         Ok,
         Empty,
         Invalid,          // scheme, path, whitespace, bad characters
-        UnsupportedPort,  // a well-formed port other than 1337
+        UnsupportedPort,  // a well-formed port outside 1..kMaxPort
     };
 
     namespace Detail
@@ -80,7 +85,7 @@ namespace MatchmakingServer
     }
 
     // The [Network] Server value. Empty or absent is Mode::None and parses.
-    // False (mode None) for anything else that is not Rebellion or Custom.
+    // False (mode None) for anything that is not Rebellion, Custom or Local.
     inline bool ParseMode(std::string_view text, Mode& mode)
     {
         mode = Mode::None;
@@ -97,6 +102,11 @@ namespace MatchmakingServer
             mode = Mode::Custom;
             return true;
         }
+        if (EqualsNoCase(text, "Local"))
+        {
+            mode = Mode::Local;
+            return true;
+        }
         return false;
     }
 
@@ -106,12 +116,14 @@ namespace MatchmakingServer
         {
         case Mode::Rebellion: return "Rebellion";
         case Mode::Custom: return "Custom";
+        case Mode::Local: return "Local";
         default: return "";
         }
     }
 
-    // Validates a typed or saved CustomServer value and returns the bare host
-    // (":1337" stripped, case kept). `host` is cleared unless the result is Ok.
+    // Validates a typed or saved CustomServer value and returns it canonical:
+    // "host", or "host:port" for a port other than 1337 (case kept, leading
+    // zeros dropped). `host` is cleared unless the result is Ok.
     inline HostStatus ValidateCustomHost(std::string_view input, std::string& host)
     {
         host.clear();
@@ -126,6 +138,7 @@ namespace MatchmakingServer
         }
 
         std::string_view name = input;
+        unsigned portValue = kPort;
         const size_t colon = input.find(':');
         if (colon != std::string_view::npos)
         {
@@ -144,8 +157,9 @@ namespace MatchmakingServer
             name = input.substr(0, colon);
             if (name.empty())
                 return HostStatus::Invalid;
-            if (value != kPort)
+            if (value == 0 || value > kMaxPort)
                 return HostStatus::UnsupportedPort;
+            portValue = value;
         }
 
         if (name.size() > kMaxHostLength || name.front() == '.' || name.back() == '.' ||
@@ -160,16 +174,47 @@ namespace MatchmakingServer
         }
 
         host.assign(name.data(), name.size());
+        if (portValue != kPort)
+            host += ":" + std::to_string(portValue);
         return HostStatus::Ok;
     }
 
-    // The host the saved settings select: the official host for Rebellion, the
-    // validated CustomServer for Custom, empty for no override (None, or a
-    // Custom with an unusable address).
+    // Splits a canonical server value ("host" or "host:port") for the lookup.
+    // False when the port part is not a number in 1..kMaxPort.
+    inline bool SplitServer(std::string_view server, std::string& host, unsigned& port)
+    {
+        port = kPort;
+        const size_t colon = server.find(':');
+        if (colon != std::string_view::npos)
+        {
+            const std::string_view digits = server.substr(colon + 1);
+            if (digits.empty() || digits.size() > 5)
+                return false;
+            unsigned value = 0;
+            for (char c : digits)
+            {
+                if (c < '0' || c > '9')
+                    return false;
+                value = value * 10 + static_cast<unsigned>(c - '0');
+            }
+            if (value == 0 || value > kMaxPort)
+                return false;
+            port = value;
+            server = server.substr(0, colon);
+        }
+        host.assign(server.data(), server.size());
+        return !host.empty();
+    }
+
+    // The server the saved settings select: the official host for Rebellion,
+    // the canonical CustomServer for Custom, 127.0.0.1 for Local, empty for no
+    // override (None, or a Custom with an unusable address).
     inline std::string ResolveSavedHost(Mode mode, std::string_view customServer)
     {
         if (mode == Mode::Rebellion)
             return kRebellionHost;
+        if (mode == Mode::Local)
+            return kLocalHost;
         if (mode == Mode::Custom)
         {
             std::string host;
