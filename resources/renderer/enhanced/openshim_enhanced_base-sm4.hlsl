@@ -870,6 +870,10 @@ void ComputeSpotlightTerms(
 void base_vertex(
     uniform float4x4 wvpMat,
     uniform float4x4 worldViewMat,
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    uniform float4x4 worldMat,
+    uniform float4 surfaceSnow,
+#endif
 
 #if defined(SHADOWRECEIVER)
     uniform float4x4 texWorldViewProj1,
@@ -925,6 +929,17 @@ void base_vertex(
     out float4 oPosition : SV_POSITION
 )
 {
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+    // Snow thickness: faces the fragment stage covers are pushed out along
+    // their normal by the same cover term, so drifts stand off the hull.
+    if (surfaceSnow.x > 0.002 && dot(iNormal, iNormal) > 1e-8)
+    {
+        float3 snowNormal = normalize(iNormal);
+        float snowUp = normalize(mul(worldMat, float4(snowNormal, 0.0)).xyz).y;
+        float cover = ose_snow_cover(snowUp, ose_snow_noise(iPosition.xz * 0.7 + iPosition.y * 0.5), surfaceSnow.x);
+        iPosition.xyz += snowNormal * (OSE_SNOW_THICKNESS * cover);
+    }
+#endif
     oPosition = mul(wvpMat, iPosition);
     vTexCoord = iTexCoord;
 
@@ -1177,6 +1192,10 @@ void base_fragment(
 #endif
 #endif
 
+#if defined(ENHANCED_MODE)
+    float snowCover = 0.0;
+#endif
+
 #if defined(VERTEX_LIGHTING)
 
 #if defined(OG_RETRO_MODE)
@@ -1233,6 +1252,19 @@ void base_fragment(
                                  surfaceViewToLocal, surfaceRainTime, reactiveWater);
 #endif
 
+#if defined(ENHANCED_MODE)
+    // Uniform-only branch: zero snow costs nothing and keeps the source.
+    if (surfaceSnow.x > 0.002)
+    {
+        float3 snowGeometric = safe_normalize(vViewNormal);
+        float snowUp = mul(inverseViewMatrix, float4(lerp(snowGeometric, viewNormal, 0.35), 0.0)).y;
+        float3 snowLocal = mul(surfaceViewToLocal, float4(viewPos, 1.0)).xyz;
+        snowCover = ose_snow_cover(snowUp, ose_snow_noise(snowLocal.xz * 0.7 + snowLocal.y * 0.5), surfaceSnow.x);
+        // Snow fills panel lines: flatten the mapped normal under it.
+        viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.3));
+    }
+#endif
+
 #if defined(SPECULARMAP_ENABLED)
     float3 specularTex = specularMap.Sample(specularSam, vTexCoord).xyz;
     float specularMask = saturate(luminance_legacy(specularTex));
@@ -1247,9 +1279,11 @@ void base_fragment(
 #endif
 
 #if defined(ENHANCED_MODE)
+    surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), snowCover);
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = derive_legacy_roughness(materialShininess, specularMask);
     surfaceRoughness = lerp(surfaceRoughness, max(0.13, surfaceRoughness * 0.48), saturate(surfaceState.x));
+    surfaceRoughness = lerp(surfaceRoughness, 0.75, snowCover);
 #if defined(NORMALMAP_ENABLED)
     surfaceRoughness = filter_roughness_from_normal_variance(viewNormal, surfaceRoughness);
 #endif
@@ -1488,7 +1522,15 @@ void base_fragment(
     // diffuseTex.a is coverage and stays in its numerical space.
     diffuseTex.rgb = srgb_to_linear(diffuseTex.rgb);
 #endif
+#if defined(ENHANCED_MODE)
+    float3 snowAlbedo = ose_snow_albedo(surfaceSnow);
+#if !OSE_LINEAR_LIGHT_ACTIVE
+    snowAlbedo = sqrt(snowAlbedo);
+#endif
+    oColor.xyz = lightResult.xyz * ose_snow_blend(diffuseTex.xyz * diffuseColor.xyz, snowAlbedo, snowCover);
+#else
     oColor.xyz = lightResult.xyz * diffuseTex.xyz * diffuseColor.xyz;
+#endif
 
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     oColor.xyz += specularResult.xyz;

@@ -127,6 +127,13 @@ foreach ($src in $sources) {
     $blob = & git -C $repoRoot show "${Baseline}:resources/renderer/enhanced/$src" 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $blob) { $haveBaseline = $false; break }
     [IO.File]::WriteAllText((Join-Path $baseDir $src), ($blob -join "`r`n"))
+    # The baseline shader's own includes, from the same revision.
+    foreach ($include in @($blob | Select-String '^\s*#include\s+"([^"]+)"' | ForEach-Object { $_.Matches[0].Groups[1].Value })) {
+        $included = & git -C $repoRoot show "${Baseline}:resources/renderer/enhanced/$include" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $included) {
+            [IO.File]::WriteAllText((Join-Path $baseDir $include), ($included -join "`r`n"))
+        }
+    }
 }
 
 if (-not $haveBaseline) {
