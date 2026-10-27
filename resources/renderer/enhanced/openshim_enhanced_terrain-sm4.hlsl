@@ -1411,6 +1411,7 @@ void terrain_fragment(
     float terrainHollow = 0.0;
     float terrainRidge = 0.0;
     float2 iceOffset = float2(0.0, 0.0);
+    float4 iceLayers = float4(1.0, 1.0, 1.0, 0.0);
 #endif
 
 #if defined(NORMALMAP_ENABLED)
@@ -1527,6 +1528,14 @@ void terrain_fragment(
         iceOffset = ose_ice_parallax_uv(iceGeometric, viewPos, vTexCoord, surfaceSnow.w);
         float3 iceProbe = diffuseMap.SampleGrad(diffuseSam, vTexCoord, ddx(vTexCoord), ddy(vTexCoord)).xyz;
         iceMask = ose_ice_mask(iceProbe) * (1.0 - snowCover);
+        if (iceMask > 0.0)
+        {
+            float3 iceWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz + worldOrigin;
+            float3 iceV = mul(inverseViewMatrix, float4(normalize(-viewPos), 0.0)).xyz;
+            float3 iceN = safe_normalize(mul(inverseViewMatrix, float4(iceGeometric, 0.0)).xyz);
+            float footprint = length(fwidth(iceWorld.xz));
+            iceLayers = ose_ice_depth_layers(iceWorld, iceV, iceN, surfaceSnow.w, footprint);
+        }
     }
 #endif
 #endif
@@ -1830,23 +1839,23 @@ void terrain_fragment(
     float3 surfaceAlbedo = vertexTint * diffuseTex.xyz;
     if (surfaceSnow.w > 0.002)
     {
-        // Two layers at 1x and 2.2x depth, darker and bluer with depth, seen
-        // through the surface; the detail multiply below scratches over them.
+        // The ground seen one depth down, absorbed bluer along the refracted
+        // path, with the world-space fracture sheets and bubbles lit inside;
+        // the detail multiply below scratches over them.
         float2 iceDx = ddx(vTexCoord);
         float2 iceDy = ddy(vTexCoord);
         float3 iceNear = diffuseMap.SampleGrad(diffuseSam, vTexCoord + iceOffset, iceDx, iceDy).xyz;
-        float3 iceFar = diffuseMap.SampleGrad(diffuseSam, vTexCoord + iceOffset * 2.2, iceDx, iceDy).xyz;
 #if OSE_LINEAR_LIGHT_ACTIVE
         iceNear = srgb_to_linear(iceNear);
-        iceFar = srgb_to_linear(iceFar);
 #endif
-        float3 iceDeep = (iceNear * 0.6 + iceFar * 0.4) * OSE_ICE_DEEP_TINT;
+        float3 iceDeep = iceNear * OSE_ICE_DEEP_TINT * iceLayers.rgb
+            + iceLayers.a * float3(0.75, 0.86, 0.95) * (0.6 + 0.4 * iceLayers.rgb);
 #if defined(DETAILMAP_ENABLED)
         iceDeep *= lerp(float3(1.0, 1.0, 1.0),
             detail_modulation(detailMap.SampleGrad(detailSam, (vTexCoord + iceOffset * 1.6) * 32.0,
                 iceDx * 32.0, iceDy * 32.0).xyz), 0.8);
 #endif
-        surfaceAlbedo = lerp(surfaceAlbedo, vertexTint * iceDeep, iceMask * 0.45);
+        surfaceAlbedo = lerp(surfaceAlbedo, vertexTint * iceDeep, iceMask * 0.55);
     }
     if (dustCover > 0.0)
     {
