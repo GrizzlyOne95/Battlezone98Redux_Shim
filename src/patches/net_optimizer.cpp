@@ -7,6 +7,7 @@
 #include "engine_globals.h"
 #include "bzr_options_ui.h"
 #include "matchmaking_server.h"
+#include "hook_engine.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -393,6 +394,14 @@ namespace
     // of the launch-server host only, and never while a test redirect is set.
     SRWLOCK g_ServerOverrideLock = SRWLOCK_INIT;
     std::string g_ServerOverrideHost;
+    // A custom host that never answers strands multiplayer: the engine retries
+    // the same lookup every 30 s with no limit (FUN_006bef70 re-arms the timer
+    // from DAT_0260b0a0 = 30 s). Each redirected lookup arms an attempt; a
+    // connection that reaches the custom host marks it reached
+    // (NoteWithholdArmed). A redirected lookup that finds the previous attempt
+    // unreached drops the override for the session; the saved choice stays.
+    std::atomic<bool> g_OverrideAttemptPending{ false };
+    std::atomic<bool> g_OverrideReached{ false };
     GetQueuedCompletionStatusFn g_RealGetQueuedCompletionStatus = nullptr;
 
     enum class PendingIoKind : uint8_t
@@ -3878,6 +3887,7 @@ namespace
     // Log-once bookkeeping per socket handle (re-armed if the peer changes).
     void NoteWithholdArmed(SOCKET s, const std::string& key, const char* how, const sockaddr* peer, int peerLen)
     {
+        g_OverrideReached.store(true);
         bool log = false;
         AcquireSRWLockExclusive(&g_WithholdLock);
         WithholdSocket& entry = g_WithholdSockets[s];
@@ -3968,6 +3978,77 @@ namespace
         return status;
     }
 
+    // 1 = written, 0 = stored value is not the stock 30 s, -1 = fault. Kept
+    // free of C++ objects for __try.
+    int WriteReconnectDelay(uint32_t init, int seconds, LONGLONG& stock)
+    {
+        __try
+        {
+            auto* const duration = *reinterpret_cast<volatile LONGLONG**>(init + 6);
+            stock = *duration;
+            LONGLONG unitsPerSecond = 0;
+            if (stock == 30LL * 1000000LL)
+                unitsPerSecond = 1000000LL;          // microsecond ticks (boost default)
+            else if (stock == 30LL * 1000000000LL)
+                unitsPerSecond = 1000000000LL;       // nanosecond ticks
+            if (unitsPerSecond == 0)
+                return 0;
+            InterlockedExchange64(duration, seconds * unitsPerSecond);
+            return 1;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER)
+        {
+            return -1;
+        }
+    }
+
+    // The engine waits DAT_0260b0a0 between BZRNet connect retries: a boost
+    // time_duration static-initialised to 30 s by FUN_0040f310 (push 0x1E;
+    // mov ecx,0x0260B0A0; call). After a failed connect, a server switch or a
+    // retry on the multiplayer setup screen waits that long, so
+    // [Network] ReconnectDelaySeconds (default 5, 0 = stock) shortens it. Runs
+    // at the first BZRNet lookup, after static init and before any retry is
+    // armed. Fails closed unless the initialiser bytes and the stored 30 s match.
+    void ApplyReconnectDelayOnce()
+    {
+        static std::atomic<bool> s_done{ false };
+        if (s_done.exchange(true))
+            return;
+
+        int seconds = 5;
+        std::string text;
+        if (TryGetUserConfigString("Network", "ReconnectDelaySeconds", text) && !text.empty())
+            seconds = std::atoi(text.c_str());
+        if (seconds <= 0 || seconds >= 30)
+        {
+            Logf("[OpenShimNet] BZRNet reconnect delay left at stock 30 s");
+            return;
+        }
+
+        uint32_t init = 0;
+        if (HookEngine::ResolveEngineAddress("BzrNetRetryDelayInit", init) !=
+            HookEngine::EngineAddressStatus::Bound)
+        {
+            Logf("[OpenShimNet] BZRNet reconnect delay: initialiser not bound; left at stock");
+            return;
+        }
+
+        LONGLONG stock = 0;
+        switch (WriteReconnectDelay(init, seconds, stock))
+        {
+        case 1:
+            Logf("[OpenShimNet] BZRNet reconnect delay 30 s -> %d s", seconds);
+            break;
+        case 0:
+            Logf("[OpenShimNet] BZRNet reconnect delay: unexpected stored value %lld; left at stock",
+                static_cast<long long>(stock));
+            break;
+        default:
+            Logf("[OpenShimNet] BZRNet reconnect delay: read faulted; left at stock");
+            break;
+        }
+    }
+
     INT WSAAPI Hook_getaddrinfo(
         PCSTR nodeName,
         PCSTR serviceName,
@@ -3976,6 +4057,8 @@ namespace
     {
         PCSTR resolvedNode = nodeName;
         std::string overrideHost;
+        if (nodeName && MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+            ApplyReconnectDelayOnce();
         if (nodeName &&
             !g_Config.matchmakingRedirectAddress.empty() &&
             _stricmp(nodeName, kBzrNetMatchmakingHost) == 0)
@@ -3991,10 +4074,29 @@ namespace
                  CopyServerOverrideHost(overrideHost) &&
                  MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
         {
-            resolvedNode = overrideHost.c_str();
-            Logf("[OpenShimNet] Redirecting BZRNet lookup %s -> %s (server selection)",
-                nodeName,
-                resolvedNode);
+            const bool custom =
+                !MatchmakingServer::EqualsNoCase(overrideHost, kBzrNetMatchmakingHost) &&
+                !MatchmakingServer::EqualsNoCase(overrideHost, GetLaunchServerHostCached());
+            if (custom && g_OverrideAttemptPending.load() && !g_OverrideReached.load())
+            {
+                SetMatchmakingServerOverride(nullptr);
+                Logf("[OpenShimNet] Custom server %s did not answer; using %s for this session "
+                     "(saved choice kept; pick it again on the multiplayer screen to retry)",
+                    overrideHost.c_str(),
+                    nodeName);
+            }
+            else
+            {
+                if (custom)
+                {
+                    g_OverrideReached.store(false);
+                    g_OverrideAttemptPending.store(true);
+                }
+                resolvedNode = overrideHost.c_str();
+                Logf("[OpenShimNet] Redirecting BZRNet lookup %s -> %s (server selection)",
+                    nodeName,
+                    resolvedNode);
+            }
         }
 
         const INT rc = g_RealGetAddrInfoA(resolvedNode, serviceName, hints, result);
@@ -5330,6 +5432,8 @@ namespace
         AcquireSRWLockExclusive(&g_ServerOverrideLock);
         g_ServerOverrideHost = host ? host : "";
         ReleaseSRWLockExclusive(&g_ServerOverrideLock);
+        g_OverrideAttemptPending.store(false);
+        g_OverrideReached.store(false);
         Logf("[OpenShimNet] Matchmaking server override %s%s",
             host && *host ? "set to " : "cleared",
             host && *host ? host : "");
