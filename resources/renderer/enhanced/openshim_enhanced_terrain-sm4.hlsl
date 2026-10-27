@@ -1407,6 +1407,7 @@ void terrain_fragment(
 #if defined(ENHANCED_MODE)
     float snowCover = 0.0;
     float iceMask = 0.0;
+    float iceGloss = 0.0;
     float dustCover = 0.0;
     float terrainHollow = 0.0;
     float terrainRidge = 0.0;
@@ -1525,9 +1526,18 @@ void terrain_fragment(
     if (surfaceSnow.w > 0.002)
     {
         float3 iceGeometric = safe_normalize(vViewNormal);
+#if defined(OPENSHIM_TERRAIN_HD)
+        // HD terrain retypes diffuseMap to the paint/tile array, sampled by
+        // world XZ, so the stock-UV probe and resample do not exist there:
+        // the albedo stage takes the mask from the final HD colour, and the
+        // gloss lift (needed before lighting) is skipped.
+        iceMask = 1.0 - snowCover;
+#else
         iceOffset = ose_ice_parallax_uv(iceGeometric, viewPos, vTexCoord, surfaceSnow.w);
         float3 iceProbe = diffuseMap.SampleGrad(diffuseSam, vTexCoord, ddx(vTexCoord), ddy(vTexCoord)).xyz;
         iceMask = ose_ice_mask(iceProbe) * (1.0 - snowCover);
+        iceGloss = iceMask;
+#endif
         if (iceMask > 0.0)
         {
             float3 iceWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz + worldOrigin;
@@ -1610,7 +1620,7 @@ void terrain_fragment(
     surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), max(snowCover, dustCover));
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = max(
-        lerp(lerp(lerp(derive_legacy_roughness(materialShininess, specularMask), 0.28, iceMask * 0.8),
+        lerp(lerp(lerp(derive_legacy_roughness(materialShininess, specularMask), 0.28, iceGloss * 0.8),
              0.9, dustCover), 0.75, snowCover),
         OSE_TERRAIN_PBR_MIN_ROUGHNESS);
 #if defined(NORMALMAP_ENABLED)
@@ -1844,9 +1854,18 @@ void terrain_fragment(
         // the detail multiply below scratches over them.
         float2 iceDx = ddx(vTexCoord);
         float2 iceDy = ddy(vTexCoord);
+#if defined(OPENSHIM_TERRAIN_HD)
+        float3 iceNear = diffuseTex.xyz;
+#if OSE_LINEAR_LIGHT_ACTIVE
+        iceMask *= ose_ice_mask(sqrt(iceNear));
+#else
+        iceMask *= ose_ice_mask(iceNear);
+#endif
+#else
         float3 iceNear = diffuseMap.SampleGrad(diffuseSam, vTexCoord + iceOffset, iceDx, iceDy).xyz;
 #if OSE_LINEAR_LIGHT_ACTIVE
         iceNear = srgb_to_linear(iceNear);
+#endif
 #endif
         float3 iceDeep = iceNear * OSE_ICE_DEEP_TINT * iceLayers.rgb
             + iceLayers.a * float3(0.75, 0.86, 0.95) * (0.6 + 0.4 * iceLayers.rgb);
