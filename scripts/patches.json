@@ -3234,6 +3234,60 @@
       "identity": "GameObject::UpdatePosition on exact GOG Redux 2.2.301, __thiscall(complete GameObject* this) with no stack arguments (plain `ret`): reads this+0xF0 (ent) and this+0xF4 (OBJ76), recomputes the cached position from the OBJ76 matrix posit and updates the ent bounding box from the bounding sphere. Stock SprayBuilding::Simulate calls it each frame (0x005DA862); mp_splinter_sync.cpp calls it after writing a launcher's deploy position. Bytes read from the shipped image 2026-10-27."
     },
     {
+      "name": "NetPlayerDtor",
+      "address": "0x00575BF0",
+      "expected": "55 8B EC 6A FF 68 26 B9 84 00",
+      "identity": "NetPlayer destructor on exact GOG Redux 2.2.301, __thiscall(NetPlayer* this) with no stack arguments (plain `ret`): this+0x28 is the u16 player id, this+0x68 the team byte. It first zeroes the session host id (*(u16*)(*0x00917F48 + 4)) when it equals the leaver, then loops every game object and destroys or localizes those the leaver owned. mp_host_leave.cpp detours the first 10 bytes (push ebp / mov ebp,esp / push -1 / push imm32 SEH handler, absolute operand only). Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetPlayerDtorOwnerCall",
+      "address": "0x00575CDC",
+      "expected": "E8 1F 3B F4 FF 0F B7 C8",
+      "identity": "The `call 0x004B9800` (Distributed owner accessor) in the NetPlayer destructor's per-object loop, after `mov ecx,[ebp-0x14] / add ecx,0x18` (GameObject -> Distributed). The u16 result is compared with the leaver id. mp_host_leave.cpp redirects it through a wrapper that returns 0 for the leaving host's objects. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetDistributedOwner",
+      "address": "0x004B9800",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 66 8B 40 62",
+      "identity": "Distributed owner accessor on exact GOG Redux 2.2.301, __thiscall(Distributed* this) returning the u16 owner player id from this+0x62 in AX. Original target of the call at NetPlayerDtorOwnerCall. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetNotifyNowHost",
+      "address": "0x00578760",
+      "expected": "55 8B EC 56 83 3D 48 7F 91 00 00",
+      "identity": "NotifyNowHost on exact GOG Redux 2.2.301, __cdecl(void), runs on the newly elected host. Its takeover `if (host id != 0) { TakeOwnership(0); TakeOwnership(hostId); }` never fires after a host leave because the NetPlayer destructor already zeroed the host id. mp_host_leave.cpp detours the first 11 bytes (push ebp / mov ebp,esp / push esi / cmp dword [0x00917F48],0; absolute operand only). Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetTakeOwnership",
+      "address": "0x004BAAD0",
+      "expected": "55 8B EC 6A FF 68 88 9A 84 00",
+      "identity": "TakeOwnership on exact GOG Redux 2.2.301, __cdecl(short id), caller pops: looks up the NetPlayer for id (0x005771B0), then for every object whose id is in [id<<16, id<<16|0xFFFF] destroys dynamic ones on the player's team and localizes the rest. mp_host_leave.cpp calls it for the departed host from the NotifyNowHost hook. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetTakeOwnershipLookupCall",
+      "address": "0x004BAB2A",
+      "expected": "E8 81 C6 0B 00 83 C4 04",
+      "identity": "The `call 0x005771B0` (NetPlayer lookup by id, one cdecl int argument) inside TakeOwnership. mp_host_leave.cpp redirects it through a wrapper that answers the departed host's id with a stand-in NetPlayer (id and team), because the real one is already destroyed. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetFindPlayer",
+      "address": "0x005771B0",
+      "expected": "55 8B EC 83 EC 08 8D 45 08 50 8D 4D FC 51 B9 B8",
+      "identity": "NetPlayer lookup on exact GOG Redux 2.2.301, __cdecl(int id) returning NetPlayer* or 0 (same address as the BanLookup row). Original target of the call at NetTakeOwnershipLookupCall. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetOnePlayerLeftCheck",
+      "address": "0x00577D50",
+      "expected": "55 8B EC 83 EC 1C C7 45 F8 00 00 00 00 0F B6 05",
+      "identity": "Last-player-standing test on exact GOG Redux 2.2.301, __cdecl(void) returning bool in AL: exactly one player with lives left. True leads to dialog 11 (Game Over) half a second later. Original target of the call at NetExecuteOnePlayerCall. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "NetExecuteOnePlayerCall",
+      "address": "0x0057191A",
+      "expected": "E8 31 64 00 00 0F B6 C0",
+      "identity": "The `call 0x00577D50` in Net::Execute (0x005715D0) whose AL result starts the Game Over timer. mp_host_leave.cpp redirects it through a wrapper that suppresses a lone-player state caused by a host leave. Bytes read from the shipped image 2026-10-27."
+    },
+    {
       "name": "BuildingSimulate",
       "address": "0x0047FCB0",
       "expected": "55 8B EC 83 EC 68 A1 00 70 8E 00",

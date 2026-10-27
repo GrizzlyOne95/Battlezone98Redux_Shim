@@ -315,6 +315,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "MissionEndSync", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_HOST_LEAVE") ||
+            Equals(name, "BZR_DISABLE_MP_HOST_LEAVE"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "HostLeave", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_MP_SPLINTER_SYNC") ||
             Equals(name, "BZR_DISABLE_MP_SPLINTER_SYNC"))
         {

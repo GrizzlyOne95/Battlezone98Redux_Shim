@@ -571,6 +571,20 @@ LuaSendLengthUnsigned = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_MISSION_END_SYNC
 MissionEndSync = 1
 
+; Multiplayer only: survive the host leaving. Stock deletes every object the
+; leaving host owned on every peer (all the AI in co-op), skips the ownership
+; takeover NotifyNowHost is meant to run (the NetPlayer destructor zeroes the
+; host id first), and with two players ends the match as Game Over for the
+; survivor. With this on the host's objects stay as remote copies, the newly
+; elected host takes them over (the leaver's own-team units are still removed,
+; AI teams are kept), and a lone-player state caused by a leave no longer
+; triggers Game Over; a real last-man-standing on lives still does.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match. No effect in single player.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_HOST_LEAVE
+HostLeave = 1
+
 ; Stop a Daywrecker exploding on its own Armory on remote peers. A remote
 ; copy is created with no flags and can run a frame before its first network
 ; state marks it in flight; that frame detonated it where it spawned, inside

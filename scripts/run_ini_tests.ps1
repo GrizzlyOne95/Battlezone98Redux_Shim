@@ -228,6 +228,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # that stock peers ignore. SplinterUndead also runs in a network game
     # while this is on.
     "Fixes/SplinterSync",
+    # Multiplayer host leave: keeps the departed host's objects and suppresses
+    # the lone-player Game Over it causes. Network sessions only.
+    "Fixes/HostLeave",
     # Host-side lobby default only: each new lobby starts with Sync Join on.
     "Fixes/SyncJoinDefaultOn",
     # Client-side cursor handling only; no simulation or wire effect.
@@ -456,6 +459,7 @@ $shippingPolicyChecks = @{
     "Fixes/MissionEndSync" = "1"
     "Fixes/DaywreckerArmoryCollision" = "1"
     "Fixes/SplinterSync" = "1"
+    "Fixes/HostLeave" = "1"
     "Fixes/SyncJoinDefaultOn" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
     "Fixes/RestoreCraftBounds" = "1"

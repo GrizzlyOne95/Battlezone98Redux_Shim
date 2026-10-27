@@ -59,6 +59,7 @@
 #include "lua_send_length_install.h"
 #include "mp_mission_end_sync_install.h"
 #include "mp_splinter_sync_install.h"
+#include "mp_host_leave_install.h"
 #include "mp_daywrecker_armory_collision_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
@@ -188,6 +189,13 @@ static unsigned __stdcall PatchThreadProc(void*)
     // dispatcher. Byte-guarded and fail-closed; [Fixes] SplinterSync = 0
     // leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::SplinterSync::InstallSplinterSyncIfPossible());
+
+    // When the host leaves, stock deletes every object it owned (all the AI in
+    // co-op) and, with two players, puts the survivor on Game Over. Keeps the
+    // objects, runs the skipped ownership takeover on the new host and hides a
+    // lone-player Game Over caused by the leave. Byte-guarded and all-or-
+    // nothing; [Fixes] HostLeave = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::HostLeave::InstallHostLeaveIfPossible());
 
     // A remote Daywrecker copy has no launcher recorded, so one spawned inside
     // the Armory detonates on it. Exempts an Armory collision for an ownerless
