@@ -3827,7 +3827,7 @@
     {
       "name": "DayWreckerRegCollision",
       "address": "0x004B0610",
-      "expected": "55 8B EC 83 EC 2C",
+      "expected": "55 8B EC 83 EC 2C A1 00 70 8E 00 33 C5 89 45 FC",
       "identity": "DayWrecker::RegCollision, __thiscall(this, _OBJ76* other, CLSN_INFO*, CLSN_INFO*), ret 0xC, bool in AL; mp_daywrecker_armory_collision.cpp detours it"
     },
     {
