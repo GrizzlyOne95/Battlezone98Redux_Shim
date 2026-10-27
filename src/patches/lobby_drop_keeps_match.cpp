@@ -40,23 +40,32 @@ namespace BZROpenShim
         // for that member <- site "Remote" at 0x0073F13F, and drop a player
         // whose P2P is still live.
         //
-        // Local: while a match is running and some remote peer was heard over
-        // P2P within kFreshMs, skip the leave-lobby cleanup so the P2P session
-        // and the Net state survive; the websocket reconnect proceeds as stock.
+        // P2P liveness comes from the game's own ping check 0x00576B70: every
+        // NetManager+0x430 ms (ramping by 10 ms per ping up to 3000) it pings
+        // each player over P2P (0x00576480), shifting Player+0x1B0 left; the
+        // reply handler sets bit 0 (0x00572368). Bit 0 or 1 set = one of the
+        // last two pings was answered, i.e. within about 6 s. (Player+0x40 is
+        // not a last-heard time: it is stamped once, on first contact, at
+        // 0x00576931.)
+        //
+        // Local: while a match is running and some remote peer answered a
+        // recent ping, skip the leave-lobby cleanup so the P2P session and the
+        // Net state survive; the websocket reconnect proceeds as stock.
         // Remote: while a match is running, skip the lobby-driven drop of a
-        // remote player heard over P2P within kFreshMs. Kicks and bans still
+        // remote player that answered a recent ping. Kicks and bans still
         // drop. A peer whose P2P really died is still flagged lagging and then
-        // auto-kicked by the host's ping check (0x00576B70: 10 s + 10 s), and
-        // a client whose P2P is silent too quits exactly as stock.
+        // auto-kicked by the host's ping check (10 s + 10 s), and a client
+        // whose P2P is silent too quits exactly as stock.
 
         namespace
         {
-            constexpr uint32_t kFreshMs = 5000;   // stock flags "lagging" at 10000
+            constexpr uint32_t kRecentPings = 0x3;   // replies to the last two pings
+            constexpr uint32_t kPingIntervalOffset = 0x430;
             constexpr uint32_t kNetStateOffset = 0x08;
             constexpr uint32_t kNetStateInSession = 4;
             constexpr uint32_t kGameStatePlaying = 5;
             constexpr uint32_t kPlayerShortIdOffset = 0x28;
-            constexpr uint32_t kPlayerLastHeardOffset = 0x40;
+            constexpr uint32_t kPlayerPingRepliesOffset = 0x1B0;
             constexpr uint32_t kPlayerIsLocalOffset = 0x8E;
 
             using LeaveLobbyFn = void(__thiscall*)(void* lobby);
@@ -71,7 +80,6 @@ namespace BZROpenShim
             PlayerLeftFn g_PlayerLeft = nullptr;
             FindPlayerFn g_FindPlayer = nullptr;
             NextPlayerFn g_NextPlayer = nullptr;
-            GetU32Fn g_Clock = nullptr;
             GetU32Fn g_GameState = nullptr;
             GetBoolFn g_GameEnded = nullptr;
             uintptr_t g_NetManagerSlot = 0;
@@ -109,12 +117,17 @@ namespace BZROpenShim
                 return netState == kNetStateInSession && gameState == kGameStatePlaying && !(g_GameEnded() & 0xFF);
             }
 
-            // Milliseconds since the player was last heard over P2P, or ~0u.
-            uint32_t SinceHeard(uintptr_t player, uint32_t now)
+            // Player+0x1B0 ping reply history (bit 0 = latest ping), or 0.
+            uint32_t PingReplies(uintptr_t player)
             {
-                uint32_t heard = 0;
-                if (!ReadU32(player + kPlayerLastHeardOffset, heard) || !heard) return ~0u;
-                return now - heard;
+                uint32_t replies = 0;
+                return ReadU32(player + kPlayerPingRepliesOffset, replies) ? replies : 0;
+            }
+
+            uint32_t PingIntervalMs()
+            {
+                uint32_t net = 0, interval = 0;
+                return ReadU32(g_NetManagerSlot, net) && net && ReadU32(net + kPingIntervalOffset, interval) ? interval : 0;
             }
 
             void __fastcall LocalLeaveLobbyHook(void* lobby)
@@ -122,26 +135,26 @@ namespace BZROpenShim
                 uint32_t netState = 0, gameState = 0;
                 if (g_Enabled && MatchRunning(netState, gameState))
                 {
-                    const uint32_t now = g_Clock();
-                    uint32_t freshest = ~0u;
-                    uint16_t freshestId = 0;
-                    int peers = 0;
+                    uint16_t liveId = 0;
+                    uint32_t liveReplies = 0;
+                    int peers = 0, remotes = 0;
                     for (uintptr_t p = g_NextPlayer(0); p && peers < 64; p = g_NextPlayer(p), ++peers)
                     {
                         uint8_t local = 1;
                         if (!ReadU8(p + kPlayerIsLocalOffset, local) || local) continue;
-                        const uint32_t since = SinceHeard(p, now);
-                        if (since < freshest) { freshest = since; ReadU16(p + kPlayerShortIdOffset, freshestId); }
+                        ++remotes;
+                        const uint32_t replies = PingReplies(p);
+                        if (replies & kRecentPings) { liveReplies = replies; ReadU16(p + kPlayerShortIdOffset, liveId); break; }
                     }
-                    if (freshest <= kFreshMs)
+                    if (liveReplies)
                     {
                         const LONG n = InterlockedIncrement(&g_LocalKept);
-                        Log(L"[LOBBYDROP] websocket closed mid-match; P2P peer %u heard %u ms ago, keeping the match (lobby leave skipped, #%ld)\n",
-                            static_cast<unsigned>(freshestId), freshest, n);
+                        Log(L"[LOBBYDROP] websocket closed mid-match; P2P peer %u answers pings (replies=0x%03X, interval %u ms), keeping the match (lobby leave skipped, #%ld)\n",
+                            static_cast<unsigned>(liveId), liveReplies & 0x3FF, PingIntervalMs(), n);
                         return;
                     }
-                    Log(L"[LOBBYDROP] websocket closed mid-match with no P2P peer heard within %u ms (freshest %u ms); stock leave\n",
-                        kFreshMs, freshest);
+                    Log(L"[LOBBYDROP] websocket closed mid-match; none of %d remote players answered the last two pings (interval %u ms); stock leave\n",
+                        remotes, PingIntervalMs());
                 }
                 g_LeaveLobby(lobby);
             }
@@ -155,18 +168,18 @@ namespace BZROpenShim
                     uint8_t local = 1;
                     if (player && ReadU8(player + kPlayerIsLocalOffset, local) && !local)
                     {
-                        const uint32_t since = SinceHeard(player, g_Clock());
+                        const uint32_t replies = PingReplies(player);
                         uint16_t shortId = 0;
                         ReadU16(player + kPlayerShortIdOffset, shortId);
-                        if (since <= kFreshMs)
+                        if (replies & kRecentPings)
                         {
                             const LONG n = InterlockedIncrement(&g_RemoteKept);
-                            Log(L"[LOBBYDROP] player %u left the lobby mid-match but was heard over P2P %u ms ago; kept in the match (#%ld)\n",
-                                static_cast<unsigned>(shortId), since, n);
+                            Log(L"[LOBBYDROP] player %u left the lobby mid-match but answers P2P pings (replies=0x%03X); kept in the match (#%ld)\n",
+                                static_cast<unsigned>(shortId), replies & 0x3FF, n);
                             return;
                         }
-                        Log(L"[LOBBYDROP] player %u left the lobby mid-match, P2P silent for %u ms; stock drop\n",
-                            static_cast<unsigned>(shortId), since);
+                        Log(L"[LOBBYDROP] player %u left the lobby mid-match and missed the last two P2P pings (replies=0x%03X); stock drop\n",
+                            static_cast<unsigned>(shortId), replies & 0x3FF);
                     }
                 }
                 g_PlayerLeft(id, kicked);
@@ -174,25 +187,23 @@ namespace BZROpenShim
 
             bool ResolveHelpers()
             {
-                if (g_Clock) return true;
+                if (g_NextPlayer) return true;
                 const uint32_t slot = HookEngine::ResolveNamedAddress("Net::ManagerSlot");
                 const uint32_t find = HookEngine::ResolveNamedAddress("Net::FindPlayer");
                 const uint32_t next = HookEngine::ResolveNamedAddress("Net::NextPlayer");
-                const uint32_t clock = HookEngine::ResolveNamedAddress("Net::Clock");
                 const uint32_t state = HookEngine::ResolveNamedAddress("GameState::Get");
                 const uint32_t ended = HookEngine::ResolveNamedAddress("Net::GameEnded");
-                if (!slot || !find || !next || !clock || !state || !ended)
+                if (!slot || !find || !next || !state || !ended)
                 {
-                    Log(L"[LOBBYDROP] helper unresolved (slot=0x%08X find=0x%08X next=0x%08X clock=0x%08X state=0x%08X ended=0x%08X); stock kept\n",
-                        slot, find, next, clock, state, ended);
+                    Log(L"[LOBBYDROP] helper unresolved (slot=0x%08X find=0x%08X next=0x%08X state=0x%08X ended=0x%08X); stock kept\n",
+                        slot, find, next, state, ended);
                     return false;
                 }
                 g_NetManagerSlot = slot;
                 g_FindPlayer = reinterpret_cast<FindPlayerFn>(static_cast<uintptr_t>(find));
-                g_NextPlayer = reinterpret_cast<NextPlayerFn>(static_cast<uintptr_t>(next));
                 g_GameState = reinterpret_cast<GetU32Fn>(static_cast<uintptr_t>(state));
                 g_GameEnded = reinterpret_cast<GetBoolFn>(static_cast<uintptr_t>(ended));
-                g_Clock = reinterpret_cast<GetU32Fn>(static_cast<uintptr_t>(clock));
+                g_NextPlayer = reinterpret_cast<NextPlayerFn>(static_cast<uintptr_t>(next));
                 return true;
             }
         }
@@ -222,7 +233,7 @@ namespace BZROpenShim
                 return 0;
             }
             g_Enabled = true;
-            Log(L"[LOBBYDROP] %hs redirected site=0x%08X original=%p fresh=%u ms\n", name, site, original, kFreshMs);
+            Log(L"[LOBBYDROP] %hs redirected site=0x%08X original=%p\n", name, site, original);
             if (local)
             {
                 g_LeaveLobby = reinterpret_cast<LeaveLobbyFn>(original);

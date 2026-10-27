@@ -1840,16 +1840,6 @@
       "identity": "NextPlayer 0x00577B50, Player* __cdecl(Player*), 0 returns the first player (FirstPlayer 0x0056F950 is NextPlayer(0)); call in the ping check 0x00576B70 (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
     },
     {
-      "name": "Net::Clock",
-      "pattern": "E8 ?? ?? ?? ?? 89 85 9C FE FF FF 8D 8D 88 FE FF FF E8 ?? ?? ?? ?? C7 45 FC 00 00 00 00 E8 ?? ?? ?? ?? 89 85 AC FE FF FF 83 3D ?? ?? ?? ?? 00",
-      "offset": 0,
-      "mode": "rel32_target",
-      "fallback": "0x00822D90",
-      "prefer": "scan",
-      "require_unique": true,
-      "identity": "Millisecond clock 0x00822D90 (returns [0x02CC1B28]) that the ping check 0x00576B70 compares with Player+0x40 last-heard (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
-    },
-    {
       "name": "GameState::Get",
       "pattern": "E8 ?? ?? ?? ?? 85 C0 74 61 E8 ?? ?? ?? ?? 85 C0 75 56 E8 ?? ?? ?? ?? 83 F8 02 74 42 E8 ?? ?? ?? ?? 85 C0 75 39 68",
       "offset": 18,

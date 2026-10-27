@@ -4,7 +4,7 @@ GOG 2.2.301 (`battlezone98redux.exe`, image base 0x00400000).
 Patch: `src/patches/lobby_drop_keeps_match.cpp`, `[Network] LobbyDropKeepsMatch`
 (default **on**). Sites registered in `scripts/patches.json` / `include/patches.h`
 as `Lobby Drop Keeps Match Local` and `Lobby Drop Keeps Match Remote`; both
-signatures and all eight helper resolves are unique in the shipped image.
+signatures and all seven helper resolves are unique in the shipped image.
 
 ## Field report
 
@@ -55,10 +55,13 @@ The other clients drop a player whose P2P is still live.
 
 ## Real P2P loss still ends the session
 
-The ping check `0x00576B70` is unchanged:
+The ping check `0x00576B70` is unchanged. Every client runs it from Net
+Execute (`0x005718C7`) once per NetManager+0x430 ms. That interval starts low
+and grows by 10 ms per ping up to 3000 ms (`0x0057188F`).
 
-- `Player+0x40` holds the last time the player was heard over P2P, on clock `0x00822D90` (ms, `[0x02CC1B28]`).
-- A player is lagging once `now > +0x40 + 10000` (`0x008E8D0C`) and the ping metrics are bad (`0x008E8CF8` = 1000, `0x008E8BFC` = 50).
+- Each run pings every remote player over P2P (`0x00576480`, message `PP`) and shifts `Player+0x1B0` left. The reply handler sets bit 0 (`0x00572368`). `0x00575FF0` turns the low 10 bits into a loss figure: 100 minus 10 per answered ping.
+- `Player+0x40` is **not** a last-heard time. It is stamped once, on first contact (`0x00576923`: only when zero). The 2026-10-26 harness run read it as 12 s stale on a healthy link, which was the time since launch.
+- A player is lagging once `now > +0x40 + 10000` (`0x008E8D0C`) and the ping metrics are bad (average RTT `0x00575F80` > 1000 ms `0x008E8CF8`, or loss > 50 `0x008E8BFC`).
 - The host (`0x00572A60`) auto-kicks after another 10000 ms of lagging (`0x008E8CE4`; "Auto kicking player ... due to ping failure", `0x00576A70`).
 
 ## Patch
@@ -70,13 +73,16 @@ The ping check `0x00576B70` is unchanged:
 - game state is 5 (mission running);
 - game-ended is false.
 
-**Local site:** when `InMatch` holds and at least one non-local player was heard
-within 5000 ms, the hook skips `0x0074D250`. Both the P2P session and the Net
-state survive, and the websocket reconnects as stock. With no fresh peer, the
+A player is *live* when bit 0 or 1 of `Player+0x1B0` is set, meaning one of
+the last two pings was answered (about 6 s at the 3000 ms cap).
+
+**Local site:** when `InMatch` holds and at least one non-local player is live,
+the hook skips `0x0074D250`. Both the P2P session and the Net
+state survive, and the websocket reconnects as stock. With no live peer, the
 stock leave runs and the match quits as before.
 
 **Remote site:** when `InMatch` holds, the departure is not a kick or ban, and
-the player is non-local and was heard within 5000 ms, the hook skips
+the player is non-local and live, the hook skips
 `0x00578640`. A player whose P2P really died is still removed by the host's
 ping check.
 
