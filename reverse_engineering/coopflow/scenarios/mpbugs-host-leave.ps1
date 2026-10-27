@@ -7,7 +7,10 @@
 # "You have been elected host" and NotifyNowHost, every host-owned object is
 # deleted, and the guest is put on the Game Over screen (dialog 11,
 # RUN_WAS_QUIT). -Expect Stock checks that characterization, so a regression
-# shows; -Expect Fixed only asks that the guest leaves its mission. The mission
+# shows; -Expect Fixed only asks that the guest leaves its mission. With two or
+# more guests (mpbugs-hl-3c-1) the host migrates instead: one guest is elected,
+# nobody gets Game Over and the mission keeps running, so both arms check
+# that. Host-owned objects are still deleted on every guest. The mission
 # script is stock and does nothing about the departure, unlike CR's
 # leader-departure FailMission (scenarios\host-leaves.ps1). Before leaving, the
 # host spawns two AI armies it owns, so the samples also show what guests keep
@@ -91,6 +94,7 @@ $samples = Invoke-CRFlowStep "guests sampled for ${WatchSeconds}s without a host
     foreach ($g in $guests) { [ordered]@{ client = $g; samples = @($series[$g]) } }
 }
 
+$electedBy = @{}
 foreach ($series in @($samples)) {
     $g = [int]$series.client
     $states = @($series.samples | Where-Object { $_.state } | ForEach-Object { $_.state })
@@ -107,7 +111,13 @@ foreach ($series in @($samples)) {
         answered = $states.Count; samples = @($series.samples).Count; timeFirst = $first.time; timeLast = $last.time
         deletedPlayers = $last.deletedPlayers; rosterBefore = $pre.roster; rosterAfter = $last.roster
         leaderDeparted = $last.leaderDeparted }
-    if ($Expect -eq 'Stock') {
+    $electedBy["c$g"] = $elected.Count
+    if ($guests.Count -gt 1) {
+        # Host migration: both arms expect the mission to carry on.
+        $running = [bool]($first -and $last -and $last.time -gt $first.time)
+        Add-CRFlowCheck "guest c$g stays in its mission under a new host (no Game Over, mission time advances)" `
+            ([bool](-not $gameOver.Count -and -not $left.Count -and $running)) $detail
+    } elseif ($Expect -eq 'Stock') {
         Add-CRFlowCheck "stock: guest c$g is elected host, then put on Game Over (dialog 11) and leaves its mission" `
             ([bool]($elected.Count -and $gameOver.Count -and $left.Count)) $detail
     } else {
@@ -124,4 +134,8 @@ foreach ($series in @($samples)) {
         }
         Add-CRFlowCheck "observed on c${g}: host-owned AI after the host left (moved=$($ai.moved) damaged=$($ai.damaged) craft $($last.craft5)/$($last.craft6))" $true $ai
     }
+}
+if ($guests.Count -gt 1) {
+    $n = @($electedBy.Values | Where-Object { $_ }).Count
+    Add-CRFlowCheck "exactly one guest is elected host ($n of $($guests.Count))" ($n -eq 1) $electedBy
 }
