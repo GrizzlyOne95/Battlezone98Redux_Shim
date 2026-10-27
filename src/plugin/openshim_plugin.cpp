@@ -58,6 +58,7 @@
 #include "lua_getindependence_guard_install.h"
 #include "lua_send_length_install.h"
 #include "mp_mission_end_sync_install.h"
+#include "mp_splinter_sync_install.h"
 #include "mp_daywrecker_armory_collision_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
@@ -180,6 +181,13 @@ static unsigned __stdcall PatchThreadProc(void*)
     // through the same End. Byte-guarded and fail-closed (both detours or
     // neither); [Fixes] MissionEndSync = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::MissionEndSync::InstallMissionEndSyncIfPossible());
+
+    // A thrown Splinter deploys independently on every peer and nothing
+    // carries its death. The launcher broadcasts the deploy position and any
+    // peer broadcasts a damage kill, through the shared Net::Receive
+    // dispatcher. Byte-guarded and fail-closed; [Fixes] SplinterSync = 0
+    // leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::SplinterSync::InstallSplinterSyncIfPossible());
 
     // A remote Daywrecker copy has no launcher recorded, so one spawned inside
     // the Armory detonates on it. Exempts an Armory collision for an ownerless

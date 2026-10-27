@@ -275,7 +275,7 @@ openshim_opt:VehicleGeometryContact:desc~Experimental vehicle contact against le
 openshim_opt:ApcAlliedTargetDeploy:label~APC Allied Deploy~~~~~~
 openshim_opt:ApcAlliedTargetDeploy:desc~Let APC AI accept allied deploy targets. Single player only. Restart required.~~~~~~
 openshim_opt:SplinterUndead:label~Splinter Undead Fix~~~~~~
-openshim_opt:SplinterUndead:desc~Stop a destroyed splinter from spawning payload ordnance. Single player only. Restart required.~~~~~~
+openshim_opt:SplinterUndead:desc~Stop a destroyed splinter from spawning payload ordnance. Single player, and multiplayer while Splinter Sync is on. Restart required.~~~~~~
 openshim_opt:HowitzerUndeployedRetaliation:label~Howitzer Deploy Fix~~~~~~
 openshim_opt:HowitzerUndeployedRetaliation:desc~Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required.~~~~~~
 openshim_opt:TugCargoPostLoad:label~Tug Cargo Deploy~~~~~~

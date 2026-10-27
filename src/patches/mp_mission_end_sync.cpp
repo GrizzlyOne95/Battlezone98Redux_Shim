@@ -31,12 +31,12 @@
 //
 //         'M' 'E'  version=1  failed  float shutdownTime  char name[13]
 //
-//   Net dispatcher 0x00570500 (guest side), __thiscall(Net* this, int arg0,
-//     unsigned short senderId, const unsigned short* buf, unsigned len),
-//     ret 0x10. The tag is the first two payload bytes as a little-endian
-//     ushort, 0x454D. A well-formed message (len >= 21, version 1) is consumed
-//     here and never reaches the stock switch; anything else calls the
-//     original unchanged. Stock treats an unknown tag as a silent
+//   Net dispatcher 0x00570500 (guest side), shared with the other OpenShim
+//     messages through net_tag_dispatch.cpp, which owns the one detour. The
+//     tag is the first two payload bytes as a little-endian ushort, 0x454D.
+//     A well-formed message (len >= 21, version 1) is consumed by the
+//     registered handler and never reaches the stock switch; anything else
+//     calls the original unchanged. Stock treats an unknown tag as a silent
 //     fall-through, so an unpatched peer simply ignores the packet.
 //
 // A received message is applied only when it comes from the host
@@ -52,6 +52,7 @@
 #include "bzr_options_ui.h"
 #include "env_switch_table.h"
 #include "hook_engine.h"
+#include "net_tag_dispatch.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -79,8 +80,6 @@ namespace BZROpenShim
 
             // thiscall: ecx = this, callee pops the rest.
             using FnEnd = void(__thiscall*)(void* mission, float shutdownTime, const char* name, char failed);
-            using FnReceive = void(__thiscall*)(void* net, int arg0, unsigned senderId,
-                                                const unsigned char* buf, unsigned len);
             using FnBroadcastSend = char(__cdecl*)(const void* buf, unsigned len, int p3, char p4);
             using FnIsHost = unsigned char(__cdecl*)();
             using FnIsPlayerHost = unsigned char(__cdecl*)(int playerId);
@@ -88,13 +87,10 @@ namespace BZROpenShim
 
             // Prologues (whole instructions, no relative operands).
             constexpr uint8_t kEndStolen[9] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x14, 0x89, 0x4D, 0xF8 };
-            constexpr uint8_t kReceiveStolen[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x40, 0x02, 0x00, 0x00 };
 
             std::atomic<bool> g_Done{ false };
             InlineDetour32 g_EndDetour = {};
-            InlineDetour32 g_ReceiveDetour = {};
             void* volatile g_EndOriginal = nullptr;
-            void* volatile g_ReceiveOriginal = nullptr;
 
             FnBroadcastSend g_Send = nullptr;
             FnIsHost g_IsHost = nullptr;
@@ -271,23 +267,15 @@ namespace BZROpenShim
                          failed ? 1 : 0, static_cast<double>(shutdownTime), name, senderId & 0xFFFF);
             }
 
-            // thiscall(Net* this, int arg0, ushort senderId, buf, len), ret 0x10.
-            void __fastcall ReceiveHook(void* net, void* /*edx*/, int arg0, unsigned senderId,
-                                        const unsigned char* buf, unsigned len)
+            // Registered with NetTagDispatch; true if the message was consumed.
+            bool ReceiveHandler(unsigned senderId, const unsigned char* buf, unsigned len)
             {
-                if (buf && len >= kPacketLen)
+                if (len >= kPacketLen && buf[2] == kVersion)
                 {
-                    uint16_t tag = 0;
-                    std::memcpy(&tag, buf, sizeof(tag));
-                    if (tag == kTag && buf[2] == kVersion)
-                    {
-                        ApplyMessage(senderId, buf);
-                        return;
-                    }
+                    ApplyMessage(senderId, buf);
+                    return true;
                 }
-                const FnReceive original = reinterpret_cast<FnReceive>(g_ReceiveOriginal);
-                if (original)
-                    original(net, arg0, senderId, buf, len);
+                return false;
             }
 
             bool DoInstall()
@@ -295,7 +283,6 @@ namespace BZROpenShim
                 // Literal names so patch_registration_tests can check them
                 // against scripts/patches.json.
                 const uint32_t endAddr = HookEngine::ResolveNamedAddress("AiMission::End");
-                const uint32_t receiveAddr = HookEngine::ResolveNamedAddress("Net::Receive");
                 const uint32_t sendAddr = HookEngine::ResolveNamedAddress("Net::BroadcastSend");
                 const uint32_t sessionAddr = HookEngine::ResolveNamedAddress("Net::Session");
                 const uint32_t isPlayerHostAddr = HookEngine::ResolveNamedAddress("Net::IsPlayerHost");
@@ -306,7 +293,7 @@ namespace BZROpenShim
                     { "IsHost", &isHostAddr },
                     { "CurrentAiMission", &missionAddr },
                 };
-                if (!endAddr || !receiveAddr || !sendAddr || !sessionAddr || !isPlayerHostAddr || !localIdAddr ||
+                if (!endAddr || !sendAddr || !sessionAddr || !isPlayerHostAddr || !localIdAddr ||
                     !HookEngine::BindEngineRows("MissionEndSync", rows))
                 {
                     LogShimA(LogLevel::Warn, kComponent, "an address did not resolve; mission end sync not installed");
@@ -328,9 +315,7 @@ namespace BZROpenShim
                              "AiMission::End at 0x%08X failed its byte guard; mission end sync not installed", endAddr);
                     return false;
                 }
-                if (!InstallInlineDetour32(g_ReceiveDetour, receiveAddr, reinterpret_cast<void*>(ReceiveHook),
-                                           sizeof(kReceiveStolen), kReceiveStolen, sizeof(kReceiveStolen),
-                                           &g_ReceiveOriginal))
+                if (!NetTagDispatch::RegisterNetTagHandler(kTag, &ReceiveHandler))
                 {
                     // Roll back the first detour: half the pair would send
                     // messages nobody here can read, or the reverse. The
@@ -338,14 +323,14 @@ namespace BZROpenShim
                     const bool restored = HookEngine::WriteMemory(static_cast<uint32_t>(g_EndDetour.target),
                                                                   g_EndDetour.original.data(), g_EndDetour.patchLen);
                     LogShimA(LogLevel::Warn, kComponent,
-                             "Net::Receive at 0x%08X failed its byte guard; mission end sync not installed (%s)",
-                             receiveAddr, restored ? "AiMission::End hook rolled back" : "ROLLBACK FAILED");
+                             "Net::Receive handler not registered; mission end sync not installed (%s)",
+                             restored ? "AiMission::End hook rolled back" : "ROLLBACK FAILED");
                     return false;
                 }
 
                 LogShimA(LogLevel::Info, kComponent,
-                         "installed: AiMission::End 0x%08X, Net::Receive 0x%08X, send 0x%08X, session ptr 0x%08X",
-                         endAddr, receiveAddr, sendAddr, sessionAddr);
+                         "installed: AiMission::End 0x%08X, send 0x%08X, session ptr 0x%08X",
+                         endAddr, sendAddr, sessionAddr);
                 return true;
             }
         }

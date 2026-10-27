@@ -41,7 +41,7 @@ $scenarioName = @{ MissionEnd = 'mpbugs-mission-end.ps1'; HostLeave = 'mpbugs-ho
 if ($Case -eq 'Weapons' -and -not $NoTrace) { $env:OPENSHIM_TRACE_MPAUTH = '1' }
 # The Stock arm turns the case's OpenShim fix off in each instance's ini, so a
 # fixed build still shows the stock defect. Needs Prepare (no -SkipPrepare).
-$stockOff = @{ MissionEnd = 'Fixes.MissionEndSync=0'; Weapons = 'Fixes.DaywreckerArmoryCollision=0' }[$Case]
+$stockOff = @{ MissionEnd = 'Fixes.MissionEndSync=0'; Weapons = 'Fixes.DaywreckerArmoryCollision=0;Fixes.SplinterSync=0' }[$Case]
 if ($Expect -eq 'Stock' -and $stockOff) {
     if ($SkipPrepare) { throw "-Expect Stock for $Case writes the instance ini; drop -SkipPrepare." }
     $env:BZRCOOP_INI_SET = (@($env:BZRCOOP_INI_SET, $stockOff) | Where-Object { $_ }) -join ';'

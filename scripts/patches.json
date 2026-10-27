@@ -3222,6 +3222,18 @@
       "identity": "SprayBuilding::Simulate, SprayBuildingVtable slot 15"
     },
     {
+      "name": "SprayBuildingDtor",
+      "address": "0x005DA680",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 21 00 00 00 8B 45 08 83 E0 01",
+      "identity": "SprayBuilding scalar deleting destructor on exact GOG Redux 2.2.301, SprayBuildingVtable slot 0: __thiscall(SprayBuilding* this, int flags) returning this, callee-clean `ret 4`; runs the real destructor then operator delete when flags & 1. mp_splinter_sync.cpp replaces the slot to drop its building<->bomb-key map entry. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "GameObjectUpdatePosition",
+      "address": "0x004DB100",
+      "expected": "55 8B EC 81 EC 60 01 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "GameObject::UpdatePosition on exact GOG Redux 2.2.301, __thiscall(complete GameObject* this) with no stack arguments (plain `ret`): reads this+0xF0 (ent) and this+0xF4 (OBJ76), recomputes the cached position from the OBJ76 matrix posit and updates the ent bounding box from the bounding sphere. Stock SprayBuilding::Simulate calls it each frame (0x005DA862); mp_splinter_sync.cpp calls it after writing a launcher's deploy position. Bytes read from the shipped image 2026-10-27."
+    },
+    {
       "name": "BuildingSimulate",
       "address": "0x0047FCB0",
       "expected": "55 8B EC 83 EC 68 A1 00 70 8E 00",

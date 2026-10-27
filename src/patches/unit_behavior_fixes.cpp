@@ -37,6 +37,7 @@
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
 #include "hook_engine.h"
+#include "mp_splinter_sync_install.h"
 #include "ui_performance.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
@@ -462,8 +463,15 @@ namespace BZROpenShim
                 return;
             }
 
+            // Single player, or a network game with [Fixes] SplinterSync active:
+            // the sync needs this gate so a remotely killed splinter stops
+            // firing, and reports a damage death to the other peers.
+            const bool deadGateActive =
+                g_SplinterUndeadFixActive ||
+                (g_SplinterUndeadFixEnabled && SplinterSync::IsActive());
             bool routeToBase = false;
-            if (g_SplinterUndeadFixActive && g_BzrFn_BuildingSimulate)
+            bool damageDeath = false;
+            if (deadGateActive && g_BzrFn_BuildingSimulate)
             {
                 __try
                 {
@@ -474,6 +482,9 @@ namespace BZROpenShim
                         const uint32_t flags = *reinterpret_cast<const uint32_t*>(
                             reinterpret_cast<const uint8_t*>(stateBlock) + kBuildingStateFlagsOffset);
                         routeToBase = (flags & kBuildingDestroyedOrRemoveMask) != 0;
+                        // 0x01000000 is set only by Building::DamageAlloc;
+                        // ammo exhaustion sets 0x200 alone.
+                        damageDeath = (flags & 0x01000000u) != 0;
                     }
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
@@ -492,6 +503,8 @@ namespace BZROpenShim
                             remaining,
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sprayPtr)));
                 }
+                if (damageDeath && !g_SplinterUndeadFixActive)
+                    SplinterSync::OnSplinterDead(sprayPtr);
                 g_BzrFn_BuildingSimulate(sprayPtr, dt);
                 return;
             }

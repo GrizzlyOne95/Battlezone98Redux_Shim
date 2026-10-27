@@ -22,10 +22,11 @@
 # (-SplinterDistances), plus the target tank's loss on its owner (the launcher);
 # per-owner mean loss per ring is compared receiver / launcher (duplicate check
 # below x1.5). -KillSplinter launcher|receiver also destroys the deployed
-# Splinter on that peer (Damage 100000 on every splintb2 there, polled until one
-# is live) and checks that every other peer's Splinter ended within 1 s of it,
-# each on its own mission clock: every peer's GetTime at the kill moment is
-# recorded, since the clocks differ.
+# Splinter on that peer (-KillMethod damage: Damage 100000 on every splintb2
+# there, local only; fire: a gunner tank shoots it with networked cannon fire)
+# and checks that every other peer's Splinter ended within 1 s of it (1.5 s
+# with -Expect Fixed), each on its own mission clock: every peer's GetTime at
+# the kill moment is recorded, since the clocks differ.
 #
 # Also reported (veteran player, 2026-10-27): after an Armory launches, other
 # players sometimes see a Daywrecker blow up AT THE ARMORY and take its damage,
@@ -37,7 +38,11 @@
 # damage); the aim point is then the Armory site and the burst checks apply.
 #
 # -Expect Stock records a duplicate as a warning (what stock does is the
-# question); -Expect Fixed fails on one.
+# question); -Expect Fixed fails on one. -Expect Fixed also fails when a
+# receiver's deployed Splinter is more than 2 m from the launcher's, or when
+# a killed Splinter is still alive on a peer 1.5 s after the kill (the
+# [Fixes] SplinterSync deploy and kill messages; the Stock arm of
+# Run-BZRMpBugs turns SplinterSync off).
 param([ValidateSet('host','guest')][string]$Launcher = 'host',
       [ValidateSet('both','daywrecker','splinter')][string]$Weapon = 'both',
       [ValidateSet('site','armory')][string]$Target = 'site',
@@ -55,6 +60,9 @@ param([ValidateSet('host','guest')][string]$Launcher = 'host',
       # Destroy the deployed Splinter on the launcher or on the first receiver
       # right after it appears there; none leaves it to run out.
       [ValidateSet('none','launcher','receiver')][string]$KillSplinter = 'none',
+      # damage: Lua Damage on the killer only (local, not networked). fire: a
+      # gunner tank on the killer shoots it with networked cannon fire.
+      [ValidateSet('damage','fire')][string]$KillMethod = 'damage',
       # Seconds to wait after the launcher's explosive is gone, for late
       # reconstruction on the receivers.
       [int]$SettleSeconds = 20)
@@ -178,21 +186,43 @@ foreach ($w in $weapons) {
             $fire = Invoke-CRFlow $L "return BugFireSplinter($($site.x), $($site.z))"
             if ($fire.weapon -notmatch 'gsplint') { throw "shooter has no Splinter in slot 3 ($($fire.weapon))" }
             $script:splinterFire = $fire
+            if ($KillSplinter -ne 'none' -and $KillMethod -eq 'fire') {
+                Invoke-CRFlow $killer "return BugArmSplinterGunner($($site.x), $($site.z))" | Out-Null
+            }
             $fired = Wait-Site $L $w 40 { param($s) $s.fire.firedAt -or $s.fire.timedOut }
             if (-not $fired -or -not $fired.fire.firedAt) { throw "the shooter never fired its Splinter ($($fired.fire | ConvertTo-Json -Compress))" }
             if ($KillSplinter -ne 'none') {
                 # BugKillSplinter hits only a live splintb2 on that peer, so polling it
                 # kills the Splinter the moment it deploys there (it lives only ~5 s).
                 $clock = [Diagnostics.Stopwatch]::StartNew()
-                do {
-                    $k = Invoke-CRFlow $killer 'return BugKillSplinter()'
-                    if ($k.killed) { break }
-                    Start-Sleep -Milliseconds 200
-                } while ($clock.Elapsed.TotalSeconds -lt 40)
-                if (-not $k.killed) { throw "no deployed Splinter appeared on c$killer to kill within 40 s of firing" }
-                # Each peer's own mission clock at the kill moment.
+                $back = 0.0
+                if ($KillMethod -eq 'fire') {
+                    # Poll until the gunner's target is gone (or it gave up); the kill
+                    # happened at shoot.gone, $back seconds before this poll.
+                    do {
+                        $st = Invoke-CRFlow $killer 'return BugShootState()'
+                        if ($st.shoot.gone -or $st.shoot.timedOut) { break }
+                        Start-Sleep -Milliseconds 200
+                    } while ($clock.Elapsed.TotalSeconds -lt 60)
+                    if (-not $st.shoot.gone) { throw "the gunner on c$killer never saw a deployed Splinter go ($($st.shoot | ConvertTo-Json -Compress))" }
+                    $shot = $st.shoot.lastHealth -ne $null -and $st.shoot.lastHealth -lt $st.shoot.health
+                    if (-not $shot) { throw "the Splinter on c$killer ran out before the gunner damaged it ($($st.shoot | ConvertTo-Json -Compress))" }
+                    $k = [ordered]@{ time = [double]$st.shoot.gone; killed = 1; method = 'fire'
+                                     health = @([ordered]@{ id = $st.shoot.target; health = $st.shoot.health; lastHealth = $st.shoot.lastHealth
+                                                            seenFor = [math]::Round($st.shoot.gone - $st.shoot.seen, 2) }) }
+                    $back = [double]$st.time - [double]$st.shoot.gone
+                } else {
+                    do {
+                        $k = Invoke-CRFlow $killer 'return BugKillSplinter()'
+                        if ($k.killed) { break }
+                        Start-Sleep -Milliseconds 200
+                    } while ($clock.Elapsed.TotalSeconds -lt 40)
+                    if (-not $k.killed) { throw "no deployed Splinter appeared on c$killer to kill within 40 s of firing" }
+                }
+                # Each peer's own mission clock at the kill moment (a fire kill is
+                # read back $back seconds after it happened).
                 $peerTimes = [ordered]@{}
-                foreach ($i in $C) { $peerTimes["c$i"] = if ($i -eq $killer) { [double]$k.time } else { [double](Invoke-CRFlow $i 'return GetTime()') } }
+                foreach ($i in $C) { $peerTimes["c$i"] = if ($i -eq $killer) { [double]$k.time } else { [math]::Round([double](Invoke-CRFlow $i 'return GetTime()') - $back, 3) } }
                 $script:splinterKill = [ordered]@{ killer = $killer; time = $k.time; killed = $k.killed; health = $k.health; peerTimes = $peerTimes }
                 ([ordered]@{ at = (Get-Date).ToUniversalTime().ToString('o'); client = $killer; site = $w; phase = 'kill'; state = $script:splinterKill } |
                     ConvertTo-Json -Compress -Depth 8) | Add-Content -LiteralPath $samplePath
@@ -248,6 +278,9 @@ foreach ($w in $weapons) {
         if ($w -eq 'splinter' -and $impact -and $lives.Count) {
             $spread = [math]::Round([math]::Sqrt([math]::Pow($lives[0].lastX - $impact.lastX, 2) + [math]::Pow($lives[0].lastZ - $impact.lastZ, 2)), 1)
             Add-CRFlowCheck "observed on c${i}: Splinter deployed $spread m from the launcher's" $true @{ spread = $spread; here = $lives[0]; launcher = $impact }
+            if ($Expect -eq 'Fixed' -and $i -ne $L) {
+                Add-CRFlowCheck "Splinter on c$i deployed within 2 m of the launcher's ($spread m)" ($spread -le 2) @{ spread = $spread; here = $lives[0]; launcher = $impact }
+            }
         }
     }
     if ($w -eq 'splinter') {
@@ -288,13 +321,15 @@ foreach ($w in $weapons) {
             if ($kill) {
                 $kt = $kill.peerTimes["c$i"]
                 $offsets = @($lives | Where-Object { $null -ne $_.gone } | ForEach-Object { [math]::Round($_.gone - $kt, 2) })
-                $near = @($offsets | Where-Object { [math]::Abs($_) -le 1 }).Count -gt 0
+                # Fixed: the kill message crosses the network, so allow 1.5 s.
+                $killTolerance = if ($Expect -eq 'Fixed') { 1.5 } else { 1 }
+                $near = @($offsets | Where-Object { [math]::Abs($_) -le $killTolerance }).Count -gt 0
                 $killDetail = [ordered]@{ killer = $kill.killer; killTimeOnKiller = $kill.time; killTimeOnThisPeer = $kt
                                           goneMinusKillTime = $offsets; killedHealthBefore = $kill.health; lifetimes = $times }
                 if ($i -eq $kill.killer) {
                     Add-CRFlowCheck "observed: Splinter killed on c$i ($($kill.killed) object(s)); its lifetime ended $($offsets -join ', ') s from the kill" $true $killDetail
                 } else {
-                    Add-DuplicateCheck "deployed Splinter on c$i ended within 1 s of the kill on c$($kill.killer)" $near $killDetail
+                    Add-DuplicateCheck "deployed Splinter on c$i ended within $killTolerance s of the kill on c$($kill.killer)" $near $killDetail
                 }
             }
         }

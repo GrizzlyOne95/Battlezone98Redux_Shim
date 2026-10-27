@@ -25,6 +25,7 @@ local tracked, lifetimes = {}, {}
 local pendingLaunch, pendingFire
 -- The Splinter test's target tank, so BugSite can report its health on its owner.
 local splinterTarget
+local pendingShoot
 local WITNESS_TEAM = 7
 
 -- Humans are observers; the two AI teams fight each other only.
@@ -116,6 +117,27 @@ local function serviceLaunches()
             M.fire.firedAt = GetTime(); pendingFire = nil
         elseif IsAlive(f.target) then
             FireAt(f.shooter, f.target)
+        end
+    end
+    if pendingShoot then
+        local s = pendingShoot
+        if not s.target then
+            for h in AllObjects() do
+                if explosiveKind(h) == "splinter" and IsAlive(h) then
+                    s.target = h
+                    M.shoot.target, M.shoot.seen, M.shoot.health = tostring(h), GetTime(), round(GetCurHealth(h))
+                    break
+                end
+            end
+        end
+        if s.target and not IsAlive(s.target) then
+            -- lastHealth below full means the gunner's hits ended it, not its timer.
+            M.shoot.gone = GetTime(); pendingShoot = nil
+        elseif GetTime() > s.deadline or not IsAlive(s.gunner) then
+            M.shoot.timedOut = GetTime(); pendingShoot = nil
+        elseif s.target then
+            M.shoot.lastHealth = round(GetCurHealth(s.target))
+            FireAt(s.gunner, s.target)
         end
     end
 end
@@ -277,6 +299,20 @@ function BugFireSplinter(tx, tz, range)
               target = tostring(target), targetHealth = round(GetCurHealth(target))}
     return M.fire
 end
+
+-- A gunner tank on this peer, placed before the Splinter deploys, that fires
+-- its cannon at the first live deployed Splinter here until it is gone. Its
+-- shots are networked ordnance, so every peer simulates them, unlike Damage.
+function BugArmSplinterGunner(tx, tz, range)
+    local gunner = exu.BuildSyncObject("avtank", GetTeamNum(GetPlayerHandle()), SetVector(tx, 0, tz + (range or 40)))
+    assert(gunner, "splinter gunner failed to spawn")
+    SetIndependence(gunner, 0)
+    pendingShoot = {gunner = gunner, deadline = GetTime() + 60}
+    M.shoot = {armed = GetTime(), gunner = tostring(gunner)}
+    return M.shoot
+end
+
+function BugShootState() return {time = GetTime(), shoot = M.shoot} end
 
 -- Lethal damage to every live deployed Splinter on this peer (0 killed when
 -- none is deployed yet, so the scenario can poll it). Returns this peer's clock

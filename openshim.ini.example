@@ -419,9 +419,26 @@ ApcAlliedTargetDeploy = 1
 ; Stop a destroyed splinter (spraybomb) from continuing to spawn payload
 ; ordnance. SprayBuilding::Simulate overrides Building::Simulate without
 ; preserving the base destroyed/marked-for-remove gate; this restores it.
-; Accepted: boolean. Default: ON. Stands down in a network game.
+; Accepted: boolean. Default: ON. Stands down in a network game unless
+; SplinterSync (below) is on, in which case it also runs there so a splinter
+; killed on another peer stops firing here.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX
 SplinterUndead = 1
+
+; Multiplayer only: keep a thrown splinter (spraybomb) the same object on every
+; peer. Stock gives the deployed SprayBuilding no network identity: each peer
+; builds its own where its own bomb settled (a lagging peer was seen 87 m off),
+; and killing it on one peer leaves it alive and firing on all the others. The
+; launcher broadcasts the deploy position ('SD'); a peer whose splinter dies of
+; damage broadcasts a kill ('SK'). Receivers move or kill their own copy; both
+; packets use the shared Net::Receive dispatcher, so peers without the fix
+; ignore them like any unknown tag. Needs SplinterUndead on for the kill to stop
+; the payload; with SplinterUndead off the building dies but keeps firing.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match. No effect in single player.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_SPLINTER_SYNC
+SplinterSync = 1
 
 ; Reveal the owning craft when a comet, deployed APC soldier, splinter payload
 ; or another GameObject-owned child lands a damaging hit. Redux reveals only

@@ -315,6 +315,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "MissionEndSync", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_SPLINTER_SYNC") ||
+            Equals(name, "BZR_DISABLE_MP_SPLINTER_SYNC"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SplinterSync", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION") ||
             Equals(name, "BZR_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION"))
         {
