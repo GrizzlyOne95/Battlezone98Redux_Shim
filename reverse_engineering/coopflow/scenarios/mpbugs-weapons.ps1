@@ -15,8 +15,17 @@
 #   - terrain heights and normals on a grid around each impact, per peer;
 #   - MPAUTH_* trace lines per client (Run-BZRMpBugs turns the trace on).
 # The Splinter's deployed building and payload are rebuilt on each peer by
-# design, so one Splinter lifetime per peer is expected; its deploy point and
-# the damage per owner are recorded as observations.
+# design, so one Splinter lifetime per peer is expected. Reported: each guest
+# gets its own copy ("escalating devastation") and a deployed Splinter cannot be
+# destroyed. So per peer it records the lifetimes (first, gone, duration), the
+# deploy point, and the loss on that peer's own witnesses on close rings
+# (-SplinterDistances), plus the target tank's loss on its owner (the launcher);
+# per-owner mean loss per ring is compared receiver / launcher (duplicate check
+# below x1.5). -KillSplinter launcher|receiver also destroys the deployed
+# Splinter on that peer (Damage 100000 on every splintb2 there, polled until one
+# is live) and checks that every other peer's Splinter ended within 1 s of it,
+# each on its own mission clock: every peer's GetTime at the kill moment is
+# recorded, since the clocks differ.
 #
 # Also reported (veteran player, 2026-10-27): after an Armory launches, other
 # players sometimes see a Daywrecker blow up AT THE ARMORY and take its damage,
@@ -41,6 +50,11 @@ param([ValidateSet('host','guest')][string]$Launcher = 'host',
       # Witness rings (metres from the aim point); the Daywrecker blast reaches 200 m.
       # A burst defaults to wider rings so the witnesses survive several blasts.
       [int[]]$Distances = @(80, 120),
+      # Witness rings for the Splinter site (its shards reach tens of metres, not 200).
+      [int[]]$SplinterDistances = @(12, 25),
+      # Destroy the deployed Splinter on the launcher or on the first receiver
+      # right after it appears there; none leaves it to run out.
+      [ValidateSet('none','launcher','receiver')][string]$KillSplinter = 'none',
       # Seconds to wait after the launcher's explosive is gone, for late
       # reconstruction on the receivers.
       [int]$SettleSeconds = 20)
@@ -103,13 +117,18 @@ function Add-DuplicateCheck([string]$Name, [bool]$Pass, $Detail) {
 # Witness angles per client rank, so owners alternate around each ring.
 $angleSets = @(@(0, 180), @(90, 270), @(45, 225), @(135, 315))
 $ranked = @($H) + $guests
-$expectedWitnesses = $ranked.Count * $Distances.Count * 2
-Invoke-CRFlowStep "every peer places its witnesses ($($Distances -join '/') m)" {
-    $distanceList = '{' + ($Distances -join ',') + '}'
+$rings = @{ daywrecker = $Distances; splinter = $SplinterDistances }
+$expectedWitnesses = @{}
+foreach ($w in $weapons) { $expectedWitnesses[$w] = $ranked.Count * $rings[$w].Count * 2 }
+$killer = if ($KillSplinter -eq 'launcher') { $L } else { $receivers[0] }
+$script:splinterFire = $null
+$script:splinterKill = $null
+Invoke-CRFlowStep "every peer places its witnesses ($(($weapons | ForEach-Object { "$_ " + ($rings[$_] -join '/') }) -join ', ') m)" {
     for ($r = 0; $r -lt $ranked.Count; $r++) {
         $angles = '{' + ($angleSets[$r % 4] -join ',') + '}'
         foreach ($w in $weapons) {
             $site = $sites[$w]
+            $distanceList = '{' + ($rings[$w] -join ',') + '}'
             Invoke-CRFlow $ranked[$r] "return BugPlaceWitnesses($($site.x), $($site.z), $distanceList, $angles)" | Out-Null
         }
         if ($watchArmory) {
@@ -119,8 +138,9 @@ Invoke-CRFlowStep "every peer places its witnesses ($($Distances -join '/') m)" 
     }
     foreach ($i in $C) {
         foreach ($w in $weapons) {
-            $s = Wait-Site $i $w 20 { param($s) @($s.witnesses | Where-Object { $_ }).Count -ge $expectedWitnesses }
-            if (-not $s) { throw "c$i never sees all $expectedWitnesses witnesses at the $w site" }
+            $need = $expectedWitnesses[$w]
+            $s = Wait-Site $i $w 20 { param($s) @($s.witnesses | Where-Object { $_ }).Count -ge $need }
+            if (-not $s) { throw "c$i never sees all $need witnesses at the $w site" }
         }
         if ($watchArmory) {
             $n = $ranked.Count * $ArmoryDistances.Count * 2
@@ -128,7 +148,7 @@ Invoke-CRFlowStep "every peer places its witnesses ($($Distances -join '/') m)" 
             if (-not $s) { throw "c$i never sees all $n witnesses at the Armory site" }
         }
     }
-    @{ perSite = $expectedWitnesses; owners = $ranked; armoryRings = $(if ($watchArmory) { $ArmoryDistances } else { @() }) }
+    @{ perSite = $expectedWitnesses; rings = $rings; owners = $ranked; armoryRings = $(if ($watchArmory) { $ArmoryDistances } else { @() }) }
 }
 
 $armoryBefore = if ($watchArmory) {
@@ -157,8 +177,26 @@ foreach ($w in $weapons) {
         } else {
             $fire = Invoke-CRFlow $L "return BugFireSplinter($($site.x), $($site.z))"
             if ($fire.weapon -notmatch 'gsplint') { throw "shooter has no Splinter in slot 3 ($($fire.weapon))" }
+            $script:splinterFire = $fire
             $fired = Wait-Site $L $w 40 { param($s) $s.fire.firedAt -or $s.fire.timedOut }
             if (-not $fired -or -not $fired.fire.firedAt) { throw "the shooter never fired its Splinter ($($fired.fire | ConvertTo-Json -Compress))" }
+            if ($KillSplinter -ne 'none') {
+                # BugKillSplinter hits only a live splintb2 on that peer, so polling it
+                # kills the Splinter the moment it deploys there (it lives only ~5 s).
+                $clock = [Diagnostics.Stopwatch]::StartNew()
+                do {
+                    $k = Invoke-CRFlow $killer 'return BugKillSplinter()'
+                    if ($k.killed) { break }
+                    Start-Sleep -Milliseconds 200
+                } while ($clock.Elapsed.TotalSeconds -lt 40)
+                if (-not $k.killed) { throw "no deployed Splinter appeared on c$killer to kill within 40 s of firing" }
+                # Each peer's own mission clock at the kill moment.
+                $peerTimes = [ordered]@{}
+                foreach ($i in $C) { $peerTimes["c$i"] = if ($i -eq $killer) { [double]$k.time } else { [double](Invoke-CRFlow $i 'return GetTime()') } }
+                $script:splinterKill = [ordered]@{ killer = $killer; time = $k.time; killed = $k.killed; health = $k.health; peerTimes = $peerTimes }
+                ([ordered]@{ at = (Get-Date).ToUniversalTime().ToString('o'); client = $killer; site = $w; phase = 'kill'; state = $script:splinterKill } |
+                    ConvertTo-Json -Compress -Depth 8) | Add-Content -LiteralPath $samplePath
+            }
             $done = Wait-Site $L $w 40 { param($s) @(Get-Lifetimes $s 'splinter' | Where-Object { $_.gone }).Count }
             if (-not $done) { throw "no deployed Splinter finished on the launcher c$L within 40 s of firing" }
         }
@@ -210,6 +248,70 @@ foreach ($w in $weapons) {
         if ($w -eq 'splinter' -and $impact -and $lives.Count) {
             $spread = [math]::Round([math]::Sqrt([math]::Pow($lives[0].lastX - $impact.lastX, 2) + [math]::Pow($lives[0].lastZ - $impact.lastZ, 2)), 1)
             Add-CRFlowCheck "observed on c${i}: Splinter deployed $spread m from the launcher's" $true @{ spread = $spread; here = $lives[0]; launcher = $impact }
+        }
+    }
+    if ($w -eq 'splinter') {
+        $site = $sites.splinter
+        $kill = $script:splinterKill
+        $fireInfo = $script:splinterFire
+        $targetNow = $after["c$L"].target
+        $targetLoss = if ($targetNow -and $null -ne $fireInfo.targetHealth) {
+            [math]::Round($(if ($targetNow.alive) { $fireInfo.targetHealth - $targetNow.health } else { $fireInfo.targetHealth }), 1) }
+        $targetDetail = [ordered]@{ id = $fireInfo.target; before = $fireInfo.targetHealth; now = $targetNow; loss = $targetLoss }
+        # Mean loss per ring on each owner's own witnesses (rings measured from the aim point).
+        $meanByOwner = @{}
+        foreach ($i in $C) {
+            $pre, $post = $before["c$i"], $after["c$i"]
+            $lives = @(Get-Lifetimes $post $w)
+            $own = @()
+            foreach ($wb in @($pre.witnesses | Where-Object { $_ -and $_.mine })) {
+                $wa = @($post.witnesses | Where-Object { $_ -and $_.id -eq $wb.id }) | Select-Object -First 1
+                $d = [math]::Sqrt([math]::Pow($wb.x - $site.x, 2) + [math]::Pow($wb.z - $site.z, 2))
+                $ring = @($SplinterDistances | Sort-Object { [math]::Abs($_ - $d) })[0]
+                $own += [ordered]@{ ring = $ring; distance = [math]::Round($d, 1); before = $wb.health
+                                    loss = $(if ($wa) { $wb.health - $wa.health } else { $wb.health }); killed = -not $wa }
+            }
+            $ownLoss = [math]::Round([double](($own | ForEach-Object { $_.loss } | Measure-Object -Sum).Sum), 1)
+            $means = [ordered]@{}
+            foreach ($ring in $SplinterDistances) {
+                $v = @($own | Where-Object { $_.ring -eq $ring } | ForEach-Object { $_.loss })
+                $means["$ring"] = if ($v.Count) { [math]::Round(($v | Measure-Object -Average).Average, 2) } else { $null }
+            }
+            $meanByOwner[$i] = $means
+            $times = @($lives | ForEach-Object { [ordered]@{ first = $_.first; gone = $_.gone
+                duration = $(if ($null -ne $_.gone) { [math]::Round($_.gone - $_.first, 2) } else { $null }) } })
+            $detail = [ordered]@{ lifetimes = $times; ownWitnesses = $own; ownLoss = $ownLoss; meanLossByRing = $means
+                                  mpauth = (Get-MpauthCounts $i) }
+            if ($i -eq $L) { $detail.target = $targetDetail }
+            $role = if ($i -eq $L) { 'launcher' } else { 'receiver' }
+            Add-CRFlowCheck "observed on $role c${i}: $($lives.Count) Splinter lifetime(s) ($(@($times | ForEach-Object { "$($_.duration) s" }) -join ', ')); own witnesses lost $ownLoss" $true $detail
+            if ($kill) {
+                $kt = $kill.peerTimes["c$i"]
+                $offsets = @($lives | Where-Object { $null -ne $_.gone } | ForEach-Object { [math]::Round($_.gone - $kt, 2) })
+                $near = @($offsets | Where-Object { [math]::Abs($_) -le 1 }).Count -gt 0
+                $killDetail = [ordered]@{ killer = $kill.killer; killTimeOnKiller = $kill.time; killTimeOnThisPeer = $kt
+                                          goneMinusKillTime = $offsets; killedHealthBefore = $kill.health; lifetimes = $times }
+                if ($i -eq $kill.killer) {
+                    Add-CRFlowCheck "observed: Splinter killed on c$i ($($kill.killed) object(s)); its lifetime ended $($offsets -join ', ') s from the kill" $true $killDetail
+                } else {
+                    Add-DuplicateCheck "deployed Splinter on c$i ended within 1 s of the kill on c$($kill.killer)" $near $killDetail
+                }
+            }
+        }
+        foreach ($r in $receivers) {
+            $ratios = [ordered]@{}
+            foreach ($ring in $SplinterDistances) {
+                $lm, $rm = $meanByOwner[$L]["$ring"], $meanByOwner[$r]["$ring"]
+                $ratios["$ring"] = if ($lm -and $null -ne $rm) { [math]::Round($rm / $lm, 2) } else { $null }
+            }
+            $known = @($ratios.Values | Where-Object { $null -ne $_ })
+            $ratio = if ($known.Count) { ($known | Measure-Object -Maximum).Maximum } else { $null }
+            $detail = [ordered]@{ ratio = $ratio; ratioByRing = $ratios; launcherMean = $meanByOwner[$L]; receiverMean = $meanByOwner[$r]; target = $targetDetail }
+            Add-CRFlowCheck "observed Splinter loss per ring, receiver c$r vs launcher c${L}: x$ratio" $true $detail
+            # Worst ring decides; a launcher whose witnesses took nothing gives no ratio.
+            if ($null -ne $ratio) {
+                Add-DuplicateCheck "no escalated Splinter damage on receiver c$r's witnesses (x$ratio of launcher c$L)" ($ratio -lt 1.5) $detail
+            }
         }
     }
     # A doubled blast on one peer shows as about twice the damage on its own

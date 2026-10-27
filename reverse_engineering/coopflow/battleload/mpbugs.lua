@@ -23,6 +23,8 @@ local tracked, lifetimes = {}, {}
 -- The Armory deploys on its geyser, then BuildAt-launches its Daywreckers one
 -- after another; the Splinter shooter fires until its ammunition drops.
 local pendingLaunch, pendingFire
+-- The Splinter test's target tank, so BugSite can report its health on its owner.
+local splinterTarget
 local WITNESS_TEAM = 7
 
 -- Humans are observers; the two AI teams fight each other only.
@@ -269,9 +271,25 @@ function BugFireSplinter(tx, tz, range)
     SetIndependence(target, 0); SetIndependence(shooter, 0)
     GiveWeapon(shooter, "gsplint", 3)
     SetWeaponMask(shooter, 8)
+    splinterTarget = target
     pendingFire = {shooter = shooter, target = target, ammo = GetCurAmmo(shooter), deadline = GetTime() + 30}
-    M.fire = {team = team, at = GetTime(), weapon = GetWeaponClass(shooter, 3), ammo = pendingFire.ammo}
+    M.fire = {team = team, at = GetTime(), weapon = GetWeaponClass(shooter, 3), ammo = pendingFire.ammo,
+              target = tostring(target), targetHealth = round(GetCurHealth(target))}
     return M.fire
+end
+
+-- Lethal damage to every live deployed Splinter on this peer (0 killed when
+-- none is deployed yet, so the scenario can poll it). Returns this peer's clock
+-- at the kill and each Splinter's health before.
+function BugKillSplinter()
+    local before = {}
+    for h in AllObjects() do
+        if explosiveKind(h) == "splinter" and IsAlive(h) then
+            before[#before + 1] = {id = tostring(h), health = round(GetCurHealth(h)), mine = IsLocal(h), remote = IsRemote(h)}
+            Damage(h, 100000)
+        end
+    end
+    return {time = GetTime(), killed = #before, health = before}
 end
 
 -- One site on this peer: terrain heights and normals on a grid, every witness
@@ -298,6 +316,10 @@ function BugSite(cx, cz, radius, half, step)
                     mine = IsLocal(h), remote = IsRemote(h)}
             end
         end
+    end
+    if splinterTarget then
+        local alive = IsAlive(splinterTarget)
+        s.target = {id = tostring(splinterTarget), alive = alive, health = alive and round(GetCurHealth(splinterTarget)) or 0}
     end
     for _, r in ipairs(lifetimes) do
         if math.sqrt((r.lastX - cx) ^ 2 + (r.lastZ - cz) ^ 2) <= radius then s.lifetimes[#s.lifetimes + 1] = r end
