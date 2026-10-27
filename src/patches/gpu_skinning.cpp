@@ -1683,7 +1683,9 @@ namespace BZROpenShim
             void* entity = nullptr;
             if (probe.readable && !ReadRootEntity(root, entity))
                 probe.readable = false;
-            return entity;
+            // +0x94 is not an entity on every object kind; skip float-like junk
+            // before TryGetRttiClassName faults on it (logged as an AV).
+            return IsPointerShaped(entity) ? entity : nullptr;
         }
 
         void ScanFrame()
