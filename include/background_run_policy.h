@@ -7,7 +7,9 @@ namespace BZROpenShim
 {
     namespace BackgroundRunPolicy
     {
+        constexpr unsigned kWmActivate = 0x0006;
         constexpr unsigned kWmActivateApp = 0x001C;
+        constexpr unsigned kWaInactive = 0;
 
         // The toggle only ever acts in a windowed, single-player session.
         // Multiplayer already bypasses the engine's pause, and a fullscreen
@@ -18,10 +20,19 @@ namespace BZROpenShim
         }
 
         // WM_ACTIVATEAPP(FALSE) is swallowed so the engine never pauses the
-        // simulation or minimizes the window.
+        // simulation or minimizes the window. WM_ACTIVATE(WA_INACTIVE) is
+        // swallowed too: the engine forwards it to Ogre's window procedure,
+        // which marks the RenderWindow inactive, and Ogre then skips that
+        // window every frame. The sim keeps running but nothing is drawn.
         inline bool ShouldSwallowMessage(bool active, unsigned msg, unsigned long long wParam)
         {
-            return active && msg == kWmActivateApp && wParam == 0;
+            if (!active)
+                return false;
+            if (msg == kWmActivateApp)
+                return wParam == 0;
+            if (msg == kWmActivate)
+                return (wParam & 0xFFFFu) == kWaInactive;
+            return false;
         }
 
         // The app-active flag is forced on only while the window is not
