@@ -10,5 +10,7 @@ void ConfigureP2PReliablePatches(std::vector<HookEngine::PatchDef>& patches);
 // Opt-in receive tolerance for unreliable updates stamped past a missing
 // reliable fragment ([Network] EarlyUnreliableAccept).
 void ConfigureP2PEarlyUnreliablePatches(std::vector<HookEngine::PatchDef>& patches);
+// New hosted lobbies start with Sync Join on ([Fixes] SyncJoinDefaultOn).
+void ConfigureSyncJoinDefaultPatch(std::vector<HookEngine::PatchDef>& patches);
 }
 }

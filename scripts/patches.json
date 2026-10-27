@@ -30,6 +30,15 @@
       "identity": "GOG 2.2.301 P2P send 0x0075BEB0 queues and increments reliable sequence before this connected-state/retransmit-pending test at 0x0075C71B. Only the second JNE at 0x0075C730 skips immediate send to 0x0075C972 when peer+0x1A is set. The retry pump 0x0075AAF0 still owns acknowledgements and retransmission; receive 0x0075D800 rejects updates stamped beyond unreceived reliable messages. The exact whole test occurs once in the shipped GOG image and the recorded four-player replay reproduces native drop counts within three packets. Preserve the connected-state branch and remove only the backlog branch; no fallback on a signature miss. See reverse_engineering/p2p_reliable_send_backlog_20261007.md."
     },
     {
+      "name": "Sync Join Default On",
+      "pattern": "74 14 8B 55 BC 0F BE 02 83 F8 31 75 09 C7 45 B4 01 00 00 00 EB 07 C7 45 B4 00 00 00 00 8B 4D 08 8A 55 B4 88 91 14 01 00 00",
+      "offset": 25,
+      "expected_size": 1,
+      "fallback": "0x00000000",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 hosted-lobby game-info loader 0x00742090 (called for every new hosted lobby via 0x007436C0 from CNetGameLobby::OnLobbyCreated 0x0073DF60) reads multi.ini [multi] syncJoin (default \"1\" at 0x00873EF0) and stores 1 if it starts with '1', else the immediate 0 at 0x0074216E, into lobby game-info +0x114. The UI toggle 0x0079B880 flips +0x114 and writes multi.ini, so one host who turns Sync Join off keeps it off in every later game. At launch 0x00742DF0 reads +0x114 and locks the lobby through backend vtable +0x34 (Steam 0x00750BD0, Galaxy 0x0074DF20, BZRNet 0x0074B540). Writing 01 over the else-arm immediate starts every new lobby with Sync Join on; the toggle still works for that game. Whole test unique in the shipped image; no fallback on a miss."
+    },
+    {
       "name": "P2P Reliable First Retry",
       "pattern": "6A 00 68 E8 03 00 00 8D 8D FC FE FF FF E8 9A 34 00 00",
       "offset": 3,

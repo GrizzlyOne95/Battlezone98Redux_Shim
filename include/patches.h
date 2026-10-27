@@ -341,6 +341,7 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early Unreliable Drop Log", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early Unreliable Deliver", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early NAK Accept", false, {} },
+            { 0, HookEngine::PatchType::BYTES, {}, "Sync Join Default On", false, {} },
         };
 
         // Future: could also load this list from JSON

@@ -1614,6 +1614,7 @@ namespace BZROpenShim
         FillJmp5Payloads(patches); FillDwordPayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
         Hooks::ConfigureP2PReliablePatches(patches);
         Hooks::ConfigureP2PEarlyUnreliablePatches(patches);
+        Hooks::ConfigureSyncJoinDefaultPatch(patches);
         // Apply critical patches (JMP5 hooks, version notice, etc.) BEFORE the
         // deferred-hook retry loop. The retry loop can take ~25 seconds for
         // Steam input binding UI hooks, and the game may crash during that
