@@ -650,7 +650,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Splinter Undead Fix", "Fixes", "SplinterUndead", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Stop a destroyed splinter from spawning payload ordnance. Single player only. Restart required." },
+      "Stop a destroyed splinter from spawning payload ordnance. Single player, and multiplayer while Splinter Sync is on. Restart required." },
     { "Howitzer Deploy Fix", "Fixes", "HowitzerUndeployedRetaliation", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
