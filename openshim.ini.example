@@ -1852,6 +1852,20 @@ EarlyNakHoldoffMs = 300
 ; every impaired profile). Used only with EarlyNakAccept.
 EarlyNakReorderMs = 0
 
+; Keeps a running match when only the lobby websocket drops. Gameplay is P2P;
+; stock still quits ("Lost connection to game") the moment the websocket
+; closes, even though it reconnects within a second. While a mission is
+; running and a peer answered one of the last two P2P pings (about 6 s), the
+; local lobby leave is skipped, and a remote player whose lobby session ended
+; is kept while their P2P is live (kicks and bans still drop). A real P2P
+; loss still ends the session through the stock ping check and host
+; auto-kick.
+; Accepted: boolean. Default: ON (stock behaviour is a defect; inert unless
+; the websocket drops mid-match). Restart required.
+; Kill switch: OPENSHIM_DISABLE_LOBBY_DROP_KEEPS_MATCH (or BZR_ prefix).
+; Sites: GOG 2.2.301 0x006BF11B, 0x0073F13F; a signature mismatch keeps stock.
+LobbyDropKeepsMatch = 1
+
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],
 ; because it is applied by the socket layer. See net.ini for what each value

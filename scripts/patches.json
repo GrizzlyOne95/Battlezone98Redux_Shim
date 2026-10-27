@@ -465,6 +465,24 @@
       "expected_size": 4,
       "fallback": "0x006A1AE4",
       "require_unique": true
+    },
+    {
+      "name": "Lobby Drop Keeps Match Local",
+      "pattern": "8B 4D F0 83 B9 38 0C 00 00 00 74 0E 8B 55 F0 8B 8A 38 0C 00 00 E8 ?? ?? ?? ?? 8B 45 F0 0F B6 08 85 C9",
+      "offset": 22,
+      "expected_size": 4,
+      "fallback": "0x006BF11C",
+      "require_unique": true,
+      "identity": "Leave-lobby call (E8 at 0x006BF11B, ECX=[this+0xC38] current lobby) inside the BZRNetInterface websocket close handler 0x006BF0D0 ('reset active_con due to websocket connection close', push at 0x006BF1D9) on GOG Redux 2.2.301. Stock target Net::LeaveLobbyOnClose 0x0074D250 (__thiscall, no stack args) tears down the P2P session (0x0075CEA0) and runs player-left 0x00578640 for the local id, which sets Net state 5 so DoNextFrame quits with 'Net Execute failure'. Redirected only by [Network] LobbyDropKeepsMatch after the call target matches the resolve; signature unique in the shipped image."
+    },
+    {
+      "name": "Lobby Drop Keeps Match Remote",
+      "pattern": "C6 45 8A 01 0F B6 55 8A 52 8B 45 0C 50 E8 ?? ?? ?? ?? 83 C4 08 8D 8D 4C FF FF FF 51",
+      "offset": 14,
+      "expected_size": 4,
+      "fallback": "0x0073F140",
+      "require_unique": true,
+      "identity": "Player-left call (E8 at 0x0073F13F, cdecl(member NetId*, kicked||banned), add esp 8) in CNetGameLobby::OnLobbyChatUpdate 0x0073EEB0 for a member-left lobby update on GOG Redux 2.2.301. Stock target Net::PlayerLeft 0x00578640 drops that player from the running game. Redirected only by [Network] LobbyDropKeepsMatch after the call target matches the resolve; signature unique in the shipped image."
     }
   ],
   "resolves": [
@@ -1770,6 +1788,76 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Global holding the pointer to the engine's GameObject list (1.5 GameObject::objectList, a std::vector<GameObject*>) on exact GOG Redux 2.2.301, read from the `mov eax,[imm32]` that opens FUN_005C7E90, the Lua GetHandle(label) walker (its miss message is \"No object named \\\"%s\\\"\"). The walker passes that pointer as ECX to 0x0041FBD0 (begin = [ecx]) and 0x0041FC30 (end = [ecx+4]), i.e. _Myfirst at +0 and _Mylast at +4, then reads GetLabel on each element. Whole-image scan 2026-10-13: one match."
+    },
+    {
+      "name": "Net::PlayerLeft",
+      "pattern": "55 8B EC 51 83 3D ?? ?? ?? ?? 00 75 05 E9 FB 00 00 00 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 83 7D FC 00 0F 84 E2 00 00 00 8B 4D FC 0F B6 91 8E 00 00 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00578640",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Player-left 0x00578640, void __cdecl(const NetId*, bool kicked): FindPlayer, then for the local player (+0x8E) Net state 5, else player_left/host_autokicked and removal (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "Net::ManagerSlot",
+      "pattern": "55 8B EC 51 83 3D ?? ?? ?? ?? 00 75 05 E9 FB 00 00 00 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 83 7D FC 00 0F 84 E2 00 00 00 8B 4D FC 0F B6 91 8E 00 00 00",
+      "offset": 6,
+      "mode": "abs32_operand",
+      "fallback": "0x00917F48",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Global NetManager pointer read by player-left's `cmp [imm32],0`; NetManager+8 is the Net state (4 = in session, 5/6 = left/ended) (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "Net::FindPlayer",
+      "pattern": "55 8B EC 51 83 3D ?? ?? ?? ?? 00 75 05 E9 FB 00 00 00 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 83 7D FC 00 0F 84 E2 00 00 00 8B 4D FC 0F B6 91 8E 00 00 00",
+      "offset": 22,
+      "mode": "rel32_target",
+      "fallback": "0x00577200",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "FindPlayer 0x00577200, Player* __cdecl(const NetId*), called by player-left (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "Net::LeaveLobbyOnClose",
+      "pattern": "55 8B EC 51 89 4D FC E8 ?? ?? ?? ?? 8B 4D FC 83 C1 28 E8 ?? ?? ?? ?? 0F B6 C0 85 C0 74 5A",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0074D250",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Leave-lobby cleanup 0x0074D250, __thiscall(lobby), called from the websocket close handler 0x006BF0D0 (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "Net::NextPlayer",
+      "pattern": "E8 ?? ?? ?? ?? 89 85 BC FE FF FF EB 15 8B 95 BC FE FF FF 52 E8 ?? ?? ?? ?? 83 C4 04",
+      "offset": 20,
+      "mode": "rel32_target",
+      "fallback": "0x00577B50",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "NextPlayer 0x00577B50, Player* __cdecl(Player*), 0 returns the first player (FirstPlayer 0x0056F950 is NextPlayer(0)); call in the ping check 0x00576B70 (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "GameState::Get",
+      "pattern": "E8 ?? ?? ?? ?? 85 C0 74 61 E8 ?? ?? ?? ?? 85 C0 75 56 E8 ?? ?? ?? ?? 83 F8 02 74 42 E8 ?? ?? ?? ?? 85 C0 75 39 68",
+      "offset": 18,
+      "mode": "rel32_target",
+      "fallback": "0x00434160",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Game state getter 0x00434160 (returns [0x008E706C]; 5 = mission running) called after Net Execute in DoNextFrame 0x00618130 (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "Net::GameEnded",
+      "pattern": "E8 ?? ?? ?? ?? 85 C0 74 61 E8 ?? ?? ?? ?? 85 C0 75 56 E8 ?? ?? ?? ?? 83 F8 02 74 42 E8 ?? ?? ?? ?? 85 C0 75 39 68",
+      "offset": 28,
+      "mode": "rel32_target",
+      "fallback": "0x00572A80",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Game-ended flag getter 0x00572A80 (byte [0x00917F4C]) called after Net Execute in DoNextFrame 0x00618130 (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
     }
   ],
   "engine_addresses": [
