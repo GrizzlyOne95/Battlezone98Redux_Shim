@@ -42,6 +42,9 @@ Test the exact release candidate files on the supported GOG executable.
 - campaign mission launch
 - Instant Action launch
 - save, load, restart
+  (`reverse_engineering/test_cr_saveload.ps1` automates this for every CR
+  mission: a menu save and an OpenShim autosave per mission, each loaded in a
+  fresh process and held past its first Updates)
 - return mission -> shell -> mission
 - clean process exit and relaunch
 
