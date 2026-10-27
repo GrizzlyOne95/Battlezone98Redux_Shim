@@ -47,6 +47,7 @@ namespace BZROpenShim
     extern FnResolveObj76GameObject g_BzrFn_ResolveObj76GameObject;
 
     void InstallShadowFarOverrideIfPossible();
+    void InstallEffectLightShadowFixIfPossible();
 
     using FnEngineFlameAddFlame = void(__thiscall*)(void* self, const void* transform, float scale);
     using FnEngineFlameControl = void(__thiscall*)(void* self);

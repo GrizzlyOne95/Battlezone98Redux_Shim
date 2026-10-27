@@ -1632,6 +1632,7 @@ namespace BZROpenShim
         InstallEnhancedLightSelectionIfPossible();
         InstallD3D11ConstantLookupCacheIfPossible();
         InstallShadowFarOverrideIfPossible();
+        InstallEffectLightShadowFixIfPossible();
         InstallJumpSnipingProbeIfRequested();
         InstallUnitTurboHooksIfPossible();
         InstallCareerStatsMpHookIfPossible();
