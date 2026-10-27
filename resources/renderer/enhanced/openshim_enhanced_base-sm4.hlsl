@@ -1587,7 +1587,9 @@ void base_fragment(
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     oColor.xyz += specularResult.xyz;
 #endif
+#if defined(ACT_MAP_ENABLED) && defined(IBL_ENABLED)
     oColor.xyz *= cavity;
+#endif
 
     float3 emissiveContribution = float3(0.0, 0.0, 0.0);
 #if defined(ENHANCED_MODE)
