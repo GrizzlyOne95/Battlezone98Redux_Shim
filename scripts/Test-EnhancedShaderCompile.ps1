@@ -206,6 +206,40 @@ foreach ($bad in $incomplete) {
 }
 $variants = @($variants | Where-Object { $_.Source -and $_.Target -and $_.Entry })
 
+# TerrainHdEnabled builds one more fragment per terrain_fragment program at
+# runtime, from source no .program declares: BuildSemanticFragmentSource in
+# src/patches/terrain_proxy.cpp retypes diffuseMap to a Texture2DArray, adds the
+# HD UV/slice inputs and defines OPENSHIM_TERRAIN_HD=1. Compile that twin too,
+# with the same text rewrite, so an HD-only break fails here, not in the game log.
+$hdTwins = @($variants | Where-Object {
+    $_.Source -eq 'openshim_enhanced_terrain-sm4.hlsl' -and
+    $_.Target -like 'ps_4*' -and $_.Entry -eq 'terrain_fragment'
+} | ForEach-Object {
+    [pscustomobject]@{
+        Name = "$($_.Name) [HD]"; Source = $_.Source; Target = $_.Target
+        Entry = $_.Entry; Defines = @($_.Defines) + 'OPENSHIM_TERRAIN_HD=1'; Hd = $true
+    }
+})
+$variants += $hdTwins
+
+# Mirrors BuildSemanticFragmentSource's hdDiffuse rewrite. A missing token means
+# the runtime rewrite fails too and HD terrain silently stays stock.
+function Convert-ToHdTerrainSource {
+    param([string]$Text)
+    $declaration = 'uniform Texture2D diffuseMap : register(t0),'
+    $fragmentUv = 'in float2 vTexCoord : TEXCOORD0,'
+    $sample = 'diffuseMap.Sample(diffuseSam, vTexCoord)'
+    foreach ($token in @($declaration, $fragmentUv, $sample)) {
+        if ($Text.IndexOf($token) -lt 0) { return $null }
+    }
+    $at = $Text.IndexOf($declaration)
+    $Text = $Text.Remove($at, $declaration.Length).Insert($at, 'uniform Texture2DArray diffuseMap : register(t0),')
+    $at = $Text.IndexOf($fragmentUv) + $fragmentUv.Length
+    $Text = $Text.Insert($at, "`n    in float2 openShimHdUV : TEXCOORD9,`n    in float openShimTileSlice : TEXCOORD10,")
+    $at = $Text.IndexOf($sample)
+    return $Text.Remove($at, $sample.Length).Insert($at, 'diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice))')
+}
+
 # Many program names differ only in their runtime bindings and compile to the
 # same thing. Compile each distinct (source, target, entry, defines) once and
 # report which program names it covers -- the count of names is what the
@@ -288,10 +322,27 @@ try {
             continue
         }
 
+        $includeArgs = @()
+        if ($v.PSObject.Properties['Hd']) {
+            $hdText = Convert-ToHdTerrainSource -Text (Get-Content -Raw -LiteralPath $sourcePath)
+            if (-not $hdText) {
+                $failures += [pscustomobject]@{
+                    Name = $v.Name; Target = $v.Target; Entry = $v.Entry
+                    Source = $v.Source; Defines = ($v.Defines -join ",")
+                    Output = "HD diffuse rewrite tokens not found; BuildSemanticFragmentSource would decline this program"
+                }
+                Write-Host ("[{0,3}/{1}] FAIL     {2} HD rewrite" -f $index, $groups.Count, $v.Source) -ForegroundColor Red
+                continue
+            }
+            $sourcePath = Join-Path $outDir ("v{0}-hd-{1}" -f $index, $v.Source)
+            [System.IO.File]::WriteAllText($sourcePath, $hdText)
+            $includeArgs = @("/I", $PayloadDir)
+        }
+
         # Ogre's D3D11 program gives a bare define the value "1"; mirror that
         # exactly, or a `#if FOO` in the shader evaluates differently here than
         # it does at runtime and the validation is of a variant nobody ships.
-        $args = @("/nologo", "/T", $v.Target, "/E", $v.Entry)
+        $args = @("/nologo", "/T", $v.Target, "/E", $v.Entry) + $includeArgs
         foreach ($d in $v.Defines) {
             if ($d -match "=") { $args += @("/D", $d) } else { $args += @("/D", "$d=1") }
         }
