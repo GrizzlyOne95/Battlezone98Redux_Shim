@@ -82,6 +82,12 @@
 //              Inert while Graphics/Renderer stays Auto. Only the old
 //              shipped 0 moves.
 //
+//   Revision 12: the multiplayer setup screen turned on by default at the
+//              user's request on 2026-10-27:
+//                 Network/PreLobby                = 1  (was 0)
+//              Rebellion stays the default server. Only the old shipped 0
+//              moves.
+//
 // Migration policy is implemented here so it works for:
 //   - Campaign Reimagined Workshop users
 //   - standalone OpenShim releases
@@ -96,7 +102,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 11;
+    constexpr int kCurrentPresetRevision = 12;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset as a Windows checkout

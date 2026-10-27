@@ -1,16 +1,16 @@
 #pragma once
 
 // Matchmaking server selection: the pure parsing and validation behind the
-// pre-lobby's Rebellion / Custom choice. Header-only and free of Windows and
-// engine calls so the tests can include it.
+// pre-lobby's Rebellion / Custom / Local choice. Header-only and free of
+// Windows and engine calls so the tests can include it.
 //
-//   openshim.ini [Network] Server       = Rebellion | Custom   (absent: no override)
+//   openshim.ini [Network] Server       = Rebellion | Custom | Local   (absent: no override)
 //   openshim.ini [Network] CustomServer = <host or IP>[:1337]
 //
 // Only the host is switchable. The scheme (ws) and port (1337) are the same
 // for the official and custom servers, so a CustomServer value carries
 // neither; a trailing ":1337" is accepted and dropped, any other port is
-// refused.
+// refused. Local is a dedicated server on this PC, at 127.0.0.1.
 
 #include <cstddef>
 #include <string>
@@ -21,6 +21,7 @@ namespace BZROpenShim
 namespace MatchmakingServer
 {
     inline constexpr const char kRebellionHost[] = "battlezone98mp.webdev.rebellion.co.uk";
+    inline constexpr const char kLocalHost[] = "127.0.0.1";
     inline constexpr unsigned kPort = 1337;
     inline constexpr size_t kMaxHostLength = 253;
 
@@ -29,6 +30,7 @@ namespace MatchmakingServer
         None,       // no saved choice: stock behaviour (/bzrserver or the official host)
         Rebellion,
         Custom,
+        Local,      // a dedicated server on this PC (kLocalHost)
     };
 
     enum class HostStatus
@@ -80,7 +82,7 @@ namespace MatchmakingServer
     }
 
     // The [Network] Server value. Empty or absent is Mode::None and parses.
-    // False (mode None) for anything else that is not Rebellion or Custom.
+    // False (mode None) for anything that is not Rebellion, Custom or Local.
     inline bool ParseMode(std::string_view text, Mode& mode)
     {
         mode = Mode::None;
@@ -97,6 +99,11 @@ namespace MatchmakingServer
             mode = Mode::Custom;
             return true;
         }
+        if (EqualsNoCase(text, "Local"))
+        {
+            mode = Mode::Local;
+            return true;
+        }
         return false;
     }
 
@@ -106,6 +113,7 @@ namespace MatchmakingServer
         {
         case Mode::Rebellion: return "Rebellion";
         case Mode::Custom: return "Custom";
+        case Mode::Local: return "Local";
         default: return "";
         }
     }
@@ -164,12 +172,14 @@ namespace MatchmakingServer
     }
 
     // The host the saved settings select: the official host for Rebellion, the
-    // validated CustomServer for Custom, empty for no override (None, or a
-    // Custom with an unusable address).
+    // validated CustomServer for Custom, 127.0.0.1 for Local, empty for no
+    // override (None, or a Custom with an unusable address).
     inline std::string ResolveSavedHost(Mode mode, std::string_view customServer)
     {
         if (mode == Mode::Rebellion)
             return kRebellionHost;
+        if (mode == Mode::Local)
+            return kLocalHost;
         if (mode == Mode::Custom)
         {
             std::string host;

@@ -356,7 +356,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
 
     # The startup backend seam behind the Video page's Renderer row, on since
     # 2026-10-26 (preset revision 11). Inert while Graphics/Renderer = Auto.
-    "Startup/BackendTransport"
+    "Startup/BackendTransport",
+
+    # The multiplayer setup screen, on at the user's request on 2026-10-27
+    # (preset revision 12). Rebellion stays the default server.
+    "Network/PreLobby"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(
@@ -486,7 +490,7 @@ $shippingPolicyChecks = @{
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"
-    "Network/PreLobby" = "0"
+    "Network/PreLobby" = "1"
     "Career/StatsTracking" = "0"
     "SinglePlayer/JumpSnipeCrouch" = "1"
     "SinglePlayer/AttackRevealPerceivedTeam" = "0"

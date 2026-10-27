@@ -747,12 +747,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Experimental: recycle the lounge BZRNet connection after a nickname "
       "edit so stock reconnects and authorizes the new name. Expect a brief "
       "lounge drop / possible Not Ready flicker. In-match remains persist-only." },
-    // Absent key = off, so defaultIndex 1 selects "0" (Off).
+    // defaultIndex 0 selects "1", matching an absent key (default on).
     { "MP Setup Screen", "Network", "PreLobby", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::ReadOnNextUse,
       "Multiplayer opens a setup screen first (nickname, flag, matchmaking "
-      "server: Rebellion or Custom) instead of going straight to the lobby. "
+      "server: Rebellion, Custom or Local) instead of going straight to the lobby. "
       "While on, the nickname and flag pickers move to that screen and are "
       "no longer built in the lobby. Read when Multiplayer is clicked." },
     // defaultIndex 0 selects "1", matching an absent key (default on).

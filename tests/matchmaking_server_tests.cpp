@@ -27,6 +27,7 @@ namespace
         CHECK(MS::ParseMode("", mode) && mode == MS::Mode::None);
         CHECK(MS::ParseMode("  rebellion ", mode) && mode == MS::Mode::Rebellion);
         CHECK(MS::ParseMode("CUSTOM", mode) && mode == MS::Mode::Custom);
+        CHECK(MS::ParseMode(" local", mode) && mode == MS::Mode::Local);
         CHECK(!MS::ParseMode("official", mode) && mode == MS::Mode::None);
     }
 
@@ -65,6 +66,7 @@ namespace
     {
         CHECK(MS::ResolveSavedHost(MS::Mode::None, "x.example") == "");
         CHECK(MS::ResolveSavedHost(MS::Mode::Rebellion, "x.example") == MS::kRebellionHost);
+        CHECK(MS::ResolveSavedHost(MS::Mode::Local, "x.example") == MS::kLocalHost);
         CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "x.example:1337") == "x.example");
         CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "ws://x.example") == "");
         CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "") == "");

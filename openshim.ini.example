@@ -2027,23 +2027,24 @@ LobbyBanButton = 1
 ; opens the lobby exactly as stock does. While this is ON the nickname and flag
 ; pickers appear only on the setup screen and are not built in the lobby (the
 ; net-route readout stays there; /nickname works either way).
-; Accepted: boolean. Default: OFF. Read when Multiplayer is clicked.
-; The Server row picks Rebellion or a Custom host (see Server below); it is
+; Accepted: boolean. Default: ON. Read when Multiplayer is clicked.
+; The Server row picks Rebellion, a Custom host or Local (see Server below); it is
 ; read-only, showing "<address> (test redirect)", when [OpenShimSocket]
 ; MatchmakingRedirectAddress is set.
-PreLobby = 0
+PreLobby = 1
 
 ; Matchmaking server: Rebellion's official one or a community/custom one.
-; Accepted: Rebellion, Custom. Blank/absent = no override: stock behaviour,
+; Accepted: Rebellion, Custom, Local. Local is a dedicated server running on
+; this PC (127.0.0.1, port 1337). Blank/absent = no override: stock behaviour,
 ; i.e. whatever the /bzrserver= launch switch gives, else Rebellion's server.
 ; The multiplayer setup screen (PreLobby) edits this and CustomServer; Continue
 ; saves a changed choice and reconnects to it. Read at startup too, so the first
 ; connection and invites use the saved server. Needs NetImprovements on.
 ; Precedence: net.ini MatchmakingRedirectAddress (test redirect) > this >
 ; /bzrserver= > Rebellion.
-; SECURITY: a custom server receives your platform (Steam/GOG) sign-in ticket
-; in the BZRNet Authorization, exactly as Rebellion's does. Only choose a
-; server you trust.
+; SECURITY: your platform (Steam/GOG) sign-in ticket is sent only to
+; Rebellion's server. Custom, Local, /bzrserver= and test-redirect servers get
+; the BZRNet Authorization without it.
 ; Server =
 
 ; Host name or IP of the custom server, used when Server = Custom.

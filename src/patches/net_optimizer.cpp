@@ -3758,7 +3758,7 @@ namespace
         MatchmakingServer::Mode mode = MatchmakingServer::Mode::None;
         if (!MatchmakingServer::ParseMode(modeText, mode))
         {
-            Logf("[OpenShimNet] Ignoring [Network] Server=%s (expected Rebellion or Custom)",
+            Logf("[OpenShimNet] Ignoring [Network] Server=%s (expected Rebellion, Custom or Local)",
                 modeText.c_str());
             return;
         }

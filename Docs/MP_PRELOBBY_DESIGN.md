@@ -1,8 +1,8 @@
 # Multiplayer pre-lobby: design
 
-Status: **nickname + flag + server selection (Rebellion / Custom, host only)
+Status: **nickname + flag + server selection (Rebellion / Custom / Local, host only)
 implemented** as an OpenShim shell screen (`src/patches/prelobby_screen.cpp`,
-opt-in `[Network] PreLobby = 1`). LAN and non-default ports are not built. Static RE for the GOG build
+on by default, `[Network] PreLobby = 0` turns it off). LAN and non-default ports are not built. Static RE for the GOG build
 (sha256 `8d71f56c…3377413`, byte-identical to the decompile corpus). The live
 checks listed at the end have not run.
 
@@ -205,11 +205,13 @@ will use, whatever happens to the live session.
      (`CreateFlagButtonCommon`), borrowed from `lobby_ui.cpp` and parented to
      the centre panel
    - CONNECTION box: `Network: Ready | Connecting... | Status unknown`, and a
-     `Server:` row with two stock-style option slots, **Rebellion** and
-     **Custom** (the selected one is captioned `> Rebellion <`), plus a text
-     entry for the custom host that exists only while Custom is selected. A
-     note under it reads "Custom servers never receive your sign-in
-     ticket." When a test redirect is active
+     `Server:` row with three stock-style option slots, **Rebellion**,
+     **Custom** and **Local** (the selected one is captioned `> Rebellion <`),
+     plus a text entry for the custom host that exists only while Custom is
+     selected. Local is 127.0.0.1, a dedicated server on this PC. A note
+     under the row reads "Custom servers never receive your sign-in
+     ticket." (Custom) or "Start the dedicated server on this PC first."
+     (Local). When a test redirect is active
      (`GetMatchmakingRedirectTarget`) the row is instead the read-only label
      `Server: <addr> (test redirect)` and no toggle or entry is built.
    - Back (top corner) and Continue (bottom centre)
@@ -265,7 +267,7 @@ line repeats after a recycle).
    `BZ_MATCHMAKING_ADDRESS` / `OPENSHIM_MATCHMAKING_ADDRESS`). Fail-closed guard
    for the test harness: it redirects the official host as before, nothing
    below applies while it is set, and the pre-lobby selector is read-only.
-2. The saved choice: `[Network] Server = Rebellion | Custom` with
+2. The saved choice: `[Network] Server = Rebellion | Custom | Local` with
    `CustomServer = <host or IP>[:1337]`, loaded at startup into the live
    override (so the first connection and invites use it) and updated by
    Continue. Absent or blank means no override.

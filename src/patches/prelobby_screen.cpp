@@ -74,17 +74,17 @@ namespace BZROpenShim
         constexpr float kFlagX = kPlayerBox.x + kPlayerBox.w * 0.5f + (kPlayerBox.w * 0.5f - kFlagW) * 0.5f;
         constexpr float kFlagArrowsY = kColumnTop + kFlagPreviewToArrows;
 
-        // The Server row: caption, the two toggle slots (the 196x42 option-slot
-        // size the settings pages use), then the custom-host well to the box's
-        // right padding. The security note sits one gap below.
+        // The Server row: caption, the three toggle slots, then the
+        // custom-host well to the box's right padding. The note sits one gap
+        // below. mkscreens.py PRELOBBY_LAYOUT paints the same rectangles.
         constexpr float kServerRowY = kConnectionBox.y + kRowTop + kRowH;
         constexpr float kServerRowH = 42.0f;
         constexpr float kServerCaptionW = 110.0f;
-        constexpr float kServerSlotW = 196.0f;
+        constexpr float kServerSlotW = 160.0f;
         constexpr float kServerSlotGap = 10.0f;
         constexpr float kServerCaptionX = kConnectionBox.x + kBoxPadX;
         constexpr float kServerSlotX = kServerCaptionX + kServerCaptionW + kServerSlotGap;
-        constexpr float kServerWellX = kServerSlotX + 2.0f * (kServerSlotW + kServerSlotGap);
+        constexpr float kServerWellX = kServerSlotX + 3.0f * (kServerSlotW + kServerSlotGap);
         constexpr float kServerWellW = kConnectionBox.x + kConnectionBox.w - kBoxPadX - kServerWellX;
         constexpr float kServerNoteY = kServerRowY + kServerRowH + 8.0f;
 
@@ -118,11 +118,12 @@ namespace BZROpenShim
 
         // The Server selector. g_ServerSelector is false while a test redirect
         // owns the endpoint: the row is then a read-only label.
-        enum class ServerChoice { Rebellion, Custom };
+        enum class ServerChoice { Rebellion, Custom, Local };
         bool g_ServerSelector = false;
         ServerChoice g_Choice = ServerChoice::Rebellion;
         void* g_RebellionButton = nullptr;
         void* g_CustomButton = nullptr;
+        void* g_LocalButton = nullptr;
         void* g_ServerNoteLabel = nullptr;
 
         using FnClickMultiPlayer = void(__thiscall*)(void* screen);
@@ -140,6 +141,12 @@ namespace BZROpenShim
         namespace MS = MatchmakingServer;
 
         constexpr const char* kCustomServerNote = "Custom servers never receive your sign-in ticket.";
+        constexpr const char* kLocalServerNote = "Start the dedicated server on this PC first.";
+
+        bool IsLocalHost(const std::string& host)
+        {
+            return MS::EqualsNoCase(host, MS::kLocalHost) || MS::EqualsNoCase(host, "localhost");
+        }
 
         // The host the client connects to right now: the live override, else
         // the /bzrserver= launch host, else the official one.
@@ -151,17 +158,18 @@ namespace BZROpenShim
             return host;
         }
 
-        // Where the selector starts: the host in effect decides Rebellion or
-        // Custom, and the entry is prefilled with it (or, for Rebellion, with
-        // the saved CustomServer so toggling back finds it).
+        // Where the selector starts: the host in effect decides Rebellion,
+        // Local or Custom, and the entry is prefilled with it (or, for
+        // Rebellion and Local, with the saved CustomServer so toggling back
+        // finds it).
         void ReadServerState(ServerChoice& choice, std::string& customText)
         {
             const std::string current = CurrentServerHost();
             std::string saved;
             TryGetUserConfigString("Network", "CustomServer", saved);
-            if (current.empty() || MS::EqualsNoCase(current, MS::kRebellionHost))
+            if (current.empty() || MS::EqualsNoCase(current, MS::kRebellionHost) || IsLocalHost(current))
             {
-                choice = ServerChoice::Rebellion;
+                choice = IsLocalHost(current) ? ServerChoice::Local : ServerChoice::Rebellion;
                 customText = TrimAsciiCopy(saved);
             }
             else
@@ -176,11 +184,13 @@ namespace BZROpenShim
             const bool selected = g_Choice == which;
             if (which == ServerChoice::Rebellion)
                 return selected ? "> Rebellion <" : "Rebellion";
+            if (which == ServerChoice::Local)
+                return selected ? "> Local <" : "Local";
             return selected ? "> Custom <" : "Custom";
         }
 
-        // Captions mark the selected button; the host entry and the security
-        // note exist only while Custom is selected.
+        // Captions mark the selected button; the host entry exists only while
+        // Custom is selected, and the note explains Custom and Local.
         void RefreshServerSelector()
         {
             if (!g_ServerSelector)
@@ -192,9 +202,13 @@ namespace BZROpenShim
                     g_BzrFn_SetButtonLabel(g_RebellionButton, ServerCaption(ServerChoice::Rebellion));
                 if (g_CustomButton)
                     g_BzrFn_SetButtonLabel(g_CustomButton, ServerCaption(ServerChoice::Custom));
+                if (g_LocalButton)
+                    g_BzrFn_SetButtonLabel(g_LocalButton, ServerCaption(ServerChoice::Local));
             }
             PreLobbySetServerEntryVisible(custom);
-            Shell::SetLabelText(g_ServerNoteLabel, custom ? kCustomServerNote : "");
+            Shell::SetLabelText(g_ServerNoteLabel,
+                                custom ? kCustomServerNote
+                                : g_Choice == ServerChoice::Local ? kLocalServerNote : "");
         }
 
         void __cdecl OnRebellionClicked()
@@ -209,6 +223,12 @@ namespace BZROpenShim
             RefreshServerSelector();
         }
 
+        void __cdecl OnLocalClicked()
+        {
+            g_Choice = ServerChoice::Local;
+            RefreshServerSelector();
+        }
+
         // Resolves the selector to the host that should be in effect. False,
         // with a note set, when a Custom address is unusable.
         bool ResolveDesiredServerHost(std::string& desired)
@@ -216,6 +236,11 @@ namespace BZROpenShim
             if (g_Choice == ServerChoice::Rebellion)
             {
                 desired = MS::kRebellionHost;
+                return true;
+            }
+            if (g_Choice == ServerChoice::Local)
+            {
+                desired = MS::kLocalHost;
                 return true;
             }
             char typed[192] = {};
@@ -253,7 +278,10 @@ namespace BZROpenShim
                 return true;
 
             const bool custom = g_Choice == ServerChoice::Custom;
-            if (!WriteShimUserConfigValue("Network", "Server", custom ? "Custom" : "Rebellion") ||
+            const MS::Mode mode = custom ? MS::Mode::Custom
+                                : g_Choice == ServerChoice::Local ? MS::Mode::Local
+                                : MS::Mode::Rebellion;
+            if (!WriteShimUserConfigValue("Network", "Server", MS::ModeName(mode)) ||
                 (custom && !WriteShimUserConfigValue("Network", "CustomServer", desired.c_str())))
             {
                 SetNote("Server not saved");
@@ -262,7 +290,7 @@ namespace BZROpenShim
             }
             SetMatchmakingServerOverride(desired.c_str());
             Log(L"[PRELOBBY] server selection applied: %hs (%hs)\n", desired.c_str(),
-                custom ? "custom" : "rebellion");
+                MS::ModeName(mode));
             changed = true;
             return true;
         }
@@ -298,6 +326,7 @@ namespace BZROpenShim
             g_Choice = ServerChoice::Rebellion;
             g_RebellionButton = nullptr;
             g_CustomButton = nullptr;
+            g_LocalButton = nullptr;
             g_ServerNoteLabel = nullptr;
             g_Pending = false;
             g_AwaitDrop = false;
@@ -584,6 +613,11 @@ namespace BZROpenShim
                     { kServerSlotX + kServerSlotW + kServerSlotGap, kServerRowY, kServerSlotW,
                       kServerRowH },
                     ServerCaption(ServerChoice::Custom), slotSkin, 1.0f, 0.0f, &OnCustomClicked);
+                g_LocalButton = Shell::AddButton(
+                    panel, panel, "OpenShimPreLobby_ServerLocal",
+                    { kServerSlotX + 2.0f * (kServerSlotW + kServerSlotGap), kServerRowY, kServerSlotW,
+                      kServerRowH },
+                    ServerCaption(ServerChoice::Local), slotSkin, 1.0f, 0.0f, &OnLocalClicked);
                 g_ServerNoteLabel = Shell::AddLabel(
                     panel, panel, "OpenShimPreLobby_ServerNote",
                     { kServerCaptionX, kServerNoteY, rowW, 34.0f }, "");
@@ -680,10 +714,12 @@ namespace BZROpenShim
 
         // Read at click time, so the Options row (ReadOnNextUse) takes effect
         // without a restart.
+        // An absent key is on.
         bool PreLobbyIniEnabled()
         {
-            bool enabled = false;
-            return TryGetUserConfigBool("Network", "PreLobby", enabled) && enabled;
+            bool enabled = true;
+            TryGetUserConfigBool("Network", "PreLobby", enabled);
+            return enabled;
         }
 
         // The MP-status refresh runs every title-screen frame, and the ini read
@@ -702,9 +738,12 @@ namespace BZROpenShim
         }
     }
 
+    // The lobby moves its pickers here only when this screen can actually
+    // open: with the key on by default, an unbound click hook must not leave
+    // the player with no nickname or flag picker anywhere.
     bool IsPreLobbyEnabled()
     {
-        return PreLobbyIniEnabled();
+        return g_Registered && g_ClickHookInstalled && PreLobbyIniEnabled();
     }
 
     void __fastcall PreLobbyClickMultiPlayerHook(void* thisPtr, void* /*edx*/)
