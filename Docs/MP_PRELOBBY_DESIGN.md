@@ -297,8 +297,10 @@ the DedicatedServer does not check it.
 
 OpenShim's own port checks (socket classification, ticket withholding, the
 recycle's socket match, relay datagram logging) accept 1337/1338 and the
-last selected port and port + 1, which is kept after the selection changes
-so the recycle still finds a socket on the old port.
+last non-1337 port a BZRNet lookup resolved for (a selected port, or a
+/bzrserver= port), plus that port + 1. It is kept after the selection
+changes so the recycle still finds a socket on the old port. On that port
+the recycle only closes sockets whose peer a BZRNet lookup resolved.
 
 **Security: the platform ticket is withheld from non-official servers.** The
 `Authorization` body carries the Steam/Galaxy ticket; a malicious server could

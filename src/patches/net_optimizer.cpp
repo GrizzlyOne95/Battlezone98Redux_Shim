@@ -395,9 +395,10 @@ namespace
     SRWLOCK g_ServerOverrideLock = SRWLOCK_INIT;
     std::string g_ServerOverrideHost;
 
-    // The last non-1337 websocket port a server selection sent a lookup to (0:
-    // none). Never cleared, so a socket still on that port is recognised after
-    // the selection moves on (the recycle runs before the next lookup). The
+    // The last non-1337 port a BZRNet lookup resolved for (a selected port or
+    // a /bzrserver= one; 0: none). Never cleared, so a socket still on that
+    // port is recognised after the selection moves on (the recycle runs
+    // before the next lookup). The
     // game probes UDP on the connected websocket port + 1.
     std::atomic<uint16_t> g_SelectedWebSocketPort{ 0 };
 
@@ -3850,16 +3851,20 @@ namespace
         return false;
     }
 
+    // A lookup for the endpoint the game itself would use: the official name,
+    // or the /bzrserver= host.
+    bool IsBzrNetLookupName(PCSTR nodeName)
+    {
+        return nodeName &&
+               (MatchmakingServer::EqualsNoCase(nodeName, kBzrNetMatchmakingHost) ||
+                MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()));
+    }
+
     // Called with the result of a BZRNet-endpoint lookup. `effectiveHost` is
     // the name actually resolved after any override.
     void RecordLookupAddresses(PCSTR nodeName, PCSTR effectiveHost, const ADDRINFOA* result)
     {
-        if (!nodeName || !effectiveHost || !result)
-            return;
-        // Only lookups for the endpoint the game itself would use: the official
-        // name, or the /bzrserver= host.
-        if (!MatchmakingServer::EqualsNoCase(nodeName, kBzrNetMatchmakingHost) &&
-            !MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+        if (!effectiveHost || !result || !IsBzrNetLookupName(nodeName))
             return;
 
         const bool official = MatchmakingServer::EqualsNoCase(effectiveHost, kBzrNetMatchmakingHost);
@@ -4038,13 +4043,23 @@ namespace
             {
                 std::snprintf(overridePortText, sizeof(overridePortText), "%u", overridePort);
                 resolvedService = overridePortText;
-                g_SelectedWebSocketPort.store(static_cast<uint16_t>(overridePort), std::memory_order_relaxed);
             }
             Logf("[OpenShimNet] Redirecting BZRNet lookup %s:%s -> %s:%s (server selection)",
                 nodeName,
                 serviceName ? serviceName : "-",
                 resolvedNode,
                 resolvedService ? resolvedService : "-");
+        }
+
+        // Whatever port the websocket ends up on (a selected one, or a
+        // /bzrserver= one), ticket withholding and the recycle must know it.
+        unsigned lookupPort = 0;
+        std::string scratchHost;
+        if (IsBzrNetLookupName(nodeName) && resolvedService &&
+            MatchmakingServer::SplitServer(std::string("x:") + resolvedService, scratchHost, lookupPort) &&
+            lookupPort != MatchmakingServer::kPort)
+        {
+            g_SelectedWebSocketPort.store(static_cast<uint16_t>(lookupPort), std::memory_order_relaxed);
         }
 
         const INT rc = g_RealGetAddrInfoA(resolvedNode, resolvedService, hints, result);
