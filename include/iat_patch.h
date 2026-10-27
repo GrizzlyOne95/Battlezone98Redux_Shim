@@ -66,6 +66,19 @@ namespace IatPatch
 
     namespace Detail
     {
+        // A named import can be readable before the loader replaces its RVA
+        // with a callable address. Do not publish that value as a predecessor.
+        inline bool IsExecutableTarget(const void* target)
+        {
+            MEMORY_BASIC_INFORMATION memory{};
+            if (!target || !VirtualQuery(target, &memory, sizeof(memory)) ||
+                memory.State != MEM_COMMIT || (memory.Protect & PAGE_GUARD))
+                return false;
+            const DWORD access = memory.Protect & 0xff;
+            return access == PAGE_EXECUTE || access == PAGE_EXECUTE_READ ||
+                   access == PAGE_EXECUTE_READWRITE || access == PAGE_EXECUTE_WRITECOPY;
+        }
+
         // A bounds-checked view of a mapped image. Every pointer handed out is
         // known to lie inside the module, so a half-initialised import
         // directory cannot walk the caller off into unmapped memory.
@@ -255,10 +268,16 @@ namespace IatPatch
                             reinterpret_cast<void**>(&firstThunk->u1.Function);
                         if (*entry == replacement)
                         {
+                            if (original && !IsExecutableTarget(*original))
+                                return Result::Faulted;
                             if (outSlot)
                                 *outSlot = entry;
                             return Result::Patched;
                         }
+
+                        if (!IsExecutableTarget(*entry) ||
+                            (original && *original && !IsExecutableTarget(*original)))
+                            return Result::Faulted;
 
                         DWORD oldProtect = 0;
                         if (!VirtualProtect(
