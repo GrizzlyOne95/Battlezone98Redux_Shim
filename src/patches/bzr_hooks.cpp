@@ -1667,6 +1667,7 @@ namespace BZROpenShim
         InstallEntityReloadLifetimeHookIfPossible();
         InstallEntityFrustumCullingIfEnabled();
         InstallMissionTransitionSeamIfPossible();
+        InstallCommunityKeyAuthHookIfPossible();
         PinDirect3DModulesForShutdown();
         InstallMultiplayerFlagRenderHookIfPossible();
         InstallNicknameTextEntryInputHookIfPossible();

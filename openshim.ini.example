@@ -2089,6 +2089,12 @@ ReconnectDelaySeconds = 5
 ;                     OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE,
 ;                     BZR_DISABLE_PERSISTENT_PLAYER_MUTE, BZR_ENABLE_PERSISTENT_PLAYER_MUTE
 PersistentPlayerMute = 1
+; Sent only to community (non-official) matchmaking servers, never to
+; Rebellion's: a per-server key that lets a server recognise you across
+; sessions. Each server gets a different key, so servers cannot link you. The
+; secret behind it is openshim_community.key next to this file; keep it
+; private. Deleting it gives you a new identity. 0 = send no key.
+CommunityIdentityKey = 1
 
 ; Lua Send/Receive and map-authored objects.
 ; Redux packs a Lua Handle into the network message as the object's network id

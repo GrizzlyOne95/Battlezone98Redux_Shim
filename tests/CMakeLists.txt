@@ -219,6 +219,15 @@ if(EXISTS "${OPENSHIM_PATHBLOCK_SAMPLE_DIR}/bbsubtun.sdf")
         COMMAND path_block_geometry_tests --dry "${OPENSHIM_PATHBLOCK_SAMPLE_DIR}" bbsubtun --expect-tunnel)
 endif()
 
+openshim_add_test(community_key_tests STD 17 SOURCES community_key_tests.cpp)
+if(WIN32 AND MSVC)
+    openshim_add_test(community_key_secret_win32_tests STD 17 SOURCES
+        community_key_secret_win32_tests.cpp
+        ../src/patches/community_key_secret.cpp
+    )
+    target_compile_definitions(community_key_secret_win32_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+endif()
+
 openshim_add_test(bzrnet_protocol_tests STD 20 SOURCES
     bzrnet_protocol_tests.cpp
     ../src/patches/bzrnet_protocol.cpp

@@ -33,6 +33,18 @@ namespace BZROpenShim
 
         std::string Finish()
         {
+            static const char digits[] = "0123456789abcdef";
+            std::string hex;
+            for (const unsigned char byte : FinishBytes())
+            {
+                hex.push_back(digits[byte >> 4]);
+                hex.push_back(digits[byte & 0xF]);
+            }
+            return hex;
+        }
+
+        std::array<unsigned char, 32> FinishBytes()
+        {
             const uint64_t bits = total_ * 8;
             const unsigned char one = 0x80;
             Update(&one, 1);
@@ -44,14 +56,13 @@ namespace BZROpenShim
                 length[index] = static_cast<unsigned char>(bits >> (56 - 8 * index));
             Update(length, 8);
 
-            static const char digits[] = "0123456789abcdef";
-            std::string hex;
-            for (const uint32_t word : state_)
+            std::array<unsigned char, 32> digest = {};
+            for (size_t word = 0; word < state_.size(); ++word)
             {
-                for (int shift = 28; shift >= 0; shift -= 4)
-                    hex.push_back(digits[(word >> shift) & 0xF]);
+                for (int index = 0; index < 4; ++index)
+                    digest[word * 4 + index] = static_cast<unsigned char>(state_[word] >> (24 - 8 * index));
             }
-            return hex;
+            return digest;
         }
 
     private:

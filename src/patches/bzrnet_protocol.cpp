@@ -224,6 +224,7 @@ BzrNetSanitizedMessage SanitizeBzrNetJson(std::string_view json,bool privateFore
         result.passwordRedacted=true;
         result.passwordLength=passwordLength;
     }
+    RedactAll(result.json,"communityKey");
     if(!privateForensic)
     {
         for(const char* key:{"userId","player","speakerId","owner","member"})AliasAll(result.json,key,g_Identities,"player_");

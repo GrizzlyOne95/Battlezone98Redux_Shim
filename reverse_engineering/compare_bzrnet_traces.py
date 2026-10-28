@@ -27,7 +27,7 @@ ASYNC_MESSAGE_TYPES = {
     "OnLobbyMemberListChanged",
     "OnWhitelistUpdated",
 }
-VARIABLE_KEYS = {"time", "steamAppTicket", "gogAppTicket", "authTicket", "platformTicket", "wanAddress", "lanAddresses"}
+VARIABLE_KEYS = {"time", "steamAppTicket", "gogAppTicket", "authTicket", "platformTicket", "wanAddress", "lanAddresses", "communityKey"}
 IDENTITY_KEYS = {"userId", "player", "owner", "speakerId", "member", "realname"}
 LOBBY_KEYS = {"lobbyId", "lobby"}
 ROUTE_KEYS = {"routeId", "route", "sessionId"}
