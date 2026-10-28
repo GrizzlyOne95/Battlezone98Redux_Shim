@@ -687,7 +687,14 @@ namespace BZROpenShim
 
         static void __fastcall RootDestructorExitSeam(void* root, void* /*edx*/)
         {
-            ArmD3D11ExitTeardownSkip();
+            __try
+            {
+                ArmD3D11ExitTeardownSkip();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // Never let the guard cost the game its exit path.
+            }
             reinterpret_cast<RootDestructorFn>(g_RealRootDestructor)(root);
         }
 
