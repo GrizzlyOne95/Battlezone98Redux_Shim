@@ -2,11 +2,14 @@
 
 #include "weapon_presentation.h"
 
+#include <array>
 #include <charconv>
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
+#include <unordered_map>
 
 namespace BZROpenShim::WeaponPresentation::NativePolicy
 {
@@ -226,6 +229,95 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
     {
         const auto f = BoneForward(orientation);
         return { rest.x + f.x * displacement, rest.y + f.y * displacement, rest.z + f.z * displacement };
+    }
+
+    // baseName inheritance: stock ODFs such as player.odf name a model ODF
+    // (avtank) via [GameObjectClass] baseName and carry no presentation keys.
+    // Flat "section/key" (lower case) -> raw value; first occurrence wins.
+    using OdfValues = std::unordered_map<std::string, std::string>;
+
+    inline std::string LowerAscii(std::string_view text)
+    {
+        std::string result(text);
+        for (char& c : result) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
+        return result;
+    }
+
+    // Strips // and ; comments outside double quotes, trims, ignores bad lines.
+    inline OdfValues ParseOdfText(std::string_view text)
+    {
+        OdfValues values;
+        std::string section;
+        if (text.substr(0, 3) == "\xEF\xBB\xBF") text.remove_prefix(3); // UTF-8 BOM
+        while (!text.empty())
+        {
+            const size_t eol = text.find('\n');
+            std::string_view line = text.substr(0, eol);
+            text = eol == std::string_view::npos ? std::string_view{} : text.substr(eol + 1);
+            bool quoted = false;
+            for (size_t i = 0; i < line.size(); ++i)
+            {
+                if (line[i] == '"') quoted = !quoted;
+                else if (!quoted && (line[i] == ';' || (line[i] == '/' && i + 1 < line.size() && line[i + 1] == '/')))
+                {
+                    line = line.substr(0, i);
+                    break;
+                }
+            }
+            while (!line.empty() && (line.back() == '\r' || line.back() == ' ' || line.back() == '\t')) line.remove_suffix(1);
+            line = Trim(line);
+            if (line.empty()) continue;
+            if (line.front() == '[')
+            {
+                const size_t close = line.find(']');
+                if (close != std::string_view::npos) section = LowerAscii(Trim(line.substr(1, close - 1)));
+                continue;
+            }
+            const size_t equals = line.find('=');
+            if (equals == std::string_view::npos || section.empty()) continue;
+            const auto key = Trim(line.substr(0, equals));
+            if (key.empty()) continue;
+            values.try_emplace(section + "/" + LowerAscii(key), Trim(line.substr(equals + 1)));
+        }
+        return values;
+    }
+
+    inline const std::string* OdfValue(const OdfValues& values, std::string_view section, std::string_view key)
+    {
+        const auto found = values.find(LowerAscii(section) + "/" + LowerAscii(key));
+        return found == values.end() ? nullptr : &found->second;
+    }
+
+    constexpr size_t kCraftSlots = 5;
+    constexpr std::array<std::string_view, 8> kCraftSlotKeys = {"recoilDistance", "recoilReturn",
+        "recoilPlaybackRate", "recoilName", "flashOffset", "recoilKick", "recoilAnimation", "recoilCockpit"};
+
+    // Slots that inherit the base ODF's keys: the loading ODF has no
+    // presentation key for the slot and both name the same weaponHardN.
+    // ownHard[N-1] is the loading ODF's weaponHardN ("" when absent).
+    inline unsigned InheritedCraftSlots(unsigned ownMask, const std::array<std::string, kCraftSlots>& ownHard,
+        const OdfValues& base)
+    {
+        unsigned mask = 0;
+        for (size_t slot = 1; slot <= kCraftSlots; ++slot)
+        {
+            if (ownMask & (1u << (slot - 1))) continue;
+            const auto* baseHard = OdfValue(base, "GameObjectClass", "weaponHard" + std::to_string(slot));
+            const auto own = Name(ownHard[slot - 1]);
+            const auto theirs = baseHard ? Name(*baseHard) : std::nullopt;
+            if (own && theirs && !own->empty() && LowerAscii(*own) == LowerAscii(*theirs)) mask |= 1u << (slot - 1);
+        }
+        return mask;
+    }
+
+    // Base ODF to follow, or empty when absent, malformed or the ODF itself
+    // (name is the 8-byte packed class name, so longer bases never match it).
+    inline std::string BaseOdfName(std::string_view baseName, std::string_view ownName)
+    {
+        const auto base = Name(baseName);
+        if (!base || base->empty()) return {};
+        if (base->size() <= 8 && LowerAscii(*base) == LowerAscii(ownName)) return {};
+        return std::string(*base);
     }
 
     // Removes the mesh flash and muzzleRender layer; legacy flashName is untouched.

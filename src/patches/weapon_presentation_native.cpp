@@ -19,6 +19,8 @@
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <set>
@@ -372,28 +374,82 @@ namespace BZROpenShim::Hooks
             {
                 CraftConfig result;
                 if (!Read(objectClass, kObjectClassName, result.name)) return;
+                char odfName[9] = {}; std::memcpy(odfName, &result.name, 8);
+                // Stock ODFs (player.odf) only name their model ODF; slots with no
+                // own presentation key and the same weaponHardN use the base's.
+                Policy::OdfValues base;
+                unsigned inheritMask = 0;
+                std::string baseOdf;
+                {
+                    char raw[kMaxValueBytes] = {};
+                    if (ReadValue(scope, Policy::Hash("GameObjectClass"), Policy::Hash("baseName"), raw) == ValueStatus::Present)
+                        baseOdf = Policy::BaseOdfName(raw, odfName);
+                }
+                if (!baseOdf.empty())
+                {
+                    std::filesystem::path path;
+                    std::ifstream file;
+                    if (TryResolveOdfFilePath(baseOdf.c_str(), path)) file.open(path, std::ios::binary);
+                    if (file)
+                    {
+                        std::string text(std::istreambuf_iterator<char>(file), {}); // IO failure leaves it partial/empty
+                        base = Policy::ParseOdfText(text);
+                        unsigned ownMask = 0;
+                        std::array<std::string, Policy::kCraftSlots> ownHard;
+                        for (size_t i = 0; i < Policy::kCraftSlots; ++i)
+                        {
+                            char raw[kMaxValueBytes] = {};
+                            for (const auto key : Policy::kCraftSlotKeys)
+                                if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash(std::string(key) + std::to_string(i + 1)), raw) !=
+                                    ValueStatus::Missing) ownMask |= 1u << i;
+                            raw[0] = 0;
+                            if (ReadValue(scope, Policy::Hash("GameObjectClass"), Policy::Hash("weaponHard" + std::to_string(i + 1)), raw) ==
+                                ValueStatus::Present) ownHard[i] = raw;
+                        }
+                        inheritMask = Policy::InheritedCraftSlots(ownMask, ownHard, base);
+                    }
+                    else
+                        LogShimA(LogLevel::Info, "WEAPONFX", "ODF=%s baseName %s not found as a loose ODF; no presentation keys inherited",
+                            odfName, baseOdf.c_str());
+                }
+                if (inheritMask)
+                {
+                    std::string list;
+                    for (size_t i = 0; i < Policy::kCraftSlots; ++i)
+                        if (inheritMask & (1u << i)) list += (list.empty() ? "" : ",") + std::to_string(i + 1);
+                    LogShimA(LogLevel::Info, "WEAPONFX", "ODF=%s slot(s) %s presentation keys from baseName %s",
+                        odfName, list.c_str(), baseOdf.c_str());
+                }
                 for (size_t i = 0; i < result.slots.size(); ++i)
                 {
                     auto& slot = result.slots[i];
                     const auto suffix = std::to_string(i + 1);
+                    const bool inherit = (inheritMask & (1u << i)) != 0;
+                    // Inherited slots read the base ODF's [CraftClass] with the same
+                    // Missing/Present/Invalid contract as the native parameter DB.
+                    auto readKey = [&](const std::string& key, char (&out)[kMaxValueBytes]) {
+                        if (!inherit) return ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash(key), out);
+                        const auto* v = Policy::OdfValue(base, "CraftClass", key);
+                        if (!v) return ValueStatus::Missing;
+                        if (v->size() >= kMaxValueBytes) { out[0] = 0; return ValueStatus::Invalid; }
+                        std::memcpy(out, v->c_str(), v->size() + 1);
+                        return ValueStatus::Present;
+                    };
                     auto readNumber = [&](const char* prefix, float fallback) {
                         char raw[kMaxValueBytes] = {};
-                        const auto status = ReadValue(scope, Policy::Hash("CraftClass"),
-                            Policy::Hash(std::string(prefix) + suffix), raw);
+                        const auto status = readKey(std::string(prefix) + suffix, raw);
                         return status == ValueStatus::Missing ? fallback : Policy::Duration(raw);
                     };
                     slot.distance = readNumber("recoilDistance", WP::kRecoilKick);
                     slot.returnSpeed = readNumber("recoilReturn", WP::kRecoilReturnSpeed);
                     slot.animation.playbackRate = readNumber("recoilPlaybackRate", 1);
                     char value[kMaxValueBytes] = {};
-                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash("recoilName" + suffix), value) ==
-                        ValueStatus::Present)
+                    if (readKey("recoilName" + suffix, value) == ValueStatus::Present)
                     {
                         const auto name = Policy::Name(value);
                         if (name) slot.node = WP::ParseMeshId(*name);
                     }
-                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash("flashOffset" + suffix), value) !=
-                        ValueStatus::Missing)
+                    if (readKey("flashOffset" + suffix, value) != ValueStatus::Missing)
                     {
                         slot.flashOffset = Policy::Offset(value);
                         if (!slot.flashOffset)
@@ -402,8 +458,7 @@ namespace BZROpenShim::Hooks
                             LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s flashOffset%s rejected; expected \"right up forward\" within -20..20; weapon flashOffset kept", odf, suffix.c_str());
                         }
                     }
-                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash("recoilKick" + suffix), value) !=
-                        ValueStatus::Missing)
+                    if (readKey("recoilKick" + suffix, value) != ValueStatus::Missing)
                     {
                         slot.kick = Policy::Kick(value);
                         if (!slot.kick)
@@ -412,16 +467,14 @@ namespace BZROpenShim::Hooks
                             LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s recoilKick%s rejected; expected 0..%.0f; weapon recoilKick kept", odf, suffix.c_str(), Policy::kMaxRecoilKick);
                         }
                     }
-                    const auto animStatus = ReadValue(scope, Policy::Hash("CraftClass"),
-                        Policy::Hash("recoilAnimation" + suffix), value);
+                    const auto animStatus = readKey("recoilAnimation" + suffix, value);
                     slot.animationPresent = animStatus != ValueStatus::Missing;
                     if (animStatus == ValueStatus::Present)
                     {
                         const auto name = Policy::Name(value);
                         if (name) slot.animation.clip = *name;
                     }
-                    if (ReadValue(scope, Policy::Hash("CraftClass"), Policy::Hash("recoilCockpit" + suffix), value) !=
-                        ValueStatus::Missing)
+                    if (readKey("recoilCockpit" + suffix, value) != ValueStatus::Missing)
                     {
                         const auto flag = Policy::Trim(value);
                         slot.cockpit = Policy::CockpitFlag(flag).value_or(false);

@@ -76,5 +76,30 @@ int main()
         const auto f = Policy::BoneForward({ s, 0, s, 0 });
         Require(std::abs(f.x - 1) < 1e-5f && std::abs(f.y) < 1e-5f && std::abs(f.z) < 1e-5f, "bone forward axis wrong");
     }
+    {
+        // baseName inheritance: player.odf -> avtank.odf
+        const auto base = Policy::ParseOdfText(
+            "\xEF\xBB\xBF[GameObjectClass]\r\nweaponHard1 = \"Gcannon\" // main\r\nweaponHard2 = gmortar\r\nweaponHard3 = gdual\r\n"
+            "[CraftClass]\r\nflashOffset1 = \"0.20 0.10 2.41\" ; muzzle\r\nrecoilName1 = \"AGR11BGA\"\r\n"
+            "flashOffset2 = \"0 0 1\"\r\nflashOffset3 = \"0 0 2\"\r\nFlashOffset1 = \"9 9 9\"\r\n");
+        Require(*Policy::OdfValue(base, "craftclass", "FLASHOFFSET1") == "\"0.20 0.10 2.41\"", "comment/first-wins/case parse wrong");
+        Require(Policy::OdfValue(base, "GameObjectClass", "weaponHard1") && *Policy::OdfValue(base, "GameObjectClass", "weaponHard1") == "\"Gcannon\"",
+            "// comment not stripped");
+        Require(!Policy::OdfValue(base, "GameObjectClass", "flashOffset1"), "section leaked");
+        const auto player = Policy::ParseOdfText(
+            "[GameObjectClass]\nbaseName = \"avtank\"\nweaponHard1 = GCANNON\nweaponHard2 = other\nweaponHard3 = gdual\n"
+            "[CraftClass]\nflashOffset3 = \"1 1 1\"\n");
+        std::array<std::string, Policy::kCraftSlots> hard;
+        for (size_t i = 0; i < hard.size(); ++i)
+            if (const auto* v = Policy::OdfValue(player, "GameObjectClass", "weaponHard" + std::to_string(i + 1))) hard[i] = *v;
+        const unsigned own = 0b00100; // slot 3 has its own flashOffset3
+        // slot 1 inherits (case-insens. match), 2 mismatched hardpoint, 3 has own key, 4/5 absent
+        Require(Policy::InheritedCraftSlots(own, hard, base) == 0b00001, "inheritance mask wrong");
+        Require(Policy::InheritedCraftSlots(0, std::array<std::string, Policy::kCraftSlots>{}, base) == 0,
+            "missing own weaponHard inherited");
+        Require(Policy::BaseOdfName("\"avtank\"", "player") == "avtank", "base name not extracted");
+        Require(Policy::BaseOdfName("AVTANK", "avtank").empty(), "self baseName followed");
+        Require(Policy::BaseOdfName("", "player").empty() && Policy::BaseOdfName("\"bad", "player").empty(), "bad baseName followed");
+    }
     std::puts("weapon_presentation_native_policy_tests: all checks passed");
 }
