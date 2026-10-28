@@ -28,7 +28,7 @@ An entry present only in `patches.json` is never walked and produces no runtime 
 
 Deploy the complete current load chain and configuration with `scripts/Deploy-OpenShim.ps1`; do not hand-copy only `winmm.dll`. At minimum, `scripts/patches.json` must match the DLL because the binary does not embed patch addresses.
 
-Build `BZROpenShim.sln` (Release | Win32) before deploying. Patch code lives in `Plugin_OpenShim.vcxproj` (`bin\Release\plugins\openshim.dll`); building `BZROpenShim.vcxproj` alone produces only `winmm.dll` (not the plugin or `bzloader.dll`), and the deploy script then ships the stale plugin without warning. Before a test run, confirm the deployed `plugins\openshim.dll` timestamp is newer than your last source edit, and that the run's `openshim.log` contains a log line your change adds.
+Build `BZROpenShim.sln` (Release | Win32) before deploying. Patch code lives in `Plugin_OpenShim.vcxproj` (`bin\Release\plugins\openshim.dll`); building `BZROpenShim.vcxproj` alone produces only `winmm.dll` (not the plugin or `bzloader.dll`). The deploy script refuses a DLL older than any file its project compiles, but it does not check headers, so after a header-only edit confirm that the run's `openshim.log` contains a log line your change adds.
 
 The CR suite updater can replace a development build with its bundled files. A development DLL often has the same `version.rc` version as the release, so the downgrade guard cannot distinguish it. After the game exits, redeploy and confirm the deployed artifacts before trusting another run. `verify_windows.ps1 -GamePath <install>` verifies the source `patches.json` and checks the last session for `[STALE-CONFIG]`.
 
