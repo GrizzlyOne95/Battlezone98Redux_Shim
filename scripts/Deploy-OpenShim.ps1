@@ -41,9 +41,9 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 # pre-main seams armed and no OpenShim at all -- which boots, which is exactly
 # why it has to be impossible to do by accident.
 $pairs = @(
-    @{ Source = Join-Path $repoRoot "bin\$Configuration\winmm.dll";            Target = Join-Path $GameDir 'winmm.dll' },
-    @{ Source = Join-Path $repoRoot "bin\$Configuration\bzloader.dll";         Target = Join-Path $GameDir 'bzloader.dll' },
-    @{ Source = Join-Path $repoRoot "bin\$Configuration\plugins\openshim.dll"; Target = Join-Path $GameDir 'plugins\openshim.dll' },
+    @{ Source = Join-Path $repoRoot "bin\$Configuration\winmm.dll";            Target = Join-Path $GameDir 'winmm.dll';            Project = 'BZROpenShim.vcxproj' },
+    @{ Source = Join-Path $repoRoot "bin\$Configuration\bzloader.dll";         Target = Join-Path $GameDir 'bzloader.dll';         Project = 'BZLoader.vcxproj' },
+    @{ Source = Join-Path $repoRoot "bin\$Configuration\plugins\openshim.dll"; Target = Join-Path $GameDir 'plugins\openshim.dll'; Project = 'Plugin_OpenShim.vcxproj' },
     @{ Source = Join-Path $repoRoot 'scripts\patches.json';                     Target = Join-Path $GameDir 'scripts\patches.json' }
 )
 
@@ -58,6 +58,26 @@ foreach ($pair in $pairs) {
     if (-not (Test-Path -LiteralPath $pair.Source)) {
         throw "Missing build output: $($pair.Source). Build $Configuration|Win32 first."
     }
+}
+
+# Each DLL must be newer than every file its own project compiles. Building
+# BZROpenShim.vcxproj alone refreshes winmm.dll and leaves an old
+# plugins\openshim.dll behind, which deployed and spent a whole A/B testing
+# code from before the change. Headers are not checked: a project lists
+# headers it never includes, and MSBuild rightly skips relinking for those.
+$stale = foreach ($pair in $pairs | Where-Object { $_.Project }) {
+    [xml]$project = Get-Content -LiteralPath (Join-Path $repoRoot $pair.Project)
+    $built = (Get-Item -LiteralPath $pair.Source).LastWriteTimeUtc
+    $newer = $project.Project.ItemGroup |
+        ForEach-Object { $_.ClCompile; $_.ResourceCompile } |
+        Where-Object { $_ } |
+        ForEach-Object { Join-Path $repoRoot $_.Include } |
+        Where-Object { (Test-Path -LiteralPath $_) -and (Get-Item -LiteralPath $_).LastWriteTimeUtc -gt $built } |
+        Select-Object -First 1
+    if ($newer) { "$($pair.Source) is older than $newer" }
+}
+if ($stale) {
+    throw "Stale build output; build BZROpenShim.sln ($Configuration|Win32) first:`n$($stale -join "`n")"
 }
 
 foreach ($pair in $pairs) {
