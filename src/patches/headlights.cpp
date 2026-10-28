@@ -546,20 +546,35 @@ namespace BZROpenShim
                 static_cast<uint32_t>(g_EmissionLightStateBranchAddr));
         }
 
+        // The player's bridge can keep its light pointer after the light is
+        // destroyed (see IsLiveOgreLight). A crash dump had this file's colour
+        // write (peak 3.0 = White 5.0 x Wide 0.8 x brightness 0.75) land in an
+        // overlay TextArea that had taken over the freed block, faulting later
+        // in OgreOverlay _updateFromParent.
+        static uint32_t g_HeadlightStaleLightRejects = 0;
         static void* TryGetGameObjectHeadlight(void* gameObject)
         {
             if (!gameObject)
                 return nullptr;
+            void* light = nullptr;
             __try
             {
                 auto* bridge = *reinterpret_cast<uint8_t**>(
                     reinterpret_cast<uint8_t*>(gameObject) + 0xF0);
-                return bridge ? *reinterpret_cast<void**>(bridge + 0xA8) : nullptr;
+                light = bridge ? *reinterpret_cast<void**>(bridge + 0xA8) : nullptr;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 return nullptr;
             }
+            if (!light || IsLiveOgreLight(light))
+                return light;
+            if (g_HeadlightStaleLightRejects++ < 3)
+            {
+                Log(L"[HEADLIGHT] bridge light is not a live Ogre::Light, left untouched: "
+                    L"object=0x%p light=0x%p\n", gameObject, light);
+            }
+            return nullptr;
         }
 
         bool IsLiveHeadlightObjectSlot(void* gameObject)
@@ -597,7 +612,9 @@ namespace BZROpenShim
 
         static void RestoreHeadlightState(void* light, const HeadlightOriginalState& state)
         {
-            if (!light)
+            // Same-world entries can still outlive their light (see
+            // IsLiveOgreLight); the caller erases the entry either way.
+            if (!IsLiveOgreLight(light))
                 return;
             auto& api = GetHeadlightOgreApi();
             __try

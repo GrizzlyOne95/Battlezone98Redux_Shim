@@ -1034,39 +1034,6 @@ namespace BZROpenShim
             }
         }
 
-        // TerrainMasterLight can outlive the light it names: a co-op crash dump
-        // had it pointing at a recycled allocation (a D3D11 shader resource
-        // view), and the Light setters below wrote the restored sun into it.
-        // SEH cannot catch a write that lands in readable memory, so the sun is
-        // only touched while both of its vtable pointers are Ogre::Light's. A
-        // destroyed Light carries its base classes' vtables after the
-        // destructor runs, so this also rejects a freed, not yet reused sun.
-        static bool IsLiveOgreLight(const void* light)
-        {
-            static const void* s_ShadowCasterVtable = nullptr;
-            static const void* s_AnimableVtable = nullptr;
-            static int s_Bound = 0;
-            if (s_Bound == 0)
-            {
-                s_ShadowCasterVtable = ResolveOgreProc<const void*>("??_7Light@Ogre@@6BShadowCaster@1@@");
-                s_AnimableVtable = ResolveOgreProc<const void*>("??_7Light@Ogre@@6BAnimableObject@1@@");
-                s_Bound = s_ShadowCasterVtable && s_AnimableVtable ? 1 : -1;
-                if (s_Bound < 0)
-                    Log(L"[SUNWATCH] Ogre::Light vtables unresolved; the sun is never read or written\n");
-            }
-            if (s_Bound < 0 || !light)
-                return false;
-            __try
-            {
-                const void* const* const vptrs = static_cast<const void* const*>(light);
-                return vptrs[0] == s_ShadowCasterVtable && vptrs[1] == s_AnimableVtable;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
-        }
-
         static bool NotifySceneLightsDirty(void* sceneManager)
         {
             __try
