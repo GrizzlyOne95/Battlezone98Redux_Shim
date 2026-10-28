@@ -265,6 +265,33 @@ float4 ose_ice_depth_layers(float3 P, float3 V, float3 N, float depth, float foo
     return float4(transmittance, saturate(inclusions));
 }
 
+// Lineae: the red-brown bands that stain Europa's ice along its cracks. Two
+// sets of gently curving bands (zero crossings of warped value noise, about
+// 45 m and 28 m apart, a few metres wide) on world XZ, each fading in and out
+// along its length so not every crack is stained, with a paler ridge down the
+// middle and a mottled fill. N is the world normal: like the depth layers the
+// bands fade on steep faces, which see world XZ edge-on. 0..1.
+static const float3 OSE_LINEAE_TINT = float3(0.92, 0.60, 0.42);
+
+float ose_ice_lineae_set(float2 xz, float scale, float seed, float footprint)
+{
+    float2 warp = float2(ose_snow_value(xz * 0.006 + seed), ose_snow_value(xz * 0.006 + seed + 4.7)) * 3.0;
+    float n = ose_snow_value(xz * scale + warp + seed * 2.3) - 0.5;
+    float soft = max(0.012, footprint * scale * 1.5);
+    float band = 1.0 - smoothstep(0.018, 0.018 + soft + 0.03, abs(n));
+    float ridge = 1.0 - smoothstep(0.0, soft, abs(n));
+    float along = smoothstep(0.35, 0.65, ose_snow_value(xz * 0.012 + seed * 5.1));
+    return band * (1.0 - 0.6 * ridge) * along;
+}
+
+float ose_ice_lineae(float2 xz, float3 N, float footprint)
+{
+    float stain = max(ose_ice_lineae_set(xz, 0.022, 1.3, footprint),
+        ose_ice_lineae_set(xz.yx, 0.036, 7.9, footprint) * 0.6);
+    stain *= 0.7 + 0.3 * ose_snow_value(xz * 0.4 + 2.1);
+    return stain * smoothstep(0.55, 0.8, abs(N.y));
+}
+
 float ose_surface_mask(float3 position, float4 anchor)
 {
     float3 delta = position - anchor.xyz;

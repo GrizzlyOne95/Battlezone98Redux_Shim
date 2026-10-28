@@ -1420,6 +1420,7 @@ void terrain_fragment(
     float terrainRidge = 0.0;
     float2 iceOffset = float2(0.0, 0.0);
     float4 iceLayers = float4(1.0, 1.0, 1.0, 0.0);
+    float iceLineae = 0.0;
 #endif
 
 #if defined(NORMALMAP_ENABLED)
@@ -1598,6 +1599,7 @@ void terrain_fragment(
             float3 iceN = safe_normalize(mul(inverseViewMatrix, float4(iceGeometric, 0.0)).xyz);
             float footprint = length(fwidth(iceWorld.xz));
             iceLayers = ose_ice_depth_layers(iceWorld, iceV, iceN, surfaceSnow.w, footprint);
+            iceLineae = ose_ice_lineae(iceWorld.xz, iceN, footprint);
         }
     }
 #endif
@@ -1944,6 +1946,8 @@ void terrain_fragment(
                 iceDx * 32.0, iceDy * 32.0).xyz), 0.8);
 #endif
         surfaceAlbedo = lerp(surfaceAlbedo, vertexTint * iceDeep, iceMask * 0.55);
+        // Red-brown lineae stain the ice surface (over the depth layers, under snow).
+        surfaceAlbedo *= lerp(float3(1.0, 1.0, 1.0), OSE_LINEAE_TINT, iceLineae * iceMask * 0.75);
     }
     if (dustCover > 0.0)
     {
