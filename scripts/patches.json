@@ -5279,6 +5279,24 @@
       "rva": "0x000A2B9C",
       "expected": "?? ?? ?? ??",
       "identity": "D3D11HLSLProgram vtable slot 0x160 (vtable RVA 0xA2A3C), the only reference to D3D11HLSLBuildConstantDefinitionsThunk in the image. The value is relocated, so the installer checks it equals the bound thunk instead of guarding bytes."
+    },
+    {
+      "name": "D3D11PluginUninstallThunk",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x00005CC2",
+      "expected": "E9 D9 15 04 00",
+      "identity": "Incremental-link thunk for export ?uninstall@D3D11Plugin@Ogre@@UAEXXZ (export RVA 0x5CC2), jumping to D3D11PluginUninstall. Slot 5 of the exported D3D11Plugin vtable (??_7D3D11Plugin@Ogre@@6B@, RVA 0xA24D4) holds it; the exit crash dump showed that slot reached from dllStopPlugin -> Root::uninstallPlugin."
+    },
+    {
+      "name": "D3D11PluginUninstall",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x000472A0",
+      "expected": "56 8B F1 8B 4E 04 85 C9 74 06 8B 01 6A 01 FF 10 C7 46 04 00 00 00 00 5E C3",
+      "identity": "D3D11Plugin::uninstall body: if (mRenderSystem) delete mRenderSystem (scalar deleting dtor, vtable slot 0, arg 1); mRenderSystem = 0. The deleted D3D11RenderSystem's shutdown releases the device while the NVIDIA driver worker thread can still use it (exit crash in nvwgf2um)."
     }
   ],
   "globals": [
