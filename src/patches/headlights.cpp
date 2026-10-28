@@ -427,7 +427,8 @@ namespace BZROpenShim
                 const bool active = rendererBytes[0x1C] != 0;
                 void* light = *reinterpret_cast<void**>(rendererBytes + 0x70);
                 auto& api = GetHeadlightOgreApi();
-                if (light && api.setVisible)
+                // The renderer can outlive its light, as the player headlight did.
+                if (api.setVisible && IsLiveOgreLight(light))
                     api.setVisible(light, active);
 
                 if (!active || !renderClass)
