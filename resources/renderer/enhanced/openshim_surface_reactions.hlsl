@@ -115,6 +115,29 @@ float ose_snow_noise(float2 p)
     return ose_snow_value(p) * 0.65 + ose_snow_value(p * 3.7 + 0.37) * 0.35 - 0.5;
 }
 
+// One layer of rain rings on a horizontal plane (metres). Each 0.8 m cell
+// spawns an expanding ring at a hashed spot every 1/rate seconds, re-seeded
+// each cycle. Returns the analytic height gradient (d/dx, d/dz). rate * 4000
+// must be a whole number of cycles (cycles) so the clock wrap at 4000 s
+// leaves both phase and seed unchanged.
+float2 ose_rain_ring_layer(float2 xz, float clock, float rate, float cycles, float seed)
+{
+    float2 p = xz * 1.25;
+    float2 cell = floor(p);
+    float2 rnd = ose_water_hash(cell + seed);
+    float t = clock * rate + rnd.y;
+    float phase = frac(t);
+    float cycle = fmod(floor(t), cycles);
+    float2 pick = ose_water_hash(cell + seed * 3.1 + cycle * 7.13);
+    float2 delta = (frac(p) - (0.3 + pick * 0.4)) * 0.8;
+    float dist = length(delta);
+    float w = dist - phase * 0.22;
+    float fade = (1.0 - phase) * (1.0 - phase) * step(0.4, pick.x + pick.y * 0.5);
+    float e = exp(-w * w * 500.0);
+    float slope = (70.0 * cos(w * 70.0) - 1000.0 * w * sin(w * 70.0)) * e * 0.0035 * fade;
+    return delta / max(dist, 0.0001) * slope;
+}
+
 // Thruster wash w = (x, z, radius, strength): full inside half the radius,
 // fading to the rim; edge (about -0.2..0.2) roughens the rim.
 float ose_wash(float4 w, float2 xz, float edge)

@@ -1225,6 +1225,9 @@ void terrain_fragment(
     // See openshim_surface_reactions.hlsl. Zero leaves the terrain untouched.
     uniform float4 surfaceSnow,
     uniform float4 surfaceDust,
+    // x = rain wetness 0..1 (shared with objects); surfaceRainTime wraps at 4000 s.
+    uniform float4 surfaceState,
+    uniform float surfaceRainTime,
 #endif
 
     uniform float4 sceneAmbient,
@@ -1409,6 +1412,8 @@ void terrain_fragment(
     float iceMask = 0.0;
     float iceGloss = 0.0;
     float dustCover = 0.0;
+    float terrainWet = 0.0;
+    float terrainPuddle = 0.0;
     float terrainHollow = 0.0;
     float terrainRidge = 0.0;
     float2 iceOffset = float2(0.0, 0.0);
@@ -1510,6 +1515,50 @@ void terrain_fragment(
 #endif
         viewNormal = safe_normalize(lerp(viewNormal, snowGeometric, snowCover * 0.25));
     }
+#if !defined(VERTEX_LIGHTING)
+    // Rain: uniform-only early out. Wet ground darkens and sheens (lit stages
+    // below); flat hollows hold puddles whose normal goes flat and ripples.
+    if (surfaceState.x > 0.002)
+    {
+        terrainWet = saturate(surfaceState.x) * (1.0 - snowCover);
+        float3 rainGeometric = safe_normalize(vViewNormal);
+        float rainUp = mul(inverseViewMatrix, float4(rainGeometric, 0.0)).y;
+        float3 rainWorld = mul(inverseViewMatrix, float4(viewPos, 1.0)).xyz + worldOrigin;
+        float rainNoise = ose_snow_noise(rainWorld.xz * 0.35);
+        float rainFlat = smoothstep(0.9, 0.98, rainUp);
+        float rainPool = 0.0;
+#if defined(TERRAIN_SHAPE_ENABLED)
+        if (surfaceTerrain.x != 0.0)
+        {
+            float rainThreshold = lerp(0.65, 0.25, terrainWet);
+            rainPool = smoothstep(rainThreshold, rainThreshold + 0.12,
+                terrainHollow + rainNoise * 0.5 - terrainRidge * 0.5);
+        }
+        else
+#endif
+        {
+            // No shape map: sparse noise-only pools.
+            rainPool = smoothstep(0.78 - 0.08 * terrainWet, 0.9 - 0.08 * terrainWet, rainNoise + 0.5);
+        }
+        terrainPuddle = terrainWet * rainFlat * rainPool;
+#if defined(TERRAIN_SHAPE_ENABLED)
+        terrainPuddle *= 1.0 - terrainWash;
+#endif
+        if (terrainPuddle > 0.0)
+        {
+            viewNormal = safe_normalize(lerp(viewNormal, rainGeometric, terrainPuddle));
+            float rainNear = 1.0 - smoothstep(20.0, 30.0, length(viewPos));
+            if (rainNear > 0.0)
+            {
+                float2 ring = ose_rain_ring_layer(rainWorld.xz, surfaceRainTime, 0.8, 3200.0, 0.0)
+                            + ose_rain_ring_layer(rainWorld.xz + 0.37, surfaceRainTime, 0.625, 2500.0, 17.0);
+                float3 ringWorld = float3(-ring.x, 0.0, -ring.y);
+                viewNormal = safe_normalize(viewNormal
+                    + mul(ringWorld, (float3x3)inverseViewMatrix) * (terrainPuddle * rainNear));
+            }
+        }
+    }
+#endif
     // Dust drifts into the same hollows; the open ground keeps its own colour.
     if (surfaceDust.w > 0.002 && terrainHollow > 0.0)
     {
@@ -1520,6 +1569,7 @@ void terrain_fragment(
 #if defined(TERRAIN_SHAPE_ENABLED)
         dustCover *= 1.0 - terrainWash;
 #endif
+        dustCover *= 1.0 - 0.8 * terrainWet;
     }
 #if !defined(VERTEX_LIGHTING)
     // Ice under the snow line gets a refracted sub-surface layer (albedo stage).
@@ -1617,7 +1667,7 @@ void terrain_fragment(
 #endif
 
 #if defined(ENHANCED_MODE)
-    surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), max(snowCover, dustCover));
+    surfaceF0 = lerp(surfaceF0, float3(0.02, 0.02, 0.02), max(max(snowCover, dustCover), terrainPuddle));
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
     float surfaceRoughness = max(
         lerp(lerp(lerp(derive_legacy_roughness(materialShininess, specularMask), 0.28, iceGloss * 0.8),
@@ -1630,6 +1680,10 @@ void terrain_fragment(
     surfaceRoughness = max(surfaceRoughness, OSE_LOD_MIN_ROUGHNESS);
 #endif
     surfaceRoughness = max(surfaceRoughness, OSE_TERRAIN_PBR_MIN_ROUGHNESS);
+    // Wet sheen, then standing water: after the dry-terrain floor, which would
+    // otherwise cancel both. Puddle normals are flat, so no variance filter.
+    surfaceRoughness = lerp(surfaceRoughness, min(surfaceRoughness, 0.25), terrainWet * 0.7);
+    surfaceRoughness = lerp(surfaceRoughness, 0.05, terrainPuddle);
 #endif
 #endif
 
@@ -1883,6 +1937,14 @@ void terrain_fragment(
         dustAlbedo = sqrt(dustAlbedo);
 #endif
         surfaceAlbedo = ose_dust_blend(surfaceAlbedo, dustAlbedo, dustCover);
+    }
+    if (terrainWet > 0.0)
+    {
+        // Porous darkening with a touch more saturation, then deep water.
+        float wetLuma = dot(surfaceAlbedo, float3(0.299, 0.587, 0.114));
+        surfaceAlbedo = max(lerp(float3(wetLuma, wetLuma, wetLuma), surfaceAlbedo, 1.0 + 0.2 * terrainWet), 0.0);
+        surfaceAlbedo *= 1.0 - 0.38 * terrainWet;
+        surfaceAlbedo *= 1.0 - 0.65 * terrainPuddle;
     }
     oColor.xyz = lightResult.xyz * ose_snow_blend(surfaceAlbedo, snowAlbedo, snowCover);
 #else
