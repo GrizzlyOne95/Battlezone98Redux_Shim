@@ -265,6 +265,45 @@ float4 ose_ice_depth_layers(float3 P, float3 V, float3 N, float depth, float foo
     return float4(transmittance, saturate(inclusions));
 }
 
+// Lineae: the red-brown bands that stain Europa's ice along its cracks. Two
+// sets of gently curving bands (zero crossings of warped value noise, about
+// 45 m and 28 m apart, a few metres wide) on world XZ, each fading in and out
+// along its length so not every crack is stained, with a paler ridge down the
+// middle and a mottled fill. N is the world normal: like the depth layers the
+// bands fade on steep faces, which see world XZ edge-on. 0..1.
+static const float3 OSE_LINEAE_TINT = float3(0.92, 0.60, 0.42);
+
+// xz arrives already rotated per set, so the two sets' value-noise lattices
+// never line up with each other or the world axes.
+float ose_ice_lineae_set(float2 xz, float scale, float seed, float footprint)
+{
+    float along = smoothstep(0.35, 0.65, ose_snow_value(xz * 0.012 + seed * 5.1));
+    if (along <= 0.0)
+        return 0.0;
+    float2 warp = float2(ose_snow_value(xz * 0.006 + seed), ose_snow_value(xz * 0.006 + seed + 4.7)) - 0.5;
+    float n = ose_snow_value(xz * scale + warp * 6.0 + seed * 2.3) - 0.5;
+    // Filter width in noise units, capped: far off the bands fade out
+    // (below) instead of smearing into a broad stain.
+    float px = footprint * scale;
+    float soft = clamp(px * 1.5, 0.012, 0.06);
+    float band = 1.0 - smoothstep(0.018, 0.018 + soft + 0.03, abs(n));
+    float ridge = 1.0 - smoothstep(0.0, soft, abs(n));
+    return band * (1.0 - 0.6 * ridge) * along * (1.0 - smoothstep(0.04, 0.12, px));
+}
+
+float ose_ice_lineae(float2 xz, float3 N, float footprint)
+{
+    float slope = smoothstep(0.55, 0.8, abs(N.y));
+    if (slope <= 0.0)
+        return 0.0;
+    float2 xzA = float2(0.80 * xz.x - 0.60 * xz.y, 0.60 * xz.x + 0.80 * xz.y);
+    float2 xzB = float2(0.28 * xz.x + 0.96 * xz.y, -0.96 * xz.x + 0.28 * xz.y);
+    float stain = max(ose_ice_lineae_set(xzA, 0.022, 1.3, footprint),
+        ose_ice_lineae_set(xzB, 0.036, 7.9, footprint) * 0.6);
+    stain *= 0.7 + 0.3 * ose_snow_value(xz * 0.4 + 2.1);
+    return stain * slope;
+}
+
 float ose_surface_mask(float3 position, float4 anchor)
 {
     float3 delta = position - anchor.xyz;
