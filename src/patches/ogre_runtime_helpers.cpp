@@ -155,6 +155,41 @@ namespace BZROpenShim
         // Ogre object begins with a vtable pointer into OgreMain.dll, so require
         // that before making any call on a candidate.
 
+        // Ogre::Light pointers read out of game memory can outlive the light
+        // they name, and the freed block is soon reused. SEH cannot catch a
+        // write that lands in readable memory, so a light is only touched while
+        // both of its vtable pointers are Ogre::Light's. Two crash dumps had a
+        // stale light recycled as something else: TerrainMasterLight as a D3D11
+        // shader resource view (the sun restore), and a player headlight as an
+        // overlay TextArea (the headlight colour write). A destroyed Light
+        // carries its base classes' vtables after the destructor runs, so this
+        // also rejects a freed, not yet reused light.
+        bool IsLiveOgreLight(const void* light)
+        {
+            static const void* s_ShadowCasterVtable = nullptr;
+            static const void* s_AnimableVtable = nullptr;
+            static int s_Bound = 0;
+            if (s_Bound == 0)
+            {
+                s_ShadowCasterVtable = ResolveOgreProc<const void*>("??_7Light@Ogre@@6BShadowCaster@1@@");
+                s_AnimableVtable = ResolveOgreProc<const void*>("??_7Light@Ogre@@6BAnimableObject@1@@");
+                s_Bound = s_ShadowCasterVtable && s_AnimableVtable ? 1 : -1;
+                if (s_Bound < 0)
+                    Log(L"[OGRE] Ogre::Light vtables unresolved; sun and headlight lights are never read or written\n");
+            }
+            if (s_Bound < 0 || !light)
+                return false;
+            __try
+            {
+                const void* const* const vptrs = static_cast<const void* const*>(light);
+                return vptrs[0] == s_ShadowCasterVtable && vptrs[1] == s_AnimableVtable;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         bool TryGetOgreModuleRange(uintptr_t& outBase, uintptr_t& outEnd)
         {
             static uintptr_t s_base = 0;

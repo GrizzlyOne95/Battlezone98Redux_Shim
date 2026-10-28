@@ -425,6 +425,7 @@ namespace BZROpenShim
             return reinterpret_cast<T>(ResolveOgreProcRaw(name));
         }
         bool TryGetOgreModuleRange(uintptr_t& outBase, uintptr_t& outEnd);
+        bool IsLiveOgreLight(const void* light);
         void* GetOgreSceneManagerRuntime();
         const char* TryGetRttiClassName(const void* object, char* buffer, size_t bufferSize);
 
