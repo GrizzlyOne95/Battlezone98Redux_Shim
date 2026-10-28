@@ -58,6 +58,8 @@ namespace BZROpenShim
         constexpr const char* kProgramRoot = "OpenShim/GpuSkinVP/";
         // SceneManager::setShadowTextureCasterMaterial target used by the exe.
         constexpr const char* kCasterMaterialName = "Ogre/DepthShadowmap/Caster/Float";
+        // Private copy of it that ConvertPass reads as the caster template.
+        constexpr const char* kCasterTemplateName = "OpenShim/GpuSkinCasterTemplate";
         // Palette capacities the generated programs come in.
         // world_matrix_array_3x4 writes one 3x4 per bone matrix without a
         // bounds check, so an entity only ever gets a palette at least as big
@@ -327,8 +329,8 @@ namespace BZROpenShim
         };
         std::unordered_map<void*, RootProbe> g_rootProbes;
 
-        // Caster material pass whose vertex program the skinned caster twins,
-        // and whose parameters seed each skinned caster's.
+        // Pass of the caster template clone whose vertex program the skinned
+        // caster twins, and whose parameters seed each skinned caster's.
         void* g_casterPass = nullptr;
         SharedPtr g_casterMaterial;
         // Offset of Technique::mShadowCasterMaterial, read from the exported
@@ -772,8 +774,19 @@ namespace BZROpenShim
             void* manager = g_ogre.materialManager();
             if (!manager)
                 return false;
+            SharedPtr stock;
+            g_ogre.getMaterialByName(manager, &stock, std::string(kCasterMaterialName), std::string("Autodetect"));
+            if (!stock.rep)
+                return false;
+            // Not the stock pass itself: SceneManager::deriveShadowCasterPass
+            // swaps each caster's override program and parameters into it per
+            // draw, so later reads could return another clone's skinned caster.
+            // Cloned before OpenShim sets its first caster override (only a
+            // stock caster override drawn just before could still be in it),
+            // and the clone copies the parameters rather than sharing them.
             SharedPtr material;
-            g_ogre.getMaterialByName(manager, &material, std::string(kCasterMaterialName), std::string("Autodetect"));
+            g_ogre.cloneMaterial(stock.rep, &material, std::string(kCasterTemplateName), false, std::string());
+            Release(stock);
             if (!material.rep)
                 return false;
             void* technique = g_ogre.getNumTechniques(material.rep) > 0
@@ -783,6 +796,8 @@ namespace BZROpenShim
             if (!pass || !g_ogre.hasVertexProgram(pass))
             {
                 Release(material);
+                // Free the name, or the next attempt's clone throws a duplicate.
+                g_ogre.removeResource(manager, std::string(kCasterTemplateName));
                 return false;
             }
             // Keep the reference: the pass must outlive every clone using it.
