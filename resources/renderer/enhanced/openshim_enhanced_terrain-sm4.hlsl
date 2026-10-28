@@ -1410,6 +1410,8 @@ void terrain_fragment(
 #if defined(ENHANCED_MODE)
     float snowCover = 0.0;
     float iceMask = 0.0;
+    // Snow before jet wash: blowing snow aside shows the ground, not ice.
+    float iceSnowCover = 0.0;
     float iceGloss = 0.0;
     float dustCover = 0.0;
     float terrainWet = 0.0;
@@ -1510,6 +1512,7 @@ void terrain_fragment(
         // Wind piles snow into hollows and scours it off ridges.
         snowCover = lerp(snowCover, 1.0, terrainHollow * 0.75 * smoothstep(0.2, 0.7, snowUp + snowNoise * 0.2));
         snowCover *= 1.0 - 0.8 * terrainRidge;
+        iceSnowCover = snowCover;
 #if defined(TERRAIN_SHAPE_ENABLED)
         snowCover *= 1.0 - 0.9 * terrainWash;
 #endif
@@ -1581,11 +1584,11 @@ void terrain_fragment(
         // world XZ, so the stock-UV probe and resample do not exist there:
         // the albedo stage takes the mask from the final HD colour, and the
         // gloss lift (needed before lighting) is skipped.
-        iceMask = 1.0 - snowCover;
+        iceMask = 1.0 - iceSnowCover;
 #else
         iceOffset = ose_ice_parallax_uv(iceGeometric, viewPos, vTexCoord, surfaceSnow.w);
         float3 iceProbe = diffuseMap.SampleGrad(diffuseSam, vTexCoord, ddx(vTexCoord), ddy(vTexCoord)).xyz;
-        iceMask = ose_ice_mask(iceProbe) * (1.0 - snowCover);
+        iceMask = ose_ice_mask(iceProbe) * (1.0 - iceSnowCover);
         iceGloss = iceMask;
 #endif
         if (iceMask > 0.0)
