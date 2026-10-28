@@ -2375,6 +2375,46 @@ namespace BZROpenShim
             TryResetChunkProxyNode(node, setPosition, setOrientation);
         }
 
+        using FnOgreDestroySceneNodePtr = void(__thiscall*)(void*, void*);
+
+        static bool TryDestroyShimObjectSeh(
+            void* sceneManager,
+            void* node,
+            void* entity,
+            FnOgreDestroyEntityPtr destroyEntity,
+            FnOgreDestroySceneNodePtr destroySceneNode)
+        {
+            __try
+            {
+                return CatchOgreThrow("destroyShimObject", [&] {
+                    if (entity && IsLikelyLiveOgreObject(entity))
+                        destroyEntity(sceneManager, entity);
+                    if (node && IsLikelyLiveOgreObject(node))
+                        destroySceneNode(sceneManager, node);
+                });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        // Destroys a pooled object in the scene that made it. Callers then
+        // forget the pointers whatever the result.
+        void DestroyShimOwnedMeshObject(void* sceneManager, void* node, void* entity)
+        {
+            static FnOgreDestroyEntityPtr destroyEntity =
+                ResolveOgreProc<FnOgreDestroyEntityPtr>("?destroyEntity@SceneManager@Ogre@@UAEXPAVEntity@2@@Z");
+            static FnOgreDestroySceneNodePtr destroySceneNode =
+                ResolveOgreProc<FnOgreDestroySceneNodePtr>("?destroySceneNode@SceneManager@Ogre@@UAEXPAVSceneNode@2@@Z");
+            if (!sceneManager || (!node && !entity) || !destroyEntity || !destroySceneNode ||
+                sceneManager != GetOgreSceneManagerRuntime())
+            {
+                return;
+            }
+            TryDestroyShimObjectSeh(sceneManager, node, entity, destroyEntity, destroySceneNode);
+        }
+
         // Same submission the per-Entity chunk path makes: notify the live
         // viewport camera, then let the Entity queue its own sub-entities.
         // False means the entity faulted and must be forgotten, not touched.

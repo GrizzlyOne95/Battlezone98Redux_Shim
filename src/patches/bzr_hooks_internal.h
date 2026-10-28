@@ -1606,6 +1606,8 @@ namespace BZROpenShim
         void SubmitSkinnedGibsToRenderQueue(void* renderQueue);
         void ForgetSkinnedGibSceneResources(const wchar_t* reason);
         void DeactivateSkinnedGibs(const wchar_t* reason);
+        // SceneManager::destroyAllEntities is about to free the pool's entities.
+        void DestroySkinnedGibSceneObjects(void* sceneManager, const wchar_t* reason);
         // PathBlockFaces (path_block.cpp): forget the per-mission blocker
         // registry and ODF cache. No-op when the hook is not installed.
         void ResetPathBlockState(const wchar_t* reason);
@@ -1625,6 +1627,7 @@ namespace BZROpenShim
         void SubmitShellCasingsToRenderQueue(void* renderQueue);
         void ForgetShellCasingSceneResources(const wchar_t* reason);
         void DeactivateShellCasings(const wchar_t* reason);
+        void DestroyShellCasingSceneObjects(void* sceneManager, const wchar_t* reason);
         // Writes the generated casing mesh and its default materials into
         // the chunk cache root (materials yield to a payload pack's own).
         // Must run before the payload resource group is initialised.
@@ -1644,6 +1647,7 @@ namespace BZROpenShim
             const float orientationWxyz[4],
             const float scale[3]);
         void HideShimOwnedObject(void* node, void* entity);
+        void DestroyShimOwnedMeshObject(void* sceneManager, void* node, void* entity);
         bool SubmitShimOwnedEntityToRenderQueue(void* sceneManager, void* entity, void* renderQueue);
 
         // Gib payloads (native_chunk_runtime.cpp). Runtime pieces sit in their

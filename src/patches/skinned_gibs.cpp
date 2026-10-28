@@ -1301,6 +1301,25 @@ namespace BZROpenShim
             ForgetAll(reason);
         }
 
+        void DestroySkinnedGibSceneObjects(void* sceneManager, const wchar_t* reason)
+        {
+            // Every mission end runs SceneManager::destroyAllEntities, which
+            // frees the hidden pool entities DeactivateSkinnedGibs kept for
+            // reuse. Destroy them with their nodes first, then forget them.
+            // Another scene manager's teardown leaves the pool alone.
+            bool matched = false;
+            for (GibSlot& slot : g_Slots)
+            {
+                if (SceneMatches(slot, sceneManager))
+                {
+                    DestroyShimOwnedMeshObject(slot.sceneManager, slot.node, slot.entity);
+                    matched = true;
+                }
+            }
+            if (matched)
+                ForgetAll(reason);
+        }
+
         void DeactivateSkinnedGibs(const wchar_t* reason)
         {
             // Mission left simulation: the scene is still alive, so hide every
