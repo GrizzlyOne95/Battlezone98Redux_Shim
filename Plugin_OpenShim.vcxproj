@@ -161,6 +161,8 @@
     <ClCompile Include="src\patches\alert_reticle_modes.cpp" />
     <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
+    <ClCompile Include="src\patches\community_key_auth.cpp" />
+    <ClCompile Include="src\patches\community_key_secret.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
     <ClCompile Include="src\patches\career_screen.cpp" />
     <ClCompile Include="src\patches\prelobby_screen.cpp" />

@@ -170,6 +170,12 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # files players already have. Set it to 0 for stock session-only mutes.
     "Network/PersistentPlayerMute",
 
+    # Sent only to non-official matchmaking servers, never to Rebellion's, and
+    # it is a per-server HMAC of a local secret, so servers cannot link a
+    # player across servers. It ships ON because community servers can only
+    # recognise returning players if the key is sent by default. 0 sends none.
+    "Network/CommunityIdentityKey",
+
     # Sender/receiver-side Lua Send/Receive fix: same four-byte wire payload,
     # applied only to a handle that previously went out as id 0 and arrived
     # as nil. A stock receiver still pushes nil for the reserved id, so a

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
 
 namespace BZROpenShim
 {
@@ -38,4 +39,9 @@ namespace BZROpenShim
     void SetMatchmakingServerOverride(const char* host);
     // False, with out empty, when no override is set.
     bool GetMatchmakingServerOverride(char* out, size_t outSize);
+
+    // The "host:port" the latest BZRNet lookup resolved to (after any redirect
+    // or override) and whether it is the official host. False until a BZRNet
+    // lookup has happened, including when the resolver hook is not installed.
+    bool GetBzrNetEffectiveEndpoint(std::string& hostPort, bool& official);
 }

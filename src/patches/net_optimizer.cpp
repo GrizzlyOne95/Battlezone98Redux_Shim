@@ -4087,6 +4087,55 @@ namespace
         }
     }
 
+    // The BZRNet endpoint the latest lookup resolved (after any override), for
+    // the community identity key. Empty until the first BZRNet lookup.
+    SRWLOCK g_EffectiveEndpointLock = SRWLOCK_INIT;
+    std::string g_EffectiveEndpoint;
+    bool g_EffectiveEndpointOfficial = false;
+
+    bool EqualsHostNoCase(std::string host, const char* other)
+    {
+        while (!host.empty() && host.back() == '.')
+            host.pop_back();
+        return MatchmakingServer::EqualsNoCase(host, other);
+    }
+
+    // Official unless proven otherwise: the official name (any trailing dot),
+    // the test redirect of it, or any address an official lookup resolved.
+    // A failed lookup clears the endpoint, so no key goes out on stale state.
+    void RecordEffectiveEndpoint(PCSTR nodeName, PCSTR resolvedNode, PCSTR resolvedService, const ADDRINFOA* result)
+    {
+        std::string endpoint;
+        bool official = true;
+        if (result && resolvedNode && *resolvedNode)
+        {
+            unsigned port = MatchmakingServer::kPort;
+            std::string scratch;
+            if (!resolvedService ||
+                !MatchmakingServer::SplitServer(std::string("x:") + resolvedService, scratch, port))
+                port = MatchmakingServer::kPort;
+            const std::string host(resolvedNode);
+            const bool ipv6 = host.find(':') != std::string::npos && host.front() != '[';
+            endpoint = (ipv6 ? "[" + host + "]" : host) + ":" + std::to_string(port);
+
+            official = EqualsHostNoCase(host, kBzrNetMatchmakingHost) ||
+                       (!g_Config.matchmakingRedirectAddress.empty() &&
+                        EqualsHostNoCase(nodeName ? nodeName : "", kBzrNetMatchmakingHost));
+            AcquireSRWLockShared(&g_WithholdLock);
+            for (const ADDRINFOA* ai = result; ai && !official; ai = ai->ai_next)
+            {
+                std::string key;
+                if (ai->ai_addr && MakeAddressKey(ai->ai_addr, static_cast<int>(ai->ai_addrlen), key))
+                    official = g_OfficialAddresses.count(key) != 0;
+            }
+            ReleaseSRWLockShared(&g_WithholdLock);
+        }
+        AcquireSRWLockExclusive(&g_EffectiveEndpointLock);
+        g_EffectiveEndpoint = endpoint;
+        g_EffectiveEndpointOfficial = official;
+        ReleaseSRWLockExclusive(&g_EffectiveEndpointLock);
+    }
+
     INT WSAAPI Hook_getaddrinfo(
         PCSTR nodeName,
         PCSTR serviceName,
@@ -4168,6 +4217,8 @@ namespace
         const INT rc = g_RealGetAddrInfoA(resolvedNode, resolvedService, hints, result);
         if (rc == 0 && result)
             RecordLookupAddresses(nodeName, resolvedNode, *result);
+        if (IsBzrNetLookupName(nodeName))
+            RecordEffectiveEndpoint(nodeName, resolvedNode, resolvedService, rc == 0 && result ? *result : nullptr);
         return rc;
     }
 
@@ -5513,6 +5564,15 @@ namespace
         CopyServerOverrideHost(host);
         std::snprintf(out, outSize, "%s", host.c_str());
         return !host.empty();
+    }
+
+    bool GetBzrNetEffectiveEndpoint(std::string& hostPort, bool& official)
+    {
+        AcquireSRWLockShared(&g_EffectiveEndpointLock);
+        hostPort = g_EffectiveEndpoint;
+        official = g_EffectiveEndpointOfficial;
+        ReleaseSRWLockShared(&g_EffectiveEndpointLock);
+        return !hostPort.empty();
     }
 
     bool RecycleBzrNetWebSocket()

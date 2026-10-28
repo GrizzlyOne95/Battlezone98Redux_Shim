@@ -12,7 +12,7 @@ from typing import Any
 from analyze_bzrnet_trace import details, load_trace
 
 
-SECRET_KEYS = {"steamAppTicket", "gogAppTicket", "authTicket", "platformTicket", "password"}
+SECRET_KEYS = {"steamAppTicket", "gogAppTicket", "authTicket", "platformTicket", "password", "communityKey"}
 IDENTITY_KEYS = {"userId", "player", "speakerId", "owner", "member", "realname", "name"}
 ENDPOINT_KEYS = {"wanAddress"}
 

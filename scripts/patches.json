@@ -4215,6 +4215,30 @@
       "identity": "movsx edx,byte ptr [ecx+nickname] in FUN_006C6E60 (identity message); the char[0x80] /nickname= buffer is its disp32 at +3"
     },
     {
+      "name": "BzrNetAuthContentSerializeCall",
+      "address": "0x006C7EA0",
+      "expected": "6A 02 6A 00 8D 8D 64 FB FF FF 51 8B 95 74 FB FF FF 52 E8 B9 FA 10 00",
+      "identity": "FUN_006C6E60 Authorization branch: serialises the content JSON object just before framing; the call to the json serialize routine 0x007D7970 is at +0x12, the content object is the local [ebp-0x42C], eax/ecx/edx are dead across the call"
+    },
+    {
+      "name": "BzrNetAuthContentLocal",
+      "address": "0x006C7A7E",
+      "expected": "8B 8D D4 FB FF FF E8 77 46 00 00",
+      "identity": "mov ecx,[ebp-0x42C]; call rel32 in FUN_006C6E60: proves the local the Authorization content hook reads is the content JSON object"
+    },
+    {
+      "name": "BzrJsonObjectIndex",
+      "address": "0x006CC100",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 08 50 E8 70 B6 D4 FF",
+      "identity": "json operator[] get-or-create: __thiscall(this=json object, const std::string* key), ret 4, returns the value slot in eax"
+    },
+    {
+      "name": "BzrJsonAssignString",
+      "address": "0x006DC070",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 08 50 E8 00 B7 D3 FF",
+      "identity": "json value assign from std::string: __thiscall(this=value slot, const std::string* value), ret 4"
+    },
+    {
       "name": "BzrNetGetLobby",
       "address": "0x00764760",
       "expected": "55 8B EC A1 70 54 94 00 5D C3",

@@ -461,6 +461,12 @@ int main()
     Check(safe.json.find("abc") == std::string::npos && safe.json.find("Alice") == std::string::npos, "identity redaction");
     Check(safe.json.find("1.2.3.4") == std::string::npos && safe.json.find("10.0.0.2") == std::string::npos, "endpoint redaction");
 
+    auto community = SanitizeBzrNetJson(
+        R"({"type":"Authorization","content":{"communityKey":"0123456789abcdef","name":"Alice"}})",
+        true);
+    Check(community.json.find("0123456789abcdef") == std::string::npos &&
+          community.json.find("<REDACTED>") != std::string::npos, "community key redaction");
+
     auto repeated = SanitizeBzrNetJson(
         R"({"users":[{"userId":"A","wanAddress":"8.8.8.8","lanAddresses":["10.1.1.1"]},{"userId":"B","wanAddress":"9.9.9.9","lanAddresses":["10.2.2.2"]}]})",
         false);

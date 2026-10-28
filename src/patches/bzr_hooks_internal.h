@@ -960,6 +960,7 @@ namespace BZROpenShim
         bool TryApplySelectedFlagThroughEngine(const char* source);
         bool TryApplyCachedFlagPayload(const char* source);
         void InstallBzrNetRouteObserverIfPossible();
+        void InstallCommunityKeyAuthHookIfPossible();
         void InstallStockLogThrottleIfPossible();
         void InstallAttackTaskLazyNearestIfRequested();
         void InstallMapFilterExtrasIfEnabled();

@@ -45,6 +45,7 @@ WORKSTATION.local.md
 *.log
 *.pcap
 *.pcapng
+openshim_community.key*
 BZPLYR*.DEF
 save/
 nul
