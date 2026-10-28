@@ -234,6 +234,9 @@ float4 ose_ice_depth_layers(float3 P, float3 V, float3 N, float depth, float foo
             * step(0.67, h.y) * saturate(1.0 - footprint * 2.5);
         inclusions += (crack * 0.9 + speck) * fade;
     }
+    // The layers live on world XZ, which a steep face sees edge-on: there
+    // the lines would smear into streaks that slide as the view moves.
+    inclusions *= smoothstep(0.55, 0.8, abs(N.y));
     float path = depth * 2.15 / cosR;
     float3 transmittance = exp(-path * float3(0.30, 0.11, 0.04));
     return float4(transmittance, saturate(inclusions));
