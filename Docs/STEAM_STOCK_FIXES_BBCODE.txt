@@ -61,6 +61,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed old mods' fixed-function and legacy shaders rendering black on DX11.
 [*] Fixed the DX11 glow pass throwing errors on meshes with no vertex colour.
 [*] Fixed every craft being drawn and shadowed by every camera, wherever it was.
+[*] Fixed shadows jumping and the ground flickering while firing: every muzzle flash and explosion light cast shadows and took shadow maps from the sun.
 [*] Fixed four terrain atlas tiles on the Elysium and Ganymede worlds that straddled two atlas cells.
 [*] Fixed sounds dropping in big fights because the playing-sound pool held only 100 entries.
 [*] Fixed 46-69 ms frame hitches from "LinkCopy out of copies" log spam.
