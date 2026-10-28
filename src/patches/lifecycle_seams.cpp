@@ -181,12 +181,11 @@ namespace BZROpenShim
                 g_SkyDomeEnabledOffset && TryClearSceneFlagSeh(sceneManager, g_SkyDomeEnabledOffset);
             const bool planeCleared =
                 g_SkyPlaneEnabledOffset && TryClearSceneFlagSeh(sceneManager, g_SkyPlaneEnabledOffset);
-            if (domeCleared || planeCleared)
-            {
-                Log(L"[SCENE] destroyAllEntities: disabled sky dome=%d plane=%d before its entities are freed\n",
-                    domeCleared ? 1 : 0,
-                    planeCleared ? 1 : 0);
-            }
+            // Once per mission end, so a quiet teardown still shows it ran.
+            Log(L"[SCENE] destroyAllEntities sm=0x%08X: disabled sky dome=%d plane=%d before its entities are freed\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
+                domeCleared ? 1 : 0,
+                planeCleared ? 1 : 0);
             DestroySkinnedGibSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyShellCasingSceneObjects(sceneManager, L"destroyAllEntities");
             if (g_OgreFn_DestroyAllEntitiesOriginal)
