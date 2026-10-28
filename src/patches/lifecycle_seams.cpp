@@ -139,6 +139,123 @@ namespace BZROpenShim
                 WeaponPresentationSceneTeardownComplete();
         }
 
+        // ---- Mission-end entity teardown --------------------------------
+        // Every mission end (and save load, and replay) runs stock
+        // FUN_0067D0C0, which calls SceneManager::destroyAllEntities and then
+        // destroyAllLights. That frees every Ogre Entity in the scene, mod
+        // ones included, while leaving their owners' pointers set:
+        //  - the sky dome / sky plane flags stay true, so the next frame's
+        //    _queueSkiesForRendering walks freed entities (the Wine crash
+        //    after a mission win, a save load or a replay; Windows got lucky);
+        //  - the gib and shell casing pools keep their hidden entities for
+        //    reuse in the next mission.
+        // Ogre re-creates sky entities by name when the sky is re-enabled,
+        // and a by-name destroy of a missing entity is a no-op, so clearing
+        // the enabled flags is enough to make the next setSkyDome safe.
+        static InlineDetour32 g_SceneDestroyAllEntitiesDetour = {};
+        static FnOgreSceneManagerVoidMethod g_OgreFn_DestroyAllEntitiesOriginal = nullptr;
+        // SceneManager offsets of mSkyDomeEnabled / mSkyPlaneEnabled, read
+        // from the isSky*Enabled accessors; 0 = accessor not recognised.
+        static uint32_t g_SkyDomeEnabledOffset = 0;
+        static uint32_t g_SkyPlaneEnabledOffset = 0;
+
+        static bool TryClearSceneFlagSeh(void* sceneManager, uint32_t offset)
+        {
+            __try
+            {
+                uint8_t* flag = static_cast<uint8_t*>(sceneManager) + offset;
+                if (!*flag)
+                    return false;
+                *flag = 0;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void __fastcall SceneManagerDestroyAllEntitiesHook(void* sceneManager, void* /*unusedEdx*/)
+        {
+            const bool domeCleared =
+                g_SkyDomeEnabledOffset && TryClearSceneFlagSeh(sceneManager, g_SkyDomeEnabledOffset);
+            const bool planeCleared =
+                g_SkyPlaneEnabledOffset && TryClearSceneFlagSeh(sceneManager, g_SkyPlaneEnabledOffset);
+            // Once per mission end, so a quiet teardown still shows it ran.
+            Log(L"[SCENE] destroyAllEntities sm=0x%08X: disabled sky dome=%d plane=%d before its entities are freed\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
+                domeCleared ? 1 : 0,
+                planeCleared ? 1 : 0);
+            DestroySkinnedGibSceneObjects(sceneManager, L"destroyAllEntities");
+            DestroyShellCasingSceneObjects(sceneManager, L"destroyAllEntities");
+            if (g_OgreFn_DestroyAllEntitiesOriginal)
+                g_OgreFn_DestroyAllEntitiesOriginal(sceneManager);
+        }
+
+        // `mov al, byte [ecx+disp32]; ret` -- the whole accessor.
+        static uint32_t ReadBoolAccessorOffset(const uint8_t* body)
+        {
+            if (!body || body[0] != 0x8A || body[1] != 0x81 || body[6] != 0xC3)
+                return 0;
+            uint32_t offset = 0;
+            memcpy(&offset, body + 2, sizeof(offset));
+            return offset < 0x1000 ? offset : 0;
+        }
+
+        static void InstallDestroyAllEntitiesHook(HMODULE ogreMain, uint8_t* body, uint8_t* domeAccessor, uint8_t* planeAccessor)
+        {
+            static bool attempted = false;
+            if (attempted)
+                return;
+            attempted = true;
+
+            g_SkyDomeEnabledOffset = ReadBoolAccessorOffset(domeAccessor);
+            g_SkyPlaneEnabledOffset = ReadBoolAccessorOffset(planeAccessor);
+
+            // mov eax,[ecx]; push <static type-name String>; call [eax+0x494]
+            // (destroyAllMovableObjectsByType). The push operand is an
+            // absolute address that moves with OgreMain's load base, so the
+            // first 7 bytes are checked by shape and the operand must point
+            // inside OgreMain.
+            static const uint8_t kCallByType[] = {0xFF, 0x90, 0x94, 0x04, 0x00, 0x00};
+            bool shapeOk = body && body[0] == 0x8B && body[1] == 0x01 && body[2] == 0x68 &&
+                           memcmp(body + 7, kCallByType, sizeof(kCallByType)) == 0;
+            if (shapeOk)
+            {
+                const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(ogreMain);
+                const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+                    reinterpret_cast<const uint8_t*>(ogreMain) + dos->e_lfanew);
+                const uintptr_t base = reinterpret_cast<uintptr_t>(ogreMain);
+                uint32_t operand = 0;
+                memcpy(&operand, body + 3, sizeof(operand));
+                shapeOk = operand >= base && operand < base + nt->OptionalHeader.SizeOfImage;
+            }
+
+            uint8_t expected[7] = {};
+            if (shapeOk)
+                memcpy(expected, body, sizeof(expected));
+            if (!shapeOk ||
+                !InstallInlineDetour32(g_SceneDestroyAllEntitiesDetour,
+                                       reinterpret_cast<uintptr_t>(body),
+                                       reinterpret_cast<void*>(SceneManagerDestroyAllEntitiesHook),
+                                       sizeof(expected),
+                                       expected,
+                                       sizeof(expected),
+                                       reinterpret_cast<void* volatile*>(&g_OgreFn_DestroyAllEntitiesOriginal)))
+            {
+                Log(L"[SCENE] destroyAllEntities hook not installed body=0x%08X shape=%d\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(body)),
+                    shapeOk ? 1 : 0);
+                return;
+            }
+
+            // The trampoline was published before the jump went live.
+            Log(L"[SCENE] Installed destroyAllEntities hook body=0x%08X skyDomeFlag=+0x%X skyPlaneFlag=+0x%X\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(body)),
+                g_SkyDomeEnabledOffset,
+                g_SkyPlaneEnabledOffset);
+        }
+
         void InstallSceneTeardownForgetHooksIfPossible()
         {
             if (g_SceneTeardownHooksInstalled)
@@ -164,6 +281,14 @@ namespace BZROpenShim
                 }
                 return proc;
             };
+
+            // Independent of the two forget hooks below: it has its own log
+            // line and fails closed on its own.
+            InstallDestroyAllEntitiesHook(
+                ogreMain,
+                resolveExportBody("?destroyAllEntities@SceneManager@Ogre@@UAEXXZ"),
+                resolveExportBody("?isSkyDomeEnabled@SceneManager@Ogre@@UBE_NXZ"),
+                resolveExportBody("?isSkyPlaneEnabled@SceneManager@Ogre@@UBE_NXZ"));
 
             uint8_t* clearSceneBody =
                 resolveExportBody("?clearScene@SceneManager@Ogre@@UAEXXZ");
@@ -247,11 +372,14 @@ namespace BZROpenShim
 
         // --- mission lifetime seam -------------------------------------------
         //
-        // The scene teardown hooks above never fire at a mission change. The
-        // shipped executable contains no call to Ogre::SceneManager::clearScene
-        // or destroyAllMovableObjects -- it creates one SceneManager and keeps
-        // it for the life of the process, and a mission change is torn down by
-        // the terrain zone destructor destroying only the objects it created.
+        // The clearScene / destroyAllMovableObjects hooks above never fire at
+        // a mission change. The shipped executable contains no call to either
+        // -- it creates one SceneManager and keeps it for the life of the
+        // process. A mission change is torn down by the terrain zone
+        // destructor destroying its own objects and, last, by FUN_0067D0C0
+        // calling destroyAllEntities and destroyAllLights, which free every
+        // Entity and Light in the scene, ours included (caught with cdb on
+        // 2026-10-28). The destroyAllEntities hook above covers the entities.
         //
         // They DO fire at process exit, and they must stay. Redux shuts Ogre
         // down cleanly, and the SceneManager destructor calls clearScene, which

@@ -1348,6 +1348,25 @@ namespace BZROpenShim
             g_Nearby.clear();
         }
 
+        void DestroyShellCasingSceneObjects(void* sceneManager, const wchar_t* reason)
+        {
+            // Same as DestroySkinnedGibSceneObjects: destroyAllEntities would
+            // otherwise free the hidden pool entities under us.
+            bool matched = false;
+            for (const CasingSlot& slot : g_Slots)
+            {
+                if (slot.sceneManager && slot.sceneManager == sceneManager)
+                {
+                    DestroyShimOwnedMeshObject(slot.sceneManager, slot.node, slot.entity);
+                    matched = true;
+                }
+            }
+            if (!matched)
+                return;
+            ForgetAll(reason);
+            g_Nearby.clear();
+        }
+
         void DeactivateShellCasings(const wchar_t* reason)
         {
             size_t hidden = 0;
