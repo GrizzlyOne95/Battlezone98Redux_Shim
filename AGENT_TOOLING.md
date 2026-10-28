@@ -44,6 +44,14 @@ If one of them is missing something, fix it in that repository, or report the ga
 - **For executable-version drift:** first compare PE identity, then use ghidriff; confirm any candidate correlation with bytes and runtime behavior before reusing it.
 - **For a screenshot of a live run:** set `OPENSHIM_FRAME_CAPTURE=1500,4000,8000` before launch. OpenShim writes those rendered world frames as `openshim_frame_NNNNN.png` next to the exe and logs `[FRAME-CAPTURE]`. It reads the Ogre render window back, so it works headless (session locked or disconnected) where `PrintWindow`/`CopyFromScreen` return black. Requires the DX11 renderer with the terrain-proxy Ogre exports resolved.
 - **For loading/filesystem/environment issues:** use ProcMon. Do not use static disassembly to infer a load path when a filtered capture can answer it directly.
+- **For unattended cdb crash capture (repeated harness runs):**
+  - The game is 32-bit: use the x86 cdb (`bzr-cdb32.cmd`), or dumps and stacks come out wrong.
+  - Put the handlers in a script file (`-cf <file>` or `$$><file`). In PowerShell, pass any inline `-c` string in single quotes so `$`, `;` and backticks reach cdb intact.
+  - Every command path must end in `g` (init script, exception handlers), `gc` (breakpoint hit scripts) or `qd`. A path with none of these leaves the game frozen at the break. The init script must end in `g`, because a launched target stops at the initial breakpoint.
+  - Handle every break type the run can raise: `sxe -c "..." -c2 "..." av` (first and second chance), `sxe bpe` (break instruction, 0x80000003) and `sxe c0000374` (heap corruption). Each handler prints its own distinct marker line, then dumps and quits with `qd`. The game raises handled first-chance AVs, so a first-chance AV is a crash only once its stack has been classified.
+  - If cdb was killed rather than exiting via `qd`, the game can be left suspended. For a game this task launched, resume it with `cdb -pv -p <pid> -c '~*m;~*;qd'` and repeat while `~*` still shows a non-zero suspend count. Then stop it with `Stop-BZRGame -Id <pid>` (dot-source `reverse_engineering/BZRHarness.ps1` first). This recovery path has only been used once; verify the game actually resumed.
+- **For scoring crash logs:** match the handlers' markers anchored to the start of a line (for example `^=== (FIRST CHANCE AV|SECOND CHANCE|BREAK)`). Classify each event from the lines that follow it, not from the whole log. Unanchored matches hit cdb's own echo of the `sxe`/script text. Before trusting any rate, validate the detector on one known-clean log and one known-crash log.
+- **For A/B crash-rate comparisons:** run at least 8 runs per arm (more for rare crashes) and interleave the arms. Report runs that crashed early separately from runs that reached the measured phase (for example exit). An early crash hides any later crash, so small or unsplit samples give false dependence verdicts.
 
 ## Runtime / Safety Rules
 - Static addresses, decompiler output, leaked-PDB hints, and runtime bytes are different evidence classes; corroborate them rather than treating one as authoritative for all builds.
@@ -52,6 +60,7 @@ If one of them is missing something, fix it in that repository, or report the ga
 - A native patch must fail closed when the expected build, signature, bytes, or object lifetime cannot be validated.
 - Record the command, executable hash/build identity, process PID (for live work), addresses read, and tool/backend in the task evidence. Never promote a one-shot probe, static address, or unvalidated PDB hint to live-runtime proof.
 - Prefer existing catalog/pattern infrastructure over scattering raw addresses through feature code.
+- Never start a harness run while any other `battlezone98redux` process is running, including the user's own game. Never attach to, suspend, or stop a game process this task did not launch.
 
 ## Tool Availability
 The installed toolchain normally includes Ghidra/pyghidra, the Redux debugger bridge, WinDbg/cdb, Frida, angr, ghidriff, Qiling, Rizin/Cutter, Detect It Easy, Sysinternals, LLVM/MSVC utilities, and `bzr-*` build/archive/triage wrappers. Do not load or enumerate the full installation inventory unless a setup/repair task requires it; `AGENT_TOOLING_SETUP.md` is authoritative for installation and environment overrides.
