@@ -1547,7 +1547,7 @@ void terrain_fragment(
         if (terrainPuddle > 0.0)
         {
             viewNormal = safe_normalize(lerp(viewNormal, rainGeometric, terrainPuddle));
-            float rainNear = 1.0 - smoothstep(20.0, 30.0, length(viewPos));
+            float rainNear = 1.0 - smoothstep(12.0, 20.0, length(viewPos));
             if (rainNear > 0.0)
             {
                 float2 ring = ose_rain_ring_layer(rainWorld.xz, surfaceRainTime, 0.8, 3200.0, 0.0)
@@ -1864,6 +1864,18 @@ void terrain_fragment(
 #else
     lightResult.xyz += sceneAmbient.xyz * pow(1.0 - NdotVForFill, 4.0) * 0.10;
 #endif
+#endif
+#if defined(ENHANCED_MODE) && (defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED))
+    // Standing water mirrors the overcast sky; the fog colour is its horizon.
+    if (terrainPuddle > 0.0)
+    {
+        float puddleFresnel = fresnel_schlick(saturate(dot(viewNormal, eyeDir)), float3(0.02, 0.02, 0.02)).x;
+        float3 puddleSky = saturate(fogColour.xyz);
+#if OSE_LINEAR_LIGHT_ACTIVE
+        puddleSky = srgb_to_linear(puddleSky);
+#endif
+        specularResult.xyz += puddleSky * puddleFresnel * terrainPuddle;
+    }
 #endif
 #endif
 
