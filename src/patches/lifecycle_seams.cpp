@@ -46,6 +46,8 @@
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
 #include "hook_engine.h"
+#include "bool_token.h"
+#include "iat_patch.h"
 #include "ui_performance.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
@@ -552,6 +554,8 @@ namespace BZROpenShim
         // on unmapped memory, which is what the shutdown path already assumed.
         static bool g_D3D11ModulesPinned[3] = { false, false, false };
 
+        static void InstallRootDestructorExitSeam();
+
         void PinDirect3DModulesForShutdown()
         {
             static const wchar_t* const kModules[] =
@@ -585,6 +589,129 @@ namespace BZROpenShim
                     kModules[index],
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(module)));
             }
+            InstallRootDestructorExitSeam();
+        }
+
+        // --- D3D11 exit teardown skip ------------------------------------------
+        //
+        // At exit Root::unloadPlugins -> dllStopPlugin -> Root::uninstallPlugin
+        // -> D3D11Plugin::uninstall deletes the render system, whose shutdown
+        // releases the device and context. The NVIDIA driver's own worker
+        // thread can still be using a released object then: it faults at
+        // nvwgf2um!NVAPI_Thunk+0x1a0cea (lock xadd on freed memory) while the
+        // main thread waits in ID3D11DeviceContext::Flush inside
+        // D3D11Device::ReleaseAll. The crash hit 6 of 8 exits in one batch and
+        // 2 of 8 in another, with or without FXAA and the buffer mirrors.
+        //
+        // The same race can instead deadlock the main thread in that Flush.
+        //
+        // When the game calls Ogre::Root::~Root (its only Root, destroyed once
+        // at exit; the run state is not a usable signal because quitting from a
+        // finished mission never reaches RUN_WAS_EXITED), point the plugin's
+        // uninstall vtable slot at a no-op, so the render system is leaked to
+        // the OS instead of being torn down under the driver. The modules are
+        // pinned above, and ExitProcess ends the driver's threads before any
+        // DLL detach. The rest of ~Root and the game's exit tail still run.
+        // OPENSHIM_KEEP_D3D11_EXIT_TEARDOWN=1 leaves the stock teardown.
+        static bool g_D3D11ExitTeardownSkipDone = false;
+
+        static void __fastcall SkipD3D11PluginUninstall(void* /*plugin*/, void* /*edx*/)
+        {
+            Log(L"[D3D11] Skipped render system teardown at exit (driver worker race guard)\n");
+        }
+
+        static void ArmD3D11ExitTeardownSkip()
+        {
+            if (g_D3D11ExitTeardownSkipDone)
+                return;
+            g_D3D11ExitTeardownSkipDone = true;
+
+            char value[16] = {};
+            const DWORD n = GetEnvironmentVariableA("OPENSHIM_KEEP_D3D11_EXIT_TEARDOWN", value,
+                                                    static_cast<DWORD>(sizeof(value)));
+            if (n > 0 && n < sizeof(value) && BoolToken::IsTruthy(value, n))
+            {
+                Log(L"[D3D11] Exit teardown skip disabled by OPENSHIM_KEEP_D3D11_EXIT_TEARDOWN\n");
+                return;
+            }
+
+            const HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
+            if (!renderer)
+                return;  // DX9 or not loaded: nothing to guard.
+
+            uint32_t thunk = 0, body = 0;
+            const HookEngine::EngineRow rows[] = {
+                {"D3D11PluginUninstallThunk", &thunk},
+                {"D3D11PluginUninstall", &body},
+            };
+            if (!HookEngine::BindModuleRows("D3D11 exit teardown skip", renderer, rows))
+                return;
+
+            // The thunk must be the uninstall export and jump to the guarded
+            // body, and slot 5 of the exported D3D11Plugin vtable must hold it.
+            const auto exportAt = [renderer](const char* name) {
+                return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(GetProcAddress(renderer, name)));
+            };
+            const uint32_t vtable = exportAt("??_7D3D11Plugin@Ogre@@6B@");
+            const uint32_t slot = vtable ? vtable + 5 * sizeof(uint32_t) : 0;
+            int32_t rel = 0;
+            std::memcpy(&rel, reinterpret_cast<const void*>(thunk + 1), sizeof(rel));
+            if (exportAt("?uninstall@D3D11Plugin@Ogre@@UAEXXZ") != thunk ||
+                thunk + 5 + static_cast<uint32_t>(rel) != body ||
+                !slot || *reinterpret_cast<const uint32_t*>(slot) != thunk)
+            {
+                Log(L"[D3D11] Exit teardown skip: rows do not match the renderer exports; left stock\n");
+                return;
+            }
+
+            DWORD oldProtect = 0;
+            if (!VirtualProtect(reinterpret_cast<void*>(slot), 4, PAGE_READWRITE, &oldProtect))
+            {
+                Log(L"[D3D11] Exit teardown skip: could not unprotect the uninstall slot; left stock\n");
+                return;
+            }
+            const uint32_t skip = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&SkipD3D11PluginUninstall));
+            const bool swapped = static_cast<uint32_t>(InterlockedCompareExchange(
+                reinterpret_cast<volatile LONG*>(slot), static_cast<LONG>(skip), static_cast<LONG>(thunk))) == thunk;
+            DWORD ignored = 0;
+            VirtualProtect(reinterpret_cast<void*>(slot), 4, oldProtect, &ignored);
+            Log(swapped
+                    ? L"[D3D11] Armed exit teardown skip at D3D11Plugin vtable slot 0x%08X\n"
+                    : L"[D3D11] Exit teardown skip: uninstall slot 0x%08X changed underneath; left as is\n",
+                slot);
+        }
+
+        using RootDestructorFn = void(__thiscall*)(void* root);
+        static void* g_RealRootDestructor = nullptr;
+        static bool g_RootDestructorSeamInstalled = false;
+
+        static void __fastcall RootDestructorExitSeam(void* root, void* /*edx*/)
+        {
+            __try
+            {
+                ArmD3D11ExitTeardownSkip();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                // Never let the guard cost the game its exit path.
+            }
+            reinterpret_cast<RootDestructorFn>(g_RealRootDestructor)(root);
+        }
+
+        static void InstallRootDestructorExitSeam()
+        {
+            if (g_RootDestructorSeamInstalled)
+                return;
+            const IatPatch::Result result = IatPatch::PatchImport(
+                GetModuleHandleW(nullptr), "OgreMain.dll", "??1Root@Ogre@@QAE@XZ",
+                reinterpret_cast<void*>(&RootDestructorExitSeam), &g_RealRootDestructor);
+            if (result == IatPatch::Result::Faulted)
+                return;  // Retried on the next run state change.
+            g_RootDestructorSeamInstalled = true;
+            if (result == IatPatch::Result::Patched)
+                Log(L"[D3D11] Installed Root destructor exit seam (exit teardown skip)\n");
+            else
+                Log(L"[D3D11] Root destructor import not found; exit teardown skip unavailable\n");
         }
     }
 
