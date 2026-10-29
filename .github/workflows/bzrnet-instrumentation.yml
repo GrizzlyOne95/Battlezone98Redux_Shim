@@ -6,6 +6,12 @@ on:
       - 'include/bzrnet_*'
       - 'src/patches/bzrnet_*'
       - 'tests/bzrnet_*'
+      - 'include/socket_tunnel*'
+      - 'src/patches/socket_tunnel*'
+      - 'src/patches/net_optimizer.cpp'
+      - 'tests/socket_tunnel*'
+      - 'tools/socket_tunnel/**'
+      - 'net.ini'
       - 'tests/CMakeLists.txt'
       - 'reverse_engineering/*bzrnet*'
       - 'reverse_engineering/BZRNET_NATIVE_INSTRUMENTATION.md'
@@ -15,6 +21,24 @@ on:
       - '.github/workflows/bzrnet-instrumentation.yml'
 
 jobs:
+  tunnel-tests:
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure tunnel tests
+        run: cmake -S tests -B build/tunnel-tests -A Win32
+      - name: Build tunnel protocol and configuration tests
+        run: cmake --build build/tunnel-tests --config Release --target socket_tunnel_protocol_tests socket_tunnel_config_tests
+      - name: Run tunnel protocol and configuration tests
+        run: ctest --test-dir build/tunnel-tests -C Release -R socket_tunnel --output-on-failure
+      - name: Build standalone Win32 tunnel
+        shell: pwsh
+        run: ./tools/socket_tunnel/build.ps1 -Out "$env:RUNNER_TEMP/socket_tunnel"
+      - name: Test socket transport and recovery without Steam or the game
+        shell: pwsh
+        run: python tests/socket_tunnel_integration.py "$env:RUNNER_TEMP/socket_tunnel/socket_tunnel.exe" --out "$env:RUNNER_TEMP/tunnel-evidence"
+
   protocol-tests:
     runs-on: windows-latest
     steps:
