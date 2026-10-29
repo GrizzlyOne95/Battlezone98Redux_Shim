@@ -86,6 +86,13 @@ identity state and binaries are not committed.
 - Full `BZROpenShim.sln` Release | Win32 build passes; complete Release CTest
   passes **161/161** (247.79 seconds). Network correctness baseline and workflow
   YAML parse pass. No patch catalog sites or engine resolves were added.
+- Static PE export inspection confirms the shipped DLL has no `SteamUtils`
+  shortcut. The appid check uses its verified exported
+  `SteamAPI_ISteamClient_GetISteamUtils` accessor with `SteamUtils008`, then
+  `SteamAPI_ISteamUtils_GetAppID`. Networking still uses the exact generic
+  Sockets/NetworkingUtils interfaces; no missing shortcut is assumed.
+  Standalone `/W4 /WX`, full solution rebuild and five configuration tests pass
+  after that accessor correction. Final WSL codec/policy rebuild passes 2/2.
 
 Latest plain-UDP same-PC smoke: median UDP echo RTT 0.387 ms tunnel versus
 0.107 ms direct, p95 0.591/0.266 ms; 256-KiB TCP echo throughput 4.80/18.16 MB/s.
@@ -114,5 +121,6 @@ No merge, release or public deployment occurred.
 Local evidence is under `%TEMP%/bzr-tunnel-m2-plain-final/`,
 `bzr-tunnel-m2-server-final/`, `bzr-steam-runtime-*`,
 `bzr-tunnel-m2-solution-final.log`, `bzr-tunnel-m2-ctest.log` and
-`bzr-tunnel-m2-linux.log`. Setup and CLI/INI details are in
+`bzr-tunnel-m2-loader-build.log` and `bzr-tunnel-m2-linux-final.log`.
+Setup and CLI/INI details are in
 [STEAM_TUNNEL.md](STEAM_TUNNEL.md).

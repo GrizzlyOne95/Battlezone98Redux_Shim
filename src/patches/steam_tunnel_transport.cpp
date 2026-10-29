@@ -159,15 +159,17 @@ struct SteamTransport::Impl
         auto pipe = Export<HandleFn>(dll, "SteamAPI_GetHSteamPipe");
         auto client = Export<PointerFn>(dll, "SteamClient");
         auto generic = Export<GenericFn>(dll, "SteamAPI_ISteamClient_GetISteamGenericInterface");
-        auto legacyUtils = Export<PointerFn>(dll, "SteamUtils");
+        // This shipped DLL exports SteamClient, but NOT a SteamUtils shortcut.
+        // Obtain the old Utils008 pointer through Client017's exported accessor.
+        auto legacyUtils = Export<void* (__cdecl*)(void*, int, const char*)>(dll, "SteamAPI_ISteamClient_GetISteamUtils");
         auto appId = Export<unsigned (__cdecl*)(void*)>(dll, "SteamAPI_ISteamUtils_GetAppID");
         const auto deadline = GetTickCount64() + 30000;
         while (!stop.load() && (!user() || !pipe()) && GetTickCount64() < deadline) Sleep(20);
         if (stop.load() || !user() || !pipe()) throw std::runtime_error("game Steam API did not initialize in time");
-        auto u = legacyUtils();
-        if (!u || appId(u) != 301650) throw std::runtime_error("Steam tunnel requires appid 301650");
         auto c = client();
         if (!c) throw std::runtime_error("SteamClient017 accessor unavailable");
+        auto u = legacyUtils(c, pipe(), "SteamUtils008");
+        if (!u || appId(u) != 301650) throw std::runtime_error("Steam tunnel requires appid 301650");
         sockets = static_cast<ISteamNetworkingSockets*>(generic(c, user(), pipe(), STEAMNETWORKINGSOCKETS_INTERFACE_VERSION));
         utils = static_cast<ISteamNetworkingUtils*>(generic(c, user(), pipe(), STEAMNETWORKINGUTILS_INTERFACE_VERSION));
         if (!sockets || !utils) throw std::runtime_error("exact SteamNetworkingSockets012/Utils004 interfaces unavailable; no legacy fallback");
