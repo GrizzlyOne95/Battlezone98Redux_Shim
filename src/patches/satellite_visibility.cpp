@@ -326,12 +326,11 @@ namespace BZROpenShim
         };
 
         static bool g_SatelliteVisibilityFixEnabled = true;
-        // Configured value AND'd with the single-player gate. This one is
-        // client-side only -- it cannot desync anything -- but it is a
-        // competitive asymmetry in the shim user's DISfavour: it hides enemies
-        // the team has never illuminated, so a shim player would see less on
-        // the satellite than a stock peer in the same match. Standing it down
-        // in a network game restores parity with stock Redux.
+        // Mirrors the configured value, in network games too. It is
+        // client-side only -- it cannot desync anything -- and online it is an
+        // asymmetry only in the shim user's DISfavour: it hides enemies the
+        // team has never illuminated, so a shim player sees less on the
+        // satellite than a stock peer in the same match.
         static bool g_SatelliteVisibilityFixActive = false;
 
         // Re-readable config for the two engine toggles the settings page can
@@ -365,8 +364,8 @@ namespace BZROpenShim
 
         void RefreshSatelliteVisibilityFixState()
         {
-            g_SatelliteVisibilityFixActive =
-                g_SatelliteVisibilityFixEnabled && IsSinglePlayerSession();
+            // Client-side rendering only, so it also runs in network games.
+            g_SatelliteVisibilityFixActive = g_SatelliteVisibilityFixEnabled;
         }
 
         static bool g_SatVisWasActive = false;
