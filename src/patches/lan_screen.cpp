@@ -3,6 +3,7 @@
 #include "bzr_options_ui.h"
 #include "lan_session.h"
 #include "lan_no_auth.h"
+#include "lan_no_auth_policy.h"
 #include "lan_discovery.h"
 #include "matchmaking_server.h"
 #include "net_optimizer.h"
@@ -37,10 +38,11 @@ namespace BZROpenShim
             char redirect[256]{};
             if (GetMatchmakingRedirectTarget(redirect, sizeof(redirect)))
             { g_Note = "A test redirect owns the server address."; return; }
-            // Persist using the existing Custom contract. Returning to setup
-            // displays this endpoint; Continue still uses stock readiness and
-            // authentication checks. Discovery cannot bypass those checks.
+            // Persist the explicit LAN selection. Its readiness policy still
+            // requires a real admission; discovery alone never enables it.
             std::string canonical;
+            if (LanNoAuth::Enabled() && !LanNoAuth::PrivateEndpoint(endpoint,canonical))
+            { g_Note = "Enter a private numeric LAN IPv4 address (optional :port)."; return; }
             if (MatchmakingServer::ValidateCustomHost(endpoint, canonical) != MatchmakingServer::HostStatus::Ok)
             { g_Note = "Enter an IPv4 address or host name, optionally with :port."; return; }
             if (!WriteShimUserConfigValue("Network", "CustomServer", canonical.c_str()) ||
