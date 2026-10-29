@@ -5,7 +5,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [h2]Gameplay and AI[/h2]
 [list]
 [*] Fixed howitzers firing at a sniper without deploying first. Stock lets a recent hit override a howitzer's target even while it is undeployed. [i](SP)[/i]
-[*] Fixed APCs refusing to drop soldiers on allied targets. Stock's APC AI rejected allied targets when choosing where to deploy. [i](SP)[/i]
+[*] Fixed APCs refusing to drop soldiers near an allied targeted unit. Stock's APC AI rejected allied targets when choosing where to deploy. [i](SP)[/i]
 [*] Fixed a destroyed splinter (spraybomb) continuing to spawn payload. Stock's splinter update skips the destroyed check that other buildings have.
 [*] Fixed hits from comets, APC soldiers and splinter payloads not revealing the craft that fired them. Stock reveals only the object that dealt the damage, not the craft that owned it. [i](SP)[/i]
 [*] Fixed tugs never deploying after picking up cargo. Stock only arms the deploy transition while a craft is undeployed, so a tug that had picked up cargo never started it. [i](SP)[/i]
