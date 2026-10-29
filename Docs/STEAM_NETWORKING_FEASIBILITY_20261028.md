@@ -6,9 +6,10 @@ BZR multiplayer (WS lobby TCP 1337, BZRNet UDP 1338 probe / 1339-1369 relay / P2
 over Steam networking so Steam friends can "just join" a home-hosted community
 server with no port forwarding?
 
-**Current design and implementation status (M1):**
+**Current design and implementation status (M1/M2):**
 [Steam tunnel setup and limits](STEAM_TUNNEL.md),
-[M1 validation results](STEAM_TUNNEL_M1_RESULTS_20261028.md).
+[M1 validation results](STEAM_TUNNEL_M1_RESULTS_20261028.md),
+[M2 validation results](STEAM_TUNNEL_M2_RESULTS_20261028.md).
 Section 1b supersedes the original legacy-API recommendation below. Use
 `ISteamNetworkingSockets` via the shipped DLL's generic accessor, one P2P
 connection per client, reliable TCP frames and unreliable UDP datagrams. Use
@@ -16,8 +17,12 @@ the exact current header interface version; never cast older versions to it.
 The host bridge is Win32, appid 301650. The in-process client reuses game Steam
 initialization. Do not replace Steam DLLs, vendor SDK headers, add server ticket
 verification, friends-list Join Game or rich presence in this workstream.
-M1 currently implements only the plain-UDP adapter; native five-minute gameplay
-acceptance, M2 and the two-account section-5 tests remain open.
+M1 implements the plain-UDP adapter; M2 adds Sockets P2P/SDR, native reliable
+stream messages, unreliable datagrams, connection-config callbacks, reconnects,
+quality diagnostics and persistent SteamID source mapping. The current live
+standalone attempt failed SteamAPI_Init before networking initialization, so
+offline tests are not remote Steam proof. Native five-minute M1 gameplay,
+two-account/ten-minute M2 gameplay, coexistence and section-5 metrics remain open.
 
 Confidence labels: **CONFIRMED** (read from files/binaries this session),
 **INFERRED**, **UNKNOWN**. Exe addresses come from existing repo RE docs, not

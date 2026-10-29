@@ -7,6 +7,11 @@ on:
       - 'src/patches/bzrnet_*'
       - 'tests/bzrnet_*'
       - 'include/socket_tunnel*'
+      - 'include/steam_tunnel*'
+      - 'src/patches/steam_tunnel*'
+      - 'tests/steam_tunnel*'
+      - 'scripts/Fetch-SteamNetworkingHeaders.ps1'
+      - 'Plugin_OpenShim.vcxproj'
       - 'src/patches/socket_tunnel*'
       - 'src/patches/net_optimizer.cpp'
       - 'tests/socket_tunnel*'
@@ -29,9 +34,9 @@ jobs:
       - name: Configure tunnel tests
         run: cmake -S tests -B build/tunnel-tests -A Win32
       - name: Build tunnel protocol and configuration tests
-        run: cmake --build build/tunnel-tests --config Release --target socket_tunnel_protocol_tests socket_tunnel_config_tests
+        run: cmake --build build/tunnel-tests --config Release --target socket_tunnel_protocol_tests socket_tunnel_config_tests steam_tunnel_policy_tests steam_tunnel_fixture
       - name: Run tunnel protocol and configuration tests
-        run: ctest --test-dir build/tunnel-tests -C Release -R socket_tunnel --output-on-failure
+        run: ctest --test-dir build/tunnel-tests -C Release -R "socket_tunnel|steam_tunnel" --output-on-failure
       - name: Build standalone Win32 tunnel
         shell: pwsh
         run: ./tools/socket_tunnel/build.ps1 -Out "$env:RUNNER_TEMP/socket_tunnel"

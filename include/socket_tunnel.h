@@ -2,12 +2,17 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
+#include "steam_tunnel_policy.h"
 
 namespace BZROpenShim::SocketTunnel
 {
     struct Config
     {
         bool bridge = false;
+        uint64_t steamHost = 0; // nonzero selects Steam on agent
+        bool steam = false;
+        bool ownSteam = false; // standalone only: init/pump/shutdown our own Steam session
+        std::string identityMap; // bridge: durable SteamID -> loopback source mapping
         // All addresses are numeric IPv4. Defaults never expose a LAN listener.
         std::string listen = "127.0.0.1";
         uint16_t port = 27030;
@@ -25,5 +30,8 @@ namespace BZROpenShim::SocketTunnel
     void Configure(const std::string& steamHost, const std::string& udpBridge);
     bool Requested();
     bool Ready();
+    // Logical server identity for community-key derivation. Never resolve this
+    // name: it namespaces distinct tunnels that share physical 127.0.0.1.
+    std::string CommunityEndpoint();
     void Stop();
 }

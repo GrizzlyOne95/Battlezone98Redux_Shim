@@ -20,13 +20,13 @@ namespace
     {
         requested = !steamHost.empty() || !udpBridge.empty();
         if (!requested) return;
-        // M1 deliberately refuses Steam mode; never silently fall back to an
-        // unauthenticated UDP route or the official matchmaking server.
         if (!steamHost.empty())
         {
-            ready = -1; Log("SteamTunnelHost is reserved for M2; connection blocked in this M1 build"); return;
+            if (!udpBridge.empty() || !ParseSteamId(steamHost, config.steamHost))
+            { ready = -1; Log("Steam tunnel host invalid or both transports selected; connection blocked"); return; }
+            config.steam = true; // borrow game init and callback pump
         }
-        if (!ParseEndpoint(udpBridge, config.remote, config.port))
+        else if (!ParseEndpoint(udpBridge, config.remote, config.port))
         {
             ready = -1; Log("invalid TunnelUdpBridge (expected numeric IPv4:port); connection blocked"); return;
         }
@@ -35,6 +35,12 @@ namespace
     }
     bool Requested() { return requested.load(); }
     bool Ready() { return ready.load() == 1 && !stop.load(); }
+    std::string CommunityEndpoint()
+    {
+        if (!requested) return {};
+        if (config.steam) return SteamCommunityEndpoint(config.steamHost);
+        return "udp." + config.remote + "." + std::to_string(config.port) + ".openshim.invalid:1337";
+    }
     void Stop()
     {
         AcquireSRWLockExclusive(&shutdownLock);
