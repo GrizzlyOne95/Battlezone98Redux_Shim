@@ -4161,7 +4161,7 @@ namespace
             // Wins over environment/test redirects, saved server choices and
             // /bzrserver=. Bind/route qualification failure never reaches an
             // unrelated local service or falls back to official matchmaking.
-            if (!SocketTunnel::Ready() || !EnsureBzrNetTunnelRelay())
+            if (!SocketTunnel::WaitReady() || !EnsureBzrNetTunnelRelay())
             {
                 if (result) *result = nullptr;
                 return EAI_FAIL;

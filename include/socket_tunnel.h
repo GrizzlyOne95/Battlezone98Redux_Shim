@@ -25,5 +25,7 @@ namespace BZROpenShim::SocketTunnel
     void Configure(const std::string& steamHost, const std::string& udpBridge);
     bool Requested();
     bool Ready();
+    // Bound the first resolver wait while the worker binds its local ports.
+    bool WaitReady(unsigned timeoutMs = 1000);
     void Stop();
 }

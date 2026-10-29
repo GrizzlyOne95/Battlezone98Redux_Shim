@@ -35,6 +35,13 @@ namespace
     }
     bool Requested() { return requested.load(); }
     bool Ready() { return ready.load() == 1 && !stop.load(); }
+    bool WaitReady(unsigned timeoutMs)
+    {
+        const auto deadline = GetTickCount64() + timeoutMs;
+        while (requested.load() && ready.load() == 0 && !stop.load() && GetTickCount64() < deadline)
+            Sleep(5);
+        return Ready(); // ports bound only; not remote bridge qualification
+    }
     void Stop()
     {
         AcquireSRWLockExclusive(&shutdownLock);
