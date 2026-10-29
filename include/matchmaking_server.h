@@ -4,7 +4,7 @@
 // pre-lobby's Rebellion / Custom / Local choice. Header-only and free of
 // Windows and engine calls so the tests can include it.
 //
-//   openshim.ini [Network] Server       = Rebellion | Custom | Local   (absent: no override)
+//   openshim.ini [Network] Server       = Rebellion | Custom | Local | LAN   (absent: no override)
 //   openshim.ini [Network] CustomServer = <host or IP>[:port]
 //
 // The scheme is always ws. The port defaults to 1337, the official one; any
@@ -34,6 +34,7 @@ namespace MatchmakingServer
         Rebellion,
         Custom,
         Local,      // a dedicated server on this PC (kLocalHost)
+        Lan,        // discovered/manual LAN host; no automatic official fallback
     };
 
     enum class HostStatus
@@ -85,7 +86,7 @@ namespace MatchmakingServer
     }
 
     // The [Network] Server value. Empty or absent is Mode::None and parses.
-    // False (mode None) for anything that is not Rebellion, Custom or Local.
+    // False (mode None) for anything that is not Rebellion, Custom, Local or LAN.
     inline bool ParseMode(std::string_view text, Mode& mode)
     {
         mode = Mode::None;
@@ -107,6 +108,11 @@ namespace MatchmakingServer
             mode = Mode::Local;
             return true;
         }
+        if (EqualsNoCase(text, "LAN"))
+        {
+            mode = Mode::Lan;
+            return true;
+        }
         return false;
     }
 
@@ -117,6 +123,7 @@ namespace MatchmakingServer
         case Mode::Rebellion: return "Rebellion";
         case Mode::Custom: return "Custom";
         case Mode::Local: return "Local";
+        case Mode::Lan: return "LAN";
         default: return "";
         }
     }
@@ -207,7 +214,7 @@ namespace MatchmakingServer
     }
 
     // The server the saved settings select: the official host for Rebellion,
-    // the canonical CustomServer for Custom, 127.0.0.1 for Local, empty for no
+    // the canonical CustomServer for Custom/LAN, 127.0.0.1 for Local, empty for no
     // override (None, or a Custom with an unusable address).
     inline std::string ResolveSavedHost(Mode mode, std::string_view customServer)
     {
@@ -215,7 +222,7 @@ namespace MatchmakingServer
             return kRebellionHost;
         if (mode == Mode::Local)
             return kLocalHost;
-        if (mode == Mode::Custom)
+        if (mode == Mode::Custom || mode == Mode::Lan)
         {
             std::string host;
             if (ValidateCustomHost(customServer, host) == HostStatus::Ok)

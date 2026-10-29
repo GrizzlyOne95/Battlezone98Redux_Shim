@@ -23,6 +23,7 @@
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
 #include "matchmaking_server.h"
+#include "lan_session.h"
 #include "net_optimizer.h"
 #include "patcher.h"
 #include "shell_screens.h"
@@ -35,6 +36,7 @@
 
 namespace BZROpenShim
 {
+    bool RegisterLanScreen();
     namespace Hooks
     {
         bool RedirectCallTarget(uintptr_t callAddress,
@@ -189,7 +191,7 @@ namespace BZROpenShim
             if (which == ServerChoice::Rebellion)
                 return selected ? "> Rebellion <" : "Rebellion";
             if (which == ServerChoice::Local)
-                return selected ? "> Local <" : "Local";
+                return "LAN...";
             return selected ? "> Custom <" : "Custom";
         }
 
@@ -229,8 +231,9 @@ namespace BZROpenShim
 
         void __cdecl OnLocalClicked()
         {
-            g_Choice = ServerChoice::Local;
-            RefreshServerSelector();
+            PreLobbyEndNicknameEdit();
+            PreLobbyEndServerEdit();
+            Shell::RequestScreen(Shell::LiveScreen(Shell::kPreLobbyScreenId), Shell::kLanScreenId);
         }
 
         // Resolves the selector to the host that should be in effect. False,
@@ -456,6 +459,7 @@ namespace BZROpenShim
 
         void TickPreLobby(void* screen)
         {
+            LanSession::Tick();
             if (g_InContinue)
                 return;
 
@@ -806,6 +810,7 @@ namespace BZROpenShim
         Shell::ScreenDef def = { Shell::kPreLobbyScreenId, "MultiplayerPreLobby", &BuildPreLobbyScreen,
                                  &ClosedPreLobby, &TickPreLobby, &OnCharPreLobby };
         g_Registered = Shell::RegisterScreen(def);
+        RegisterLanScreen();
         if (g_Registered)
             InstallEntryHooks();
         else

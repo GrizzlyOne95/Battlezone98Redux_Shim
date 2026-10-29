@@ -2053,7 +2053,8 @@ PreLobby = 1
 ReconnectDelaySeconds = 5
 
 ; Matchmaking server: Rebellion's official one or a community/custom one.
-; Accepted: Rebellion, Custom, Local. Local is a dedicated server running on
+; Accepted: Rebellion, Custom, Local, LAN. LAN uses CustomServer and never
+; falls back to the official service. Local is a dedicated server running on
 ; this PC (127.0.0.1, port 1337). Blank/absent = no override: stock behaviour,
 ; i.e. whatever the /bzrserver= launch switch gives, else Rebellion's server.
 ; The multiplayer setup screen (PreLobby) edits this and CustomServer; Continue
@@ -2066,7 +2067,7 @@ ReconnectDelaySeconds = 5
 ; the BZRNet Authorization without it.
 ; Server =
 
-; Host name or IP of the custom server, used when Server = Custom.
+; Host name or IP of the custom server, used when Server = Custom or LAN.
 ; Accepted: a bare host or IPv4 address, optionally with a ":port" suffix
 ; (1-65534, default 1337). No scheme (ws://), path or spaces. The lobby
 ; websocket goes to that TCP port and the game probes UDP on port + 1, so a

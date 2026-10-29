@@ -36,7 +36,8 @@ namespace BZROpenShim
     // from [Network] Server / CustomServer; empty or null clears it. Takes
     // effect on the next lookup, i.e. the next BZRNet reconnect; follow with
     // RecycleBzrNetWebSocket to reconnect now. Thread-safe.
-    void SetMatchmakingServerOverride(const char* host);
+    // LAN keeps retrying its selected host rather than switching to the public service.
+    void SetMatchmakingServerOverride(const char* host, bool allowOfficialFallback = true);
     // False, with out empty, when no override is set.
     bool GetMatchmakingServerOverride(char* out, size_t outSize);
 

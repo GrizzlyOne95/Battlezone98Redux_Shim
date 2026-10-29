@@ -26,6 +26,8 @@ namespace BZROpenShim::ShellScreens
     // Multiplayer pre-lobby ([Network] PreLobby): nickname, flag and server
     // status before the lobby.
     inline constexpr uint32_t kPreLobbyScreenId = kCustomScreenIdBase + 3;
+    // +4 is the existing Menu Colors screen (menu_theme.h).
+    inline constexpr uint32_t kLanScreenId = kCustomScreenIdBase + 5;
     inline constexpr uint32_t kOptionsCategoryScreenIdBase = kCustomScreenIdBase + 0x10;
 
     // Adds the screen's children to `screen` (a constructed Top Screen). Runs

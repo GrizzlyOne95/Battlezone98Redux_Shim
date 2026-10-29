@@ -47,6 +47,8 @@ These are known problems we are still tracking down. Detailed reports and log fi
 
 [h2]Experiments[/h2]
 
+LAN hosting and a nearby-host browser are in development on a separate branch. They still require Steam/Galaxy sign-in and need testing between real PCs; they are not included in the release.
+
 Not part of the release, and may never be: DLSS frame generation and ray-traced shadows, terrain tessellation, and fog that swirls around passing hovercraft.
 
 [h2]Install and Update[/h2]
