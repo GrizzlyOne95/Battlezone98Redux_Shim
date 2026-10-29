@@ -9,7 +9,7 @@ server with no port forwarding?
 **Current design and implementation status (M1):**
 [Steam tunnel setup and limits](STEAM_TUNNEL.md),
 [M1 validation results](STEAM_TUNNEL_M1_RESULTS_20261028.md).
-Section 1b supersedes the original legacy-API recommendation below. Use
+Section 1b establishes the generic-accessor approach. Use
 `ISteamNetworkingSockets` via the shipped DLL's generic accessor, one P2P
 connection per client, reliable TCP frames and unreliable UDP datagrams. Use
 the exact current header interface version; never cast older versions to it.
@@ -25,20 +25,21 @@ re-verified in Ghidra here.
 
 ## Verdict
 
-**Feasible, medium effort (~2-3 weeks to a usable v1), and the transport is the
-easy part.** The clean design is a *local loopback tunnel*, not a rewrite of the
-game's sockets: OpenShim's existing `MatchmakingRedirectAddress` already points
-the whole BZRNet stack (TCP 1337, UDP 1338, relay ports) at one host. Point it at
-127.0.0.1, run a Steam-backed tunnel agent there, and a Steam-hosted bridge on the
-server PC. The game and the Python server are untouched.
+**Interface access is confirmed; remote P2P/SDR feasibility is UNKNOWN.** The
+shipped DLL's generic accessor supplies Sockets012/Utils004. The proposed seam
+is a loopback TCP/UDP tunnel, with a Steam-backed bridge on the server PC.
 
-Caveats that decide whether it is worth it: the host must run a Steam-logged-in
-bridge that owns BZR (appid 301650); GOG players cannot use it; the legacy API
-that is available without an SDK swap is deprecated; and "Join Game" from the
-friends list needs rich presence the game does not appear to set. Compared with
-Tailscale (zero code, works today, but installs a VPN and needs invites) and a
-playit-style tunnel (client-free only for TCP/UDP exposure, not a friends-list
-UX), Steam wins only on UX for Steam players. See "Is it worth it".
+No connection between two accounts has succeeded. Relay availability reaching
+Current and creating a P2P listener do not establish that appid 301650 permits
+remote SDR P2P without publisher-side Steamworks configuration. That dependency
+remains **UNKNOWN** until two owning accounts connect. Any solution requiring
+Rebellion's keys, client secrets or publisher approval is out of scope.
+
+The Steam transport is unavailable to the GOG executable, which does not load
+`steam_api.dll`; this is a transport capability limit, not an executable/store
+gate on other multiplayer paths. The Galaxy bridge remains blocked because it
+requires Rebellion's client secret. Friends-list Join Game and host-account /
+bridge session coexistence also remain unverified.
 
 ## 1. Steam SDK version and interfaces (CONFIRMED)
 
@@ -75,15 +76,11 @@ Steam install exists at
   (`mp_not_ready_readiness_chain.md`). The Steam lobby/P2P code is dormant legacy
   from the pre-BZRNet era (modes 1/3). Whether it is still functional is UNKNOWN.
 
-Consequence for the SDR question: ISteamNetworkingSockets/Messages (SDR proper)
-are **not reachable through the shipped dll's flat API**. Options: (a) use the
-legacy `ISteamNetworking005` the exe is already built against (no SDK change,
-deprecated but Valve routes it over SDR/Steam relay today, INFERRED); (b) obtain
-`SteamNetworkingSockets0xx` through `ISteamClient::GetISteamGenericInterface`
-using newer SDK headers (works against current Steam clients, INFERRED); (c) ship
-a newer 32-bit `steam_api.dll` (flat ABI is stable, legacy exports preserved, but
-swapping a DRM-adjacent DLL is a risk to avoid). Recommend (a) for the spike,
-(b) for v2.
+The absence of flat Sockets/Messages exports does not prevent access through
+`SteamAPI_ISteamClient_GetISteamGenericInterface`. Section 1b confirms that route
+with the shipped DLL. Use exact Sockets012/Utils004 header interfaces for the
+spike; no legacy SteamNetworking005 recommendation or DLL replacement is needed.
+Remote P2P/SDR acceptance remains UNKNOWN independently of interface access.
 
 ### 1b. Live probe: the Steam client serves the new interfaces (CONFIRMED 2026-10-28)
 
@@ -110,7 +107,7 @@ dll's `SteamAPI_RunCallbacks`: certificate request then `auth status: OK` within
 `relay: overall=100 (Current) ... 26 valid, 1 great, 6 good+, 18 ok+, 6 ignored`;
 ping location string was produced (ord/iad/dfw/sea/atl at 27-50 ms from this PC).
 
-Verdict: option (b) is viable. The shipped DLL needs no replacement; the game
+Verdict: generic interface access is confirmed; remote SDR remains UNKNOWN. The shipped DLL needs no replacement; the game
 process can use `ISteamNetworkingSockets`/`Messages` with SDR through the generic
 accessor. Not yet tested: an actual two-account P2P connection (probe is
 single-account), reliable-stream behaviour, and coexistence of two processes on the
@@ -143,7 +140,7 @@ Battlezone was not).
 ```
 game --getaddrinfo--> 127.0.0.1
  TCP 1337 / UDP 1338 / UDP 1339-1369  (local tunnel agent, in OpenShim or a sidecar)
-        |  ISteamNetworking (SendP2PPacket, channel per stream, Reliable for TCP bytes)
+        |  ISteamNetworkingSockets (reliable stream frames, unreliable UDP messages)
         v   Steam relay / direct
  host bridge (Steam-logged-in, appid 301650) --> 127.0.0.1 Python server 1337/1338/1339-1369
 ```
