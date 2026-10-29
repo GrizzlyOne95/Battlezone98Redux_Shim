@@ -1,4 +1,4 @@
-# LAN host and discovery preview
+# Local host tools preview
 
 Development branch: `agent/lan-host-discovery`, based on OpenShim `045035ea2`.
 Companion server source: `e1544da7437b0b619502586f71725098911be82c`
@@ -6,9 +6,15 @@ Companion server source: `e1544da7437b0b619502586f71725098911be82c`
 The companion DedicatedServer branch supplies the Win32 helper. This is source
 development, not a published release or native gameplay acceptance.
 
+The requested direct LAN target is now documented in
+[DIRECT_LAN_BACKEND.md](DIRECT_LAN_BACKEND.md): client-owned sessions with no
+service or platform sign-in. This helper prototype is optional Local tooling
+and does not meet that target. Official (Rebellion), Custom and Local selectors
+remain separate and retain their existing behavior.
+
 ## Player flow
 
-Open Multiplayer setup and select **LAN...**. **Host LAN** starts the helper on
+Open Multiplayer setup and select **Local host tools**. **Start local host** starts the helper on
 this PC, waits for its readiness signal, and returns to setup with its LAN
 address selected. Press **Continue**, then create the game in the normal Redux
 lobby. Other players use **Refresh**, select that host, then press **Continue**.
@@ -32,7 +38,7 @@ provide an independent offline identity implementation.
 | Surface | State |
 |---|---|
 | Existing Redux LAN UDP gameplay transport | PROVEN in the Redux 2.2.301 GOG corpus; see the networking investigation below |
-| New registered LAN shell screen, host controls, manual address selection | Implemented; builds as Release Win32; native UI remains unverified |
+| New registered Local host tools screen, host controls, manual address selection | Implemented; builds as Release Win32; native UI remains unverified |
 | Hidden managed server launch, readiness, graceful Stop and process ownership | Implemented; Win32 lifecycle fixture and real frozen-helper checks pass |
 | UDP broadcast discovery | Implemented; nonce, bounds, source/port validation and per-adapter broadcasts; local socket integration passes |
 | Physical two-PC broadcast/join/gameplay | UNKNOWN; not run |

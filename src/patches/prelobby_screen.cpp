@@ -90,7 +90,7 @@ namespace BZROpenShim
         constexpr float kServerWellW = kConnectionBox.x + kConnectionBox.w - kBoxPadX - kServerWellX;
         constexpr float kServerNoteY = kServerRowY + kServerRowH + 8.0f;
 
-        constexpr Shell::Rect kHintRect = { 244.0f, 828.0f, 952.0f, 46.0f };
+        constexpr Shell::Rect kHintRect = { 244.0f, 828.0f, 680.0f, 46.0f };
 
         // The stock top-corner Back button, as Career builds it.
         constexpr Shell::Rect kBackRect = { 0.0f, 0.0f, 342.0f, 77.0f };
@@ -191,7 +191,7 @@ namespace BZROpenShim
             if (which == ServerChoice::Rebellion)
                 return selected ? "> Rebellion <" : "Rebellion";
             if (which == ServerChoice::Local)
-                return "LAN...";
+                return selected ? "> Local <" : "Local";
             return selected ? "> Custom <" : "Custom";
         }
 
@@ -230,6 +230,12 @@ namespace BZROpenShim
         }
 
         void __cdecl OnLocalClicked()
+        {
+            g_Choice = ServerChoice::Local;
+            RefreshServerSelector();
+        }
+
+        void __cdecl OnLocalToolsClicked()
         {
             PreLobbyEndNicknameEdit();
             PreLobbyEndServerEdit();
@@ -633,7 +639,11 @@ namespace BZROpenShim
                     { kServerCaptionX, kServerNoteY, rowW, 34.0f }, "");
             }
             Shell::AddLabel(panel, panel, "OpenShimPreLobby_Hint", kHintRect,
-                            "A new name or server is applied when you press Continue.");
+                            "Press Continue to apply a new name or server.");
+            if (g_ServerSelector)
+                Shell::AddButton(panel, panel, "OpenShimPreLobby_LocalTools",
+                                 { 950.0f, 832.0f, 246.0f, 52.0f }, "Local host tools",
+                                 Shell::kSkinToMainMenu, 0.72f, 0.0f, &OnLocalToolsClicked);
             RefreshStatus(true);
 
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimPreLobby_Back", kBackRect,

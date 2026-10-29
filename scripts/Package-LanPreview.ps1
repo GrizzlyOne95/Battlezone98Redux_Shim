@@ -27,18 +27,21 @@ Copy-Item -LiteralPath (Join-Path $repo 'openshim.ini.example') -Destination $pa
 Copy-Item -LiteralPath (Join-Path $repo 'LICENSE') -Destination $payload
 Copy-Item -LiteralPath (Join-Path $repo 'Docs\LAN_MULTIPLAYER.md') -Destination $payload
 @'
-OpenShim LAN development preview
+OpenShim Local host tools development preview
 
 Back up your current OpenShim DLLs and scripts/patches.json before trying this
 overlay. Extract its complete folder layout into a Battlezone 98 Redux install;
 keep your existing openshim.ini and net.ini. This archive includes only the
 example INI, so it does not replace active preferences.
 
-Multiplayer setup > LAN... > Host LAN, then Continue and Create Game in the
-normal lobby. Other players choose LAN... > Refresh, select the host, Continue,
-then join its game. Use address is the manual IP fallback. Steam/Galaxy sign-in
+Multiplayer setup > Local host tools > Start local host, then Continue and
+Create Game in the normal lobby. Other players use Local host tools > Refresh,
+select the host, Continue, then join its game. Use address is the manual IP fallback. Steam/Galaxy sign-in
 and matching game/mod versions are still required. Allow the helper and game
 through the private-network firewall if prompted. Stop Host disconnects users.
+
+This helper prototype does not provide the requested no-service/no-account
+direct LAN backend. Official, Custom and Local selectors retain their behavior.
 
 This is a preview. Native menu, physical two-PC gameplay and Steam/GOG/
 Proton/Wine acceptance are not established. It has not been merged or released.
