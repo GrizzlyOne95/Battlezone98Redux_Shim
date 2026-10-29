@@ -73,17 +73,17 @@ openshim_opt:ReticleStyle:desc~Stock artwork, cross, dot, or cross plus dot at t
 openshim_opt:ReticleColor:label~Reticle Color~~~~~~
 openshim_opt:ReticleColor:desc~Color of custom reticles and target-contact brackets; stock artwork keeps its own colors.~~~~~~
 openshim_opt:ReticleSize:label~Reticle Size~~~~~~
-openshim_opt:ReticleSize:desc~Scale custom reticles and feedback with the game's current UI scale. Applies live.~~~~~~
+openshim_opt:ReticleSize:desc~Scale of the custom cross/dot and contact brackets, following the game's UI scale. Hit markers have their own size. Applies live.~~~~~~
 openshim_opt:ReticleThickness:label~Reticle Thickness~~~~~~
 openshim_opt:ReticleThickness:desc~Line thickness for custom reticles and feedback. Applies live.~~~~~~
 openshim_opt:ReticleOutline:label~Reticle Outline~~~~~~
 openshim_opt:ReticleOutline:desc~Dark outline for custom reticles and feedback, for contrast on bright terrain. Applies live.~~~~~~
 openshim_opt:ReticleOpacity:label~Reticle Opacity~~~~~~
-openshim_opt:ReticleOpacity:desc~Opacity of custom reticles and feedback. Stock artwork is unchanged.~~~~~~
+openshim_opt:ReticleOpacity:desc~Opacity of the custom cross/dot and contact brackets. Hit markers have their own opacity; stock artwork is unchanged.~~~~~~
 openshim_opt:ReactiveReticle:label~Reactive Reticle~~~~~~
-openshim_opt:ReactiveReticle:desc~Over a target, contract a custom cross, add brackets and tint red for enemies or green for allies. Visual only; disguised units stay untinted.~~~~~~
+openshim_opt:ReactiveReticle:desc~Over a target, add brackets and contract a custom cross; tint red for enemies, green for allies. Neutral or disguised units keep your color. Visual only.~~~~~~
 openshim_opt:HitMarkers:label~Hit Markers~~~~~~
-openshim_opt:HitMarkers:desc~Ticks pop out when your weapon actually reduces health; hitting several targets at once enlarges them. No marker for blocked/zero damage, collisions, self hits or AI shots. Single player only.~~~~~~
+openshim_opt:HitMarkers:desc~Ticks pop out when your weapon actually lowers health, larger when one shot hits several targets. None for zero damage, collisions, self hits or AI shots. Single player only.~~~~~~
 openshim_opt:HitMarkerDuration:label~Marker Duration~~~~~~
 openshim_opt:HitMarkerDuration:desc~How long confirmed-hit ticks remain visible before fading. Applies live.~~~~~~
 openshim_opt:HitMarkerColor:label~Marker Color~~~~~~
@@ -99,7 +99,7 @@ openshim_opt:ScrapHudColor:desc~Scrap title/value color. Default preserves the s
 openshim_opt:PilotHudColor:label~Pilot Color~~~~~~
 openshim_opt:PilotHudColor:desc~Pilot title/value color. Default preserves the selected Stock/Legacy palette. Independent of scrap color.~~~~~~
 openshim_opt:HudColorPreset:label~Base Palette~~~~~~
-openshim_opt:HudColorPreset:desc~Base colors for Default rows: Stock, Classic or High Contrast. Explicit color choices stay independent. Scrap/pilot and reticle settings are separate.~~~~~~
+openshim_opt:HudColorPreset:desc~Base colors for Default rows. Classic: green/amber/red health, blue ammo. High Contrast: cyan/amber/magenta health, white ammo, darker radar. Explicit colors stay independent.~~~~~~
 openshim_opt:RadarBackgroundOpacity:label~Radar Backdrop~~~~~~
 openshim_opt:RadarBackgroundOpacity:desc~Radar backdrop opacity (percent). Default follows the base palette. Terrain lines and contacts remain visible independently.~~~~~~
 openshim_opt:RadarGridColor:label~Radar Lines~~~~~~
@@ -143,8 +143,8 @@ openshim_opt:ShadowFarDistance:desc~How far sun shadows reach. Full covers the 2
 openshim_opt:EnhancedLightSelectionV2:label~DX11 Local Lights~~~~~~
 openshim_opt:EnhancedLightSelectionV2:desc~Contribution-ranked per-object local-light ordering. DX11 only. Restart required.~~~~~~
 openshim_opt:TerrainHdEnabled:label~HD Terrain Tiles~~~~~~
-openshim_opt:TerrainHdEnabled:desc~Full-resolution authored terrain tiles, with optional normal/specular maps. Requires a compatible pack and DX11 Enhanced; other profiles keep the original atlas. Restart required.~~~~~~
-openshim_opt:TerrainMicroRelief:label~Terrain Micro Detail~~~~~~
+openshim_opt:TerrainHdEnabled:desc~Full-resolution authored terrain tiles, with optional normal/specular maps, from a compatible pack. DX11 Enhanced only; other profiles keep the original atlas. Restart required.~~~~~~
+openshim_opt:TerrainMicroRelief:label~Micro Detail~~~~~~
 openshim_opt:TerrainMicroRelief:desc~Experimental shallow ground relief. Visual only; collision is unchanged. DX11 only. Increases GPU cost. Restart required.~~~~~~
 openshim_opt:SunFlashbang:label~Sun Flashbang~~~~~~
 openshim_opt:SunFlashbang:desc~On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash.~~~~~~
@@ -153,18 +153,18 @@ openshim_opt:ExplosionFlash:desc~Stock: a nearby explosion turns the whole scree
 openshim_opt:DamageFlash:label~Damage Flash~~~~~~
 openshim_opt:DamageFlash:desc~Stock: taking damage tints the whole screen red or orange. Soft makes the tint fainter. Off removes it.~~~~~~
 openshim_opt:UnderAttackAlert:label~Attack Alert~~~~~~
-openshim_opt:UnderAttackAlert:desc~Under-attack warning style: Normal, Minimal (quieter), or None.~~~~~~
+openshim_opt:UnderAttackAlert:desc~How often the under-attack growl can play: Normal (once a second at most), Minimal (once every 10 seconds at most) or None (never).~~~~~~
 openshim_opt:SuppressHopOutAttackAlert:label~Hop-Out Alert Fix~~~~~~
 openshim_opt:SuppressHopOutAttackAlert:desc~Suppress the stale under-attack growl that fires the instant you hop out. Audio only.~~~~~~
 openshim_opt:TargetPolicy:label~Target Popup~~~~~~
-openshim_opt:TargetPolicy:desc~When the reticle target popup appears: always, neutral objects only, or explicit targets only.~~~~~~
+openshim_opt:TargetPolicy:desc~Stock pops up target info on anything you recently hit. Suppress Neutral stops that on neutral objects; Suppress All stops it everywhere, so it shows only for a target you select.~~~~~~
 openshim_opt:ScrapPilotHud:label~Scrap/Pilot HUD~~~~~~
 openshim_opt:ScrapPilotHud:desc~Legacy BZ98-style scrap and pilot readout, or the stock Redux HUD.~~~~~~
 openshim_opt:RadarSizeScale:label~Radar Size~~~~~~
 openshim_opt:RadarSizeScale:desc~Scale the cockpit radar. The projection re-anchors to the backdrop so the mesh and its underlay stay concentric.~~~~~~
 openshim_opt:SatelliteZoomOut:label~Satellite Zoom Out~~~~~~
 openshim_opt:SatelliteZoomOut:desc~How much further than stock the satellite view can pull out. Single player only.~~~~~~
-openshim_opt:SatellitePanSpeed:label~Satellite Pan Speed~~~~~~
+openshim_opt:SatellitePanSpeed:label~Satellite Pan~~~~~~
 openshim_opt:SatellitePanSpeed:desc~Satellite view pan speed, as a multiple of stock. Single player only.~~~~~~
 openshim_opt:JetFlames:label~Jet Flames~~~~~~
 openshim_opt:JetFlames:desc~Faction-colored engine flames on jets and thrusters.~~~~~~
@@ -180,10 +180,10 @@ openshim_opt:MultiplayerFlags:label~MP Vehicle Flags~~~~~~
 openshim_opt:MultiplayerFlags:desc~Multiplayer vehicle flags: the selection screen and the in-match renderer. Leave off for BZP/BZP-T; their waiting room is faction-only. Restart required.~~~~~~
 openshim_opt:MultiplayerFlagShowOwnCraft:label~Show Own MP Flag~~~~~~
 openshim_opt:MultiplayerFlagShowOwnCraft:desc~Also draw your own flag over your own craft; stock draws only other players'. Restart required.~~~~~~
-openshim_opt:ChunkMeshes:label~Death Chunk Meshes~~~~~~
+openshim_opt:ChunkMeshes:label~Death Chunks~~~~~~
 openshim_opt:ChunkMeshes:desc~Generate destruction pieces from the model's mesh and skeleton. Restart required.~~~~~~
-openshim_opt:FastMenuTransitions:label~Fast Menu Transitions~~~~~~
-openshim_opt:FastMenuTransitions:desc~Instant Action, Multiplayer and Custom Campaigns open and close without reloading every material; content loads once, before the mission or in the multiplayer game room. Restart required.~~~~~~
+openshim_opt:FastMenuTransitions:label~Fast Menus~~~~~~
+openshim_opt:FastMenuTransitions:desc~Instant Action, Multiplayer and Custom Campaigns open and close without reloading every material; content loads once, before the mission or in the game room. Restart required.~~~~~~
 openshim_opt:SoundChannels:label~Sound Channels~~~~~~
 openshim_opt:SoundChannels:desc~Simultaneous sound objects. Stock leaves the engine limit alone; 256 is the ceiling. Restart required.~~~~~~
 openshim_opt:MusicGlobalFocus:label~Background Music~~~~~~
@@ -191,8 +191,8 @@ openshim_opt:MusicGlobalFocus:desc~Keep the soundtrack playing and fed while the
 openshim_opt:CustomBindsUi:label~Custom Keybinds~~~~~~
 openshim_opt:CustomBindsUi:desc~Key-binding editor on the Input options page. Restart required.~~~~~~
 openshim_opt:RawMouseInput:label~Raw Mouse Input~~~~~~
-openshim_opt:RawMouseInput:desc~Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see Unsmoothed Controls. Restart required.~~~~~~
-openshim_opt:DisableControlSmoothing:label~Unsmoothed Controls~~~~~~
+openshim_opt:RawMouseInput:desc~Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see Raw Controls. Restart required.~~~~~~
+openshim_opt:DisableControlSmoothing:label~Raw Controls~~~~~~
 openshim_opt:DisableControlSmoothing:desc~Steer, aim, throttle and strafe follow input directly instead of easing toward it, like BZ2's Control Smoothing Off. Affects mouse, keys and joystick. Restart required.~~~~~~
 openshim_opt:MouseEveryFrame:label~Per-Frame Mouse~~~~~~
 openshim_opt:MouseEveryFrame:desc~Experimental. Apply mouse steer and aim every frame instead of 60 times a second, so aim keeps up with high refresh rates. Sensitivity is unchanged. Single player only. Restart required.~~~~~~
@@ -210,22 +210,22 @@ openshim_opt:IntervalSeconds:label~AutoSave Interval~~~~~~
 openshim_opt:IntervalSeconds:desc~How often OpenShim refreshes the rolling AutoSave recovery slot.~~~~~~
 openshim_opt:BackupExisting:label~AutoSave Backups~~~~~~
 openshim_opt:BackupExisting:desc~Before OpenShim first replaces Save\auto.sav, keep one copy of the file that was already there.~~~~~~
-openshim_opt:WeaponConvergence:label~Weapon Convergence~~~~~~
+openshim_opt:WeaponConvergence:label~Gun Convergence~~~~~~
 openshim_opt:WeaponConvergence:desc~Walker-style convergence on an explicitly targeted craft. Single player only.~~~~~~
 openshim_opt:MuzzleFlash:label~Muzzle Flashes~~~~~~
-openshim_opt:MuzzleFlash:desc~Enable authored weapon ODF mesh flashes and muzzle render effects (smoke/light). Requires mod assets and ODF configuration; no generic fallback. Experimental GOG single-player cannons. Restart required.~~~~~~
+openshim_opt:MuzzleFlash:desc~Authored muzzle flash meshes and smoke/light effects from weapon ODFs. Needs mod assets and ODF setup; no generic fallback. Experimental GOG single-player cannons. Restart required.~~~~~~
 openshim_opt:MeshRecoil:label~Muzzle Recoil~~~~~~
-openshim_opt:MeshRecoil:desc~Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required.~~~~~~
+openshim_opt:MeshRecoil:desc~Authored barrel-node or animation recoil from craft ODFs. Needs model nodes/clips and ODF setup; clips need EXU. Experimental GOG single-player cannons. Restart required.~~~~~~
 openshim_opt:ShellCasings:label~Shell Casings~~~~~~
 openshim_opt:ShellCasings:desc~Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required.~~~~~~
 openshim_opt:SkinnedGibs:label~Skinned Gibs~~~~~~
 openshim_opt:SkinnedGibs:desc~When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from the posed model (visual only). Restart required.~~~~~~
 openshim_opt:GpuSkinning:label~GPU Skinning~~~~~~
-openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, which frees CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Takes effect on the next mission load.~~~~~~
-openshim_opt:PlayerReticleConvergence:label~Reticle Convergence~~~~~~
+openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission.~~~~~~
+openshim_opt:PlayerReticleConvergence:label~Aim Convergence~~~~~~
 openshim_opt:PlayerReticleConvergence:desc~Same convergence, but toward the smart-reticle world point; no target lock required. Single player only.~~~~~~
 openshim_opt:SmartReticleRange:label~Reticle Range~~~~~~
-openshim_opt:SmartReticleRange:desc~Smart-reticle targeting distance; Stock is Redux's 200. OpenShim's own value is single-player only. A mission that calls EXU SetReticleRange (BZP, Reloaded) is honored in network games too.~~~~~~
+openshim_opt:SmartReticleRange:desc~Smart-reticle targeting distance; Stock is Redux's 200. This value is single player only; a mission calling EXU SetReticleRange (BZP, Reloaded) also sets it online.~~~~~~
 openshim_opt:SmartScavengerPathing:label~Smart Scavengers~~~~~~
 openshim_opt:SmartScavengerPathing:desc~Smarter scavenger pathing to scrap. Single player only.~~~~~~
 openshim_opt:TurretAimPitch:label~Turret AA Pitch~~~~~~
@@ -237,20 +237,20 @@ openshim_opt:OrdnanceVelocityInheritance:desc~Shots inherit the shooter's veloci
 openshim_opt:BomberAiRange:label~Bomber AI Range~~~~~~
 openshim_opt:BomberAiRange:desc~Bombers engage at the range their own weapon ODFs declare. Single player only.~~~~~~
 openshim_opt:AiWeaponMaskArtillery:label~AI Howitzer Volley~~~~~~
-openshim_opt:AiWeaponMaskArtillery:desc~Artillery AI fires every fitted hardpoint as one volley instead of the first. A stock howitzer fires four rounds per cycle. Single player only.~~~~~~
+openshim_opt:AiWeaponMaskArtillery:desc~Artillery AI fires every hardpoint its weaponMask names as one volley instead of the first. A stock howitzer fires four rounds per cycle. Single player only.~~~~~~
 openshim_opt:AiWeaponMaskMinelayer:label~AI Mine Volley~~~~~~
 openshim_opt:AiWeaponMaskMinelayer:desc~Minelayer AI honours weaponMask instead of hard-coding hardpoint 0. Single player only.~~~~~~
 openshim_opt:AiMultiProducerMakers:label~AI Multi-Producer~~~~~~
 openshim_opt:AiMultiProducerMakers:desc~A built class gets every producer that can make it, not just the first one found. Single player only.~~~~~~
-openshim_opt:AllowNeutralAttackOrders:label~Neutral Attack Orders~~~~~~
+openshim_opt:AllowNeutralAttackOrders:label~Attack Neutrals~~~~~~
 openshim_opt:AllowNeutralAttackOrders:desc~Allow explicit player attack orders against team-0 neutral objects. Diplomacy and autonomous targeting remain stock.~~~~~~
 openshim_opt:Turbo:label~Global Turbo~~~~~~
 openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~~~~~~
-openshim_opt:SatelliteVisibilityFix:label~Satellite Fog Of War~~~~~~
-openshim_opt:SatelliteVisibilityFix:desc~Restore the BZ 1.5 satellite gate so unilluminated enemies stay hidden.~~~~~~
+openshim_opt:SatelliteVisibilityFix:label~Satellite Fog~~~~~~
+openshim_opt:SatelliteVisibilityFix:desc~In satellite view, hide enemies your team has not lit up, as BZ 1.5 did. Also applies online, where you then see less than players without it.~~~~~~
 openshim_opt:Headlights:label~Player Headlight~~~~~~
 openshim_opt:Headlights:desc~Headlight on your vehicle.~~~~~~
-openshim_opt:HeadlightBrightness:label~Headlight Brightness~~~~~~
+openshim_opt:HeadlightBrightness:label~Headlight Level~~~~~~
 openshim_opt:HeadlightBrightness:desc~Player-vehicle headlight intensity relative to stock. Applies live.~~~~~~
 openshim_opt:OtherHeadlights:label~AI Headlights~~~~~~
 openshim_opt:OtherHeadlights:desc~AI vehicles run headlights too.~~~~~~
@@ -280,13 +280,13 @@ openshim_opt:HowitzerUndeployedRetaliation:label~Howitzer Deploy Fix~~~~~~
 openshim_opt:HowitzerUndeployedRetaliation:desc~Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required.~~~~~~
 openshim_opt:TugCargoPostLoad:label~Tug Cargo Deploy~~~~~~
 openshim_opt:TugCargoPostLoad:desc~Arm the stock deploy transition after a tug loads cargo. Single player only. Restart required.~~~~~~
-openshim_opt:ConstructorRecycleStaleTarget:label~Recycle Release Fix~~~~~~
+openshim_opt:ConstructorRecycleStaleTarget:label~Recycle Fix~~~~~~
 openshim_opt:ConstructorRecycleStaleTarget:desc~Free a constructor left deployed when another recycles its target first. Single player only. Restart required.~~~~~~
 openshim_opt:PreciseTimestep:label~Precise Timestep~~~~~~
 openshim_opt:PreciseTimestep:desc~Step the simulation by the measured frame time, not whole milliseconds. Single player only. Restart required.~~~~~~
 openshim_opt:MusicSingleFill:label~Music Track Start~~~~~~
 openshim_opt:MusicSingleFill:desc~Decode a new music track's first buffer once instead of twice, shortening the hitch at each track change. Restart required.~~~~~~
-openshim_opt:ConstructorRemoteBuild:label~Constructor Cleanup~~~~~~
+openshim_opt:ConstructorRemoteBuild:label~Constructor Fix~~~~~~
 openshim_opt:ConstructorRemoteBuild:desc~Clear a dead constructor's remote build state. Single player only. Restart required.~~~~~~
 openshim_opt:RestoreCraftBounds:label~Craft Culling~~~~~~
 openshim_opt:RestoreCraftBounds:desc~Give craft their real bounding boxes so off-screen and distant craft are skipped by the camera and shadows. Rendering only. Restart required.~~~~~~
@@ -295,9 +295,9 @@ openshim_opt:DynamicGeometryPieceReuse:desc~Add smoke, fire and tracer sprites t
 openshim_opt:DynamicGeometryFastSort:label~Effect Sort~~~~~~
 openshim_opt:DynamicGeometryFastSort:desc~Sort effect-sprite batches without calling into Ogre for every compare. Same order, same pixels. Restart required.~~~~~~
 openshim_opt:RoutePreference:label~Net Route~~~~~~
-openshim_opt:RoutePreference:desc~Preferred peer path: try LAN then direct WAN, or force the BZRNet relay. Does not add LAN or direct-IP hosting.~~~~~~
+openshim_opt:RoutePreference:desc~Peer path: Stock leaves Redux's choice; Prefer Direct tries LAN, then direct WAN, then the relay; Force Relay always uses BZRNet. Does not add LAN or direct-IP hosting.~~~~~~
 openshim_opt:UdpPort:label~UDP Port~~~~~~
-openshim_opt:UdpPort:desc~Fixed local UDP port for multiplayer peer traffic, for hosts who forward a port on their router. Automatic lets Windows choose. Any other port can be set in openshim.ini. Restart required.~~~~~~
+openshim_opt:UdpPort:desc~Fixed local UDP port for multiplayer peer traffic, for hosts who forward a router port. Automatic lets Windows choose; set others in openshim.ini. Restart required.~~~~~~
 openshim_opt:NetImprovements:label~Net Improvements~~~~~~
 openshim_opt:NetImprovements:desc~OpenShim's socket layer as a whole. Off gives stock networking; turn it off to rule the shim out of a connection problem.~~~~~~
 openshim_opt:GovernorTuning:label~Net Tuning~~~~~~
@@ -307,14 +307,14 @@ openshim_opt:StockFactionsOnly:desc~Restrict multiplayer starting vehicles to NS
 openshim_opt:LobbyBanButton:label~Lobby Ban Button~~~~~~
 openshim_opt:LobbyBanButton:desc~Ban User button on the multiplayer waiting room. Off leaves BZP/BZP-T's faction picker alone; /ban still works. Restart required.~~~~~~
 openshim_opt:PersistentPlayerMute:label~Persistent Mutes~~~~~~
-openshim_opt:PersistentPlayerMute:desc~Remember muted players across sessions, by stable identity, so a rename or reconnect does not undo it. Off is stock: the mute lasts the session. Local only; /mute works either way and your mute list is kept.~~~~~~
+openshim_opt:PersistentPlayerMute:desc~Remember muted players across sessions by stable identity, so a rename or reconnect does not undo it. Off is stock: mutes last the session; your list is kept.~~~~~~
 openshim_opt:LobbyReadouts:label~Lobby Readouts~~~~~~
 openshim_opt:LobbyReadouts:desc~Nickname field and route readout in the waiting-room left column. Does not cover BZP's faction picker. Restart required.~~~~~~
 openshim_opt:ReauthOnNicknameChange:label~Live Nickname~~~~~~
-openshim_opt:ReauthOnNicknameChange:desc~Experimental: recycle the lounge BZRNet connection after a nickname edit so stock reconnects and authorizes the new name. Expect a brief lounge drop / possible Not Ready flicker. In-match remains persist-only.~~~~~~
+openshim_opt:ReauthOnNicknameChange:desc~Experimental: after a nickname edit, reconnect the lounge so the new name is authorized. Expect a brief drop or Not Ready flicker. In a match it is only saved.~~~~~~
 openshim_opt:PreLobby:label~MP Setup Screen~~~~~~
-openshim_opt:PreLobby:desc~Multiplayer opens a setup screen first (nickname, flag, matchmaking server: Rebellion, Custom or Local) instead of going straight to the lobby. While on, the nickname and flag pickers move to that screen and are no longer built in the lobby. Read when Multiplayer is clicked.~~~~~~
-openshim_opt:AutoStage:label~Auto-Install Updates~~~~~~
+openshim_opt:PreLobby:desc~Multiplayer opens a setup screen first (nickname, flag, server: Rebellion, Custom or Local); those pickers leave the lobby. Read when Multiplayer is clicked.~~~~~~
+openshim_opt:AutoStage:label~Auto Updates~~~~~~
 openshim_opt:AutoStage:desc~Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim to install when you quit. Never runs in multiplayer.~~~~~~
 openshim_opt:StatsTracking:label~Career Stats~~~~~~
 openshim_opt:StatsTracking:desc~Record kills, deaths and missions played to career_stats.cfg across single player and multiplayer. Local file only; nothing is uploaded, and no mission script is required.~~~~~~
@@ -383,8 +383,8 @@ openshim_value:Stock (128 m)~Stock (128 m)~~~~~~
 openshim_value:Soft~Soft~~~~~~
 openshim_value:Minimal~Minimal~~~~~~
 openshim_value:None~None~~~~~~
-openshim_value:Neutral Only~Neutral Only~~~~~~
-openshim_value:Explicit Only~Explicit Only~~~~~~
+openshim_value:Suppress Neutral~Suppress Neutral~~~~~~
+openshim_value:Suppress All~Suppress All~~~~~~
 openshim_value:Legacy~Legacy~~~~~~
 openshim_value:125%~125%~~~~~~
 openshim_value:150%~150%~~~~~~

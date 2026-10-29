@@ -2082,9 +2082,13 @@ namespace BZROpenShim
             return estimateCharWidth * scale * static_cast<float>(text.size()) <= widthPx;
         }
 
+        // *truncated reports whether the second line had to be ellipsized.
         static std::pair<std::string, std::string> WrapUiTextToTwoLines(const char* text,
-                                                                        float widthPx)
+                                                                        float widthPx,
+                                                                        bool* truncated = nullptr)
         {
+            if (truncated)
+                *truncated = false;
             std::string value = TrimAsciiCopy(text ? text : "");
             if (value.empty() || UiTextFitsWidth(value,
                                                 widthPx,
@@ -2134,6 +2138,8 @@ namespace BZROpenShim
                                           widthPx,
                                           1.0f,
                                           kInputBindingUiLabelCharWidth);
+                if (truncated)
+                    *truncated = true;
             }
             return { std::move(first), std::move(second) };
         }
@@ -3471,8 +3477,14 @@ namespace BZROpenShim
                     {
                         const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
                         const size_t current = GetShimSettingCurrentIndex(setting);
-                        text += ShimFormat("openshim_ui:click_for", "  Click for %s.",
-                                           ShimSettingValueLabel(setting, (current + 1) % setting.valueCount));
+                        const std::string withHint = text + ShimFormat(
+                            "openshim_ui:click_for", "  Click for %s.",
+                            ShimSettingValueLabel(setting, (current + 1) % setting.valueCount));
+                        // The hint is a convenience; never let it cut the description.
+                        bool truncated = false;
+                        WrapUiTextToTwoLines(withHint.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w, &truncated);
+                        if (!truncated)
+                            text = withHint;
                     }
                     SetShimInfoText(ui.info, text.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w);
                     return;
