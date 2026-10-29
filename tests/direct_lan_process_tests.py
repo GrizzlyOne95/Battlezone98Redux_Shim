@@ -68,6 +68,11 @@ def session(executable, count, abrupt=False):
         peers[1].expect("DISCOVERED")
         for peer in peers:
             peer.expect(f"RUNNING {count}")
+        identities = [peer.expect("NATIVE ").split()[1:] for peer in peers]
+        assert len({identity[0] for identity in identities}) == 1, identities
+        assert len({identity[1] for identity in identities}) == 1, identities
+        assert len({identity[2] for identity in identities}) == count, identities
+        assert identities[0][1] == identities[0][2], identities
         host.expect(f"ROSTER {count - 1 if abrupt else count}")
         for peer in peers[1:]:
             if not (abrupt and peer is peers[-1]):
@@ -75,7 +80,7 @@ def session(executable, count, abrupt=False):
         for peer in peers:
             peer.finish()
         print(f"PASS: {count} independent clients, discovery/manual join, prepare/commit, "
-              f"{'abrupt guest departure, ' if abrupt else ''}host shutdown")
+              f"consistent native identity/roster projection, {'abrupt guest departure, ' if abrupt else ''}host shutdown")
     finally:
         for peer in reversed(peers):
             peer.cleanup()

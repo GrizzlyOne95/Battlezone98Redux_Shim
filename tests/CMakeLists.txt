@@ -111,10 +111,14 @@ endfunction()
 openshim_add_test(camera_fov_policy_tests STD 17 SOURCES camera_fov_policy_tests.cpp)
 openshim_add_test(lan_discovery_tests STD 17 SOURCES lan_discovery_tests.cpp)
 openshim_add_test(direct_lan_session_tests STD 17 SOURCES direct_lan_session_tests.cpp ../src/network/direct_lan_session.cpp)
+openshim_add_test(direct_lan_redux_adapter_tests STD 17 SOURCES direct_lan_redux_adapter_tests.cpp
+    ../src/network/direct_lan_redux_adapter.cpp ../src/network/direct_lan_session.cpp)
+target_compile_definitions(direct_lan_redux_adapter_tests PRIVATE OPENSHIM_DIRECT_LAN_ABI_TEST=1)
 openshim_add_test(direct_lan_socket_tests STD 17 SOURCES direct_lan_socket_tests.cpp
     ../src/network/direct_lan_session.cpp ../src/network/direct_lan_transport.cpp ../src/network/direct_lan_discovery.cpp)
 add_executable(direct_lan_peer_process direct_lan_peer_process.cpp
-    ../src/network/direct_lan_session.cpp ../src/network/direct_lan_transport.cpp ../src/network/direct_lan_discovery.cpp)
+    ../src/network/direct_lan_session.cpp ../src/network/direct_lan_transport.cpp ../src/network/direct_lan_discovery.cpp
+    ../src/network/direct_lan_redux_adapter.cpp)
 target_include_directories(direct_lan_peer_process PRIVATE ../include)
 target_compile_features(direct_lan_peer_process PRIVATE cxx_std_17)
 if(MSVC)

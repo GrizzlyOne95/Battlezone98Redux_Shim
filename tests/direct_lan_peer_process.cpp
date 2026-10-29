@@ -1,6 +1,7 @@
 // Standalone session-layer qualification client, not a game/server/helper.
 // Every process runs the same native Node intended for the eventual adapter.
 #include "direct_lan_discovery.h"
+#include "direct_lan_redux_adapter.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -73,6 +74,7 @@ int main(int argc, char** argv)
     GameplayEndpoint gameplay;
     if (!gameplay.port) return 13;
     Node node(local, host ? "Host" : "Guest", compatibility, gameplay.port);
+    Redux::Adapter adapter(local);
     if (host)
     {
         Config config{compatibility, "Client-owned LAN", "testmap", {1, 2}, uint8_t(players)};
@@ -99,6 +101,9 @@ int main(int argc, char** argv)
     while (Now() - began < 15000)
     {
         node.Poll(); const auto& view = node.Control().State();
+        if ((view.phase == Phase::Lobby || view.phase == Phase::Preparing || view.phase == Phase::Running || view.phase == Phase::Closed) &&
+            !adapter.Apply(view))
+        { std::fprintf(stderr, "adapter projection failed: %s\n", adapter.Error().c_str()); return 14; }
         if (view.phase == Phase::Closed)
         {
             std::printf("CLOSED %s\n", view.reason.c_str()); std::fflush(stdout);
@@ -115,6 +120,7 @@ int main(int argc, char** argv)
         {
             if (event.type == EventType::Prepare)
             {
+                if (!adapter.HasLobby() || adapter.Members() != view.members.size()) return 15;
                 // Session-layer barrier qualification only. The game adapter
                 // must wait for actual native peer readiness before this call.
                 if (!node.Control().Prepared()) return 11;
@@ -123,6 +129,11 @@ int main(int argc, char** argv)
             {
                 started = true; runningAt = Now();
                 std::printf("RUNNING %zu\n", event.state.members.size()); std::fflush(stdout);
+                Redux::Identity mine, owner;
+                const auto lobby = adapter.Lobby();
+                adapter.Local(&mine); adapter.Owner(&owner, lobby);
+                std::printf("NATIVE %u:%u %u:%u %u:%u\n", lobby.word12, lobby.word8,
+                    owner.word12, owner.word8, mine.word12, mine.word8); std::fflush(stdout);
                 if (depart) return 0; // abrupt transport close, without a Leave message
             }
         }

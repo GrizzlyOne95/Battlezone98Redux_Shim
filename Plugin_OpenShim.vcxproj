@@ -170,6 +170,7 @@
     <ClCompile Include="src\patches\lan_session.cpp" />
     <ClCompile Include="src\patches\lan_screen.cpp" />
     <ClCompile Include="src\network\direct_lan_session.cpp" />
+    <ClCompile Include="src\network\direct_lan_redux_adapter.cpp" />
     <ClCompile Include="src\network\direct_lan_transport.cpp" />
     <ClCompile Include="src\network\direct_lan_discovery.cpp" />
     <ClCompile Include="src\patches\chunk_engine_hooks.cpp" />

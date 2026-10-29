@@ -117,11 +117,14 @@ interoperability with unpatched/older clients is promised.
 
 The session/control code builds into `openshim.dll` but no gameplay Node is
 created by the UI. Discovery preview alone uses the new Browser. No new native
-patch address or authentication bypass is installed. See
+patch address or authentication bypass is installed. A partial identity/roster
+query adapter is implemented and tested against bounded released-code paths;
+see [DIRECT_LAN_ADAPTER.md](DIRECT_LAN_ADAPTER.md). It is not a complete backend.
+See
 [DIRECT_LAN_NATIVE_IDENTITY.md](DIRECT_LAN_NATIVE_IDENTITY.md) for the current
 released-image identity evidence and remaining ABI work.
 
-The next implementation must qualify lobby ownership and callbacks, local
+The remaining implementation must qualify lobby ownership and callbacks, all
 identity serialization/equality, roster-to-native-player creation, peer
 endpoint publication, reliable/unreliable gameplay I/O, launch and teardown.
 Activation must bind the entire required adapter or fail visibly before

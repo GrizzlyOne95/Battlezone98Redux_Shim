@@ -43,6 +43,16 @@ which callbacks retain copies, and whether any consumer converts it through a
 platform-specific accessor. Its validity predicate alone proves none of those
 contracts. Prefix letters must not be promoted into invented object roles.
 
+## Qualified query adapter subset
+
+The first implementation now projects local/owner/member identities and
+executes the released owner predicates against compiled Win32 query methods.
+Copy/equality/ordering and candidate kind-3 validity also pass differential
+checks against released code. See [DIRECT_LAN_ADAPTER.md](DIRECT_LAN_ADAPTER.md)
+for the exact scope, addresses, reproduction commands and remaining contracts.
+This resolves the query subset only; suitability through every native
+consumer remains **UNKNOWN**.
+
 ## Consequence for implementation
 
 The OpenShim control protocol keeps its own opaque 128-bit IDs. Do not cast
@@ -61,6 +71,6 @@ see [DIRECT_LAN_BACKEND.md](DIRECT_LAN_BACKEND.md).
 
 Reproduce with `reverse_engineering/inspect_direct_lan_backend.py --exe
 <exact-baseline-exe> --corpus <private-corpus>`. It verifies the executable
-hash and now records 36 vtable entries, 20 boundary functions, assembly and
+hash and now records 36 vtable entries, 27 boundary functions, assembly and
 unqualified corpus hints in ignored `reverse_engineering/workshop/` output.
 No runtime native hook should be added from this static inventory alone.

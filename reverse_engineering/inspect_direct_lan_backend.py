@@ -43,6 +43,13 @@ BOUNDARIES = {
     "id_parse": 0x0073ABD0,
     "id_convert_kind_1": 0x0073A970,
     "id_convert_kind_2": 0x0073A9B0,
+    "id_invalid_constructor": 0x0073A6B0,
+    "id_equality": 0x0056F780,
+    "id_ordering": 0x00574A30,
+    "lobby_owner_check_current": 0x00742CF0,
+    "lobby_owner_check_explicit": 0x00742D50,
+    "lobby_base_constructor": 0x0073D690,
+    "peer_base_constructor": 0x00758B90,
 }
 
 
