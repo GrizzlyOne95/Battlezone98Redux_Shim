@@ -255,7 +255,7 @@ CATEGORY_LAYOUT = {
     'title': (470, 132, 500, 56),
     'columns': [(228, 236, 476, 438), (736, 236, 476, 438)],
     'row_top': 14, 'row_pitch': 52, 'row_h': 42, 'rows': 8,
-    'pad': 16, 'value_w': 196,
+    'pad': 16, 'value_w': 160,
     'info': (228, 690, 984, 120),
 }
 # The key-binding editor on the stock Input screen (painted mode). Toolbar

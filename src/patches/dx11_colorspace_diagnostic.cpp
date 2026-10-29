@@ -2256,7 +2256,7 @@ namespace BZROpenShim
         g_TessStatisticsEnabled = tessLength > 0 && tessLength < sizeof(tessTest) &&
             BoolToken::IsTruthy(tessTest, tessLength);
         const bool terrainProbeRequested = TerrainProbeRequested() || g_TessStatisticsEnabled;
-        // Keyed on HD terrain alone, not Micro Detail: the preset
+        // Keyed on HD terrain alone, not Terrain Micro Detail: the preset
         // migration that turns relief on runs later in startup, and the
         // options page can turn it on mid-session. Without the hook the
         // relief test is declined and the painted terrain falls back to

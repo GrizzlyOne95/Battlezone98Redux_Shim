@@ -144,7 +144,7 @@ openshim_opt:EnhancedLightSelectionV2:label~DX11 Local Lights~~~~~~
 openshim_opt:EnhancedLightSelectionV2:desc~Contribution-ranked per-object local-light ordering. DX11 only. Restart required.~~~~~~
 openshim_opt:TerrainHdEnabled:label~HD Terrain Tiles~~~~~~
 openshim_opt:TerrainHdEnabled:desc~Full-resolution authored terrain tiles, with optional normal/specular maps, from a compatible pack. DX11 Enhanced only; other profiles keep the original atlas. Restart required.~~~~~~
-openshim_opt:TerrainMicroRelief:label~Micro Detail~~~~~~
+openshim_opt:TerrainMicroRelief:label~Terrain Micro Detail~~~~~~
 openshim_opt:TerrainMicroRelief:desc~Experimental shallow ground relief. Visual only; collision is unchanged. DX11 only. Increases GPU cost. Restart required.~~~~~~
 openshim_opt:SunFlashbang:label~Sun Flashbang~~~~~~
 openshim_opt:SunFlashbang:desc~On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash.~~~~~~
@@ -164,7 +164,7 @@ openshim_opt:RadarSizeScale:label~Radar Size~~~~~~
 openshim_opt:RadarSizeScale:desc~Scale the cockpit radar. The projection re-anchors to the backdrop so the mesh and its underlay stay concentric.~~~~~~
 openshim_opt:SatelliteZoomOut:label~Satellite Zoom Out~~~~~~
 openshim_opt:SatelliteZoomOut:desc~How much further than stock the satellite view can pull out. Single player only.~~~~~~
-openshim_opt:SatellitePanSpeed:label~Satellite Pan~~~~~~
+openshim_opt:SatellitePanSpeed:label~Satellite Pan Speed~~~~~~
 openshim_opt:SatellitePanSpeed:desc~Satellite view pan speed, as a multiple of stock. Single player only.~~~~~~
 openshim_opt:JetFlames:label~Jet Flames~~~~~~
 openshim_opt:JetFlames:desc~Faction-colored engine flames on jets and thrusters.~~~~~~
@@ -180,9 +180,9 @@ openshim_opt:MultiplayerFlags:label~MP Vehicle Flags~~~~~~
 openshim_opt:MultiplayerFlags:desc~Multiplayer vehicle flags: the selection screen and the in-match renderer. Leave off for BZP/BZP-T; their waiting room is faction-only. Restart required.~~~~~~
 openshim_opt:MultiplayerFlagShowOwnCraft:label~Show Own MP Flag~~~~~~
 openshim_opt:MultiplayerFlagShowOwnCraft:desc~Also draw your own flag over your own craft; stock draws only other players'. Restart required.~~~~~~
-openshim_opt:ChunkMeshes:label~Death Chunks~~~~~~
+openshim_opt:ChunkMeshes:label~Death Chunk Meshes~~~~~~
 openshim_opt:ChunkMeshes:desc~Generate destruction pieces from the model's mesh and skeleton. Restart required.~~~~~~
-openshim_opt:FastMenuTransitions:label~Fast Menus~~~~~~
+openshim_opt:FastMenuTransitions:label~Fast Menu Transitions~~~~~~
 openshim_opt:FastMenuTransitions:desc~Instant Action, Multiplayer and Custom Campaigns open and close without reloading every material; content loads once, before the mission or in the game room. Restart required.~~~~~~
 openshim_opt:SoundChannels:label~Sound Channels~~~~~~
 openshim_opt:SoundChannels:desc~Simultaneous sound objects. Stock leaves the engine limit alone; 256 is the ceiling. Restart required.~~~~~~
@@ -191,8 +191,8 @@ openshim_opt:MusicGlobalFocus:desc~Keep the soundtrack playing and fed while the
 openshim_opt:CustomBindsUi:label~Custom Keybinds~~~~~~
 openshim_opt:CustomBindsUi:desc~Key-binding editor on the Input options page. Restart required.~~~~~~
 openshim_opt:RawMouseInput:label~Raw Mouse Input~~~~~~
-openshim_opt:RawMouseInput:desc~Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see Raw Controls. Restart required.~~~~~~
-openshim_opt:DisableControlSmoothing:label~Raw Controls~~~~~~
+openshim_opt:RawMouseInput:desc~Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see Unsmoothed Controls. Restart required.~~~~~~
+openshim_opt:DisableControlSmoothing:label~Unsmoothed Controls~~~~~~
 openshim_opt:DisableControlSmoothing:desc~Steer, aim, throttle and strafe follow input directly instead of easing toward it, like BZ2's Control Smoothing Off. Affects mouse, keys and joystick. Restart required.~~~~~~
 openshim_opt:MouseEveryFrame:label~Per-Frame Mouse~~~~~~
 openshim_opt:MouseEveryFrame:desc~Experimental. Apply mouse steer and aim every frame instead of 60 times a second, so aim keeps up with high refresh rates. Sensitivity is unchanged. Single player only. Restart required.~~~~~~
@@ -210,7 +210,7 @@ openshim_opt:IntervalSeconds:label~AutoSave Interval~~~~~~
 openshim_opt:IntervalSeconds:desc~How often OpenShim refreshes the rolling AutoSave recovery slot.~~~~~~
 openshim_opt:BackupExisting:label~AutoSave Backups~~~~~~
 openshim_opt:BackupExisting:desc~Before OpenShim first replaces Save\auto.sav, keep one copy of the file that was already there.~~~~~~
-openshim_opt:WeaponConvergence:label~Gun Convergence~~~~~~
+openshim_opt:WeaponConvergence:label~Weapon Convergence~~~~~~
 openshim_opt:WeaponConvergence:desc~Walker-style convergence on an explicitly targeted craft. Single player only.~~~~~~
 openshim_opt:MuzzleFlash:label~Muzzle Flashes~~~~~~
 openshim_opt:MuzzleFlash:desc~Authored muzzle flash meshes and smoke/light effects from weapon ODFs. Needs mod assets and ODF setup; no generic fallback. Experimental GOG single-player cannons. Restart required.~~~~~~
@@ -222,7 +222,7 @@ openshim_opt:SkinnedGibs:label~Skinned Gibs~~~~~~
 openshim_opt:SkinnedGibs:desc~When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from the posed model (visual only). Restart required.~~~~~~
 openshim_opt:GpuSkinning:label~GPU Skinning~~~~~~
 openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission.~~~~~~
-openshim_opt:PlayerReticleConvergence:label~Aim Convergence~~~~~~
+openshim_opt:PlayerReticleConvergence:label~Reticle Convergence~~~~~~
 openshim_opt:PlayerReticleConvergence:desc~Same convergence, but toward the smart-reticle world point; no target lock required. Single player only.~~~~~~
 openshim_opt:SmartReticleRange:label~Reticle Range~~~~~~
 openshim_opt:SmartReticleRange:desc~Smart-reticle targeting distance; Stock is Redux's 200. This value is single player only; a mission calling EXU SetReticleRange (BZP, Reloaded) also sets it online.~~~~~~
@@ -246,11 +246,11 @@ openshim_opt:AllowNeutralAttackOrders:label~Attack Neutrals~~~~~~
 openshim_opt:AllowNeutralAttackOrders:desc~Allow explicit player attack orders against team-0 neutral objects. Diplomacy and autonomous targeting remain stock.~~~~~~
 openshim_opt:Turbo:label~Global Turbo~~~~~~
 openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~~~~~~
-openshim_opt:SatelliteVisibilityFix:label~Satellite Fog~~~~~~
+openshim_opt:SatelliteVisibilityFix:label~Satellite Fog Of War~~~~~~
 openshim_opt:SatelliteVisibilityFix:desc~In satellite view, hide enemies your team has not lit up, as BZ 1.5 did. Also applies online, where you then see less than players without it.~~~~~~
 openshim_opt:Headlights:label~Player Headlight~~~~~~
 openshim_opt:Headlights:desc~Headlight on your vehicle.~~~~~~
-openshim_opt:HeadlightBrightness:label~Headlight Level~~~~~~
+openshim_opt:HeadlightBrightness:label~Headlight Brightness~~~~~~
 openshim_opt:HeadlightBrightness:desc~Player-vehicle headlight intensity relative to stock. Applies live.~~~~~~
 openshim_opt:OtherHeadlights:label~AI Headlights~~~~~~
 openshim_opt:OtherHeadlights:desc~AI vehicles run headlights too.~~~~~~
@@ -280,13 +280,13 @@ openshim_opt:HowitzerUndeployedRetaliation:label~Howitzer Deploy Fix~~~~~~
 openshim_opt:HowitzerUndeployedRetaliation:desc~Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required.~~~~~~
 openshim_opt:TugCargoPostLoad:label~Tug Cargo Deploy~~~~~~
 openshim_opt:TugCargoPostLoad:desc~Arm the stock deploy transition after a tug loads cargo. Single player only. Restart required.~~~~~~
-openshim_opt:ConstructorRecycleStaleTarget:label~Recycle Fix~~~~~~
+openshim_opt:ConstructorRecycleStaleTarget:label~Recycle Release Fix~~~~~~
 openshim_opt:ConstructorRecycleStaleTarget:desc~Free a constructor left deployed when another recycles its target first. Single player only. Restart required.~~~~~~
 openshim_opt:PreciseTimestep:label~Precise Timestep~~~~~~
 openshim_opt:PreciseTimestep:desc~Step the simulation by the measured frame time, not whole milliseconds. Single player only. Restart required.~~~~~~
 openshim_opt:MusicSingleFill:label~Music Track Start~~~~~~
 openshim_opt:MusicSingleFill:desc~Decode a new music track's first buffer once instead of twice, shortening the hitch at each track change. Restart required.~~~~~~
-openshim_opt:ConstructorRemoteBuild:label~Constructor Fix~~~~~~
+openshim_opt:ConstructorRemoteBuild:label~Constructor Cleanup~~~~~~
 openshim_opt:ConstructorRemoteBuild:desc~Clear a dead constructor's remote build state. Single player only. Restart required.~~~~~~
 openshim_opt:RestoreCraftBounds:label~Craft Culling~~~~~~
 openshim_opt:RestoreCraftBounds:desc~Give craft their real bounding boxes so off-screen and distant craft are skipped by the camera and shadows. Rendering only. Restart required.~~~~~~
@@ -314,7 +314,7 @@ openshim_opt:ReauthOnNicknameChange:label~Live Nickname~~~~~~
 openshim_opt:ReauthOnNicknameChange:desc~Experimental: after a nickname edit, reconnect the lounge so the new name is authorized. Expect a brief drop or Not Ready flicker. In a match it is only saved.~~~~~~
 openshim_opt:PreLobby:label~MP Setup Screen~~~~~~
 openshim_opt:PreLobby:desc~Multiplayer opens a setup screen first (nickname, flag, server: Rebellion, Custom or Local); those pickers leave the lobby. Read when Multiplayer is clicked.~~~~~~
-openshim_opt:AutoStage:label~Auto Updates~~~~~~
+openshim_opt:AutoStage:label~Auto-Install Updates~~~~~~
 openshim_opt:AutoStage:desc~Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim to install when you quit. Never runs in multiplayer.~~~~~~
 openshim_opt:StatsTracking:label~Career Stats~~~~~~
 openshim_opt:StatsTracking:desc~Record kills, deaths and missions played to career_stats.cfg across single player and multiplayer. Local file only; nothing is uploaded, and no mission script is required.~~~~~~

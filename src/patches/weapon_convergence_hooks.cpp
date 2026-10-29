@@ -504,8 +504,8 @@ namespace BZROpenShim
         // This is the convergence mechanism for both public features. The only
         // intended distinction is the provider of ConvergenceRangeSample:
         //
-        //   Gun Convergence -> explicit GameObject target range
-        //   Aim Convergence -> smart-reticle object/ground range
+        //   Weapon Convergence  -> explicit GameObject target range
+        //   Reticle Convergence -> smart-reticle object/ground range
         //
         // Stock class-specific UpdateWeaponAim runs before this function. The
         // post-pass then reproduces only Walker's proven convergence stage.

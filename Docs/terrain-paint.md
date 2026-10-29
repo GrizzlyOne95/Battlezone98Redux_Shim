@@ -7,7 +7,7 @@ positions plus cluster translation. Camera position, native tile orientation
 and atlas rectangles do not determine the new diffuse coordinates.
 
 Enable the existing **HD Terrain Tiles** option, select the generated manifest
-through `[Terrain] TerrainHdManifest`, and restart. **Micro Detail**
+through `[Terrain] TerrainHdManifest`, and restart. **Terrain Micro Detail**
 works alongside it. The original tile-array mode remains supported.
 There are no new INI keys. Stock heights, collision, indices, AI and gameplay
 terrain files are unchanged. Native packed UVs are still independently audited

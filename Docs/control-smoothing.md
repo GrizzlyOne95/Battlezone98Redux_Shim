@@ -65,7 +65,7 @@ instead of ramping, and joystick axes are unfiltered too.
 ## Configuration
 
 `[General] DisableControlSmoothing` in `openshim.ini`, boolean, default OFF,
-restart required. Exposed as **Raw Controls** under OpenShim Options →
+restart required. Exposed as **Unsmoothed Controls** under OpenShim Options →
 Controls. Env aliases: `OPENSHIM_DISABLE_CONTROL_SMOOTHING`,
 `BZR_DISABLE_CONTROL_SMOOTHING`.
 

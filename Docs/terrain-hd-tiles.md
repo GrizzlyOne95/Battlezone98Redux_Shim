@@ -4,7 +4,7 @@
 replacement. Version 2 packs also support independent normal, specular and
 emissive tiles. A texture pack is required; the option does not create new artwork.
 Restart the game after changing the tile option. It is off by default and works
-with `Micro Detail`. Activation also requires the **effective DX11
+with `Terrain Micro Detail`. Activation also requires the **effective DX11
 Enhanced profile**. Redux/Retro retain the ordinary atlas without allocating
 HD arrays. Leaving Enhanced during a mission restores the atlas material and
 native streams; returning to Enhanced rearms native discovery.
@@ -69,7 +69,7 @@ material is changed. A mismatched source channel, unsupported shader contract,
 missing tile, or conflicting surface-normal manifest declines the whole pack.
 V2 requires native terrain and cannot be combined with four-material paint.
 An optional per-material `microReliefScale` (finite **0..4**, default **1**)
-scales Micro Detail's procedural displacement after that HD pack has
+scales Terrain Micro Detail's procedural displacement after that HD pack has
 successfully installed. It does not enable micro detail or derive geometry
 heights from normal maps. The shader and culling bounds use the same scaled
 amplitude, capped at the existing one-meter envelope; `0` flattens relief.

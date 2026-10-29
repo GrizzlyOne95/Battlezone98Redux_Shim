@@ -2985,7 +2985,7 @@ namespace BZROpenShim
         constexpr float kShimRowPitch = 52.0f;
         constexpr float kShimRowH = 42.0f;
         constexpr float kShimRowPad = 16.0f;
-        constexpr float kShimValueW = 196.0f;
+        constexpr float kShimValueW = 160.0f;
         constexpr Shell::Rect kShimCategoryInfo = { 228.0f, 690.0f, 984.0f, 120.0f };
 
         static Shell::Rect ShimHubTileRect(size_t index)

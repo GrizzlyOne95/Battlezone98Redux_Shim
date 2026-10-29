@@ -93,7 +93,7 @@ SettingsUi = 1
 ; Restored legacy death-chunk rendering / chunkMeshes support.
 ; Accepted: boolean. Default: ON.
 ; Set OFF only as a compatibility/emergency opt-out.
-; Exposed on the OpenShim Settings page as "Death Chunks".
+; Exposed on the OpenShim Settings page as "Death Chunk Meshes".
 ; Generates bone-group pieces automatically from the source Ogre mesh and
 ; skeleton. Cached under openshim/cache/chunks; no external payload pack is
 ; required. Unsupported source assets can still use existing payload packs.
@@ -177,7 +177,7 @@ PathBlockFaces = 1
 ; mission starts and when the multiplayer game room opens (vehicle preview).
 ; Returning from a mission still rebuilds as stock.
 ; Accepted: boolean. Default: ON.
-; Exposed on the OpenShim Settings page as "Fast Menus".
+; Exposed on the OpenShim Settings page as "Fast Menu Transitions".
 ; Legacy env alias: OPENSHIM_DISABLE_FAST_MENU_TRANSITIONS
 FastMenuTransitions = 1
 
@@ -255,7 +255,7 @@ RawMouseInput = 0
 ; platform path sets it; ON sets it on PC.
 ; Like BZ2's option this is global: it affects mouse, joystick and keyboard, so
 ; keyboard steering and throttle snap to full instead of ramping up.
-; Exposed on the OpenShim Settings page as "Raw Controls".
+; Exposed on the OpenShim Settings page as "Unsmoothed Controls".
 ; Env aliases: OPENSHIM_DISABLE_CONTROL_SMOOTHING, BZR_DISABLE_CONTROL_SMOOTHING
 DisableControlSmoothing = 0
 
@@ -884,7 +884,7 @@ ShadowFarDistance = 256
 
 
 [Terrain]
-; Micro Detail in the OpenShim settings page. Off by default (opt-in):
+; Terrain Micro Detail in the OpenShim settings page. Off by default (opt-in):
 ; a 2026-10-24 measurement on an RTX 5080 at 4K roughly halved the frame rate.
 ; Turning it on shows terrain paint height (rock, cracks, craters) using
 ; factor-4 DX11 tessellation and a 0.25-world-unit maximum offset. Visual only:
@@ -2622,7 +2622,7 @@ AttackRevealPerceivedTeam = 1
 ; the next tick rather than being stranded.
 ;
 ; Accepted: boolean. Default: ON.
-; Exposed on the OpenShim Settings page as "Satellite Fog"; applies live.
+; Exposed on the OpenShim Settings page as "Satellite Fog Of War"; applies live.
 ; Trace: OPENSHIM_TRACE_SATELLITE_VISIBILITY_FIX=1 (logs [SATVISFIX] entry,
 ;        exit and teardown transitions with per-transition counts)
 ; Legacy env aliases to force it off: OPENSHIM_DISABLE_SATELLITE_VISIBILITY_FIX,
