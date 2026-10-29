@@ -438,7 +438,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Sound Channels", "General", "SoundChannels", nullptr, 0,
       kShimSettingsSoundChannelValues, kShimSettingsSoundChannelLabels, 5, 4,
       ShimSettingApplyGroup::RestartRequired,
-      "Simultaneous sound objects. Stock leaves the engine limit alone; 256 is the ceiling. Restart required." },
+      "Voices that can play at once; Stock keeps Redux's 64. The 100-sound limit is "
+      "separately raised to 512, whatever this is set to. Restart required." },
     { "Background Music", "General", "MusicGlobalFocus", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,

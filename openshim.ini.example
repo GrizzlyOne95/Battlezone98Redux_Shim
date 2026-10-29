@@ -60,7 +60,9 @@
 
 [General]
 
-; Maximum simultaneous GAS sound objects.
+; Maximum simultaneous GAS voices (stock 64). This does not touch the separate
+; 100-entry playing-sound pool, which OpenShim enlarges to 512 at startup; set the
+; environment variable OPENSHIM_STOCK_SOUND_COPY_POOL=1 to keep the stock 100.
 ; Accepted:
 ;   0       = disable OpenShim's override; retain the stock engine limit
 ;   1..256  = requested channel count
