@@ -11,6 +11,10 @@ The requested direct LAN target is now documented in
 service or platform sign-in. This helper prototype is optional Local tooling
 and does not meet that target. Official (Rebellion), Custom and Local selectors
 remain separate and retain their existing behavior.
+The stacked `agent/direct-lan-backend` branch now implements the separate
+client-owned session/control layer and a default-off Server Connect / LAN
+screen preview. Its native gameplay adapter is still missing; see
+[DIRECT_LAN_IMPLEMENTATION.md](DIRECT_LAN_IMPLEMENTATION.md).
 
 ## Player flow
 

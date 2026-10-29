@@ -36,6 +36,13 @@ BOUNDARIES = {
     "peer_receive": 0x0075D800,
     "ui_multiplayer_click": 0x0078C6C0,
     "id_copy_used_by_lobby_get_my_id": 0x0073A740,
+    "id_construct_kind_1": 0x0073A6E0,
+    "id_construct_kind_2": 0x0073A710,
+    "id_validity_low_byte": 0x0073A900,
+    "id_format": 0x0073AAB0,
+    "id_parse": 0x0073ABD0,
+    "id_convert_kind_1": 0x0073A970,
+    "id_convert_kind_2": 0x0073A9B0,
 }
 
 
@@ -77,6 +84,8 @@ def main() -> None:
             "address": f"0x{address:08X}",
             "body_end": f"0x{end:08X}",
             "entry_bytes": body[:16].hex(" "),
+            "disassembly_kind": "bounded linear sweep; trailing data can decode as instructions",
+            "instructions": [f"0x{i.address:08X}: {i.mnemonic} {i.op_str}" for i in instructions],
             "returns": [{"address": f"0x{i.address:08X}", "operand": i.op_str}
                         for i in instructions if i.mnemonic == "ret"],
             "decomp_path": str(path.relative_to(args.corpus)) if path else None,

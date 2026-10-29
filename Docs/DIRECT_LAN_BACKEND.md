@@ -53,6 +53,8 @@ game interfaces. This is a useful seam, not proof that a vtable swap is enough.
 those objects, the identity representation required by every consumer, and the
 smallest safe adapter for preserving the existing reliable packet transport.
 These require further qualification before installing native replacement hooks.
+The current identity/ABI findings are recorded in
+[DIRECT_LAN_NATIVE_IDENTITY.md](DIRECT_LAN_NATIVE_IDENTITY.md).
 
 ## Calling convention caution
 
@@ -99,10 +101,17 @@ features rather than assumptions inherited from the online lobby service.
 |---|---|
 | Official / Custom / Local selector preservation | Implemented in the development branch |
 | Local helper host/discovery | Existing experimental prototype; still needs platform sign-in |
-| Released-image backend inventory | Implemented research tool; 36 vtable pointers and 13 boundaries inspected |
+| Released-image backend inventory | Implemented research tool; 36 vtable pointers and 20 boundaries inspected |
 | Complete native ABI / ownership qualification | Partial |
-| Client-owned direct LAN session implementation | Missing |
+| Client-owned direct LAN session implementation | Implemented in `agent/direct-lan-backend`; independent state, sockets and multi-process tests; no native gameplay adapter |
+| Direct game discovery | Implemented; separate protocol/port from helper service discovery |
+| Server Connect / LAN screen split | Default-off layout/discovery preview; native UI unverified; Host/Join gameplay unavailable |
 | No-account native host/join/gameplay | UNKNOWN; not implemented or tested |
+
+See [DIRECT_LAN_IMPLEMENTATION.md](DIRECT_LAN_IMPLEMENTATION.md) for transport,
+protocol, preview behavior, validation boundaries and the native adapter work
+remaining. The session layer has no account/service dependency; this alone does
+not establish no-login operation of the game.
 
 Run `reverse_engineering/inspect_direct_lan_backend.py --exe <baseline-exe>
 --corpus <private-corpus>` to reproduce the bounded static inventory. It rejects

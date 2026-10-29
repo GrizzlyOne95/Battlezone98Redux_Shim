@@ -24,6 +24,7 @@
 #include "hook_engine.h"
 #include "matchmaking_server.h"
 #include "lan_session.h"
+#include "connection_setup.h"
 #include "net_optimizer.h"
 #include "patcher.h"
 #include "shell_screens.h"
@@ -567,7 +568,8 @@ namespace BZROpenShim
             if (!panel)
                 return false;
 
-            Shell::AddLabel(panel, panel, "OpenShimPreLobby_Title", kTitleRect, "MULTIPLAYER",
+            Shell::AddLabel(panel, panel, "OpenShimPreLobby_Title", kTitleRect,
+                            ConnectionSetup::PreviewEnabled() ? "SERVER CONNECT" : "MULTIPLAYER",
                             Shell::kTitleLabelFlags);
 
             const struct
@@ -739,7 +741,7 @@ namespace BZROpenShim
         {
             bool enabled = true;
             TryGetUserConfigBool("Network", "PreLobby", enabled);
-            return enabled;
+            return enabled || ConnectionSetup::PreviewEnabled();
         }
 
         // The MP-status refresh runs every title-screen frame, and the ini read
@@ -773,7 +775,7 @@ namespace BZROpenShim
         {
             __try
             {
-                requested = Shell::RequestScreen(thisPtr, Shell::kPreLobbyScreenId);
+                requested = Shell::RequestScreen(thisPtr, ConnectionSetup::EntryScreen());
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -821,6 +823,7 @@ namespace BZROpenShim
                                  &ClosedPreLobby, &TickPreLobby, &OnCharPreLobby };
         g_Registered = Shell::RegisterScreen(def);
         RegisterLanScreen();
+        ConnectionSetup::RegisterScreens();
         if (g_Registered)
             InstallEntryHooks();
         else

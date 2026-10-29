@@ -28,6 +28,8 @@ namespace BZROpenShim::ShellScreens
     inline constexpr uint32_t kPreLobbyScreenId = kCustomScreenIdBase + 3;
     // +4 is the existing Menu Colors screen (menu_theme.h).
     inline constexpr uint32_t kLanScreenId = kCustomScreenIdBase + 5;
+    inline constexpr uint32_t kConnectionSetupScreenId = kCustomScreenIdBase + 6;
+    inline constexpr uint32_t kDirectLanScreenId = kCustomScreenIdBase + 7;
     inline constexpr uint32_t kOptionsCategoryScreenIdBase = kCustomScreenIdBase + 0x10;
 
     // Adds the screen's children to `screen` (a constructed Top Screen). Runs
