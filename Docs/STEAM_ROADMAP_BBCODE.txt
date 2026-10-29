@@ -226,3 +226,5 @@ These are unresolved reports or specific evidence gaps, not delivery commitments
 [*] Speculative feature wish lists, obsolete release chronology, duplicate milestones and disproven root-cause proposals have been removed from this progress sheet. Historical details remain in the validation record and Git history.
 [*] Update an entry when its implementation, runtime evidence or delivery status changes. Keep source availability, live qualification and publication distinct.
 [/list]
+
+[quote]Steam tunnel review (2026-10-29): opt-in M1/M2 remain development previews. Review fixes bound local startup waiting and explain missing/uninitialized Steam-session failures. All 162 Win32 CTests pass. Native GOG reports an uninitialized Steam API; a fresh standalone Steam init failed. Remote SDR without publisher configuration and host-account coexistence remain UNKNOWN. Steam transport identity is not bound to the lobby user ID. Two-account gameplay and Proton/Wine acceptance are still required; no release.[/quote]

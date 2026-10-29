@@ -243,9 +243,11 @@ configuration is **UNKNOWN** until two owning accounts connect. No successful
 two-account connection is recorded. Relay status Current and local SDK socket
 pairs do not settle that question. A requirement for Rebellion's keys, client
 secret or approval rules out this approach; do not pursue such a dependency.
-GOG does not load the Steam API needed for this transport; other connection
-paths remain available after clearing the tunnel setting. Galaxy transport is
-blocked on the publisher client secret.
+The GOG executable tested here imports steam_api.dll too, but its native
+readiness log reports the Steam API uninitialized. DLL presence is insufficient:
+this transport needs an initialized owning Steam session for appid 301650.
+Other connection paths remain available after clearing the tunnel setting.
+Galaxy transport is blocked on the publisher client secret.
 
 While an in-game connection is pending, a fifteen-second absence of status
 callbacks produces a diagnostic for a possible callback-pump stall or network /
@@ -260,6 +262,7 @@ record both logs and stop the test on such a failure. The earlier init failure
 and the later reported local success are separate runs; neither proves
 coexistence, remote SDR or gameplay. Steam identity also remains unbound to
 the claimed BZRNet lobby user ID; lobby names are not authenticated identities.
+
 `Ready()` confirms only that the worker bound its local ports. The resolver
 waits up to one second for that startup; it does not probe bridge reachability.
 The separate relay-flag check verifies the game's forced-relay setting, not a

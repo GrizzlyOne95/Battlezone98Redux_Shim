@@ -163,7 +163,7 @@ struct SteamTransport::Impl
         auto appId = Export<unsigned (__cdecl*)(void*)>(dll, "SteamAPI_ISteamUtils_GetAppID");
         const auto deadline = GetTickCount64() + 30000;
         while (!stop.load() && (!user() || !pipe()) && GetTickCount64() < deadline) Sleep(20);
-        if (stop.load() || !user() || !pipe()) throw std::runtime_error("game Steam API did not initialize in time");
+        if (stop.load() || !user() || !pipe()) throw std::runtime_error("Steam tunnel blocked: game Steam API did not initialize within 30 s; an owning Steam session for appid 301650 is required; clear SteamTunnelHost to use another connection");
         auto c = client();
         if (!c) throw std::runtime_error("SteamClient017 accessor unavailable");
         auto u = legacyUtils(c, pipe(), "SteamUtils008");

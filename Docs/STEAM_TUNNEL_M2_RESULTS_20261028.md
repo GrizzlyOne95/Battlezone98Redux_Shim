@@ -124,3 +124,27 @@ Local evidence is under `%TEMP%/bzr-tunnel-m2-plain-final/`,
 `bzr-tunnel-m2-loader-build.log` and `bzr-tunnel-m2-linux-final.log`.
 Setup and CLI/INI details are in
 [STEAM_TUNNEL.md](STEAM_TUNNEL.md).
+
+## October 29 feedback validation
+
+The integrated review branch builds the complete Release Win32 solution and
+passes all 162 Release CTests plus the network baseline. The standalone tool
+builds with warnings as errors. A fresh steam-self-test using the shipped DLL
+again fails SteamAPI_Init before networking; the later guide's reported local
+success is separate evidence, and the cause of the difference remains unknown.
+No two-account connection or same-account game/bridge coexistence is accepted.
+
+The missing-DLL fixture now fails promptly with a diagnostic and verifies that
+Stop completes within two seconds. This does not imply that DLL presence proves
+Steam capability. Native GOG 2.2.301 imports steam_api.dll as well: isolated
+PID 71692 (exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413)
+reaches readiness with steam-api=not-initialized. With SteamTunnelHost selected,
+the borrowed-session path logs its clear owning-session/clear-setting diagnostic
+after the bounded thirty-second handle wait. It sends zero tunnel bytes and
+preserves fail-closed behavior. Installed content is unchanged. No DLL absence
+or executable/store gate should be inferred from the GOG label.
+
+Pending-connection callback silence produces a fifteen-second diagnostic; this
+is a heuristic for callback or network/auth delay, not a pump heartbeat. Steam
+status callbacks are event-driven. Native complete lobby/gameplay, two-account
+SDR/publisher-config independence and Proton/Wine remain open.
