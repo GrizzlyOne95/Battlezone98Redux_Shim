@@ -109,3 +109,31 @@ stop-and-wait. It must not be exposed on the Internet. Per-session IP identity
 is bounded and distinct but not persistent across reconnects; M2 needs stable
 SteamID-based assignment for useful IP bans. Win32 GOG/Steam native integration,
 Proton and Wine remain unverified. No merge, release or public deployment occurred.
+
+## October 29 feedback validation
+
+Complete Release Win32 solution builds. All 158 existing CTests pass; the new
+immediate-startup configuration regression also passes separately with the
+other four targeted tunnel cases. The resolver waits up to one second for local
+binding only. It does not establish bridge reachability; the forced-relay
+qualification is a game flag check. M1 remains a trusted local-test milestone:
+one 1-KiB frame per RTT (about 20 KiB/s at 50 ms) and a ten-second unacked-frame
+timeout. M2 replaces that loop with Steam reliability/congestion handling.
+
+The real M1 integration passes all 32 UDP ports, stable source mapping,
+distinct peers, byte-exact concurrent TCP/FIN through loss/duplication,
+malformed/8080 rejection, exclusive bind, restart/timeout and clean stop.
+The companion DedicatedServer synthetic login/list/create/join, WebSocket
+signalling/chat and UDP probe also pass. These are synthetic protocol clients,
+not a native multiplayer match. No five-minute native gameplay acceptance,
+real two-PC comparison or Proton/Wine result is claimed.
+
+A read-only native IAT check on task-owned isolated GOG PID 75552 confirms the
+module boundary: the game's ioctlsocket import targets openshim.dll, while the
+tunnel module's socket/sendto/recvfrom/ioctlsocket delay imports target WS2_32.dll.
+The agent logs readiness on 127.0.0.1 with game/Galaxy IAT hooks installed and
+continues sending its handshake with the bridge absent. The executable is GOG
+2.2.301, SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413.
+This is native hook-boundary evidence, not lobby or match acceptance. The owned
+process exits through Stop-BZRGame. Raw IAT/log evidence stays local under
+C:/bzt/pr-feedback-game; no game binary or memory dump is committed.

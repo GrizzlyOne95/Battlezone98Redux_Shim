@@ -43,7 +43,7 @@ test the Python server **must** bind a different loopback address, rather than
 0.0.0.0, which conflicts with the agent:
 
 ```powershell
-python server.py --ws-host 127.0.0.2 --udp-host 127.0.0.2 --relay-host 127.0.0.2 --relay-pair-ports --relay-pair-port-start 1340 --relay-pair-port-end 1369 --state-file C:/BZRCoop/tunnel-test/state.json
+python ../Battlezone98Redux_DedicatedServer/server.py --ws-host 127.0.0.2 --udp-host 127.0.0.2 --relay-host 127.0.0.2 --relay-pair-ports --relay-pair-port-start 1340 --relay-pair-port-end 1369 --state-file C:/BZRCoop/tunnel-test/state.json
 socket_tunnel.exe bridge --server 127.0.0.2
 ```
 
