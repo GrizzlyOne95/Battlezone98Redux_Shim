@@ -33,5 +33,7 @@ namespace BZROpenShim::SocketTunnel
     // Logical server identity for community-key derivation. Never resolve this
     // name: it namespaces distinct tunnels that share physical 127.0.0.1.
     std::string CommunityEndpoint();
+    // Bound the first resolver wait while the worker binds its local ports.
+    bool WaitReady(unsigned timeoutMs = 1000);
     void Stop();
 }

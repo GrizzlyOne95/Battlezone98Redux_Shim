@@ -62,7 +62,10 @@ directory. Run from the isolated directory with Steam logged in:
 socket_tunnel.exe bridge --steam --server 127.0.0.1 --identity-map C:/BZRCoop/steam-tunnel/steam_tunnel_peers.txt
 ```
 
-Start the unmodified Python server with bounded pair-relay ports 1340-1369.
+Use the companion [DedicatedServer repository](https://github.com/GrizzlyOne95/Battlezone98Redux_DedicatedServer),
+`server.py` at revision e1544da7437b0b619502586f71725098911be82c or a descendant.
+The older reverse_engineering/bzrnet_server/server.py emulator lacks pair-relay
+and state-file flags. Start the companion server with bounded ports 1340-1369.
 For a separate server PC, its default bindings and bridge `--server 127.0.0.1`
 are suitable. On a same-PC test where an agent also owns 127.0.0.1, bind the
 server to 127.0.0.2 as shown below and use bridge `--server 127.0.0.2`.
@@ -77,9 +80,10 @@ TunnelUdpBridge=
 Replace the example with the bridge's complete numeric individual SteamID64.
 The in-process client only borrows the loaded game's Steam API. It does not
 call SteamAPI_Init, SteamAPI_RunCallbacks or SteamAPI_Shutdown; the game's
-existing callback pump dispatches connection-status config callbacks. It waits
-up to 30 seconds for the DLL and up to 30 seconds for initialized handles, then
-blocks matchmaking if unavailable. No second client Steam process is started.
+existing callback pump dispatches connection-status config callbacks. A missing loaded Steam API fails immediately with a log explaining that the
+Steam build is required and how to clear SteamTunnelHost. With the DLL loaded,
+it waits up to 30 seconds for initialized handles, then blocks matchmaking if
+unavailable. No second client Steam process is started.
 
 The standalone bridge owns its init/callback pump/shutdown. For a transport
 diagnostic on a second account/machine, the same standalone executable also has
@@ -233,3 +237,56 @@ M1's independent socket tool is store-neutral, while SDR mode is Steam-only.
 
 API references: [Valve Sockets documentation](https://partner.steamgames.com/doc/api/ISteamNetworkingSockets),
 [public pinned header source](https://github.com/ValveSoftware/GameNetworkingSockets/tree/d534c19aa760df3fb75fd20db13ba1932b8a5463/include/steam).
+
+## Review qualifications (2026-10-29)
+
+Whether appid 301650 permits remote SDR P2P without publisher-side Steamworks
+configuration is **UNKNOWN** until two owning accounts connect. No successful
+two-account connection is recorded. Relay status Current and local SDK socket
+pairs do not settle that question. A requirement for Rebellion's keys, client
+secret or approval rules out this approach; do not pursue such a dependency.
+The GOG executable tested here imports steam_api.dll too, but its native
+readiness log reports the Steam API uninitialized. DLL presence is insufficient:
+this transport needs an initialized owning Steam session for appid 301650.
+Other connection paths remain available after clearing the tunnel setting.
+Galaxy transport is blocked on the publisher client secret.
+
+While an in-game connection is pending, a fifteen-second absence of status
+callbacks produces a diagnostic for a possible callback-pump stall or network /
+auth delay. Status callbacks are event-driven; this heuristic does not prove
+that SteamAPI_RunCallbacks is running or detect all stalls. An established
+connection can legitimately have no status callbacks for a long time.
+
+Host game / bridge coexistence on one account remains UNKNOWN. Do this test
+with a spare owning account, not a main account. Steam may refuse a second
+appid session, fail initialization, or interrupt networking in either process;
+record both logs and stop the test on such a failure. The earlier init failure
+and the later reported local success are separate runs; neither proves
+coexistence, remote SDR or gameplay. Steam identity also remains unbound to
+the claimed BZRNet lobby user ID; lobby names are not authenticated identities.
+
+`Ready()` confirms only that the worker bound its local ports. The resolver
+waits up to one second for that startup; it does not probe bridge reachability.
+The separate relay-flag check verifies the game's forced-relay setting, not a
+remote service. If the bridge is down, accepted local TCP connections close
+until the handshake completes; the stock client must reconnect.
+
+Winsock hooks patch the import tables of battlezone98redux.exe, Galaxy.dll,
+GalaxyPeer.dll and steam_api.dll. They do not patch ws2_32's exports or
+openshim.dll's import/delay-import table. The in-process tunnel calls Winsock
+from openshim.dll, so its worker sockets bypass the optimizer's reorder,
+duplication and socket-tuning hooks. The standalone tool is a separate process.
+Installing observation hooks with the optimizer disabled does not change this
+module boundary. Native lobby/gameplay qualification is still required.
+
+M1 stop-and-wait sends at most one 1-KiB reliable frame per round trip, about
+20 KiB/s at 50 ms RTT before overhead, and a frame unacknowledged for ten seconds
+kills the peer. The measured 5 MB/s is loopback-only. M1 is a trusted local test
+milestone; it is not accepted for remote play. M2 replaces this ACK/retry path
+with Steam's reliable messages and congestion handling.
+
+The local Python server conflicts with the agent if both bind 127.0.0.1:1337
+or UDP 1338-1369; 0.0.0.0 also conflicts. Bind the server to 127.0.0.2 for
+same-PC tests. Use the sibling Battlezone98Redux_DedicatedServer/server.py,
+which implements --relay-pair-ports and --state-file; the older emulator in
+reverse_engineering/bzrnet_server/server.py does not implement those flags.

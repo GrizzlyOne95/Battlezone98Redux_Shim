@@ -34,10 +34,12 @@ namespace
     SRWLOCK callbackLock = SRWLOCK_INIT;
     std::deque<SteamNetConnectionStatusChangedCallback_t>* callbackQueue = nullptr;
     bool callbackOverflow = false;
+    std::atomic<uint64_t> lastStatusCallback{0};
     void OnStatus(SteamNetConnectionStatusChangedCallback_t* change)
     {
         // SteamAPI_RunCallbacks may be called on the game's main thread. Do not
         // call Steam, log, touch tunnel sockets or retain callback-owned memory.
+        lastStatusCallback.store(GetTickCount64());
         AcquireSRWLockExclusive(&callbackLock);
         if (callbackQueue)
         {
@@ -63,7 +65,7 @@ struct SteamTransport::Impl
     std::map<HSteamNetConnection, Connection> connections;
     std::deque<SteamNetConnectionStatusChangedCallback_t> callbacks;
     std::vector<SteamEvent> events;
-    uint64_t nextConnect = 0, lastDiagnostics = 0;
+    uint64_t nextConnect = 0, lastDiagnostics = 0, startedAt = 0, lastCallbackWarning = 0;
     int lastRelay = -999, lastAuth = -999;
     uint64_t sentBytes = 0, receivedBytes = 0;
 
@@ -146,14 +148,10 @@ struct SteamTransport::Impl
         }
         else
         {
-            const auto deadline = GetTickCount64() + 30000;
-            Log("waiting for the game's loaded Steam API and initialized handles (no client-side SteamAPI_Init)");
-            while (!stop.load() && GetTickCount64() < deadline)
-            {
-                if (GetModuleHandleExW(0, L"steam_api.dll", &dll)) break;
-                Sleep(20);
-            }
-            if (!dll) throw std::runtime_error("game Steam API unavailable; tunnel remains blocked");
+            // The Steam build imports this DLL before shim startup. Do not
+            // stall a GOG client that cannot supply this transport capability.
+            if (!GetModuleHandleExW(0, L"steam_api.dll", &dll))
+                throw std::runtime_error("Steam tunnel unavailable: requires the Steam build with its loaded steam_api.dll; clear SteamTunnelHost to use another connection");
         }
         auto user = Export<HandleFn>(dll, "SteamAPI_GetHSteamUser");
         auto pipe = Export<HandleFn>(dll, "SteamAPI_GetHSteamPipe");
@@ -165,7 +163,7 @@ struct SteamTransport::Impl
         auto appId = Export<unsigned (__cdecl*)(void*)>(dll, "SteamAPI_ISteamUtils_GetAppID");
         const auto deadline = GetTickCount64() + 30000;
         while (!stop.load() && (!user() || !pipe()) && GetTickCount64() < deadline) Sleep(20);
-        if (stop.load() || !user() || !pipe()) throw std::runtime_error("game Steam API did not initialize in time");
+        if (stop.load() || !user() || !pipe()) throw std::runtime_error("Steam tunnel blocked: game Steam API did not initialize within 30 s; an owning Steam session for appid 301650 is required; clear SteamTunnelHost to use another connection");
         auto c = client();
         if (!c) throw std::runtime_error("SteamClient017 accessor unavailable");
         auto u = legacyUtils(c, pipe(), "SteamUtils008");
@@ -188,7 +186,7 @@ struct SteamTransport::Impl
             throw std::runtime_error("could not pin Steam callback code lifetime");
         AcquireSRWLockExclusive(&callbackLock);
         const bool busy = callbackQueue != nullptr;
-        if (!busy) { callbackQueue = &callbacks; callbackOverflow = false; registered = true; }
+        if (!busy) { lastStatusCallback = 0; startedAt = GetTickCount64(); callbackQueue = &callbacks; callbackOverflow = false; registered = true; }
         ReleaseSRWLockExclusive(&callbackLock);
         if (busy) throw std::runtime_error("only one Steam tunnel transport per process");
         utils->InitRelayNetworkAccess();
@@ -249,6 +247,17 @@ struct SteamTransport::Impl
         }
         if (!periodic) return;
         lastDiagnostics = now;
+        // Status callbacks are event-driven, not a heartbeat. Warn only while
+        // a connection is pending; quiet established connections are normal.
+        bool pending = false;
+        for (const auto& entry : connections) if (!entry.second.connected) pending = true;
+        const auto lastCallback = lastStatusCallback.load();
+        const auto since = lastCallback ? lastCallback : startedAt;
+        if (!cfg.ownSteam && pending && now - since >= 15000 && now - lastCallbackWarning >= 15000)
+        {
+            Log("Steam connection pending with no status callbacks for 15 s; possible game SteamAPI_RunCallbacks stall or network/auth delay (callback pump not independently proven)");
+            lastCallbackWarning = now;
+        }
         for (const auto& entry : connections)
         {
             SteamNetConnectionRealTimeStatus_t status{}; SteamNetConnectionInfo_t info{};
