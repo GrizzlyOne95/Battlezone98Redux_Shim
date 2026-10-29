@@ -1,6 +1,6 @@
 [h1]Campaign Reimagined and OpenShim: Roadmap[/h1]
 
-[b]Updated 2026-10-29. Current version: Campaign Reimagined with OpenShim 1.0.0.64 and EXU 1.3.2.[/b]
+[b]Updated 2026-10-29. Current version: Campaign Reimagined with OpenShim 1.0.0.65 and EXU 1.3.2.[/b]
 
 [b]OpenShim[/b] is a community patch for Battlezone 98 Redux. It fixes engine bugs, adds the in-game OpenShim Options menu and powers the new visuals. [b]Campaign Reimagined (CR)[/b] is the remastered NSDF campaign built on top of it. [b]Extra Utilities (EXU)[/b] gives mod and mission makers the same tools.
 
@@ -59,6 +59,7 @@ Not part of the release, and may never be: DLSS frame generation and ray-traced 
 [h2]Recent Updates[/h2]
 
 [list]
+[*] [b]2026-10-29 (1.0.0.65)[/b] - OpenShim Options names and descriptions are no longer cut off, and several descriptions are corrected. Target Popup now reads Stock, Suppress Neutral or Suppress All. Headlights, the pilot flashlight, satellite fog of war and the reticle target tint now also work in multiplayer.
 [*] [b]2026-10-29 (CR hotfix)[/b] - Loading a saved CR mission from the main menu no longer drops you back to the menu. Saves made before this update on the affected missions must be restarted.
 [*] [b]2026-10-28 (1.0.0.64, EXU 1.3.2)[/b] - Fixes the crash after winning a mission, loading a save or restarting after death (seen on Linux/Wine), and DirectX 11 font and material crashes. Multiplayer fixes for Daywreckers, splinters, the host leaving and mission endings (every player should have OpenShim).
 [*] [b]2026-10-26 (1.0.0.63)[/b] - Renderer choice (DirectX 11/DirectX 9) in Video options, a new Visual Effects page, and menu rows for settings that were ini-only. Menu Colors is back.
