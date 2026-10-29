@@ -146,7 +146,13 @@ lobby names are not proof of Steam identity.
 
 Clear `SteamTunnelHost=` on PC 2, connect to PC 1's server directly
 (`/bzrserver=<PC1 IP>` or the saved server choice) and repeat a short match on
-the same map. Compare in-game ping/feel against step 5.
+the same map. Step 2 binds the server to loopback, so first stop that test
+server and restart it with `--ws-host <PC1 private LAN IPv4>`,
+`--udp-host <PC1 private LAN IPv4>` and `--relay-host <PC1 private LAN IPv4>`,
+keeping the bounded pair-relay and state-file options. Use only a trusted LAN;
+do not forward ports. Compare in-game ping/feel against step 5. Afterwards stop
+the direct-test server, restore step 2's loopback bindings and re-enable PC 2's
+SteamTunnelHost before the bridge-recovery test.
 
 ## 7. Bridge loss and recovery
 
