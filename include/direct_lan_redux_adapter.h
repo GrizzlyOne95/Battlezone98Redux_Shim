@@ -30,7 +30,7 @@ namespace BZROpenShim::DirectLan::Redux
 
     // Projection from accepted session snapshots to Redux identity/roster
     // queries. No engine globals, allocations, hooks or callbacks are touched.
-    // Only vtable +38/+48/+68 are implemented. This partial object MUST NOT
+    // Only vtable +38/+44/+48/+68 are implemented. This partial object MUST NOT
     // be installed as a game backend; lifecycle and gameplay are unqualified.
     class Adapter
     {
@@ -46,6 +46,7 @@ namespace BZROpenShim::DirectLan::Redux
         Identity* Local(Identity*) const;
         Identity* Owner(Identity*, const Identity& lobby) const;
         Identity* Member(Identity*, const Identity& lobby, int32_t index) const;
+        uint32_t Count(const Identity& lobby) const;
         const Peer* Find(const Identity&) const; // borrowed until Apply/Reset; never lent to engine callbacks
         size_t Members() const;
         const std::string& Error() const;

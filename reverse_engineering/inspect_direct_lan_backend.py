@@ -50,6 +50,18 @@ BOUNDARIES = {
     "lobby_owner_check_explicit": 0x00742D50,
     "lobby_base_constructor": 0x0073D690,
     "peer_base_constructor": 0x00758B90,
+    "peer_register_handler": 0x00758AF0,
+    "peer_handler_lookup": 0x00759800,
+    "peer_receive_dispatch": 0x00758C90,
+    "peer_send_wrapper": 0x007592D0,
+    "player_manager_constructor": 0x00574BB0,
+    "mission_handler_constructor": 0x00508E50,
+    "peer_unregister_handler": 0x00758B20,
+    "lobby_refresh_members": 0x00742900,
+    "lobby_populate_member": 0x00744A50,
+    "lobby_created_callback": 0x0073DF60,
+    "lobby_entered_callback": 0x0073E240,
+    "player_manager_destructor": 0x00574C30,
 }
 
 

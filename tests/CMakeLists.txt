@@ -114,11 +114,15 @@ openshim_add_test(direct_lan_session_tests STD 17 SOURCES direct_lan_session_tes
 openshim_add_test(direct_lan_redux_adapter_tests STD 17 SOURCES direct_lan_redux_adapter_tests.cpp
     ../src/network/direct_lan_redux_adapter.cpp ../src/network/direct_lan_session.cpp)
 target_compile_definitions(direct_lan_redux_adapter_tests PRIVATE OPENSHIM_DIRECT_LAN_ABI_TEST=1)
+openshim_add_test(direct_lan_peer_bridge_tests STD 17 SOURCES direct_lan_peer_bridge_tests.cpp
+    ../src/network/direct_lan_session.cpp ../src/network/direct_lan_transport.cpp ../src/network/direct_lan_discovery.cpp
+    ../src/network/direct_lan_redux_adapter.cpp ../src/network/direct_lan_redux_peer.cpp ../src/network/direct_lan_mesh.cpp)
+target_compile_definitions(direct_lan_peer_bridge_tests PRIVATE OPENSHIM_DIRECT_LAN_ABI_TEST=1)
 openshim_add_test(direct_lan_socket_tests STD 17 SOURCES direct_lan_socket_tests.cpp
     ../src/network/direct_lan_session.cpp ../src/network/direct_lan_transport.cpp ../src/network/direct_lan_discovery.cpp)
 add_executable(direct_lan_peer_process direct_lan_peer_process.cpp
     ../src/network/direct_lan_session.cpp ../src/network/direct_lan_transport.cpp ../src/network/direct_lan_discovery.cpp
-    ../src/network/direct_lan_redux_adapter.cpp)
+    ../src/network/direct_lan_redux_adapter.cpp ../src/network/direct_lan_redux_peer.cpp ../src/network/direct_lan_mesh.cpp)
 target_include_directories(direct_lan_peer_process PRIVATE ../include)
 target_compile_features(direct_lan_peer_process PRIVATE cxx_std_17)
 if(MSVC)
@@ -132,9 +136,11 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(direct_lan_process_tests PROPERTIES TIMEOUT 40)
 endif()
 if(WIN32)
+    target_link_libraries(direct_lan_peer_bridge_tests PRIVATE ws2_32 delayimp)
     target_link_libraries(direct_lan_socket_tests PRIVATE ws2_32 delayimp)
     target_link_libraries(direct_lan_peer_process PRIVATE ws2_32 delayimp)
     if(MSVC)
+        target_link_options(direct_lan_peer_bridge_tests PRIVATE /DELAYLOAD:ws2_32.dll)
         target_link_options(direct_lan_socket_tests PRIVATE /DELAYLOAD:ws2_32.dll)
         target_link_options(direct_lan_peer_process PRIVATE /DELAYLOAD:ws2_32.dll)
     endif()

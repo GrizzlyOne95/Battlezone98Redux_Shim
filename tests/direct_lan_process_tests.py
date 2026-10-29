@@ -7,6 +7,7 @@ import argparse
 import queue
 import socket
 import struct
+import sys
 import subprocess
 import threading
 import time
@@ -69,6 +70,7 @@ def session(executable, count, abrupt=False):
         for peer in peers:
             peer.expect(f"RUNNING {count}")
         identities = [peer.expect("NATIVE ").split()[1:] for peer in peers]
+        assert all(f"P2P {2 * (count - 1)}" in peer.lines for peer in peers), [peer.lines for peer in peers]
         assert len({identity[0] for identity in identities}) == 1, identities
         assert len({identity[1] for identity in identities}) == 1, identities
         assert len({identity[2] for identity in identities}) == count, identities
@@ -82,6 +84,8 @@ def session(executable, count, abrupt=False):
         print(f"PASS: {count} independent clients, discovery/manual join, prepare/commit, "
               f"consistent native identity/roster projection, {'abrupt guest departure, ' if abrupt else ''}host shutdown")
     finally:
+        if sys.exc_info()[0]:
+            print("PEER DIAGNOSTICS", [peer.lines for peer in peers], flush=True)
         for peer in reversed(peers):
             peer.cleanup()
 
@@ -152,6 +156,8 @@ def hostile_input(executable):
             peer.finish()
         print("PASS: malformed frame, stalled greeting and control flood isolated; valid clients still launch")
     finally:
+        if sys.exc_info()[0]:
+            print("PEER DIAGNOSTICS", [peer.lines for peer in peers], flush=True)
         for peer in reversed(peers):
             peer.cleanup()
 

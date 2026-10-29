@@ -11,6 +11,7 @@ namespace BZROpenShim::DirectLan
 {
     constexpr size_t kMaxMembers = 16;
     constexpr size_t kMaxFrame = 4096;
+    inline constexpr std::array<uint8_t, 8> kControlFrameMagic{'B','Z','L','A','N','P','0','2'};
     using Connection = uint64_t; // local transport handle, never a remote claim
     using Time = uint64_t;       // monotonic milliseconds supplied by the caller
     struct Id
@@ -67,15 +68,17 @@ namespace BZROpenShim::DirectLan
         std::vector<uint8_t> payload;
     };
     // Length-prefixed, versioned TCP frames. Never fed to native packet parsers.
-    bool Encode(const Packet&, std::vector<uint8_t>& frame);
+    bool Encode(const Packet&, std::vector<uint8_t>& frame, const std::array<uint8_t, 8>& magic = kControlFrameMagic);
     class Decoder
     {
     public:
+        explicit Decoder(std::array<uint8_t, 8> magic = kControlFrameMagic) : magic_(magic) {}
         bool Feed(const uint8_t*, size_t, std::vector<Packet>&);
         bool Failed() const { return failed_; }
     private:
         std::vector<uint8_t> pending_;
         bool failed_ = false;
+        std::array<uint8_t, 8> magic_;
     };
     struct Outbound { Connection connection; Packet packet; bool closeAfter = false; };
     enum class EventType { Changed, Prepare, Started, Ended, Rejected };

@@ -71,6 +71,6 @@ see [DIRECT_LAN_BACKEND.md](DIRECT_LAN_BACKEND.md).
 
 Reproduce with `reverse_engineering/inspect_direct_lan_backend.py --exe
 <exact-baseline-exe> --corpus <private-corpus>`. It verifies the executable
-hash and now records 36 vtable entries, 27 boundary functions, assembly and
+hash and now records 36 vtable entries, 39 boundary functions, assembly and
 unqualified corpus hints in ignored `reverse_engineering/workshop/` output.
 No runtime native hook should be added from this static inventory alone.

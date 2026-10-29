@@ -101,9 +101,10 @@ features rather than assumptions inherited from the online lobby service.
 |---|---|
 | Official / Custom / Local selector preservation | Implemented in the development branch |
 | Local helper host/discovery | Existing experimental prototype; still needs platform sign-in |
-| Released-image backend inventory | Implemented research tool; 36 vtable pointers and 27 boundaries inspected |
+| Released-image backend inventory | Implemented research tool; 36 vtable pointers and 39 boundaries inspected |
 | Complete native ABI / ownership qualification | Partial |
-| Native identity/roster query adapter | Partial implementation; local/owner/member queries, x86 ABI and bounded released owner-predicate execution qualified; see `DIRECT_LAN_ADAPTER.md` |
+| Native identity/roster query adapter | Partial implementation; local/owner/member/count queries, x86 ABI and bounded released owner-predicate execution qualified; see `DIRECT_LAN_ADAPTER.md` |
+| Native peer bridge and direct packet mesh | Send/pump/callback ABI, direct TCP reliable and UDP unreliable payloads implemented; fixtures exchange across all pairs; native engine activation remains missing; see `DIRECT_LAN_PEER_BRIDGE.md` |
 | Client-owned direct LAN session implementation | Implemented in `agent/direct-lan-backend`; independent state, sockets and multi-process tests; no native gameplay adapter |
 | Direct game discovery | Implemented; separate protocol/port from helper service discovery |
 | Server Connect / LAN screen split | Default-off layout/discovery preview; native UI unverified; Host/Join gameplay unavailable |

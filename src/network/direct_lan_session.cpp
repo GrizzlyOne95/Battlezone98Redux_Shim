@@ -130,13 +130,13 @@ namespace BZROpenShim::DirectLan
     bool Id::Empty() const
     { return std::all_of(bytes.begin(), bytes.end(), [](uint8_t value) { return value == 0; }); }
 
-    bool Encode(const Packet& packet, std::vector<uint8_t>& frame)
+    bool Encode(const Packet& packet, std::vector<uint8_t>& frame, const std::array<uint8_t, 8>& magic)
     {
         frame.clear();
         if (uint8_t(packet.type) < 1 || uint8_t(packet.type) > uint8_t(Type::Pong) ||
             packet.payload.size() > kMaxFrame - 52 || packet.sender.Empty() || !packet.serial) return false;
         Writer w; w.N(52 + packet.payload.size(), 4);
-        const std::string magic = "BZLANP02"; w.data.insert(w.data.end(), magic.begin(), magic.end());
+        w.data.insert(w.data.end(), magic.begin(), magic.end());
         w.N(uint8_t(packet.type), 1); w.N(0, 3); w.ID(packet.session); w.ID(packet.sender); w.N(packet.serial, 8);
         w.data.insert(w.data.end(), packet.payload.begin(), packet.payload.end());
         frame = std::move(w.data); return true;
@@ -164,10 +164,10 @@ namespace BZROpenShim::DirectLan
             }
             if (pending_.size() < 4 || pending_.size() != wanted || wanted == 4) continue;
             Reader r{pending_}; r.N(4);
-            std::string magic; for (size_t i = 0; i < 8; ++i) magic += char(r.N(1));
+            for (size_t i = 0; i < 8; ++i) r.N(1);
             Packet packet; packet.type = Type(r.N(1)); const auto reserved = r.N(3);
             packet.session = r.ID(); packet.sender = r.ID(); packet.serial = r.N(8);
-            if (magic != "BZLANP02" || reserved || uint8_t(packet.type) < 1 ||
+            if (!std::equal(magic_.begin(), magic_.end(), pending_.begin() + 4) || reserved || uint8_t(packet.type) < 1 ||
                 uint8_t(packet.type) > uint8_t(Type::Pong) || packet.sender.Empty() || !packet.serial)
             { failed_ = true; return false; }
             packet.payload.assign(pending_.begin() + r.cursor, pending_.end());

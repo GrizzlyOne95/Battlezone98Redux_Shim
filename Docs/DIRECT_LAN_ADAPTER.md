@@ -1,7 +1,7 @@
 # Redux Direct LAN adapter: qualified query subset
 
 `direct_lan_redux_adapter.h/.cpp` now implements the identity/roster projection
-and three native lobby query entries. This is **partial implementation**:
+and four native lobby query entries. This is **partial implementation**:
 there is no complete replacement lobby/P2P backend and no live activation.
 The source has no production API for publishing its incomplete native object.
 Only a test build exposes that object to isolated ABI/released-code checks.
@@ -23,6 +23,7 @@ included in this implementation.
 | Lobby `+0x38`, `FUN_0074B670` / `0x0074B670` | ECX is the lobby object; stack argument is the output identity pointer; returns that pointer in EAX, `ret 4`. |
 | Lobby `+0x68`, `FUN_0074B600` / `0x0074B600` | ECX is the lobby object; stack arguments are output identity pointer and queried lobby identity pointer; returns output in EAX, `ret 8`. |
 | Lobby `+0x48`, `FUN_0074B910` / `0x0074B910` | ECX is the lobby object; stack arguments are output identity pointer, lobby identity pointer and signed member index; returns output in EAX, `ret 12`. Iterates the native membership tree and copies the selected identity; unavailable/out-of-range results use the invalid constructor. |
+| Lobby `+0x44`, `FUN_0074B760` / `0x0074B760` | ECX is the lobby object; stack argument is the lobby identity pointer, returns a 32-bit count, `ret 4`. Membership refresh at `0x00742900` uses this as the bound for `+0x48` enumeration. |
 | Current-lobby owner predicate, `FUN_00742CF0` / `0x00742CF0` | Checks identity at object `+0x28`, calls `+0x68` with that identity and a hidden output buffer, then `+0x38` with another output buffer, compares results and returns AL. `ret` with no stack arguments. |
 | Explicit-lobby owner predicate, `FUN_00742D50` / `0x00742D50` | Same owner/local query sequence, using its stack-supplied lobby identity pointer; `ret 4`. |
 | Identity equality, `FUN_0056F780` / `0x0056F780` | ECX lhs, stack rhs; compares discriminator and words at 8/12, ignores offset 4, returns AL, `ret 4`. |
@@ -34,7 +35,7 @@ the observed hidden-output ABI without relying on the compiler to infer a
 source-level struct-return type. A fastcall bridge consumes ECX plus an unused
 EDX argument while keeping the real arguments and callee cleanup on the stack.
 No complete object layout, allocator or lifetime contract follows from these
-three methods. The partial test object places current lobby at `+0x28` solely
+four methods. The partial test object places current lobby at `+0x28` solely
 for the two qualified predicates; its other fields are not a native layout.
 
 ## Implemented mapping and roster behavior
@@ -73,7 +74,7 @@ overwritten by this subset. Standard C++ containers belong to the shim only.
 
 The ordinary `direct_lan_redux_adapter_tests` CTest covers projections,
 consistent enumeration, departure/rejoin, reverse mapping, rejection,
-tombstone bounds and teardown. On Win32 it also calls all three native entries
+tombstone bounds and teardown. On Win32 it also calls all four native entries
 through thiscall function pointers for 10,000 cycles, checking output buffers,
 offset-4 preservation and stack balance. Unknown vtable slots remain null.
 These tests do not publish the partial object to a game.
@@ -113,12 +114,12 @@ GCC/UBSan checks qualify the portable projection, not the Win32 ABI or Wine.
 
 | Component | State |
 |---|---|
-| Local/owner/member query subset | Implemented; x86 ABI and bounded released owner predicates qualified |
+| Local/owner/member/count query subset | Implemented; x86 ABI and bounded released owner predicates qualified |
 | Identity copy/equality/ordering and candidate kind-3 validity | Implemented and differential-tested for this subset |
 | Every native identity consumer, string/data serialization | UNKNOWN; partial paths do not qualify the entire engine |
 | Full 32-entry lobby interface, UI/game callbacks and subscriptions | Incomplete |
 | Native roster-to-game-player creation and uint16 IDs | Missing |
-| P2P object, receive queue ownership and gameplay transport integration | Missing |
+| P2P send/pump/callback bridge and direct TCP/UDP mesh | Implemented and fixture-tested; native registration/lifetime and gameplay integration remain missing; see `DIRECT_LAN_PEER_BRIDGE.md` |
 | Backend construction/publication, helper registrations and restore/teardown | Unqualified; no hooks installed |
 | Native UI, no-login game operation, physical match, Steam/Proton/Wine | Unverified |
 

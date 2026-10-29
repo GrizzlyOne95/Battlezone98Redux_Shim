@@ -73,9 +73,12 @@ deadlines and a bounded graceful half-close. Socket ownership is per object;
 Winsock initialization occurs on explicit construction, never at DLL load.
 The Win32 plugin retains delay-loading of `ws2_32.dll`.
 
-TCP carries small session messages only. The design keeps discovery on UDP and
-intends to reuse the existing qualified Redux gameplay transport separately.
-This avoids designing another reliable UDP protocol for lobby messages:
+The control TCP socket carries small session messages only. A separate direct
+peer candidate now carries reliable payloads over pairwise TCP and unreliable
+payloads over UDP through a Redux callback bridge. See
+[DIRECT_LAN_PEER_BRIDGE.md](DIRECT_LAN_PEER_BRIDGE.md) for its contract and
+validation limits. Reuse of stock BZRNet UDP remains an alternative requiring
+native peer-record qualification. This avoids designing another reliable UDP protocol:
 [RFC 8085](https://www.rfc-editor.org/rfc/rfc8085.html) describes the reliability
 and congestion responsibilities of UDP applications. This is a design choice,
 not a claim about the exact transport used in 1.5.
@@ -139,11 +142,12 @@ and independent native processes running the same Node. Process cases include
 discovered and manual joins, three/four participants, the prepare/commit
 barrier, abrupt guest departure, explicit host shutdown, content mismatch,
 malformed framing, a stalled greeting and control flooding followed by a valid
-session. Each fixture reserves its own gameplay endpoint but sends no game
-packets. Linux also checks a subnet-broadcast query so a unicast-only listener
+session. Each fixture now opens pairwise TCP/UDP endpoints and exchanges routing
+test payloads through the peer bridge. Those payloads are not serialized native
+game messages. Linux also checks a subnet-broadcast query so a unicast-only listener
 cannot pass solely through loopback discovery.
 
-Run the three `direct_lan_` CTests after building tests in Release Win32.
+Run the five `direct_lan_` CTests after building tests in Release Win32.
 GCC host checks use the same sources with `-Wall -Wextra -Werror` and UBSan;
 they are host qualification, not Proton/Wine proof. Full CTest, INI and network
 baseline results belong to this branch's PR, not to a deployed game build.

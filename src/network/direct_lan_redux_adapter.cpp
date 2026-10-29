@@ -80,12 +80,15 @@ namespace BZROpenShim::DirectLan::Redux
             return Copy(out, lobby && s.Matches(*lobby) && index >= 0 && size_t(index) < s.peers.size()
                 ? s.peers[size_t(index)].native : Identity{});
         }
+        static uint32_t LAN_QUERY_CALL QueryCount(QueryObject* self, void*, const Identity* lobby)
+        { return lobby && self->adapter->Matches(*lobby) ? uint32_t(self->adapter->peers.size()) : 0; }
         static const std::array<uintptr_t, 32>& Table()
         {
             static const auto table = []
             {
                 std::array<uintptr_t, 32> entries{};
                 entries[0x38 / 4] = reinterpret_cast<uintptr_t>(&QueryLocal);
+                entries[0x44 / 4] = reinterpret_cast<uintptr_t>(&QueryCount);
                 entries[0x48 / 4] = reinterpret_cast<uintptr_t>(&QueryMember);
                 entries[0x68 / 4] = reinterpret_cast<uintptr_t>(&QueryOwner);
                 return entries;
@@ -164,6 +167,7 @@ namespace BZROpenShim::DirectLan::Redux
         return found == impl_->peers.end() ? nullptr : &*found;
     }
     size_t Adapter::Members() const { return impl_->peers.size(); }
+    uint32_t Adapter::Count(const Identity& lobby) const { return impl_->Matches(lobby) ? uint32_t(impl_->peers.size()) : 0; }
     const std::string& Adapter::Error() const { return impl_->error; }
 #ifdef OPENSHIM_DIRECT_LAN_ABI_TEST
     void* Adapter::QualificationObject() { return impl_->local.Empty() ? nullptr : &impl_->object; }

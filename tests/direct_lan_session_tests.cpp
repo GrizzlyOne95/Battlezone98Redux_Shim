@@ -62,6 +62,11 @@ namespace
         }
         auto both = frame; both.insert(both.end(), frame.begin(), frame.end());
         Decoder decoder; std::vector<Packet> out; CHECK(decoder.Feed(both.data(), both.size(), out)); CHECK(out.size() == 2);
+        const std::array<uint8_t, 8> peerMagic{'B','Z','L','A','N','M','0','1'};
+        std::vector<uint8_t> peerFrame; CHECK(Encode(packet, peerFrame, peerMagic));
+        Decoder controlOnly; std::vector<Packet> wrongProtocol;
+        CHECK(!controlOnly.Feed(peerFrame.data(), peerFrame.size(), wrongProtocol) && wrongProtocol.empty());
+        Decoder peerOnly(peerMagic); CHECK(peerOnly.Feed(peerFrame.data(), peerFrame.size(), wrongProtocol) && wrongProtocol.size() == 1);
         for (size_t badOffset : {size_t(4), size_t(12), size_t(13)})
         {
             auto bad = frame; bad[badOffset] = 255;

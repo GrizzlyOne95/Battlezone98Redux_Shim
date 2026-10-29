@@ -107,10 +107,12 @@ namespace
         R::Adapter adapter(ID(1)); CHECK(adapter.Apply(Snapshot()));
         void* object = adapter.QualificationObject();
         const auto table = *static_cast<const uintptr_t**>(object);
-        for (size_t i = 0; i < 32; ++i) CHECK(bool(table[i]) == (i == 0x38 / 4 || i == 0x48 / 4 || i == 0x68 / 4));
+        for (size_t i = 0; i < 32; ++i) CHECK(bool(table[i]) == (i == 0x38 / 4 || i == 0x44 / 4 || i == 0x48 / 4 || i == 0x68 / 4));
         const auto local = reinterpret_cast<LocalFn>(table[0x38 / 4]);
         const auto owner = reinterpret_cast<OwnerFn>(table[0x68 / 4]);
         const auto member = reinterpret_cast<MemberFn>(table[0x48 / 4]);
+        using CountFn = uint32_t(__thiscall*)(void*, const R::Identity*);
+        const auto count = reinterpret_cast<CountFn>(table[0x44 / 4]);
         R::Identity a, b, expected; const auto lobby = adapter.Lobby();
         a.untouched.fill(0x55); b.untouched.fill(0x77);
         uintptr_t before = 0, after = 0;
@@ -120,6 +122,7 @@ namespace
             CHECK(local(object, &a) == &a);
             CHECK(owner(object, &b, &lobby) == &b && R::Equal(a, b));
             CHECK(member(object, &b, &lobby, i % 4 - 1) == &b);
+            CHECK(count(object, &lobby) == 3);
             __asm mov after, esp
             CHECK(before == after);
             CHECK(R::Equal(b, *adapter.Member(&expected, lobby, i % 4 - 1)));

@@ -1,55 +1,32 @@
 // Standalone session-layer qualification client, not a game/server/helper.
 // Every process runs the same native Node intended for the eventual adapter.
 #include "direct_lan_discovery.h"
-#include "direct_lan_redux_adapter.h"
+#include "direct_lan_redux_peer.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <thread>
-#ifdef _WIN32
-#include <winsock2.h>
-#else
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
 
 using namespace BZROpenShim::DirectLan;
 namespace
 {
-    // Reserve a real, unique endpoint for each fixture. No gameplay packets
-    // are sent; the eventual adapter must supply the engine's bound socket.
-    struct GameplayEndpoint
+    struct Received
     {
-#ifdef _WIN32
-        WSADATA data{};
-        bool initialized = WSAStartup(MAKEWORD(2, 2), &data) == 0;
-        SOCKET socket = initialized ? ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP) : INVALID_SOCKET;
-#else
-        int socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-#endif
-        uint16_t port = 0;
-        GameplayEndpoint()
+        Redux::Adapter& adapter;
+        Id local;
+        std::vector<std::pair<Id, uint8_t>> messages;
+        bool invalid = false;
+        static void Packet(void* context, void*, const Redux::Identity& from, const uint8_t* bytes, uint32_t count)
         {
-            sockaddr_in address{}; address.sin_family = AF_INET; address.sin_addr.s_addr = htonl(0x7F000001);
-#ifdef _WIN32
-            int size = sizeof(address);
-#else
-            socklen_t size = sizeof(address);
-#endif
-            if (!bind(socket, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) &&
-                !getsockname(socket, reinterpret_cast<sockaddr*>(&address), &size)) port = ntohs(address.sin_port);
-        }
-        ~GameplayEndpoint()
-        {
-#ifdef _WIN32
-            if (socket != INVALID_SOCKET) closesocket(socket);
-            if (initialized) WSACleanup();
-#else
-            if (socket >= 0) close(socket);
-#endif
+            auto& self = *static_cast<Received*>(context); const auto sender = self.adapter.Find(from);
+            if (!sender || count != 33 || (bytes[0] != 0x7A && bytes[0] != 0x23) ||
+                std::memcmp(bytes + 1, sender->local.bytes.data(), 16) || std::memcmp(bytes + 17, self.local.bytes.data(), 16))
+            { self.invalid = true; return; }
+            const auto key = std::make_pair(sender->local, bytes[0]);
+            if (std::find(self.messages.begin(), self.messages.end(), key) == self.messages.end()) self.messages.push_back(key);
         }
     };
 }
@@ -71,10 +48,13 @@ int main(int argc, char** argv)
     Id local, session;
     if (!RandomId(local) || !RandomId(session) || players < 2 || players > kMaxMembers) return 3;
     Compatibility compatibility; compatibility.gameBuild = "2.2.301"; compatibility.content[0] = mismatch ? 43 : 42;
-    GameplayEndpoint gameplay;
-    if (!gameplay.port) return 13;
-    Node node(local, host ? "Host" : "Guest", compatibility, gameplay.port);
+    Mesh mesh(local);
+    if (!mesh.Open(0x7F000001)) { std::fprintf(stderr, "mesh open: %s\n", mesh.Error().c_str()); return 13; }
+    Node node(local, host ? "Host" : "Guest", compatibility, mesh.Port());
     Redux::Adapter adapter(local);
+    Redux::PeerBridge bridge(adapter, mesh);
+    Received received{adapter, local, {}, false};
+    bridge.SetHandler(0x7A, &Received::Packet, &received); bridge.SetHandler(0x23, &Received::Packet, &received);
     if (host)
     {
         Config config{compatibility, "Client-owned LAN", "testmap", {1, 2}, uint8_t(players)};
@@ -96,20 +76,27 @@ int main(int argc, char** argv)
         }
         if (!node.Join(target, expected)) return 7;
     }
-    const Time began = Now(); Time runningAt = 0; uint64_t readyRevision = 0;
-    bool started = false;
-    while (Now() - began < 15000)
+    const Time began = Now(); Time runningAt = 0, lastUdp = 0; uint64_t readyRevision = 0, sentLaunch = 0, observedLaunch = 0;
+    bool started = false, prepared = false;
+    // Hostile-input qualification intentionally spends five seconds on a
+    // stalled greeting before the real guest starts. Keep the overall
+    // fixture budget separate from the production connection deadlines.
+    while (Now() - began < 30000)
     {
         node.Poll(); const auto& view = node.Control().State();
         if ((view.phase == Phase::Lobby || view.phase == Phase::Preparing || view.phase == Phase::Running || view.phase == Phase::Closed) &&
-            !adapter.Apply(view))
-        { std::fprintf(stderr, "adapter projection failed: %s\n", adapter.Error().c_str()); return 14; }
+            (!adapter.Apply(view) || !mesh.Apply(view)))
+        { std::fprintf(stderr, "adapter projection failed: %s; mesh: %s\n", adapter.Error().c_str(), mesh.Error().c_str()); return 14; }
         if (view.phase == Phase::Closed)
         {
             std::printf("CLOSED %s\n", view.reason.c_str()); std::fflush(stdout);
             return (started || (mismatch && view.reason == "Game build or content differs")) ? 0 : 8;
         }
-        if (view.phase == Phase::Lobby && view.members.size() == players)
+        if (view.phase == Phase::Preparing && observedLaunch != view.launch)
+        { observedLaunch = view.launch; received.messages.clear(); prepared = false; }
+        bridge.Pump();
+        if (received.invalid) return 16;
+        if (view.phase == Phase::Lobby && view.members.size() == players && mesh.Ready())
         {
             if (readyRevision != view.revision)
             { if (!node.Control().SetReady(true)) return 9; readyRevision = view.revision; }
@@ -121,9 +108,6 @@ int main(int argc, char** argv)
             if (event.type == EventType::Prepare)
             {
                 if (!adapter.HasLobby() || adapter.Members() != view.members.size()) return 15;
-                // Session-layer barrier qualification only. The game adapter
-                // must wait for actual native peer readiness before this call.
-                if (!node.Control().Prepared()) return 11;
             }
             if (event.type == EventType::Started)
             {
@@ -137,6 +121,32 @@ int main(int argc, char** argv)
                 if (depart) return 0; // abrupt transport close, without a Leave message
             }
         }
+        if (view.phase == Phase::Preparing && mesh.Ready())
+        {
+            const bool reliable = sentLaunch != view.launch;
+            const bool unreliable = Now() - lastUdp >= 100;
+            if (reliable || unreliable)
+            {
+                for (int32_t i = 0; size_t(i) < adapter.Members(); ++i)
+                {
+                    Redux::Identity target; adapter.Member(&target, adapter.Lobby(), i);
+                    const auto peer = adapter.Find(target); if (!peer || peer->local == local) continue;
+                    uint8_t bytes[33]{}; std::memcpy(bytes + 1, local.bytes.data(), 16); std::memcpy(bytes + 17, peer->local.bytes.data(), 16);
+                    if (reliable) { bytes[0] = 0x7A; if (!bridge.Send(target, bytes, sizeof(bytes), true)) return 17; }
+                    if (unreliable) { bytes[0] = 0x23; if (!bridge.Send(target, bytes, sizeof(bytes), false)) return 18; }
+                }
+                if (reliable) sentLaunch = view.launch;
+                if (unreliable) lastUdp = Now();
+            }
+            if (!prepared && received.messages.size() == 2 * (players - 1))
+            {
+                // Every direct TCP/UDP peer path exchanged payloads through
+                // the adapter. Native game/player readiness is still pending.
+                std::printf("P2P %zu\n", received.messages.size()); std::fflush(stdout);
+                if (!node.Control().Prepared()) return 11;
+                prepared = true;
+            }
+        }
         if (host && started && Now() - runningAt >= 500)
         {
             std::printf("ROSTER %zu\n", view.members.size());
@@ -147,7 +157,7 @@ int main(int argc, char** argv)
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
-    std::fprintf(stderr, "timeout, phase %u, %zu members, transport: %s\n", unsigned(node.Control().State().phase),
-        node.Control().State().members.size(), node.Error().c_str());
+    std::fprintf(stderr, "timeout, phase %u, %zu members, transport: %s; mesh ready=%u, mesh: %s\n", unsigned(node.Control().State().phase),
+        node.Control().State().members.size(), node.Error().c_str(), unsigned(mesh.Ready()), mesh.Error().c_str());
     return 12;
 }

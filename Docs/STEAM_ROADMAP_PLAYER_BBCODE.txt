@@ -47,7 +47,7 @@ These are known problems we are still tracking down. Detailed reports and log fi
 
 [h2]Experiments[/h2]
 
-Local host tools are in development on a separate branch, keeping Official, Custom and Local choices. They still require a local lobby service and Steam/Galaxy sign-in. A separate direct LAN mode now has a client-owned session and discovery prototype without those dependencies, plus an optional Server Connect / LAN screen preview. The first Redux adapter components are implemented and tested in isolation; connecting them to actual gameplay is still pending. Neither is included in the release.
+Local host tools are in development on a separate branch, keeping Official, Custom and Local choices. They still require a local lobby service and Steam/Galaxy sign-in. A separate direct LAN mode now has client-owned sessions, discovery and direct peer packet exchange without those dependencies, plus an optional Server Connect / LAN screen preview. Redux adapter components pass isolated tests, including payload exchange between separate client processes; connecting them to actual gameplay is still pending. Neither is included in the release.
 
 Not part of the release, and may never be: DLSS frame generation and ray-traced shadows, terrain tessellation, and fog that swirls around passing hovercraft.
 
