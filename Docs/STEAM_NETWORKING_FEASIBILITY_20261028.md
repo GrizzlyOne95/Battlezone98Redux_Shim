@@ -22,9 +22,11 @@ remote SDR P2P without publisher-side Steamworks configuration. That dependency
 remains **UNKNOWN** until two owning accounts connect. Any solution requiring
 Rebellion's keys, client secrets or publisher approval is out of scope.
 
-The Steam transport is unavailable to the GOG executable, which does not load
-`steam_api.dll`; this is a transport capability limit, not an executable/store
-gate on other multiplayer paths. The Galaxy bridge remains blocked because it
+The Steam transport requires an initialized owning Steam session for appid
+301650. The GOG 2.2.301 executable on this PC imports steam_api.dll too, but its
+native readiness log reports steam-api=not-initialized. DLL presence alone does
+not establish transport capability; there is no executable/store gate on the
+other multiplayer paths. The Galaxy bridge remains blocked because it
 requires Rebellion's client secret. Friends-list Join Game and host-account /
 bridge session coexistence also remain unverified.
 
@@ -32,7 +34,8 @@ bridge session coexistence also remain unverified.
 
 Steam install exists at
 `C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux` (appid
-`301650`, `steam_appid.txt`). The GOG install has none.
+`301650`, `steam_appid.txt`). The GOG executable also imports steam_api.dll;
+the October 29 native check reports that API uninitialized in the GOG session.
 
 - `steam_api.dll` (32-bit, 217,376 bytes, "Steam Client API", file version
   3.62.82.82, 796 exports). Dated 2026-10-24, i.e. as shipped by Rebellion.
