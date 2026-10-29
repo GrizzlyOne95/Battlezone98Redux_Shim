@@ -15,7 +15,6 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed the satellite view showing enemies you haven't seen. Redux had dropped Battlezone 1.5's fog check. [i](SP)[/i]
 [*] Restored the 1.5 crouch when landing with the sniper rifle selected and jump held. [i](SP)[/i]
 [*] Fixed your own Arc Mine firing at you on the frame you board a craft. [i](SP)[/i]
-[*] Fixed the pilot losing its team when boarding a craft, so it counted as belonging to no team. [i](SP)[/i]
 [*] Fixed units that two producers can build only being buildable from the first one the engine found.
 [*] Fixed a crash from magnet mines whose ODF range is zero or invalid.
 [*] Fixed ODF and TRN decimals such as 0.8 reading as 0 on non-English Windows locales.
@@ -28,8 +27,8 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed position updates being thrown away until a lost reliable packet was resent.
 [*] Fixed a deployed splinter sitting in a different spot on each player's machine, and still firing on other players after it was destroyed.
 [*] Fixed a Daywrecker launched from an Armory exploding at the Armory on other players' machines (a phantom blast seen only there).
-[*] Fixed a mission won or lost by the host's script leaving guests playing forever.
-[*] Fixed the host leaving a co-op match deleting all of the host's units, skipping the handover to the new host, and sending the last guest to Game Over.
+[*] Fixed a mission won or lost by the host's script leaving guests playing forever (guests need OpenShim too).
+[*] Fixed the host leaving a multiplayer match deleting all the AI units, skipping the handover to the new host, and in a two-player match sending the remaining player to Game Over.
 [*] Fixed a running match quitting with "Lost connection to game" when only the lobby connection dropped and the players were still connected.
 [*] Fixed lost reliable messages waiting for the slow retry timer because the request to resend them was discarded.
 [*] Fixed Lua Send of a 128-255 byte string or table crashing every receiving player.
