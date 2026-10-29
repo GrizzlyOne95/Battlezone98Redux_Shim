@@ -185,7 +185,7 @@ openshim_opt:ChunkMeshes:desc~Generate destruction pieces from the model's mesh 
 openshim_opt:FastMenuTransitions:label~Fast Menu Transitions~~~~~~
 openshim_opt:FastMenuTransitions:desc~Instant Action, Multiplayer and Custom Campaigns open and close without reloading every material; content loads once, before the mission or in the game room. Restart required.~~~~~~
 openshim_opt:SoundChannels:label~Sound Channels~~~~~~
-openshim_opt:SoundChannels:desc~Simultaneous sound objects. Stock leaves the engine limit alone; 256 is the ceiling. Restart required.~~~~~~
+openshim_opt:SoundChannels:desc~Voices that can play at once; Stock keeps Redux's 64. The 100-sound limit is separately raised to 512, whatever this is set to. Restart required.~~~~~~
 openshim_opt:MusicGlobalFocus:label~Background Music~~~~~~
 openshim_opt:MusicGlobalFocus:desc~Keep the soundtrack playing and fed while the game is not the foreground window. Restart required.~~~~~~
 openshim_opt:CustomBindsUi:label~Custom Keybinds~~~~~~
