@@ -60,3 +60,6 @@ $zip = Join-Path $output ($name + '.zip')
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 [IO.Compression.ZipFile]::CreateFromDirectory($payload, $zip)
 Write-Host "Preview: $zip"
+# Deploy's optional mod-shadow advisory returns 2 for a staging tree without
+# a game/mod. Reaching this point means every payload check and zip succeeded.
+$global:LASTEXITCODE = 0
