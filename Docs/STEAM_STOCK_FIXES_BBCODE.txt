@@ -6,7 +6,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [list]
 [*] Fixed howitzers firing at a sniper without deploying first. [i](SP)[/i]
 [*] Fixed APCs refusing to drop soldiers on allied targets. [i](SP)[/i]
-[*] Fixed a destroyed splinter (spraybomb) continuing to spawn payload. [i](SP)[/i]
+[*] Fixed a destroyed splinter (spraybomb) continuing to spawn payload.
 [*] Fixed hits from comets, APC soldiers and splinter payloads not revealing the craft that fired them. [i](SP)[/i]
 [*] Fixed tugs never deploying after picking up cargo. [i](SP)[/i]
 [*] Fixed a dead constructor's queued build outliving it. [i](SP)[/i]
@@ -25,6 +25,11 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed a host crash (heap corruption) when a guest owns scavengers and a team runs an AIP.
 [*] Fixed multiplayer links dropping every position update after a single retransmit. It was worst with 3 or more players.
 [*] Fixed position updates being thrown away until a lost reliable packet was resent.
+[*] Fixed a deployed splinter sitting in a different spot on each player's machine, and still firing on other players after it was destroyed.
+[*] Fixed a Daywrecker launched from an Armory exploding at the Armory on other players' machines (a phantom blast seen only there).
+[*] Fixed a mission won or lost by the host's script leaving guests playing forever (guests need OpenShim too).
+[*] Fixed the host leaving a multiplayer match deleting all the AI units, skipping the handover to the new host, and in a two-player match sending the remaining player to Game Over.
+[*] Fixed a running match quitting with "Lost connection to game" when only the lobby connection dropped and the players were still connected.
 [*] Fixed lost reliable messages waiting for the slow retry timer because the request to resend them was discarded.
 [*] Fixed Lua Send of a 128-255 byte string or table crashing every receiving player.
 [*] Fixed Lua Send of map-placed objects (geysers, beacons, scenery) arriving as nil on other players.
