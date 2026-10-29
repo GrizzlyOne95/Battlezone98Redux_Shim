@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <map>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <utility>
 
@@ -71,7 +72,7 @@ namespace
         std::vector<uint8_t> output;
         size_t offset = 0;
     };
-    struct UdpSource { Socket socket; uint64_t touched = 0; };
+    struct UdpSource { Socket socket; };
     struct Peer
     {
         uint64_t session = 0, seen = 0, ping = 0;
@@ -89,7 +90,7 @@ namespace
         Socket wire, listener;
         std::map<uint16_t, Socket> ports;
         std::map<uint64_t, Peer> peers;
-        std::map<uint16_t, uint64_t> localSources;
+        std::set<uint16_t> localSources;
         std::vector<uint32_t> allowed;
         uint32_t nextStream = 1;
         uint64_t tx = 0, rx = 0, retries = 0, drops = 0;
@@ -188,7 +189,7 @@ namespace
             if (stream.offset) { stream.output.erase(stream.output.begin(), stream.output.begin() + stream.offset); stream.offset = 0; }
             stream.output.insert(stream.output.end(), f.data.begin(), f.data.end()); return true;
         }
-        void Datagram(Peer& p, const Frame& f, uint64_t now)
+        void Datagram(Peer& p, const Frame& f)
         {
             if (cfg.bridge)
             {
@@ -199,7 +200,6 @@ namespace
                     UdpSource u; u.socket = Bound(SOCK_DGRAM, p.sourceIp, 0);
                     it = p.udp.emplace(f.source, std::move(u)).first;
                 }
-                it->second.touched = now;
                 const auto target = Address(cfg.server, f.port);
                 sendto(it->second.socket.s, reinterpret_cast<const char*>(f.data.data()), int(f.data.size()), 0,
                        reinterpret_cast<const sockaddr*>(&target), sizeof(target));
@@ -210,7 +210,6 @@ namespace
                 auto target = Address("127.0.0.1", f.source);
                 sendto(ports.at(f.port).s, reinterpret_cast<const char*>(f.data.data()), int(f.data.size()), 0,
                        reinterpret_cast<const sockaddr*>(&target), sizeof(target));
-                localSources[f.source] = now;
             }
         }
         void Receive(uint64_t now)
@@ -233,7 +232,7 @@ namespace
                 else if (f.kind == Kind::Ack) p->reliable.Ack(f.sequence);
                 else if (f.kind == Kind::Datagram)
                 {
-                    try { Datagram(*p, f, now); }
+                    try { Datagram(*p, f); }
                     catch (const std::exception&) { p->failed = true; }
                 }
                 else if (Reliable(f.kind))
@@ -302,7 +301,7 @@ namespace
                 if (failed || (s.readEof && s.writeClosed)) it = p.streams.erase(it); else ++it;
             }
         }
-        void PumpUdp(Peer& p, uint64_t now)
+        void PumpUdp(Peer& p)
         {
             uint8_t bytes[kPayloadMax];
             auto read = [&](SOCKET socket, uint16_t tag, bool bridge)
@@ -319,26 +318,21 @@ namespace
                     if (!bridge)
                     {
                         if (!localSources.count(port) && localSources.size() >= 64) { ++drops; continue; }
-                        localSources[port] = now;
+                        localSources.insert(port);
                     }
                     Frame f{Kind::Datagram, 0, 0, 0, bridge ? port : tag, bridge ? tag : port};
                     f.data.assign(bytes, bytes + n); Send(p, std::move(f));
-                    if (bridge) p.udp.at(tag).touched = now;
                 }
             };
             if (cfg.bridge)
             {
-                for (auto it = p.udp.begin(); it != p.udp.end();)
-                {
-                    read(it->second.socket.s, it->first, true);
-                    if (now - it->second.touched > 120000) it = p.udp.erase(it); else ++it;
-                }
+                // Preserve the probe-advertised endpoint across a long lobby
+                // idle. The bounded mappings live until this peer disconnects.
+                for (auto& source : p.udp) read(source.second.socket.s, source.first, true);
             }
             else
             {
                 for (auto& port : ports) read(port.second.s, port.first, false);
-                for (auto it = localSources.begin(); it != localSources.end();)
-                    if (now - it->second > 120000) it = localSources.erase(it); else ++it;
             }
         }
         void Tick(uint64_t now)
@@ -357,10 +351,10 @@ namespace
                     Send(p, Frame{p.connected ? Kind::Ping : Kind::Hello}); p.ping = now;
                 }
                 if (!cfg.bridge) Accept(p, now);
-                if (!cfg.bridge && !p.connected) PumpUdp(p, now);
+                if (!cfg.bridge && !p.connected) PumpUdp(p);
                 if (p.connected)
                 {
-                    PumpStreams(p, now); PumpUdp(p, now);
+                    PumpStreams(p, now); PumpUdp(p);
                     auto& q = p.reliable;
                     if (q.Due(now)) { if (q.sentAt) ++retries; Send(p, q.pending.front()); q.Sent(now); }
                 }

@@ -29,9 +29,10 @@ establish native platform authentication or gameplay correctness.
 ## Checks
 
 - `BZROpenShim.sln` Release | Win32: complete proxy/loader/plugin chain builds.
-  Incremental rebuild after final worker-shutdown changes also passes.
+  Incremental rebuild after final worker-shutdown and UDP-mapping changes also passes.
 - Win32 CTest: 154/154 existing-plus-protocol tests pass; the subsequently added
-  three configuration cases and the protocol test pass 4/4 after the final edit.
+  three configuration cases, protocol and patch-registration tests pass 5/5
+  after the final edit.
 - `tools/validate-network-baseline.ps1`: passes. No patch catalog addresses or
   signatures were added. `EnsureBzrNetTunnelRelay` reuses existing qualified
   BZRNet settings resolves; game-time qualification remains untested.
@@ -63,10 +64,10 @@ is application bytes divided by complete echo duration (not link capacity).
 
 | Path | UDP RTT median | UDP RTT p95 | TCP echo throughput |
 |---|---:|---:|---:|
-| Direct loopback | 0.105 ms | 0.212 ms | 23.90 MB/s |
-| Plain-UDP tunnel loopback | 0.379 ms | 0.693 ms | 4.09 MB/s |
+| Direct loopback | 0.100 ms | 0.273 ms | 25.41 MB/s |
+| Plain-UDP tunnel loopback | 0.391 ms | 0.558 ms | 5.01 MB/s |
 
-Earlier socket-ready runs ranged from 0.21 to 0.38 ms tunnel median and 4.09 to
+Earlier socket-ready runs ranged from 0.21 to 0.39 ms tunnel median and 4.09 to
 9.41 MB/s tunnel throughput while builds ran on the machine. These are bounded
 smoke measurements, not a benchmark distribution or LAN/SDR performance claim.
 The initial Sleep-based poll loop added about 60 ms; it was replaced with socket
@@ -74,16 +75,16 @@ readiness waits before the accepted socket runs. No system timer setting changed
 
 Local raw evidence (not committed):
 
-- `%TEMP%/bzr-tunnel-m1-recovery/`: `metrics.json` and agent/bridge logs.
-- `%TEMP%/bzr-tunnel-server-evidence-v2/`: `result.json`, server and tunnel logs.
-- `%TEMP%/bzr-tunnel-ctest.log`, `bzr-tunnel-solution-checkpoint.log`.
+- `%TEMP%/bzr-tunnel-m1-stable-source/`: `metrics.json` and agent/bridge logs.
+- `%TEMP%/bzr-tunnel-server-stable-source/`: `result.json`, server and tunnel logs.
+- `%TEMP%/bzr-tunnel-ctest.log`, `bzr-tunnel-solution-stable-source.log`.
 
 Built artifacts at this checkpoint (not packaged/released):
 
 | Artifact | SHA-256 |
 |---|---|
-| `socket_tunnel.exe` | `B95B5E82B9F282C60920F747C9D818C4B0183B1946401A05A905D10939C2C8CC` |
-| `plugins/openshim.dll` | `697B7496FE5B1D694C52FF23FD468A53520514B6D8391445530A5E7E6BB27781` |
+| `socket_tunnel.exe` | `E72739D0068D73722783E63CD0668CF958F3F0833E2CACC71DC586B72BA2C8E5` |
+| `plugins/openshim.dll` | `C2EF654E5651D476F9DE319D65E5EFC0991351055B4A503C227892FAEEC668AA` |
 
 ## Section-5 test design status and risks
 

@@ -100,6 +100,8 @@ it and joins it before releasing state. Peer heartbeat timeout is 15 seconds;
 reliable-message timeout is 10 seconds, with 100 ms retry intervals. Losing a
 peer closes its streams and UDP sockets; a restarted agent gets a new session.
 Bridge restart during an active agent session recovers after that timeout.
+UDP source mappings remain stable for the session, including long lobby idles;
+they are released with the peer rather than aged out independently.
 The preview caps sessions at eight, TCP streams at 16 per session, game UDP
 source sockets at 64 per session, reliable queues at 256 KiB/512 frames per
 direction, and datagrams at 60,000 bytes. Larger datagrams are dropped. Local
