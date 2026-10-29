@@ -31,7 +31,16 @@ int wmain(int argc, wchar_t** argv)
         // an undrained pipe that hangs the server once a mission starts.
         wchar_t mode[32]{};
         GetEnvironmentVariableW(L"OPENSHIM_LAN_TEST_MODE", mode, 32);
-        if (std::wstring(mode) == L"exit") return 7;
+        if (std::wstring(mode) == L"exit")
+        {
+            std::fputs("OSError: [WinError 10048] bind 1337: address already in use\n", stderr);
+            std::fflush(stderr); return 7;
+        }
+        // Every service must bind to the displayed adapter, never all interfaces.
+        for (int i = 2; i + 1 < argc; ++i)
+            if (std::wstring(argv[i]) == L"--ws-host" || std::wstring(argv[i]) == L"--udp-host" ||
+                std::wstring(argv[i]) == L"--relay-host")
+                if (std::wstring(argv[i + 1]) == L"0.0.0.0") return 9;
         for (int i = 0; i < 2000; ++i) std::fputs("fixture stderr padding padding padding padding padding padding\n", stderr);
         std::fflush(stderr);
         std::puts("BZRLAN_READY 1337"); std::fflush(stdout);
@@ -86,6 +95,7 @@ int wmain(int argc, wchar_t** argv)
     LAN::StopScan(); CHECK(!LAN::Status().scanning);
     SetEnvironmentVariableW(L"OPENSHIM_LAN_TEST_MODE", L"exit");
     CHECK(LAN::StartHost(root.wstring())); CHECK(Wait(LAN::HostState::Failed));
+    CHECK(LAN::Status().hostMessage.find("10048") != std::string::npos);
     SetEnvironmentVariableW(L"OPENSHIM_LAN_TEST_MODE", nullptr);
     CHECK(LAN::StartHost(root.wstring())); CHECK(Wait(LAN::HostState::Running));
     CHECK(LAN::Status().hostAddress == first);

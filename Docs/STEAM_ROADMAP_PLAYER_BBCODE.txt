@@ -73,3 +73,5 @@ Not part of the release, and may never be: DLSS frame generation and ray-traced 
 Post in this discussion or open an issue on [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/issues]GitHub[/url]. Say what you were doing, and attach the files from the [b]logs[/b] folder in your game folder, especially [b]openshim_crash.log[/b] if there is one.
 
 The full technical roadmap, with test evidence for every item, is on [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/blob/main/Docs/STEAM_ROADMAP_BBCODE.txt]GitHub[/url].
+
+[quote]LAN development review (2026-10-29): duplicate Direct LAN mesh PR #644 was closed; its branch is retained for research. Local host tools still require stock platform sign-in. Review fixes bind services to the selected private adapter, prefer the routed adapter and expose startup errors. All 155 Win32 CTests and the real-helper lifecycle check pass; isolated GOG startup reached readiness reporting, but native LAN UI and two-PC gameplay acceptance remain open. Nothing was released.[/quote]

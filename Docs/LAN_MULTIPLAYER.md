@@ -6,9 +6,10 @@ Companion server source: `e1544da7437b0b619502586f71725098911be82c`
 The companion DedicatedServer branch supplies the Win32 helper. This is source
 development, not a published release or native gameplay acceptance.
 
-The requested direct LAN target is now documented in
+The requested direct LAN target is documented in
 [DIRECT_LAN_BACKEND.md](DIRECT_LAN_BACKEND.md): client-owned sessions with no
-service or platform sign-in. This helper prototype is optional Local tooling
+service or platform sign-in. Duplicate mesh PR #644 was closed by owner
+direction on October 29; its branch is retained as research reference. This helper prototype is optional Local tooling
 and does not meet that target. Official (Rebellion), Custom and Local selectors
 remain separate and retain their existing behavior.
 
@@ -101,9 +102,12 @@ stdin control and a kill-on-close process job. All discovery and launch work
 starts from the UI thread after an explicit click, never during DLL loading.
 System Winsock calls remain delay-loaded. No firewall rules are changed.
 
-Allow the helper and game on the private network. A VPN/virtual adapter can be
-selected first when hosting; use its correct physical LAN address manually if
-necessary. Discovery supports RFC1918, IPv4 loopback and link-local addresses.
+Hosting opens lobby/probe/relay listeners on the selected private IPv4 adapter
+and may trigger a Windows firewall prompt. Allow access on the private network.
+The default-route adapter is preferred; an isolated LAN falls back to an active
+private adapter. A VPN owning the default route can still be selected; verify
+the displayed address before sharing it. Startup failures include a bounded
+last diagnostic from openshim/lan/host.log. Discovery supports RFC1918, IPv4 loopback and link-local addresses.
 Client-isolated Wi-Fi, routed subnets and blocked broadcasts require manual IP
 entry and reachable lobby/probe/game sockets. Full IPv6 discovery is not present.
 
@@ -128,3 +132,26 @@ physical PCs, host/guest launch and a complete match, multiple adapters,
 firewall behavior, host exit/disconnect, GOG and Steam, plus Proton/Wine process
 supervision and discovery. The same Win32 artifacts are intended for all four
 platform lanes; their native behavior is currently unverified.
+
+## October 29 review follow-up
+
+All 155 Release Win32 CTests pass at the reviewed source plus these fixes.
+The complete Release Win32 solution, INI validation and network baseline pass.
+The real frozen helper passes startup, discovery and graceful stop with services
+bound to the selected private adapter. Lifecycle tests reject all-interface
+helper bindings and verify that a simulated bind failure reaches the UI status.
+
+A windowed isolated GOG 2.2.301 test (SHA256
+8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413,
+PID 47096) reached main-menu readiness reporting with platform identity absent.
+The first incomplete staging attempt crashed at exe+0x22E6A before the menu;
+copying stock assets locally and disabling GPU skinning in the isolated test
+configuration allowed startup. Those two changes were not isolated against
+each other, so neither is established as the crash cause. UI capture returned
+the wrong surface, so no LAN-screen click, text entry, Continue/Back or match
+was accepted. The owned game exited through Stop-BZRGame; installed files were
+not replaced. Raw logs/dump stay local in C:/bzt/pr-feedback-game/logs.
+
+Physical two-PC gameplay, authentication-free LAN, firewall prompts,
+multi-adapter selection and Steam/Proton/Wine remain open. A no-auth stock
+client requires additional work beyond this helper and remains a target.

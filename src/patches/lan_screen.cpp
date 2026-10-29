@@ -132,7 +132,7 @@ namespace BZROpenShim
             void* body = Shell::AddPanel(panel, panel, "OpenShimLAN_Body", {230, 225, 980, 735}, nullptr);
             Shell::SetPanelRectColor(body, {230, 225, 980, 735}, 0xD8101820);
             Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {420, 132, 600, 56}, "LOCAL HOST TOOLS", Shell::kTitleLabelFlags);
-            Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {260, 230, 920, 40}, "Start or find a local lobby service. Platform sign-in required.");
+            Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {260, 230, 920, 40}, "Hosting opens LAN listeners; Windows may ask for firewall access.");
             const auto& skin = Shell::kSkinToMainMenu;
             Shell::AddButton(panel, panel, "OpenShimLAN_Host", {260, 285, 280, 60}, "Start local host", skin, 0.85f, 0, &Start);
             Shell::AddButton(panel, panel, "OpenShimLAN_Stop", {565, 285, 280, 60}, "Stop Host", skin, 0.85f, 0, &Stop);

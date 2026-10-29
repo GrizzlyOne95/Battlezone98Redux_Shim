@@ -26,6 +26,7 @@ namespace BZROpenShim::LanSession
             bool winsock = false;
             HANDLE process = nullptr, job = nullptr, input = nullptr, output = nullptr;
             std::string pendingOutput;
+            std::filesystem::path hostLog;
         };
         // Intentionally retained until process teardown. The kernel closes the
         // job then; its kill-on-close policy prevents an orphaned helper. A DLL
@@ -62,8 +63,22 @@ namespace BZROpenShim::LanSession
             if (!Winsock()) return {};
             SOCKET socket = ::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
             if (socket == INVALID_SOCKET) return {};
-            const auto list = Interfaces(socket);
+            // UDP connect chooses the routed local interface without sending a
+            // packet. Prefer it over WSL/Hyper-V enumeration order. A private
+            // fallback still permits isolated LANs with no default route.
+            sockaddr_in route{}; route.sin_family = AF_INET;
+            route.sin_addr.s_addr = htonl(0x08080808); route.sin_port = htons(9);
+            sockaddr_in local{}; int localSize = sizeof(local);
+            uint32_t preferred = 0;
+            if (connect(socket, reinterpret_cast<sockaddr*>(&route), sizeof(route)) == 0 &&
+                getsockname(socket, reinterpret_cast<sockaddr*>(&local), &localSize) == 0)
+                preferred = local.sin_addr.s_addr;
+            auto list = Interfaces(socket);
             closesocket(socket);
+            std::stable_sort(list.begin(), list.end(), [preferred](const auto& a, const auto& b) {
+                return a.iiAddress.AddressIn.sin_addr.s_addr == preferred &&
+                       b.iiAddress.AddressIn.sin_addr.s_addr != preferred;
+            });
             for (const auto& item : list)
             {
                 const auto ip = ntohl(item.iiAddress.AddressIn.sin_addr.s_addr);
@@ -121,6 +136,30 @@ namespace BZROpenShim::LanSession
             }
             s.lastQuery = GetTickCount64();
         }
+        std::string HostFailure()
+        {
+            // Read only this launch's bounded log tail after process exit.
+            HANDLE file = CreateFileW(Data().hostLog.c_str(), GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING, 0, nullptr);
+            if (file == INVALID_HANDLE_VALUE) return {};
+            LARGE_INTEGER size{};
+            std::string tail;
+            if (GetFileSizeEx(file, &size))
+            {
+                LARGE_INTEGER start{}; start.QuadPart = (std::max)(0LL, size.QuadPart - 4096);
+                if (SetFilePointerEx(file, start, nullptr, FILE_BEGIN))
+                {
+                    char bytes[4096]; DWORD count = 0;
+                    if (ReadFile(file, bytes, sizeof(bytes), &count, nullptr)) tail.assign(bytes, count);
+                }
+            }
+            CloseHandle(file);
+            while (!tail.empty() && (tail.back() == '\r' || tail.back() == '\n')) tail.pop_back();
+            const auto last = tail.find_last_of('\n');
+            if (last != std::string::npos) tail.erase(0, last + 1);
+            for (auto& ch : tail) if (static_cast<unsigned char>(ch) < 32 || static_cast<unsigned char>(ch) > 126) ch = ' ';
+            return tail.substr(0, 240);
+        }
         void PumpOutput()
         {
             auto& s = Data();
@@ -171,8 +210,9 @@ namespace BZROpenShim::LanSession
 
         SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
         HANDLE childInput = nullptr, childOutput = nullptr;
-        HANDLE childLog = CreateFileW((runtime / L"host.log").c_str(), FILE_APPEND_DATA,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        s.hostLog = runtime / L"host.log";
+        HANDLE childLog = CreateFileW(s.hostLog.c_str(), FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, &security, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (childLog == INVALID_HANDLE_VALUE)
         { s.snapshot.hostMessage = "Cannot open openshim/lan/host.log."; return false; }
         if (!CreatePipe(&childInput, &s.input, &security, 0) ||
@@ -207,8 +247,10 @@ namespace BZROpenShim::LanSession
             JobObjectExtendedLimitInformation, &limits, sizeof(limits));
         std::wstring command = Quote(executable.wstring()) +
             L" --lan-discovery --lan-managed --stdin-control --health-port 0 --access-mode open"
-            L" --ws-host 0.0.0.0 --ws-port 1337 --udp-host 0.0.0.0 --udp-port 1338"
-            L" --relay-host 0.0.0.0 --relay-port 1339 --relay-pair-ports"
+            L" --ws-host " + std::wstring(s.snapshot.hostAddress.begin(), s.snapshot.hostAddress.end()) +
+            L" --ws-port 1337 --udp-host " + std::wstring(s.snapshot.hostAddress.begin(), s.snapshot.hostAddress.end()) +
+            L" --udp-port 1338 --relay-host " + std::wstring(s.snapshot.hostAddress.begin(), s.snapshot.hostAddress.end()) +
+            L" --relay-port 1339 --relay-pair-ports"
             L" --relay-pair-port-start 1340 --relay-pair-port-end 1369 --state-file " +
             Quote((runtime / L"state.json").wstring()) + L" --audit-log " +
             Quote((runtime / L"audit.log").wstring());
@@ -296,10 +338,12 @@ namespace BZROpenShim::LanSession
             if (WaitForSingleObject(s.process, 0) == WAIT_OBJECT_0)
             {
                 const bool stopped = s.snapshot.state == HostState::Stopping;
+                const auto detail = stopped ? std::string{} : HostFailure();
                 ReleaseHost();
                 s.snapshot.state = stopped ? HostState::Stopped : HostState::Failed;
                 s.snapshot.hostMessage = stopped ? "LAN host stopped." :
-                    "LAN helper exited. Check ports 1337-1369 and UDP 21337.";
+                    detail.empty() ? "LAN helper exited. See openshim/lan/host.log (ports 1337-1369, UDP 21337)." :
+                    "LAN helper exited: " + detail;
             }
             else if (s.snapshot.state == HostState::Starting && GetTickCount64() - s.hostSince > 30000)
             {

@@ -225,3 +225,5 @@ These are unresolved reports or specific evidence gaps, not delivery commitments
 [*] Speculative feature wish lists, obsolete release chronology, duplicate milestones and disproven root-cause proposals have been removed from this progress sheet. Historical details remain in the validation record and Git history.
 [*] Update an entry when its implementation, runtime evidence or delivery status changes. Keep source availability, live qualification and publication distinct.
 [/list]
+
+[quote]LAN development review (2026-10-29): duplicate Direct LAN mesh PR #644 was closed; its branch is retained for research. Local host tools still require stock platform sign-in. Review fixes bind services to the selected private adapter, prefer the routed adapter and expose startup errors. All 155 Win32 CTests and the real-helper lifecycle check pass; isolated GOG startup reached readiness reporting, but native LAN UI and two-PC gameplay acceptance remain open. Nothing was released.[/quote]
