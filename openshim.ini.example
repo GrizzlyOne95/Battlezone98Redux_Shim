@@ -1827,6 +1827,9 @@ TraceDamageReveal = 0
 TracePlayerKills = 0
 
 [Network]
+; In-process LAN host and local identities; no Steam/Galaxy sign-in or helper.
+; Requires an explicit LAN selection and numeric private IPv4. Development opt-in.
+NoAuthLan = 0
 
 ; OpenShim's socket layer as a whole. Off installs none of it: no winsock
 ; hooks, no bandwidth governor, no auto-kick relaxation, no packet

@@ -17,7 +17,7 @@ namespace BZROpenShim::LanSession
 
     // UI-thread only. No socket/process work at DLL load, no worker thread,
     // no shell/PATH execution. The optional helper lives at tools/lan/BZRServer.exe.
-    bool StartHost(const std::wstring& gameRoot);
+    bool StartHost(const std::wstring& gameRoot, bool inProcess = false);
     void StopHost();
     bool StartScan();
     void StopScan();

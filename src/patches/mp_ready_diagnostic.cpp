@@ -3,6 +3,7 @@
 // reverse_engineering/mp_not_ready_readiness_chain.md for the derivation.
 
 #include "mp_ready_diagnostic.h"
+#include "lan_no_auth.h"
 
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
@@ -89,7 +90,7 @@ namespace BZROpenShim
             };
             if (!HookEngine::BindEngineRows("MP ready diagnostic", rows))
                 return false;
-            g_PlatformModeAddr = OperandAt(platformReady, 5);
+            g_PlatformModeAddr = OperandAt(static_cast<uint32_t>(LanNoAuth::PlatformReadyCode(platformReady)), 5);
             g_SteamInitFlagAddr = OperandAt(steamOk, 6);
             g_GalaxyObjAddr = OperandAt(galaxyOk, 5);
             g_BzrNetClientHolderAddr = OperandAt(authOk, 5);
@@ -275,6 +276,7 @@ namespace BZROpenShim
             default: r.platformOk = false; break;
             }
 
+            if (LanNoAuth::Requested()) r.platformOk = LanNoAuth::Ready();
             r.code = (r.platformOk && r.lobbyPresent) ? 3u : 0u;
             return true;
         }
@@ -327,6 +329,11 @@ namespace BZROpenShim
                 first = false;
             };
 
+            if (LanNoAuth::Requested())
+            {
+                add(LanNoAuth::Available() ? L"lan-admission" : L"lan-unavailable");
+                return;
+            }
             switch (r.mode)
             {
             case 1:
@@ -409,6 +416,7 @@ namespace BZROpenShim
         // one call site to intercept.
         int __fastcall ExplainedGetReadyState(void*)
         {
+            LanNoAuth::PumpMainThread();
             Readiness r = {};
             if (!Evaluate(r))
                 return 0;   // cannot vouch for a reason; behave like stock
@@ -434,6 +442,8 @@ namespace BZROpenShim
             if (!Evaluate(r))
                 return "Multiplayer unavailable";
 
+            if (LanNoAuth::Requested())
+                return LanNoAuth::Available() ? "Connecting to LAN host" : "LAN mode unavailable (check private address/build)";
             // Platform identity first: it gates everything after it, and which
             // platform to name depends on which ones this mode actually asks
             // for. Naming the wrong client sends the player to an app they do

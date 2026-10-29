@@ -47,7 +47,7 @@ These are known problems we are still tracking down. Detailed reports and log fi
 
 [h2]Experiments[/h2]
 
-Local host tools are in development on a separate branch, keeping Official, Custom and Local choices. They still require a local lobby service and Steam/Galaxy sign-in. A separate direct LAN mode without those dependencies is under investigation; neither is included in the release.
+Local host tools are in development on separate branches, keeping Official, Custom and Local choices. The older helper preview still needs Steam/Galaxy sign-in. A newer opt-in LAN prototype hosts the session inside the game with local identities and no helper or sign-in. Native GOG lobby entry/game creation and automated protocol checks pass; guest join, completed launch and two-PC matches still need qualification. Neither is included in the release.
 
 Not part of the release, and may never be: DLSS frame generation and ray-traced shadows, terrain tessellation, and fog that swirls around passing hovercraft.
 

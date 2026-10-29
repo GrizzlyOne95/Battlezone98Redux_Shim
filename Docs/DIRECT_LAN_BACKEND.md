@@ -93,7 +93,12 @@ explicit message; host migration must be separately implemented and proven.
 Password support and version/mod compatibility must be explicit session
 features rather than assumptions inherited from the online lobby service.
 
-## Status
+## Status (October 29 follow-up)
+
+The game-process-only prototype is now implemented on `agent/no-auth-lan`,
+stacked on #642. See [NO_AUTH_LAN.md](NO_AUTH_LAN.md) for its opt-in flow,
+native evidence and remaining acceptance. It embeds session coordination inside
+the host game and reuses qualified Redux lobby/UDP transport boundaries.
 
 | Component | State |
 |---|---|
@@ -101,8 +106,10 @@ features rather than assumptions inherited from the online lobby service.
 | Local helper host/discovery | Existing experimental prototype; still needs platform sign-in |
 | Released-image backend inventory | Implemented research tool; 36 vtable pointers and 13 boundaries inspected |
 | Complete native ABI / ownership qualification | Partial |
-| Client-owned direct LAN session implementation | Missing |
-| No-account native host/join/gameplay | UNKNOWN; not implemented or tested |
+| Client-owned direct LAN session implementation | Implemented prototype: bounded in-process host and local B identities |
+| No-account native admission/readiness | Observed in isolated GOG; no platform callback/ticket needed |
+| Native host/lobby/game creation | Observed in isolated GOG with actual settings/slot metadata |
+| Native guest join/launch and complete two-PC gameplay | Unqualified; acceptance remains open |
 
 Run `reverse_engineering/inspect_direct_lan_backend.py --exe <baseline-exe>
 --corpus <private-corpus>` to reproduce the bounded static inventory. It rejects

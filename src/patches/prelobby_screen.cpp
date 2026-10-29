@@ -24,6 +24,7 @@
 #include "hook_engine.h"
 #include "matchmaking_server.h"
 #include "lan_session.h"
+#include "lan_no_auth.h"
 #include "net_optimizer.h"
 #include "patcher.h"
 #include "shell_screens.h"
@@ -220,7 +221,7 @@ namespace BZROpenShim
             }
             PreLobbySetServerEntryVisible(custom);
             Shell::SetLabelText(g_ServerNoteLabel,
-                                g_Choice == ServerChoice::Lan ? "LAN host selected; Local host tools changes the address."
+                                g_Choice == ServerChoice::Lan ? (LanNoAuth::Enabled() ? "LAN host selected; no platform sign-in." : "LAN host selected; Local host tools changes the address.")
                                   : custom ? kCustomServerNote
                                 : g_Choice == ServerChoice::Local ? kLocalServerNote : "");
         }
@@ -475,6 +476,7 @@ namespace BZROpenShim
 
         void TickPreLobby(void* screen)
         {
+            LanNoAuth::PumpMainThread();
             LanSession::Tick();
             if (g_InContinue)
                 return;
@@ -652,7 +654,7 @@ namespace BZROpenShim
                             "Press Continue to apply a new name or server.");
             if (g_ServerSelector)
                 Shell::AddButton(panel, panel, "OpenShimPreLobby_LocalTools",
-                                 { 950.0f, 832.0f, 246.0f, 52.0f }, "Local host tools",
+                                 { 950.0f, 832.0f, 246.0f, 52.0f }, LanNoAuth::Enabled() ? "LAN (no sign-in)" : "Local host tools",
                                  Shell::kSkinToMainMenu, 0.72f, 0.0f, &OnLocalToolsClicked);
             RefreshStatus(true);
 

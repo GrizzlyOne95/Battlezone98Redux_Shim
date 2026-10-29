@@ -167,6 +167,9 @@
     <ClCompile Include="src\patches\career_screen.cpp" />
     <ClCompile Include="src\patches\prelobby_screen.cpp" />
     <ClCompile Include="src\patches\lan_session.cpp" />
+    <ClCompile Include="src\patches\lan_no_auth.cpp" />
+    <ClCompile Include="src\network\embedded_lan_host.cpp" />
+    <ClCompile Include="src\network\embedded_lan_model.cpp" />
     <ClCompile Include="src\patches\lan_screen.cpp" />
     <ClCompile Include="src\patches\chunk_engine_hooks.cpp" />
     <ClCompile Include="src\patches\dynamic_geometry_hooks.cpp" />
