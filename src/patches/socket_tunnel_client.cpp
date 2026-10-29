@@ -41,6 +41,13 @@ namespace
         if (config.steam) return SteamCommunityEndpoint(config.steamHost);
         return "udp." + config.remote + "." + std::to_string(config.port) + ".openshim.invalid:1337";
     }
+    bool WaitReady(unsigned timeoutMs)
+    {
+        const auto deadline = GetTickCount64() + timeoutMs;
+        while (requested.load() && ready.load() == 0 && !stop.load() && GetTickCount64() < deadline)
+            Sleep(5);
+        return Ready(); // ports bound only; not remote bridge qualification
+    }
     void Stop()
     {
         AcquireSRWLockExclusive(&shutdownLock);

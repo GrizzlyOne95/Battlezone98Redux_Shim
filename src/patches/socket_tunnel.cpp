@@ -581,6 +581,8 @@ namespace
         int result = 0;
         try
         {
+            if (cfg.bridge && !cfg.steam && !IsLoopback(cfg.listen) && logger)
+                logger("WARNING: plain-UDP bridge is listening beyond loopback WITHOUT authentication or encryption; trusted private test networks only; never port-forward it");
             Runtime runtime(cfg, logger); runtime.Start(GetTickCount64(), stop); ready = 1;
             while (!stop.load()) { runtime.Tick(GetTickCount64()); runtime.Wait(); }
         }

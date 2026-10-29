@@ -260,3 +260,28 @@ record both logs and stop the test on such a failure. The earlier init failure
 and the later reported local success are separate runs; neither proves
 coexistence, remote SDR or gameplay. Steam identity also remains unbound to
 the claimed BZRNet lobby user ID; lobby names are not authenticated identities.
+`Ready()` confirms only that the worker bound its local ports. The resolver
+waits up to one second for that startup; it does not probe bridge reachability.
+The separate relay-flag check verifies the game's forced-relay setting, not a
+remote service. If the bridge is down, accepted local TCP connections close
+until the handshake completes; the stock client must reconnect.
+
+Winsock hooks patch the import tables of battlezone98redux.exe, Galaxy.dll,
+GalaxyPeer.dll and steam_api.dll. They do not patch ws2_32's exports or
+openshim.dll's import/delay-import table. The in-process tunnel calls Winsock
+from openshim.dll, so its worker sockets bypass the optimizer's reorder,
+duplication and socket-tuning hooks. The standalone tool is a separate process.
+Installing observation hooks with the optimizer disabled does not change this
+module boundary. Native lobby/gameplay qualification is still required.
+
+M1 stop-and-wait sends at most one 1-KiB reliable frame per round trip, about
+20 KiB/s at 50 ms RTT before overhead, and a frame unacknowledged for ten seconds
+kills the peer. The measured 5 MB/s is loopback-only. M1 is a trusted local test
+milestone; it is not accepted for remote play. M2 replaces this ACK/retry path
+with Steam's reliable messages and congestion handling.
+
+The local Python server conflicts with the agent if both bind 127.0.0.1:1337
+or UDP 1338-1369; 0.0.0.0 also conflicts. Bind the server to 127.0.0.2 for
+same-PC tests. Use the sibling Battlezone98Redux_DedicatedServer/server.py,
+which implements --relay-pair-ports and --state-file; the older emulator in
+reverse_engineering/bzrnet_server/server.py does not implement those flags.

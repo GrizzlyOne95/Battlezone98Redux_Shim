@@ -20,7 +20,13 @@ int main(int argc, char** argv)
     if (mode == "disabled")
     {
         Configure("", "");
-        if (Requested() || Ready()) return 1;
+        if (Requested() || WaitReady(1)) return 1;
+    }
+    else if (mode == "startup")
+    {
+        Configure("", "127.0.0.1:27030");
+        // Resolve immediately after Configure: worker may not have bound yet.
+        if (!Requested() || !WaitReady(1000)) { Stop(); return 1; }
     }
     else
     {
@@ -39,7 +45,7 @@ int main(int argc, char** argv)
         }
         else if (mode == "invalid") Configure("", "not-an-ip:27030");
         else return 2;
-        if (!Requested() || Ready()) return 1;
+        if (!Requested() || WaitReady(1000)) return 1;
     }
     Stop(); Stop(); // explicit shutdown is idempotent, including failure paths
     std::puts("tunnel configuration guard passed");
