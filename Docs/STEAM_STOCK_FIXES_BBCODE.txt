@@ -12,7 +12,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed a dead constructor's queued build outliving it. Stock never cleared a dead constructor's remote build order. [i](SP)[/i]
 [*] Fixed a constructor getting stuck forever when another constructor finishes recycling the same target first. Stock leaves the losing constructor holding a stale recycle target, so it takes orders but can no longer move or build. [i](SP)[/i]
 [*] Fixed uneven motion at high frame rates caused by the engine rounding each frame step to whole milliseconds. [i](SP)[/i]
-[*] Fixed the satellite view showing enemies you haven't seen. Redux had dropped Battlezone 1.5's fog check. [i](SP)[/i]
+[*] Fixed the satellite view showing enemies you haven't seen. Redux had dropped Battlezone 1.5's fog check.
 [*] Restored the 1.5 crouch when landing with the sniper rifle selected and jump held. Redux checks the held-jump flag before the sniper-selected flag, so holding jump skipped the crouch. [i](SP)[/i]
 [*] Fixed your own Arc Mine firing at you on the frame you board a craft. Stock briefly puts your pilot on team 0 as you board, which counts as hostile to everyone, so your own mines target it. [i](SP)[/i]
 [*] Fixed units that two producers can build only being buildable from the first one the engine found. Stock keeps only the first producer found for each buildable unit. [i](SP)[/i]

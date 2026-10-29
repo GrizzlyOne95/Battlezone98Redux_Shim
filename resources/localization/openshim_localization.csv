@@ -81,7 +81,7 @@ openshim_opt:ReticleOutline:desc~Dark outline for custom reticles and feedback, 
 openshim_opt:ReticleOpacity:label~Reticle Opacity~~~~~~
 openshim_opt:ReticleOpacity:desc~Opacity of custom reticles and feedback. Stock artwork is unchanged.~~~~~~
 openshim_opt:ReactiveReticle:label~Reactive Reticle~~~~~~
-openshim_opt:ReactiveReticle:desc~Over a target, contract a custom cross, add brackets and tint red for enemies or green for allies. Visual only; disguised units stay untinted. Single player only.~~~~~~
+openshim_opt:ReactiveReticle:desc~Over a target, contract a custom cross, add brackets and tint red for enemies or green for allies. Visual only; disguised units stay untinted.~~~~~~
 openshim_opt:HitMarkers:label~Hit Markers~~~~~~
 openshim_opt:HitMarkers:desc~Ticks pop out when your weapon actually reduces health; hitting several targets at once enlarges them. No marker for blocked/zero damage, collisions, self hits or AI shots. Single player only.~~~~~~
 openshim_opt:HitMarkerDuration:label~Marker Duration~~~~~~
@@ -247,19 +247,19 @@ openshim_opt:AllowNeutralAttackOrders:desc~Allow explicit player attack orders a
 openshim_opt:Turbo:label~Global Turbo~~~~~~
 openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~~~~~~
 openshim_opt:SatelliteVisibilityFix:label~Satellite Fog Of War~~~~~~
-openshim_opt:SatelliteVisibilityFix:desc~Restore the BZ 1.5 satellite gate so unilluminated enemies stay hidden. Single player only.~~~~~~
+openshim_opt:SatelliteVisibilityFix:desc~Restore the BZ 1.5 satellite gate so unilluminated enemies stay hidden.~~~~~~
 openshim_opt:Headlights:label~Player Headlight~~~~~~
-openshim_opt:Headlights:desc~Headlight on your vehicle. Single player only.~~~~~~
+openshim_opt:Headlights:desc~Headlight on your vehicle.~~~~~~
 openshim_opt:HeadlightBrightness:label~Headlight Brightness~~~~~~
-openshim_opt:HeadlightBrightness:desc~Player-vehicle headlight intensity relative to stock. Applies live; single player only.~~~~~~
+openshim_opt:HeadlightBrightness:desc~Player-vehicle headlight intensity relative to stock. Applies live.~~~~~~
 openshim_opt:OtherHeadlights:label~AI Headlights~~~~~~
-openshim_opt:OtherHeadlights:desc~AI vehicles run headlights too. Single player only.~~~~~~
+openshim_opt:OtherHeadlights:desc~AI vehicles run headlights too.~~~~~~
 openshim_opt:HeadlightColor:label~Headlight Color~~~~~~
 openshim_opt:HeadlightColor:desc~Headlight beam color; Rainbow cycles through colors.~~~~~~
 openshim_opt:HeadlightBeam:label~Headlight Beam~~~~~~
 openshim_opt:HeadlightBeam:desc~Headlight beam shape: Stock, Focused (narrow), or Wide.~~~~~~
 openshim_opt:PilotFlashlight:label~Pilot Flashlight~~~~~~
-openshim_opt:PilotFlashlight:desc~Flashlight on your pilot while on foot. Single player only.~~~~~~
+openshim_opt:PilotFlashlight:desc~Flashlight on your pilot while on foot.~~~~~~
 openshim_opt:PilotFlashlightColor:label~Pilot Light Color~~~~~~
 openshim_opt:PilotFlashlightColor:desc~Pilot flashlight color; Rainbow cycles through colors.~~~~~~
 openshim_opt:PilotFlashlightBeam:label~Pilot Light Beam~~~~~~
