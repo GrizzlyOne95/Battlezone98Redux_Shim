@@ -9,6 +9,19 @@
   },
   "patches": [
     {
+      "name": "Campaign Manifest ID",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "8D 95 98 E9 FF FF 52 8D 8D 98 E6 FF FF E8 ?? ?? ?? ?? 8D 85 B0 E9 FF FF 50 8D 8D B0 E6 FF FF",
+      "offset": 14,
+      "expected_size": 4,
+      "fallback": "0x0076D194",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 custom campaign parser (missionBZN string xref). The guarded assignment copies the directory identity into campaign metadata +0x34 before using that string as the mission registry key. EBP-0x410 contains the terminated current INI path. Full surrounding frame operands are pinned; absent campaignID calls the original assignment. Other distributions remain unqualified."
+    },
+    {
       "name": "Map Description Bounds Guard",
       "pattern": "81 BD 54 F6 FF FF 60 09 00 00 76 0A C7 85 54 F6 FF FF 60 09 00 00 8D 55 C0 52 E8 ?? ?? ?? ?? 83 C4 04 89 85 44 F6 FF FF",
       "offset": 0,
@@ -504,6 +517,16 @@
     }
   ],
   "resolves": [
+    {
+      "name": "Campaign Manifest ID String Assignment",
+      "pattern": "8D 95 98 E9 FF FF 52 8D 8D 98 E6 FF FF E8 ?? ?? ?? ?? 8D 85 B0 E9 FF FF 50 8D 8D B0 E6 FF FF",
+      "offset": 13,
+      "mode": "rel32_target",
+      "fallback": "0x0041F710",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Original std::string copy assignment reached by the campaign identity CALL. Independent identity: campaign-only branch copies the path-derived identity into metadata +0x34 and then passes that field to mission insertion; this resolve preserves the original ABI and engine CRT ownership."
+    },
     {
       "name": "MouseReadChannels::TimeStepCall",
       "pattern": "E8 ?? ?? ?? ?? D9 5D F4 F3 0F 10 45 F4 F3 0F 58 05 ?? ?? ?? ?? F3 0F 11 05 ?? ?? ?? ?? F3 0F 10 05 ?? ?? ?? ?? 0F 2F 05 ?? ?? ?? ?? 76 07 33 C0 E9 ?? ?? ?? ?? A1 ?? ?? ?? ?? 8B 48 38",

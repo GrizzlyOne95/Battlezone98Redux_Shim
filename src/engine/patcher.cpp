@@ -2,6 +2,7 @@
 // BZR Open Shim - runtime patcher implementation
 #include "patcher.h"
 #include "planet_video.h"
+#include "campaign_manifest_id.h"
 #include "hook_engine.h"
 #include "patch_config_parse.h"
 #include "patches.h"
@@ -1136,7 +1137,11 @@ namespace BZROpenShim
         for (auto& p : patches) {
             if (p.type != HookEngine::PatchType::REL32 || !p.verified) continue;
             uint32_t target = 0;
-            if (p.name == "Custom Planet Video Playback") {
+            if (p.name == "Campaign Manifest ID") {
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                    CampaignManifestId::PrepareThunk(p.address - 1)));
+            }
+            else if (p.name == "Custom Planet Video Playback") {
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
                     PrepareCustomPlanetVideoHook(p.address - 1)));
             }

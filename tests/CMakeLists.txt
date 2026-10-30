@@ -6,6 +6,11 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 # suite can be configured, built, and run with plain CMake + CTest:
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
+add_executable(campaign_manifest_id_tests campaign_manifest_id_tests.cpp)
+target_include_directories(campaign_manifest_id_tests PRIVATE ../include)
+target_compile_features(campaign_manifest_id_tests PRIVATE cxx_std_17)
+add_test(NAME campaign_manifest_id_tests COMMAND campaign_manifest_id_tests)
+
 if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_executable(map_description_bounds_tests map_description_bounds_tests.cpp)
     target_include_directories(map_description_bounds_tests PRIVATE ../include ../third_party)

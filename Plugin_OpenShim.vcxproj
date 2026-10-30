@@ -259,6 +259,7 @@
     <ClCompile Include="src\patches\gpu_instancing.cpp" />
     <ClCompile Include="src\patches\gpu_skinning.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
+    <ClCompile Include="src\patches\campaign_manifest_id.cpp" />
     <ClCompile Include="src\patches\lua_formation_fix.cpp" />
     <ClCompile Include="src\patches\lua_getindependence_guard.cpp" />
     <ClCompile Include="src\patches\lua_send_length.cpp" />

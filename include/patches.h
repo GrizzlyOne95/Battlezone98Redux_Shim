@@ -109,6 +109,7 @@ namespace BZROpenShim
             // Custom planets only; a .pvi sidecar opts into time-based loop
             // points and screen-owned intro audio. Stock planet calls stay stock.
             { 0, HookEngine::PatchType::REL32, {}, "Custom Planet Video Playback", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Campaign Manifest ID", false, {} },
             // The map-description loader has a 2400-byte stack array and
             // appends a NUL after copying. Clamp to 2399, not 2400: the stock
             // limit triggers its range-check failure for any larger .des.
