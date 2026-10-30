@@ -41,7 +41,8 @@ content authors opt in per manifest.
 
 Qualification: Release Win32 build and 155 CTests pass. Windows/GOG Redux
 2.2.301 native registry inspection confirms two ten-entry BZ64 lists from one
-addon, and the Pilot campaign menu launches `bz64port/n64bd01p.bzn` correctly.
+addon. Native menu launches select `bz64port/n64bd01p.bzn` for Pilot and
+`bz64port/n64bd01.bzn` for Commander, including a same-process mode change.
 Native Pilot startup confirms Follow orders targeting the player on both tanks
 and the bomber, with all three moving. The hook is currently restricted to GOG;
 Windows/Steam, Proton and Wine
