@@ -358,6 +358,15 @@ namespace BZROpenShim
             {
                 g_HopOutAttackAlertFixEnabled = kHopOutAttackAlertFixEnabledDefault;
             }
+            ResetHopOutAttackAlertTracking();
+        }
+
+        // Called when a mission leaves simulation. The last user object belongs
+        // to the old world; comparing the next mission's player against it
+        // would read a freed object's enemyShot from the old mission's clock
+        // and raise the new mission's alert floor with it.
+        void ResetHopOutAttackAlertTracking()
+        {
             g_HopOutAlertLastUserObject = nullptr;
             g_HopOutAlertPrimed = false;
         }
