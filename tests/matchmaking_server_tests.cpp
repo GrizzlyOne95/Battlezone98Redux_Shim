@@ -28,6 +28,10 @@ namespace
         CHECK(MS::ParseMode("  rebellion ", mode) && mode == MS::Mode::Rebellion);
         CHECK(MS::ParseMode("CUSTOM", mode) && mode == MS::Mode::Custom);
         CHECK(MS::ParseMode(" local", mode) && mode == MS::Mode::Local);
+        CHECK(MS::ParseMode(" LAN ", mode) && mode == MS::Mode::Lan);
+        CHECK(std::string(MS::ModeName(mode)) == "LAN");
+        CHECK(MS::ResolveSavedHost(mode, "192.168.1.7:1437") == "192.168.1.7:1437");
+        CHECK(MS::ResolveSavedHost(mode, "ws://bad") == "");
         CHECK(!MS::ParseMode("official", mode) && mode == MS::Mode::None);
     }
 

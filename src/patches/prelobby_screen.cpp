@@ -23,6 +23,7 @@
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
 #include "matchmaking_server.h"
+#include "lan_session.h"
 #include "net_optimizer.h"
 #include "patcher.h"
 #include "shell_screens.h"
@@ -35,6 +36,7 @@
 
 namespace BZROpenShim
 {
+    bool RegisterLanScreen();
     namespace Hooks
     {
         bool RedirectCallTarget(uintptr_t callAddress,
@@ -88,7 +90,7 @@ namespace BZROpenShim
         constexpr float kServerWellW = kConnectionBox.x + kConnectionBox.w - kBoxPadX - kServerWellX;
         constexpr float kServerNoteY = kServerRowY + kServerRowH + 8.0f;
 
-        constexpr Shell::Rect kHintRect = { 244.0f, 828.0f, 952.0f, 46.0f };
+        constexpr Shell::Rect kHintRect = { 244.0f, 828.0f, 680.0f, 46.0f };
 
         // The stock top-corner Back button, as Career builds it.
         constexpr Shell::Rect kBackRect = { 0.0f, 0.0f, 342.0f, 77.0f };
@@ -122,7 +124,7 @@ namespace BZROpenShim
 
         // The Server selector. g_ServerSelector is false while a test redirect
         // owns the endpoint: the row is then a read-only label.
-        enum class ServerChoice { Rebellion, Custom, Local };
+        enum class ServerChoice { Rebellion, Custom, Local, Lan };
         bool g_ServerSelector = false;
         ServerChoice g_Choice = ServerChoice::Rebellion;
         void* g_RebellionButton = nullptr;
@@ -171,7 +173,14 @@ namespace BZROpenShim
             const std::string current = CurrentServerHost();
             std::string saved;
             TryGetUserConfigString("Network", "CustomServer", saved);
-            if (current.empty() || MS::EqualsNoCase(current, MS::kRebellionHost) || IsLocalHost(current))
+            std::string mode;
+            TryGetUserConfigString("Network", "Server", mode);
+            if (MS::EqualsNoCase(mode, "LAN") && MS::EqualsNoCase(current, TrimAsciiCopy(saved)))
+            {
+                choice = ServerChoice::Lan;
+                customText = current;
+            }
+            else if (current.empty() || MS::EqualsNoCase(current, MS::kRebellionHost) || IsLocalHost(current))
             {
                 choice = IsLocalHost(current) ? ServerChoice::Local : ServerChoice::Rebellion;
                 customText = TrimAsciiCopy(saved);
@@ -199,19 +208,20 @@ namespace BZROpenShim
         {
             if (!g_ServerSelector)
                 return;
-            const bool custom = g_Choice == ServerChoice::Custom;
+            const bool custom = g_Choice == ServerChoice::Custom || g_Choice == ServerChoice::Lan;
             if (g_BzrFn_SetButtonLabel)
             {
                 if (g_RebellionButton)
                     g_BzrFn_SetButtonLabel(g_RebellionButton, ServerCaption(ServerChoice::Rebellion));
                 if (g_CustomButton)
-                    g_BzrFn_SetButtonLabel(g_CustomButton, ServerCaption(ServerChoice::Custom));
+                    g_BzrFn_SetButtonLabel(g_CustomButton, g_Choice == ServerChoice::Lan ? "> LAN <" : ServerCaption(ServerChoice::Custom));
                 if (g_LocalButton)
                     g_BzrFn_SetButtonLabel(g_LocalButton, ServerCaption(ServerChoice::Local));
             }
             PreLobbySetServerEntryVisible(custom);
             Shell::SetLabelText(g_ServerNoteLabel,
-                                custom ? kCustomServerNote
+                                g_Choice == ServerChoice::Lan ? "LAN host selected; Local host tools changes the address."
+                                  : custom ? kCustomServerNote
                                 : g_Choice == ServerChoice::Local ? kLocalServerNote : "");
         }
 
@@ -231,6 +241,13 @@ namespace BZROpenShim
         {
             g_Choice = ServerChoice::Local;
             RefreshServerSelector();
+        }
+
+        void __cdecl OnLocalToolsClicked()
+        {
+            PreLobbyEndNicknameEdit();
+            PreLobbyEndServerEdit();
+            Shell::RequestScreen(Shell::LiveScreen(Shell::kPreLobbyScreenId), Shell::kLanScreenId);
         }
 
         // Resolves the selector to the host that should be in effect. False,
@@ -278,13 +295,15 @@ namespace BZROpenShim
             std::string desired;
             if (!ResolveDesiredServerHost(desired))
                 return false;
-            if (MS::EqualsNoCase(desired, CurrentServerHost()))
-                return true;
-
-            const bool custom = g_Choice == ServerChoice::Custom;
-            const MS::Mode mode = custom ? MS::Mode::Custom
+            const bool custom = g_Choice == ServerChoice::Custom || g_Choice == ServerChoice::Lan;
+            const MS::Mode mode = g_Choice == ServerChoice::Lan ? MS::Mode::Lan
+                                : custom ? MS::Mode::Custom
                                 : g_Choice == ServerChoice::Local ? MS::Mode::Local
                                 : MS::Mode::Rebellion;
+            std::string savedMode;
+            TryGetUserConfigString("Network", "Server", savedMode);
+            if (MS::EqualsNoCase(desired, CurrentServerHost()) && MS::EqualsNoCase(savedMode, MS::ModeName(mode)))
+                return true;
             if (!WriteShimUserConfigValue("Network", "Server", MS::ModeName(mode)) ||
                 (custom && !WriteShimUserConfigValue("Network", "CustomServer", desired.c_str())))
             {
@@ -292,7 +311,7 @@ namespace BZROpenShim
                 Log(L"[PRELOBBY] server selection could not be persisted\n");
                 return false;
             }
-            SetMatchmakingServerOverride(desired.c_str());
+            SetMatchmakingServerOverride(desired.c_str(), mode != MS::Mode::Lan);
             Log(L"[PRELOBBY] server selection applied: %hs (%hs)\n", desired.c_str(),
                 MS::ModeName(mode));
             changed = true;
@@ -456,6 +475,7 @@ namespace BZROpenShim
 
         void TickPreLobby(void* screen)
         {
+            LanSession::Tick();
             if (g_InContinue)
                 return;
 
@@ -629,7 +649,11 @@ namespace BZROpenShim
                     { kServerCaptionX, kServerNoteY, rowW, 34.0f }, "");
             }
             Shell::AddLabel(panel, panel, "OpenShimPreLobby_Hint", kHintRect,
-                            "A new name or server is applied when you press Continue.");
+                            "Press Continue to apply a new name or server.");
+            if (g_ServerSelector)
+                Shell::AddButton(panel, panel, "OpenShimPreLobby_LocalTools",
+                                 { 950.0f, 832.0f, 246.0f, 52.0f }, "Local host tools",
+                                 Shell::kSkinToMainMenu, 0.72f, 0.0f, &OnLocalToolsClicked);
             RefreshStatus(true);
 
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimPreLobby_Back", kBackRect,
@@ -806,6 +830,7 @@ namespace BZROpenShim
         Shell::ScreenDef def = { Shell::kPreLobbyScreenId, "MultiplayerPreLobby", &BuildPreLobbyScreen,
                                  &ClosedPreLobby, &TickPreLobby, &OnCharPreLobby };
         g_Registered = Shell::RegisterScreen(def);
+        RegisterLanScreen();
         if (g_Registered)
             InstallEntryHooks();
         else
