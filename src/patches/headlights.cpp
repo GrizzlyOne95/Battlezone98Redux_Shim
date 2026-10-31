@@ -27,11 +27,12 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
-        // --- Stock headlights (SinglePlayer tier) -----------------------------
+        // --- Stock headlights (Display tier, [SinglePlayer] ini section) -------
         // EXU exposed these Ogre Light calls first. OpenShim applies the same
         // controls directly to the stock GameObject list so campaign scripts are
-        // not required. The feature stands down in multiplayer only; it stays
-        // active with EXU because Campaign Reimagined defers these settings here.
+        // not required. It runs in multiplayer too (local lights only), and
+        // stays active with EXU because Campaign Reimagined defers these
+        // settings here.
         enum class HeadlightColourMode
         {
             Stock,
@@ -1016,16 +1017,15 @@ namespace BZROpenShim
         {
             // EXU only exposes Lua headlight APIs and CR defers its persisted
             // headlight settings to OpenShim, so EXU presence is not a reason
-            // to stand down.
-            const bool wantActive =
-                IsHeadlightFeatureConfigured() &&
-                ReadLocalPlayerNetIdValue() == 0;
+            // to stand down. Multiplayer is not one either: every write goes
+            // to a local Ogre light, which peers never see or simulate.
+            const bool wantActive = IsHeadlightFeatureConfigured();
             if (!wantActive)
             {
                 if (g_HeadlightRuntimeActive || !g_HeadlightOriginalStates.empty())
                 {
                     RestoreAllHeadlightStates(true);
-                    Log(L"[HEADLIGHT] Stood down (multiplayer/disabled)\n");
+                    Log(L"[HEADLIGHT] Stood down (disabled)\n");
                 }
                 g_HeadlightRuntimeActive = false;
                 g_HeadlightLastRefreshTick = 0;
@@ -1036,7 +1036,7 @@ namespace BZROpenShim
             {
                 g_HeadlightRuntimeActive = true;
                 g_HeadlightLastRefreshTick = 0;
-                Log(L"[HEADLIGHT] Stock headlight policy active (SP-only)\n");
+                Log(L"[HEADLIGHT] Stock headlight policy active\n");
             }
 
             const DWORD now = GetTickCount();
@@ -1287,7 +1287,7 @@ namespace BZROpenShim
             const char* beamName =
                 g_HeadlightBeamMode == HeadlightBeamMode::Focused ? "focused" :
                 (g_HeadlightBeamMode == HeadlightBeamMode::Wide ? "wide" : "stock");
-            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs brightness=%.2f (SP-only)\n",
+            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs brightness=%.2f\n",
                 IsHeadlightFeatureConfigured() ? "yes" : "no",
                 g_HeadlightPlayerVisibleConfigured ? (g_HeadlightPlayerVisible ? "on" : "off") : "stock",
                 g_HeadlightOtherVisibleConfigured ? (g_HeadlightOtherVisible ? "on" : "off") : "stock",

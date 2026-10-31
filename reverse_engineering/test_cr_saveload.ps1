@@ -23,12 +23,12 @@ regressed into calling GetIndependence while a save was loading.
 
 A command-line .bzn has no campaign id, so the engine infers one from the mission
 name: stock campaigns first, then mod campaigns. With CR at mapType = "campaign"
-that infers the stock "usa" campaign for every CR mission whose name is in the
-stock table, and nothing mounts CR. For those missions the run temporarily sets
-mapType = "mod" in the game's copy, which loads CR's files exactly as the campaign
-does, but not through the campaign-select screen. misn15.bzn and misn16.bzn are
-not in the stock table (it lists misn15b/misn16b), so with "mod" nothing would
-mount; they run with crcampgn.ini as shipped, which infers CR's own campaign.
+that infers the stock "usa" campaign for a CR mission whose name is in the
+stock table, and nothing mounts CR (a main-menu load of such a save quits to the
+menu). CR renamed those missions to misnNNcr in 2026-10, so every current CR
+mission runs with crcampgn.ini as shipped, which infers CR's own campaign. Only a
+name still in the stock table (an older CR build) gets a temporary mapType = "mod"
+in the game's copy, which loads CR's files but not through campaign inference.
 Saves, configuration, crcampgn.ini and modEnabled.dat are
 snapshotted and restored with hash checks; every save the run creates is archived
 into the evidence folder and removed. Uses BZRHarness's machine-wide launch lock
@@ -41,7 +41,7 @@ pwsh -NoProfile -File reverse_engineering/test_cr_saveload.ps1 `
   -Label saveload-all -EvidenceDirectory C:\Temp\cr-saveload
 .EXAMPLE
 pwsh -NoProfile -File reverse_engineering/test_cr_saveload.ps1 `
-  -Label saveload-misn02b -EvidenceDirectory C:\Temp\cr-saveload -Missions misn02b.bzn
+  -Label saveload-misn2bcr -EvidenceDirectory C:\Temp\cr-saveload -Missions misn2bcr.bzn
 #>
 #requires -Version 7.0
 [CmdletBinding()]
@@ -66,8 +66,8 @@ foreach($m in $missionList){if($m -notmatch '^[A-Za-z0-9_-]+\.bzn$'){throw "Not 
 $GameRoot=(Resolve-Path -LiteralPath $GameRoot).Path.TrimEnd('\')
 $campaignRoot=Join-Path $GameRoot 'mods\3686673790'
 $campaignIni=Join-Path $campaignRoot 'crcampgn.ini'
-# CR missions the stock usa table (0x482E20) does not list; see the description.
-$stockTableLacks=@('misn15.bzn','misn16.bzn')
+# Pre-rename CR mission names that the stock usa table (0x482E20) lists; see the description.
+$stockTableNames=@('misn02b.bzn','misn03.bzn','misn04.bzn','misn05.bzn','misn06.bzn','misn07.bzn','misn08.bzn','misn09.bzn','misn10.bzn','misn11.bzn','misn12.bzn','misn13.bzn','misn14.bzn','misn17.bzn','misn18.bzn')
 $auditRoot=Join-Path ([IO.Path]::GetFullPath($EvidenceDirectory)) $Label
 if($auditRoot.StartsWith($GameRoot+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Evidence must be outside the game installation'}
 if(Test-Path -LiteralPath $auditRoot){throw 'Use a new label; never overwrite evidence'}
@@ -334,7 +334,7 @@ try {
     $menuSave=Join-Path $saveRoot 'game1.sav'
     $common=@('/nointro',"/renderer:$Renderer")
     foreach($mission in $missionList){
-        $campaignMode=$stockTableLacks -contains $mission
+        $campaignMode=$stockTableNames -notcontains $mission
         [IO.File]::WriteAllText($campaignIni,$(if($campaignMode){$ini}else{$flipped}),[Text.UTF8Encoding]::new($false))
         # The stock autoload resumes the newer of auto.sav and auto2.sav.
         if(Test-Path -LiteralPath $auto2){Remove-Item -LiteralPath $auto2}
