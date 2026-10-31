@@ -1,6 +1,8 @@
 #define _CRT_RAND_S
 #include "lan_session.h"
 #include "lan_discovery.h"
+#include "embedded_lan_host.h"
+#include <memory>
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -27,6 +29,7 @@ namespace BZROpenShim::LanSession
             HANDLE process = nullptr, job = nullptr, input = nullptr, output = nullptr;
             std::string pendingOutput;
             std::filesystem::path hostLog;
+            std::unique_ptr<EmbeddedLan::Host> nativeHost;
         };
         // Intentionally retained until process teardown. The kernel closes the
         // job then; its kill-on-close policy prevents an orphaned helper. A DLL
@@ -188,15 +191,28 @@ namespace BZROpenShim::LanSession
         }
     }
 
-    bool StartHost(const std::wstring& gameRoot)
+    bool StartHost(const std::wstring& gameRoot, bool inProcess)
     {
         auto& s = Data();
         Tick();
+        if (s.nativeHost) return s.nativeHost->Running();
         if (s.process) return s.snapshot.state == HostState::Running || s.snapshot.state == HostState::Starting;
         s.snapshot.state = HostState::Failed;
         s.snapshot.hostAddress = HostAddress();
         if (s.snapshot.hostAddress.empty())
         { s.snapshot.hostMessage = "No active LAN IPv4 address found."; return false; }
+        if (inProcess)
+        {
+            s.nativeHost = std::make_unique<EmbeddedLan::Host>();
+            if (!s.nativeHost->Start(s.snapshot.hostAddress))
+            {
+                s.snapshot.hostMessage = s.nativeHost->Error();
+                s.nativeHost.reset(); return false;
+            }
+            s.snapshot.state = HostState::Running;
+            s.snapshot.hostMessage = "Hosting LAN in this game on " + s.snapshot.hostAddress;
+            return true;
+        }
         const auto root = std::filesystem::path(gameRoot);
         const auto executable = root / L"tools" / L"lan" / L"BZRServer.exe";
         const DWORD attributes = GetFileAttributesW(executable.c_str());
@@ -285,6 +301,11 @@ namespace BZROpenShim::LanSession
     void StopHost()
     {
         auto& s = Data();
+        if (s.nativeHost)
+        {
+            s.nativeHost->Stop(); s.nativeHost.reset();
+            s.snapshot.state=HostState::Stopped; s.snapshot.hostMessage="LAN host stopped."; return;
+        }
         if (!s.process || s.snapshot.state == HostState::Stopping) return;
         DWORD written = 0;
         if (s.input) WriteFile(s.input, "stop\n", 5, &written, nullptr);
@@ -332,6 +353,11 @@ namespace BZROpenShim::LanSession
     void Tick()
     {
         auto& s = Data();
+        if (s.nativeHost && !s.nativeHost->Running())
+        {
+            s.snapshot.state=HostState::Failed;
+            s.snapshot.hostMessage=s.nativeHost->Error(); s.nativeHost.reset();
+        }
         if (s.process)
         {
             PumpOutput();

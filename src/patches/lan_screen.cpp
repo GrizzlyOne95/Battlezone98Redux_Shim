@@ -2,6 +2,8 @@
 #include "bzr_hooks.h"
 #include "bzr_options_ui.h"
 #include "lan_session.h"
+#include "lan_no_auth.h"
+#include "lan_no_auth_policy.h"
 #include "lan_discovery.h"
 #include "matchmaking_server.h"
 #include "net_optimizer.h"
@@ -36,10 +38,11 @@ namespace BZROpenShim
             char redirect[256]{};
             if (GetMatchmakingRedirectTarget(redirect, sizeof(redirect)))
             { g_Note = "A test redirect owns the server address."; return; }
-            // Persist using the existing Custom contract. Returning to setup
-            // displays this endpoint; Continue still uses stock readiness and
-            // authentication checks. Discovery cannot bypass those checks.
+            // Persist the explicit LAN selection. Its readiness policy still
+            // requires a real admission; discovery alone never enables it.
             std::string canonical;
+            if (LanNoAuth::Enabled() && !LanNoAuth::PrivateEndpoint(endpoint,canonical))
+            { g_Note = "Enter a private numeric LAN IPv4 address (optional :port)."; return; }
             if (MatchmakingServer::ValidateCustomHost(endpoint, canonical) != MatchmakingServer::HostStatus::Ok)
             { g_Note = "Enter an IPv4 address or host name, optionally with :port."; return; }
             if (!WriteShimUserConfigValue("Network", "CustomServer", canonical.c_str()) ||
@@ -57,7 +60,7 @@ namespace BZROpenShim
         void __cdecl Start()
         {
             g_Note.clear();
-            g_JoinHostedWhenReady = LanSession::StartHost(GameRoot());
+            g_JoinHostedWhenReady = LanSession::StartHost(GameRoot(),LanNoAuth::Enabled());
         }
         void __cdecl Stop()
         {
@@ -95,6 +98,7 @@ namespace BZROpenShim
         }
         void Tick(void*)
         {
+            LanNoAuth::PumpMainThread();
             LanSession::Tick();
             const auto status = LanSession::Status();
             if (g_JoinHostedWhenReady)
@@ -131,7 +135,7 @@ namespace BZROpenShim
             if (!panel) return false;
             void* body = Shell::AddPanel(panel, panel, "OpenShimLAN_Body", {230, 225, 980, 735}, nullptr);
             Shell::SetPanelRectColor(body, {230, 225, 980, 735}, 0xD8101820);
-            Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {420, 132, 600, 56}, "LOCAL HOST TOOLS", Shell::kTitleLabelFlags);
+            Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {420, 132, 600, 56}, LanNoAuth::Enabled() ? "LAN (NO SIGN-IN)" : "LOCAL HOST TOOLS", Shell::kTitleLabelFlags);
             Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {260, 230, 920, 40}, "Hosting opens LAN listeners; Windows may ask for firewall access.");
             const auto& skin = Shell::kSkinToMainMenu;
             Shell::AddButton(panel, panel, "OpenShimLAN_Host", {260, 285, 280, 60}, "Start local host", skin, 0.85f, 0, &Start);
@@ -151,7 +155,7 @@ namespace BZROpenShim
             Shell::AddLabel(panel, panel, "OpenShimLAN_ManualLabel", {260, 795, 590, 35}, "Join by IP (optional :port):");
             Shell::AddPanel(panel, panel, "OpenShimLAN_EntryWell", {260, 845, 590, 48}, "optionhv.png");
             Shell::AddButton(panel, panel, "OpenShimLAN_Manual", {870, 840, 280, 60}, "Use address", skin, 0.8f, 0, &ManualJoin);
-            Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {260, 905, 920, 40}, "Steam/Galaxy sign-in is still required. Stop Host disconnects its players.");
+            Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {260, 905, 920, 40}, LanNoAuth::Enabled() ? "Hosted by this game. No accounts or helper. Stop Host disconnects players." : "Steam/Galaxy sign-in is still required. Stop Host disconnects its players.");
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimLAN_Back", {0, 0, 342, 77}, "Back", Shell::kSkinTopCorner, 1, 28, &Back) != nullptr;
             // Borrowed entry uses the same ownership/char routing as setup.
             CreatePreLobbyServerEntry(panel, 268, 845, 574, 48, "");

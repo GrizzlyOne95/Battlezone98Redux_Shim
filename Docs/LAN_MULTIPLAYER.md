@@ -1,5 +1,9 @@
 # Local host tools preview
 
+For the newer **game-process-only, no-sign-in** prototype, see
+[NO_AUTH_LAN.md](NO_AUTH_LAN.md). This document describes the older helper path
+used with `NoAuthLan=0`; it is not required by the no-auth mode.
+
 Development branch: `agent/lan-host-discovery`, based on OpenShim `045035ea2`.
 Companion server source: `e1544da7437b0b619502586f71725098911be82c`
 ([server draft PR #20](https://github.com/GrizzlyOne95/Battlezone98Redux_DedicatedServer/pull/20)).

@@ -1,4 +1,5 @@
 #include "net_optimizer.h"
+#include "lan_no_auth.h"
 #include "bool_token.h"
 #include "netcode_hooks.h"
 #include "bzrnet_protocol.h"
@@ -3805,6 +3806,7 @@ namespace
         g_ServerOverrideHost = host;
         g_OverrideAllowOfficialFallback.store(mode != MatchmakingServer::Mode::Lan);
         ReleaseSRWLockExclusive(&g_ServerOverrideLock);
+        LanNoAuth::SelectEndpoint(host.c_str(),mode == MatchmakingServer::Mode::Lan);
         Logf("[OpenShimNet] Saved server selection: %s -> %s",
             MatchmakingServer::ModeName(mode), host.c_str());
     }
@@ -5555,6 +5557,7 @@ namespace
         ReleaseSRWLockExclusive(&g_ServerOverrideLock);
         g_OverrideAttemptPending.store(false);
         g_OverrideReached.store(false);
+        LanNoAuth::SelectEndpoint(host,!allowOfficialFallback);
         Logf("[OpenShimNet] Matchmaking server override %s%s",
             host && *host ? "set to " : "cleared",
             host && *host ? host : "");
