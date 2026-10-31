@@ -223,9 +223,10 @@ must log in, list, create, join and play a five-minute match through the bridge.
 Direct-LAN versus tunnel-LAN performance is also pending.
 
 M2 is implemented but unaccepted. The first standalone live attempt failed
-SteamAPI_Init; a 2026-10-29 rerun of the same staged binary passed
-`steam-self-test` and the bridge reached SDR Current, so that failure did not
-reproduce. Remote acceptance follows the
+SteamAPI_Init; a later 2026-10-29 run of the same staged binary passed
+`steam-self-test` and the bridge reached SDR Current, and a fresh review run
+that day failed SteamAPI_Init again. The cause of the difference is unknown.
+Remote acceptance follows the
 [live test guide](STEAM_TUNNEL_LIVE_TEST_GUIDE.md).
 
 Still required: two owning Steam accounts/PCs, ten-minute match and clean exits,
