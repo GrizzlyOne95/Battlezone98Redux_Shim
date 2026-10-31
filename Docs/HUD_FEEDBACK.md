@@ -103,8 +103,9 @@ one/two/three-attacker arc samples.
 The existing nine-tile hub is unchanged; HUD links to this subpage, keeping
 all thirteen appearance/feedback controls reachable without truncating rows.
 
-Reactive feedback and hit confirmation are disabled in network sessions;
-custom static reticle styles remain cosmetic. Unreadable session state fails
+Hit markers and damage indicators are disabled in network sessions; the
+reactive contact tint and custom static reticle styles are cosmetic and run
+there too. Unreadable session state fails
 closed. Steam, Proton and Wine are not qualified; the initial adapter is
 disabled for Steam executables and the Options rows explain that restriction.
 
