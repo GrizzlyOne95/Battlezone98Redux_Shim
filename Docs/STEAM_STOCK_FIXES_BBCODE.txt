@@ -1,77 +1,85 @@
 [h1]Stock Battlezone 98 Redux bugs fixed by OpenShim[/h1]
 
-Each fix below targets a confirmed defect in the stock game: one we traced to its root cause in the executable, caught in a crash dump, or measured before and after. Fixes marked [i](SP)[/i] switch themselves off in network games, so mixed OpenShim/stock lobbies behave identically. Every fix can be turned off individually in openshim.ini.
+Each fix below targets a confirmed defect in the stock game: one we traced to its root cause in the executable, caught in a crash dump, or measured before and after. Fixes marked [i](SP)[/i] switch themselves off in network games, so mixed OpenShim/stock lobbies behave identically. Most fixes can be turned off individually in openshim.ini.
 
 [h2]Gameplay and AI[/h2]
 [list]
-[*] Fixed howitzers firing at a sniper without deploying first. [i](SP)[/i]
-[*] Fixed APCs refusing to drop soldiers on allied targets. [i](SP)[/i]
-[*] Fixed a destroyed splinter (spraybomb) continuing to spawn payload. [i](SP)[/i]
-[*] Fixed hits from comets, APC soldiers and splinter payloads not revealing the craft that fired them. [i](SP)[/i]
-[*] Fixed tugs never deploying after picking up cargo. [i](SP)[/i]
-[*] Fixed a dead constructor's queued build outliving it. [i](SP)[/i]
-[*] Fixed a constructor getting stuck forever when another constructor finishes recycling the same target first. [i](SP)[/i]
+[*] Fixed howitzers firing at a sniper without deploying first. Stock lets a recent hit override a howitzer's target even while it is undeployed. [i](SP)[/i]
+[*] Fixed APCs refusing to drop soldiers near an allied targeted unit. Stock's APC AI rejected allied targets when choosing where to deploy. [i](SP)[/i]
+[*] Fixed a destroyed splinter (spraybomb) continuing to spawn payload. Stock's splinter update skips the destroyed check that other buildings have.
+[*] Fixed hits from comets, APC soldiers and splinter payloads not revealing the craft that fired them. Stock reveals only the object that dealt the damage, not the craft that owned it. [i](SP)[/i]
+[*] Fixed tugs never deploying after picking up cargo. Stock only arms the deploy transition while a craft is undeployed, so a tug that had picked up cargo never started it. [i](SP)[/i]
+[*] Fixed a dead constructor's queued build outliving it. Stock never cleared a dead constructor's remote build order. [i](SP)[/i]
+[*] Fixed a constructor getting stuck forever when another constructor finishes recycling the same target first. Stock leaves the losing constructor holding a stale recycle target, so it takes orders but can no longer move or build. [i](SP)[/i]
 [*] Fixed uneven motion at high frame rates caused by the engine rounding each frame step to whole milliseconds. [i](SP)[/i]
-[*] Fixed the satellite view showing enemies you haven't seen. Redux had dropped Battlezone 1.5's fog check. [i](SP)[/i]
-[*] Restored the 1.5 crouch when landing with the sniper rifle selected and jump held. [i](SP)[/i]
-[*] Fixed your own Arc Mine firing at you on the frame you board a craft. [i](SP)[/i]
-[*] Fixed units that two producers can build only being buildable from the first one the engine found.
-[*] Fixed a crash from magnet mines whose ODF range is zero or invalid.
-[*] Fixed ODF and TRN decimals such as 0.8 reading as 0 on non-English Windows locales.
+[*] Fixed the satellite view showing enemies you haven't seen. Redux had dropped Battlezone 1.5's fog check.
+[*] Restored the 1.5 crouch when landing with the sniper rifle selected and jump held. Redux checks the held-jump flag before the sniper-selected flag, so holding jump skipped the crouch. [i](SP)[/i]
+[*] Fixed your own Arc Mine firing at you on the frame you board a craft. Stock briefly puts your pilot on team 0 as you board, which counts as hostile to everyone, so your own mines target it. [i](SP)[/i]
+[*] Fixed units that two producers can build only being buildable from the first one the engine found. Stock keeps only the first producer found for each buildable unit. [i](SP)[/i]
+[*] Fixed a crash from magnet mines whose ODF range is zero or invalid. Stock tries to attract with a zero or non-finite range, which faults.
+[*] Fixed ODF and TRN decimals such as 0.8 reading as 0 on non-English Windows locales. Stock switches number parsing to the game language's locale, where the decimal separator is a comma.
 [/list]
 
 [h2]Multiplayer and Lua[/h2]
 [list]
-[*] Fixed a host crash (heap corruption) when a guest owns scavengers and a team runs an AIP.
-[*] Fixed multiplayer links dropping every position update after a single retransmit. It was worst with 3 or more players.
-[*] Fixed position updates being thrown away until a lost reliable packet was resent.
-[*] Fixed lost reliable messages waiting for the slow retry timer because the request to resend them was discarded.
-[*] Fixed Lua Send of a 128-255 byte string or table crashing every receiving player.
-[*] Fixed Lua Send of map-placed objects (geysers, beacons, scenery) arriving as nil on other players.
+[*] Fixed a host crash (heap corruption) when a guest owns scavengers and a team runs an AIP. Stock treated a guest's scavenger as a local one and wrote past the end of its memory.
+[*] Fixed multiplayer links dropping every position update after a single retransmit. It was worst with 3 or more players. Stock held new reliable messages back while retransmitting, so the backlog never drained and receivers rejected every update.
+[*] Fixed position updates being thrown away until a lost reliable packet was resent. Stock accepts a packet only when it is the next one expected, so every update behind a lost packet was dropped.
+[*] Fixed a deployed splinter sitting in a different spot on each player's machine, and still firing on other players after it was destroyed. Stock gives a deployed splinter no network identity, so each machine builds and destroys its own.
+[*] Fixed a Daywrecker launched from an Armory exploding at the Armory on other players' machines (a phantom blast seen only there). Stock's remote copy can run a frame before its first network update and detonate where it spawned, inside the Armory.
+[*] Fixed a mission won or lost by the host's script leaving guests playing forever (guests need OpenShim too). Stock has no network message for the end of a mission, so guests never hear it.
+[*] Fixed the host leaving a multiplayer match deleting all the AI units, skipping the handover to the new host, and in a two-player match sending the remaining player to Game Over. Stock deletes the leaver's objects and clears the host id before the handover runs.
+[*] Fixed a running match quitting with "Lost connection to game" when only the lobby connection dropped and the players were still connected. Stock ends the match when the lobby connection drops, even though game traffic is peer-to-peer and still flowing.
+[*] Fixed lost reliable messages waiting for the slow retry timer because the request to resend them was discarded. Stock discards the resend request unless every reliable message has already arrived, which is rarely true under load.
+[*] Fixed Lua Send of a 128-255 byte string or table crashing every receiving player. Stock reads the string length as a signed byte, so lengths of 128 to 255 came out wrong.
+[*] Fixed Lua Send of map-placed objects (geysers, beacons, scenery) arriving as nil on other players. Stock sends objects by a network ID that map-placed objects never get, so receivers could not find them.
 [*] Fixed the Lua Formation(unit, leader, priority) binding. Stock registered a copy of Recycle, which rejected the leader handle.
-[*] Fixed a crash when a mission script calls GetIndependence while a save is still loading.
-[*] Fixed the Lua CanBuild and IsBusy checks giving wrong answers for base producers.
-[*] Fixed the multiplayer map list jumping or resetting while browsing (Steam).
-[*] Fixed the multiplayer vehicle list using stock assets instead of the selected mod's.
-[*] Fixed the black craft in the multiplayer Create Game preview on DX11.
-[*] Fixed the Create Game map layout preview overflowing its frame.
+[*] Fixed a crash when a mission script calls GetIndependence while a save is still loading. Stock only checks for a missing AI, not the temporary stand-in used while a save loads.
+[*] Fixed the Lua CanBuild and IsBusy checks giving wrong answers for base producers. Stock only recognises the four specific producer types, not the base producer. [i](SP)[/i]
+[*] Fixed the multiplayer map list jumping or resetting while browsing (Steam). Stock rebuilds the list on refresh without keeping your selection or scroll position.
+[*] Fixed the multiplayer vehicle list using stock assets instead of the selected mod's. Stock reused description files cached from other mods and ignored the selected map's own vehicle list.
+[*] Fixed the black craft in the multiplayer Create Game preview on DX11. Stock's preview viewport has shadows turned off but still uses a shadow shader setup, so the craft drew black.
+[*] Fixed the Create Game map layout preview overflowing its frame. Stock resizes the preview to the 500-pixel map texture, far larger than its frame.
 [/list]
 
 [h2]Crashes[/h2]
 [list]
-[*] Fixed a first-frame crash when a pilot ODF puts weaponHard1 outside [GameObjectClass], or a script empties the selected pilot weapon slot.
-[*] Fixed a crash when a saved mission loads a stale object handle.
-[*] Fixed a crash and a stuck turbo sound on hover craft whose thrust and turbo sounds share one wav file.
-[*] Fixed a crash on hover craft models with more than 8 throttle nacelles.
-[*] Fixed a crash from a draw_multi ODF with a missing or garbage renderCount.
-[*] Fixed a crash when a map or mod thumbnail BMP can't be decoded.
-[*] Fixed a crash when leaving a multiplayer lobby for the main menu.
-[*] Fixed a crash when a mod declares a duplicate Ogre material.
-[*] Fixed the game quitting with "complete render failure" when a Lua error alert opens during a render exception.
-[*] Fixed a crash on exit under DX11.
-[*] Fixed a crash on exit from the lens flare cleanup running after Ogre's materials are gone.
-[*] Fixed a crash after a graphics driver reset on DX11. The device and its buffers are now rebuilt.
-[*] Fixed an editor crash on the second editing session.
-[*] Restored legacy ODF section headers that 1.5 accepted, such as a bare [GameObject] that otherwise quits mission load.
+[*] Fixed a first-frame crash when a pilot ODF puts weaponHard1 outside [GameObjectClass], or a script empties the selected pilot weapon slot. Stock looks up the pilot's weapons without checking the pilot has any.
+[*] Fixed a crash when a saved mission loads a stale object handle. Stock accepted a leftover handle that pointed at an empty object slot and then read from it.
+[*] Fixed a crash and a stuck turbo sound on hover craft whose thrust and turbo sounds share one wav file. Stock stopped the first sound with that filename, which freed the thrust loop and left the craft writing into freed memory.
+[*] Fixed a crash on hover craft models with more than 8 throttle nacelles. Stock stores nacelles in an eight-slot array with no bounds check, so a ninth overran it.
+[*] Fixed a crash from a draw_multi ODF with a missing or garbage renderCount. Stock passes the ODF count straight to a memory allocation without checking it.
+[*] Fixed a crash when a map or mod thumbnail BMP can't be decoded. Stock has no handler for the image decoder's error, so one bad thumbnail closed the game.
+[*] Fixed a crash when leaving a multiplayer lobby for the main menu. Stock re-reads every mod's particle scripts on the way back, and an uncaught duplicate-name error closed the game.
+[*] Fixed a crash when a mod declares a duplicate Ogre material. Stock's material loader throws on the repeated name and nothing catches it.
+[*] Fixed the game quitting with "complete render failure" when a Lua error alert opens during a render exception. Stock treats any render error under a UI window as fatal once its quality fallbacks run out, though gameplay survives the same error.
+[*] Fixed a crash on exit under DX11. Stock unloads the DX11 libraries at exit while a graphics driver thread still has work pending.
+[*] Fixed a crash on exit in the lens flare cleanup. Stock runs it after Ogre has already destroyed the materials it releases.
+[*] Fixed a crash after a graphics driver reset on DX11. The device and its buffers are now rebuilt. Stock recreated the device while the driver was still resetting, so the new device was lost again and its buffers failed.
+[*] Fixed an editor crash on the second editing session. Stock decides whether to rebuild the world map from a flag that stays set after its texture is released.
+[*] Restored legacy ODF section headers that 1.5 accepted, such as a bare [GameObject] that otherwise quits mission load. Redux reads only exact section names, while 1.5 accepted several legacy spellings.
+[*] Fixed a crash from a ChargeGun with a negative ordnanceCount or a Launcher with a negative targetCount in its ODF. Stock does not range-check these counts, and a negative value crashes the game.
+[*] Fixed a crash when a UI widget is rebuilt while Ogre still holds an old "Top Screen" object. Stock then creates a second object with the same name, and the uncaught error closes the game.
 [/list]
 
 [h2]Rendering, audio and UI[/h2]
 [list]
-[*] Fixed all HUD text, gauges and the reticle disappearing on maps with certain view ranges.
-[*] Fixed old mods' fixed-function and legacy shaders rendering black on DX11.
-[*] Fixed the DX11 glow pass throwing errors on meshes with no vertex colour.
-[*] Fixed every craft being drawn and shadowed by every camera, wherever it was.
+[*] Fixed all HUD text, gauges and the reticle disappearing on maps with certain view ranges. Stock puts the HUD layer one rounding step in front of the near plane, so for some view ranges it was clipped away.
+[*] Fixed old mods' fixed-function and legacy shaders rendering black on DX11. Direct3D 11 has no fixed-function pipeline and rejects the old shader models those mods use.
+[*] Fixed the DX11 glow pass throwing errors on meshes with no vertex colour. Stock's fallback glow shader asks for vertex colours that meshes without them can't supply.
+[*] Fixed every craft being drawn and shadowed by every camera, wherever it was. Stock gives shared craft meshes an infinite bounding box, so culling and shadow tests never rejected them.
 [*] Fixed shadows jumping and the ground flickering while firing: every muzzle flash and explosion light cast shadows and took shadow maps from the sun.
-[*] Fixed four terrain atlas tiles on the Elysium and Ganymede worlds that straddled two atlas cells.
+[*] Fixed four terrain atlas tiles on the Elysium and Ganymede worlds that straddled two atlas cells. Stock's atlas tables use 0.825 in four rows where every other row uses 0.875.
 [*] Fixed sounds dropping in big fights because the playing-sound pool held only 100 entries.
-[*] Fixed 46-69 ms frame hitches from "LinkCopy out of copies" log spam.
-[*] Fixed music stopping on alt-tab and skipping when you return.
-[*] Fixed an earthquake's shake and rumble looping forever after loading a save made mid-quake.
-[*] Fixed the target camera picture-in-picture freezing on screen in satellite or F9 view.
-[*] Fixed cinematic cameras rendering zoomed in when triggered from satellite view.
-[*] Fixed briefing and archive text snapping back to the top when scrolling to the last page.
-[*] Fixed mouse-look pinning the Windows cursor while the game is minimized or in the background.
-[*] Fixed editor object placement doing nothing in the Shift+F10 overhead view.
-[*] Fixed .trn files growing an extra line-ending byte on every save.
-[*] Fixed comma-valued command-line options such as -shellmap:W,H losing their second value (inherited from 1.5).
+[*] Fixed 46-69 ms frame hitches from "LinkCopy out of copies" log spam. Stock writes a log line to disk, blocking the game, for every sound that cannot start.
+[*] Fixed music stopping on alt-tab and skipping when you return. Stock's music buffer stops when the game loses focus, which also stalls its refill, so it replays stale audio on return.
+[*] Fixed an earthquake's shake and rumble looping forever after loading a save made mid-quake. Stock restarts a saved quake on load with nothing left to stop it.
+[*] Fixed the target camera picture-in-picture freezing on screen in satellite or F9 view. Stock's enabled flag stays latched because its updater stops running in those views.
+[*] Fixed cinematic cameras rendering zoomed in when triggered from satellite view. Stock reuses the satellite view's zoom for the cinematic camera.
+[*] Fixed briefing and archive text snapping back to the top when scrolling to the last page. Stock's briefing and archive pages use scroll code that wraps to the top on a final partial page.
+[*] Fixed mouse-look pinning the Windows cursor while the game is minimized or in the background. Stock re-clips and recentres the cursor every frame with a focus test that a minimized game still passes.
+[*] Fixed editor object placement doing nothing in the Shift+F10 overhead view. Redux swapped two draw-order priorities from 1.5, so the placement code read a position cleared earlier that frame.
+[*] Fixed .trn files growing an extra line-ending byte on every save. Stock saves in text mode over data that already has carriage returns, so each save adds another.
+[*] Fixed comma-valued command-line options such as -shellmap:W,H losing their second value (inherited from 1.5). Stock's command-line parser also splits on commas, which cut the value short.
+[*] Fixed a short hitch at every music track change. Stock decodes the first three seconds of each track twice and throws the first away.
 [/list]
