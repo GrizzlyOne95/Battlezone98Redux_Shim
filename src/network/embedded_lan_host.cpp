@@ -98,12 +98,6 @@ namespace
         return out + body;
     }
     bool Pending() { const auto error = WSAGetLastError(); return error == WSAEWOULDBLOCK; }
-    uint64_t EpochMs()
-    {
-        FILETIME file{}; GetSystemTimeAsFileTime(&file);
-        const uint64_t ticks = (uint64_t(file.dwHighDateTime) << 32) | file.dwLowDateTime;
-        return ticks / 10000 - 11644473600000ULL;
-    }
 }
 struct Host::Impl
 {
@@ -191,7 +185,7 @@ struct Host::Impl
             c.fragments += body; c.fragmented = !fin;
             if (fin)
             {
-                const auto message = Json::parse(c.fragments,nullptr,false);
+                const auto message = ParseBounded(c.fragments);
                 c.fragments.clear();
                 if (message.is_discarded()) return false;
                 Deliver(model.Receive(id,message));
@@ -221,8 +215,6 @@ struct Host::Impl
             else
             {
                 if (size != 18 || (bytes[0] & 0xc0) != 0x40 || (bytes[1] & 15) != 2) continue;
-                uint64_t sent = 0; for (unsigned j=2;j<10;++j) sent=(sent<<8)|static_cast<unsigned char>(bytes[j]);
-                const auto now = EpochMs(); if (sent > now+60000 || now > sent+60000) continue;
                 response.assign(bytes,18); response += char(4);
                 response.append(reinterpret_cast<const char*>(&sender.sin_addr),4);
                 response.append(reinterpret_cast<const char*>(&sender.sin_port),2);
@@ -283,6 +275,7 @@ struct Host::Impl
                 }
                 for (const auto id : removed)
                 { closesocket(clients.at(id).socket); clients.erase(id); Deliver(model.Disconnect(id)); }
+                Deliver(model.Flush()); // one coalesced refresh per pass
                 // Bounded worker wait; no game-thread polling or loader work.
                 fd_set reads; FD_ZERO(&reads); FD_SET(listener.value,&reads);
                 FD_SET(probe.value,&reads); FD_SET(discovery.value,&reads);

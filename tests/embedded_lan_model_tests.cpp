@@ -45,7 +45,18 @@ int main()
     CHECK(Has(m.Receive(2,Message("DoJoinLobby",{{"id",2},{"password","wrong"}})),"OnLobbyJoined",false));
     CHECK(Has(m.Receive(2,Message("DoJoinLobby",{{"id",2},{"password","secret"}})),"OnLobbyJoined"));
     CHECK(Has(m.Receive(1,Message("DoJoinLobby",{{"id",2},{"password","secret"}})),"OnLobbyJoined"));
-    CHECK(Has(m.Receive(1,Message("LockLobby",true)),"OnLobbyChanged"));
+    {
+        // Updates coalesce: a burst yields exactly one refresh at flush time.
+        m.Flush(); // drain earlier pending refreshes
+        const auto lock=m.Receive(1,Message("LockLobby",true));
+        CHECK(!Has(lock,"OnLobbyChanged"));
+        for (int i=0;i<5;++i) m.Receive(2,Message("SetPlayerData",{{"key","ready"},{"value",std::to_string(i)}}));
+        const auto flushed=m.Flush();
+        const auto lists=std::count_if(flushed.begin(),flushed.end(),[](const Delivery& d){return d.connection==1 && d.message["type"]=="OnLobbyListChanged";});
+        CHECK(lists==1);
+        CHECK(Has(flushed,"OnLobbyChanged"));
+        CHECK(m.Flush().empty());
+    }
     CHECK(Has(m.Receive(2,Message("DoJoinLobby",{{"id",2}})),"OnLobbyJoined"));
     CHECK(m.Receive(2,Message("SetLobbyData",{{"key","gameSettings"},{"value","forbidden"}})).empty());
     CHECK(Has(m.Receive(1,Message("SetLobbyData",{{"key","gameSettings"},{"value","map-settings"}})),"OnLobbyDataChanged"));
@@ -60,5 +71,10 @@ int main()
     CHECK(Has(m.Disconnect(1),"OnLobbyRemoved"));
     CHECK(m.Receive(2,Message("DoP2PConnect",{{"player","B1"}})).empty());
     CHECK(m.Receive(2,Message("DoJoinLobby",Json::array())).empty());
+    // Deep nesting is rejected before parsing; ordinary messages still parse.
+    CHECK(ParseBounded(std::string(30000,'[')+std::string(30000,']')).is_discarded());
+    CHECK(ParseBounded("{\"a\":"+std::string(33,'[')+std::string(33,']')+"}").is_discarded());
+    CHECK(!ParseBounded("{\"a\":"+std::string(30,'[')+std::string(30,']')+"}").is_discarded());
+    CHECK(!ParseBounded("{\"type\":\"DoSendChat\",\"content\":\"[[[[ \\\" {{{{\"}").is_discarded());
     return OpenShimTest::ExitCode();
 }

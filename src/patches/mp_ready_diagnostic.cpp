@@ -276,7 +276,7 @@ namespace BZROpenShim
             default: r.platformOk = false; break;
             }
 
-            if (LanNoAuth::Requested()) r.platformOk = LanNoAuth::Ready();
+            if (LanNoAuth::Requested()) r.platformOk = LanNoAuth::ReadyCached();
             r.code = (r.platformOk && r.lobbyPresent) ? 3u : 0u;
             return true;
         }

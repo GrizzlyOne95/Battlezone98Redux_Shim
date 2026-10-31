@@ -37,8 +37,9 @@ namespace
     using ConnectFn = void(__thiscall*)(void*,void*);
     ConnectFn connectClient=nullptr;
     uintptr_t holderAddress=0,relayAddress=0;
-    uint32_t lobbyVtable=0;
+    uint32_t lobbyVtable=0, clientStateOffset=0;
     std::atomic<unsigned> generation{0};
+    std::atomic<bool> readyCached{false};
 
     bool EffectiveSelection()
     {
@@ -101,6 +102,7 @@ void SelectEndpoint(const char* endpoint, bool lanSelection)
     if (want) Log(L"[LAN-NOAUTH] selection %hs; platform credentials unchanged\n",valid ? canonical.c_str() : "blocked: private numeric LAN address required, with no test redirect");
 }
 bool Ready() { return EffectiveSelection() && ReadNativeReady(); }
+bool ReadyCached() { return readyCached.load(); }
 uintptr_t PlatformReadyCode(uintptr_t site)
 {
     return originalReady ? reinterpret_cast<uintptr_t>(originalReady) : site;
@@ -114,6 +116,7 @@ void PumpMainThread()
     static unsigned lastGeneration=0;
     static bool routeSaved=false;
     static uint32_t previousRoute=0;
+    readyCached=Requested() && Ready();
     __try
     {
         const bool active=Available() && Requested();
@@ -133,7 +136,7 @@ void PumpMainThread()
         if (!client || !lobby || *reinterpret_cast<uint32_t*>(lobby)!=lobbyVtable ||
             *reinterpret_cast<void**>(static_cast<uint8_t*>(lobby)+0xC8)!=client ||
             *reinterpret_cast<void**>(static_cast<uint8_t*>(client)+0xC38)!=lobby ||
-            *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(client)+4)!=0 || started==client) return;
+            *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(client)+clientStateOffset)!=0 || started==client) return;
         started=client;
         uint32_t error[2]{};
         connectClient(client,error);
@@ -166,6 +169,11 @@ void InstallIfPossible(bool authorizationHookReady)
     };
     if (!HookEngine::BindEngineRows("LAN local identity",rows) ||
         CallTarget(nameSite)!=emptySite || CallTarget(ticketSite)!=emptySite) return;
+    // The client state field offset comes from the qualified row's `cmp dword [eax+disp8],3`.
+    uint8_t stateTest[4]{};
+    if (!HookEngine::ReadMemory(stateSite+12,stateTest,sizeof(stateTest)) ||
+        stateTest[0]!=0x83 || stateTest[1]!=0x78 || stateTest[3]!=3 || !stateTest[2]) return;
+    clientStateOffset=stateTest[2];
     unsigned random[2]{};
     if (rand_s(&random[0]) || rand_s(&random[1])) return;
     localValue=(uint64_t(random[0])<<32)|random[1]; if (!localValue) return;

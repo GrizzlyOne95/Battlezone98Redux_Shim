@@ -7,6 +7,29 @@
 
 namespace BZROpenShim::EmbeddedLan
 {
+bool JsonDepthWithin(const std::string& text, unsigned maxDepth)
+{
+    unsigned depth = 0; bool inString = false, escaped = false;
+    for (const char ch : text)
+    {
+        if (inString)
+        {
+            if (escaped) escaped = false;
+            else if (ch == '\\') escaped = true;
+            else if (ch == '"') inString = false;
+        }
+        else if (ch == '"') inString = true;
+        else if (ch == '[' || ch == '{') { if (++depth > maxDepth) return false; }
+        else if ((ch == ']' || ch == '}') && depth) --depth;
+    }
+    return true;
+}
+Json ParseBounded(const std::string& text)
+{
+    // Later copies and dump() recurse; reject deep nesting before parsing.
+    if (!JsonDepthWithin(text,32)) return Json(Json::value_t::discarded);
+    return Json::parse(text,nullptr,false);
+}
 namespace
 {
     std::string Timestamp(bool iso)
@@ -130,8 +153,9 @@ void Model::Broadcast(std::vector<Delivery>& out, const std::string& type, const
     for (const auto& entry : players)
         if (!entry.second.id.empty()) Send(out,entry.first,type,data);
 }
-void Model::Refresh(std::vector<Delivery>& out) const
+void Model::Refresh(std::vector<Delivery>& out)
 {
+    refreshPending = false;
     Broadcast(out,"OnLobbyListChanged",List());
     for (const auto& entry : lobbies)
         Broadcast(out,"OnLobbyChanged",{{"lobbies",{{std::to_string(entry.first),Room(entry.second)}}},
@@ -167,8 +191,14 @@ std::vector<Delivery> Model::Disconnect(uint64_t c)
             lounge.owner.clear();
             for (const auto& peer:players) if (!peer.second.id.empty()) {lounge.owner=peer.second.id;break;}
         }
-        Refresh(out);
+        refreshPending = true;
     }
+    return out;
+}
+std::vector<Delivery> Model::Flush()
+{
+    std::vector<Delivery> out;
+    if (refreshPending) Refresh(out);
     return out;
 }
 std::vector<Delivery> Model::Receive(uint64_t c, const Json& message)
@@ -230,7 +260,7 @@ std::vector<Delivery> Model::Receive(uint64_t c, const Json& message)
             room.metadata = {{"name",name},{"GameVersion","2.2.301"},{"clientVersion","2.2.301"},
                 {"gameType","1"},{"gameSettings","*"},{"ready","*"},{"nextmid","1"}};
             p.lobby = room.id; lobbies.emplace(room.id,room);
-            Refresh(out); // cache must arrive before OnLobbyCreated
+            Refresh(out); // cache must arrive before OnLobbyCreated (immediate, not coalesced)
             Send(out,c,"OnLobbyCreated",{{"id",room.id}}); return out;
         }
         if (type == "DoJoinLobby")
@@ -245,7 +275,7 @@ std::vector<Delivery> Model::Receive(uint64_t c, const Json& message)
             if (reason) { Send(out,c,"OnLobbyJoined",{{"success",false},{"id",id},{"reasonCode",reason}}); return out; }
             if (p.lobby == id) { Send(out,c,"OnLobbyJoined",{{"id",id},{"reasonCode",0}}); return out; }
             Leave(out,p); p.lobby = id;
-            Refresh(out);
+            Refresh(out); // immediate: cache precedes the join acknowledgement
             Broadcast(out,"OnLobbyMemberListChanged",{{"lobbyId",id},{"id",p.id},{"member",p.id},{"removed",false},{"user",User(p)}});
             Send(out,c,"OnLobbyJoined",{{"id",id},{"reasonCode",0}}); return out;
         }
@@ -264,7 +294,7 @@ std::vector<Delivery> Model::Receive(uint64_t c, const Json& message)
             Broadcast(out,type == "DoUpdateLAN" ? "OnLANUpdated" : "OnWANUpdated",
                 {{"id",p.id},{"member",p.id},{"player",p.id},{"lanAddresses",p.addresses},{"wanAddress",p.wan},
                  {"user",user},{"users",{{p.id,user}}}});
-            Refresh(out); return out;
+            refreshPending = true; return out;
         }
         if (type == "SetPlayerData" && content.is_object())
         {
@@ -273,7 +303,7 @@ std::vector<Delivery> Model::Receive(uint64_t c, const Json& message)
             if (!Printable(key,64) || value.size() > 16384 || !MetadataFits(p.metadata,key,value)) return out;
             p.metadata[key] = value;
             if ((key == "name" || key == "playerName") && Printable(value,127)) p.name = value;
-            Refresh(out);
+            refreshPending = true;
             Broadcast(out,"OnUserDataChanged",{{"member",p.id},{"id",p.id},{"lobbyId",p.lobby},{"users",{{p.id,User(p)}}}});
             if (room != lobbies.end()) Broadcast(out,"OnLobbyDataChanged",{{"changedLobby",room->first}});
             return out;
@@ -287,11 +317,11 @@ std::vector<Delivery> Model::Receive(uint64_t c, const Json& message)
             if (!Printable(key,64) || value.size() > 16384 || !MetadataFits(l.metadata,key,value)) return out;
             if (type == "SetLobbyData") l.metadata[key] = value; else l.metadata.erase(key);
             Broadcast(out,"OnLobbyDataChanged",{{"changedLobby",l.id},{"key",key},{"value",value}});
-            Refresh(out);
+            refreshPending = true;
         }
-        else if (type == "LockLobby" && l.owner == p.id && content.is_boolean()) { l.locked = content.get<bool>(); Refresh(out); }
+        else if (type == "LockLobby" && l.owner == p.id && content.is_boolean()) { l.locked = content.get<bool>(); refreshPending = true; }
         else if (type == "SetLobbyMemberLimit" && l.owner == p.id && content.is_number_integer())
-        { l.limit = (std::clamp)(content.get<int>(),1,16); Refresh(out); }
+        { l.limit = (std::clamp)(content.get<int>(),1,16); refreshPending = true; }
         else if (type == "DoSendChat")
         {
             const auto text = content.is_object() ? content.value("text",std::string{}) : Text(content);

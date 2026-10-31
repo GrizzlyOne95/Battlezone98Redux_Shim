@@ -12,6 +12,8 @@ namespace BZROpenShim::LanNoAuth
     bool Requested();
     bool Available();
     bool Ready();
+    // Last readiness computed on the main thread by PumpMainThread; safe from any thread.
+    bool ReadyCached();
     bool Identity(std::string& id, std::string& name);
     // Called only by shell ticks, never the background diagnostic watcher.
     void PumpMainThread();
