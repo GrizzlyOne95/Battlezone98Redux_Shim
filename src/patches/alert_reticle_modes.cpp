@@ -285,6 +285,16 @@ namespace BZROpenShim
             g_UnderAttackAlertNextAllowedTime = 0.0f;
         }
 
+        // Stock CockpitRadar::Init sets nextBeep = -1e30 every mission. The
+        // alert hook keeps its own cooldown instead, so it must be cleared on
+        // the same cadence: mission time restarts near zero, and a cooldown
+        // left over from a long previous match silenced every alert until the
+        // new match's clock passed it.
+        void ResetUnderAttackAlertCooldown()
+        {
+            g_UnderAttackAlertNextAllowedTime = 0.0f;
+        }
+
         static bool SetUnderAttackAlertModeInternal(UnderAttackAlertMode mode, bool logChange)
         {
             InitializeUnderAttackAlertConfig();
