@@ -205,9 +205,11 @@ namespace BZROpenShim::HudFeedback
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
 
+            // Contact tint reads only the stock reticle's own object, so it
+            // runs online too. Hits stay single player: online, a local health
+            // drop may not be a hit the host counted.
             const bool singlePlayer = IsSinglePlayerSession();
-            Settings effective = settings;
-            effective.reactive = effective.reactive && singlePlayer;
+            const Settings& effective = settings;
             const uint64_t frameNow = GetTickCount64();
             const bool hitsOn = settings.hits && singlePlayer;
             const float strength = hitsOn ? pulse.Strength(frameNow, settings.hitDurationMs) : 0.0f;

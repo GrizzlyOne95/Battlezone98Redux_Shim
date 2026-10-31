@@ -551,6 +551,7 @@ namespace BZROpenShim
         //   refreshMpGate     reconcile a SinglePlayer-tier feature against the
         //                     live net id so it can never touch a network game.
         //                     Called on mission end and from the periodic sim tick.
+        //                     A Display row may use it as a plain refresh driver.
         // Tier is advisory metadata today (it documents the [Display] vs
         // [SinglePlayer] openshim.ini section and whether refreshMpGate is required)
         // and is the hook future native features will read to auto-gate themselves.
@@ -595,9 +596,11 @@ namespace BZROpenShim
               &RevertSatelliteViewToBaseline, &RefreshSatelliteViewState },
             { "GlobalTurbo", FeatureTier::SinglePlayer,
               &RevertGlobalTurboToBaseline, &RefreshGlobalTurboPatchState },
-            { "Headlights", FeatureTier::SinglePlayer,
+            // Local Ogre lights; applied everywhere, including MP. The refresh
+            // function is their per-tick driver, not a gate.
+            { "Headlights", FeatureTier::Display,
               &RevertHeadlightsToBaseline, &RefreshHeadlightState },
-            { "PilotFlashlight", FeatureTier::SinglePlayer,
+            { "PilotFlashlight", FeatureTier::Display,
               &RevertPilotFlashlightToBaseline, &RefreshPilotFlashlightState },
             { "PilotTeamRestore", FeatureTier::SinglePlayer,
               &RevertPilotTeamRestoreToBaseline, &RefreshPilotTeamRestoreState },
@@ -615,10 +618,9 @@ namespace BZROpenShim
             // file, and must keep running in network games.
             { "CareerStats", FeatureTier::Display,
               &RevertCareerStatsToBaseline, nullptr },
-            // Client-side only, so it cannot desync -- but it is documented
-            // under [SinglePlayer], and standing it down online is what keeps
-            // a shim player's satellite view equivalent to a stock peer's.
-            { "SatelliteVisibilityFix", FeatureTier::SinglePlayer,
+            // Client-side only, so it cannot desync, and online it only hides
+            // enemies from the shim player; applied everywhere, including MP.
+            { "SatelliteVisibilityFix", FeatureTier::Display,
               nullptr, &RefreshSatelliteVisibilityFixState },
             // [Fixes] engine-defect corrections. They are bug fixes rather than
             // enhancements and stay on for normal single-player play, but every

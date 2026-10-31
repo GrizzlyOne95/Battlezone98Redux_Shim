@@ -9,6 +9,15 @@
   },
   "patches": [
     {
+      "name": "Map Description Bounds Guard",
+      "pattern": "81 BD 54 F6 FF FF 60 09 00 00 76 0A C7 85 54 F6 FF FF 60 09 00 00 8D 55 C0 52 E8 ?? ?? ?? ?? 83 C4 04 89 85 44 F6 FF FF",
+      "offset": 0,
+      "expected_size": 22,
+      "fallback": "0x00000000",
+      "require_unique": true,
+      "identity": "Released GOG Redux 2.2.301 SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413, map-description loader 0x0076EB90, reached from the IA map-selection call at 0x00789A78 and shared with the multiplayer description path. At 0x0076ED0E the loader clamps GetItemSize to 2400, copies that many resource bytes to a 2400-byte local array, then range-checks the terminator index against 2400 at 0x0076ED6C. Crash dump battlezone98redux.exe.65088.dmp records FAST_FAIL_RANGE_CHECK_FAILURE with length 2400 and arsenals.des; the full 3020-byte resource and copied prefix match the installed file. Native ReadProcessMemory of harness-launched GOG PID 60408 after 18 seconds on 2026-10-29 matched this loader's installed-image bytes. Replace both 2400 immediates with 2399 in one guarded 22-byte write; keep the terminator bounds check, resource ownership, and short descriptions unchanged. Exact pattern must match uniquely; no fallback. Steam/Proton/Wine runtime qualification remains separate."
+    },
+    {
       "name": "Custom Planet Video Playback",
       "platforms": [
         "gog"

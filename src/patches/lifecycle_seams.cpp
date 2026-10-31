@@ -585,6 +585,8 @@ namespace BZROpenShim
                 NativeHud::Runtime::ResetMission();
                 HudFeedback::ResetMission();
                 UnitDamage::ResetMissionState();
+                ResetUnderAttackAlertCooldown();
+                ResetHopOutAttackAlertTracking();
             }
             else if (previous != kBzrRunStateStarted && current == kBzrRunStateStarted)
             {

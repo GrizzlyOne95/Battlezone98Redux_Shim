@@ -60,7 +60,9 @@
 
 [General]
 
-; Maximum simultaneous GAS sound objects.
+; Maximum simultaneous GAS voices (stock 64). This does not touch the separate
+; 100-entry playing-sound pool, which OpenShim enlarges to 512 at startup; set the
+; environment variable OPENSHIM_STOCK_SOUND_COPY_POOL=1 to keep the stock 100.
 ; Accepted:
 ;   0       = disable OpenShim's override; retain the stock engine limit
 ;   1..256  = requested channel count
@@ -1195,9 +1197,10 @@ ReticleOpacity = 100
 ReticleOutline = 0
 ; Contact feedback uses only the stock reticle's current object. No aiming change.
 ; It tints red over enemies and green over allies (neutral/disguised: ReticleColor).
+; Also runs in network games.
 ReactiveReticle = 0
 ; Confirmed health loss from the local player's weapon, not attempted damage.
-; Hit markers and reactions are disabled in network games.
+; Hit markers and damage indicators are disabled in network games.
 HitMarkers = 0
 ; Fade duration in milliseconds, 60-400 (menu: 80, 120, 180, 250).
 HitMarkerDuration = 120
@@ -1257,7 +1260,9 @@ UnderAttackAlert = Normal
 ; Canonical values:
 ;   Default      = stock behavior
 ;   NeutralOnly  = suppress recent-hit popups for team-0/neutral objects
-;   ExplicitOnly = only show when explicitly targeted
+;   ExplicitOnly = suppress recent-hit popups on all objects; shows only when
+;                  explicitly targeted
+; The settings page labels these Stock, Suppress Neutral and Suppress All.
 ; Accepted aliases:
 ;   Default      : Normal, On, numeric <=1
 ;   NeutralOnly  : Neutral, numeric 2
@@ -2183,7 +2188,7 @@ StockFactionSet = as
 ; network order format remain stock.
 ;
 ; Accepted: boolean. Default: OFF (exact legacy behavior).
-; Exposed on the OpenShim Settings page as "Neutral Attack Orders".
+; Exposed on the OpenShim Settings page as "Attack Neutrals".
 AllowNeutralAttackOrders = 0
 
 
@@ -2225,7 +2230,9 @@ VehicleGeometryContact = 0
 MeshAccurateHits = 0
 
 ; Every setting in this section is hard-disabled in network games regardless of
-; its configured value. The gate is the local player's net id: non-zero means a
+; its configured value, except the local-render keys (Headlights and the other
+; headlight keys, PilotFlashlight and its keys, SatelliteVisibilityFix), which
+; also run online. The gate is the local player's net id: non-zero means a
 ; network session (the host has an id too), and it fails closed, so a net id
 ; that cannot be read stands the feature down rather than enabling it.
 ;
@@ -2235,10 +2242,6 @@ MeshAccurateHits = 0
 ; game. That applies to the byte-patched features (jump-snipe crouch, global
 ; turbo, the convergence dispatchers, the smart-reticle range cell) as well as
 ; the flag-checked ones.
-;
-; SatelliteVisibilityFix is included in the gate even though it is client-side
-; rendering only and cannot desync anything: see its own note at the end of
-; this section for why standing it down online is the parity-correct choice.
 
 ; Weapon convergence: make hover/wingman-style fixed weapons use the stock
 ; Walker-style convergence behavior against the craft's explicit target.
@@ -2308,7 +2311,7 @@ OrdnanceVelocityInheritance = 0
 ; the stock values (0.25 - 8.0). ZoomOut raises only the maximum zoom, so the
 ; closest zoom stays stock. Both are hard-disabled in network games, because
 ; pulling further out than a stock peer would reveal more of the map than that
-; peer can see -- the same reasoning that gates SatelliteVisibilityFix.
+; peer can see.
 SatelliteZoomOut = 1.0
 SatellitePanSpeed = 1.0
 
@@ -2422,8 +2425,9 @@ Turbo = 0
 ; Legacy env alias: OPENSHIM_GLOBAL_TURBO_TOLERANCE
 TurboTolerance = 0.9
 
-; Native stock headlight control. These stand down in multiplayer and when EXU
-; owns scripted mission lighting.
+; Native stock headlight control. These change only local Ogre lights, so they
+; also run in network games.
+; Kept under [SinglePlayer] so existing openshim.ini files keep their values.
 ; Accepted: boolean. Default: Player ON, AI OFF.
 Headlights = 1
 OtherHeadlights = 0
@@ -2466,9 +2470,9 @@ HeadlightBrightness = 1.00
 ; boards a craft, and dropped without being touched when the scene or mission
 ; is torn down.
 ;
-; Unlike the vehicle headlight keys above this does NOT stand down under EXU:
+; Like the vehicle headlight keys above this does not stand down under EXU:
 ; the light is created by the shim and no script or ODF can address it.
-; It does stand down for the duration of a network game.
+; It also runs in network games; no peer can see it.
 ; Accepted: boolean. Default: OFF.
 PilotFlashlight = 0
 
@@ -2616,12 +2620,12 @@ AttackRevealPerceivedTeam = 1
 ; first person -- and an entity that was already hidden for some other reason
 ; stays hidden.
 ;
-; This is client-side rendering only and cannot desync anything, but it stands
-; down in a network game anyway, because online it works against you: a shim
-; player would see fewer enemies on the satellite than a stock peer looking at
-; the same match. Standing it down restores parity. If it goes inactive while
-; the satellite view is open, every entity it hid has its visibility restored
-; on the next tick rather than being stranded.
+; This is client-side rendering only and cannot desync anything, so it also
+; runs in network games. Online it only works against you: a shim player sees
+; fewer enemies on the satellite than a stock peer looking at the same match.
+; Set it to 0 to see what a stock peer sees. If it goes inactive while the
+; satellite view is open, every entity it hid has its visibility restored on
+; the next tick rather than being stranded.
 ;
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Satellite Fog Of War"; applies live.
