@@ -799,6 +799,7 @@ namespace BZROpenShim
         extern volatile long g_SatVisValidateBudget;
         extern DWORD g_SatVisValidateLastTick;
         void MaybeSuppressStaleHopOutAttackAlert();
+        void ResetHopOutAttackAlertTracking();
         void MaybeLogSatelliteVisibilitySample();
         void SyncSatelliteVisibility();
         void LogSatelliteVisibilityValidationSample();
@@ -1998,6 +1999,7 @@ namespace BZROpenShim
         extern bool g_TargetReticlePopupConfigInitialized;
         void InitializeUnderAttackAlertConfig();
         void RevertUnderAttackAlertToBaseline();
+        void ResetUnderAttackAlertCooldown();
         void InitializeTargetReticlePopupConfig();
         void RevertTargetReticlePopupToBaseline();
 

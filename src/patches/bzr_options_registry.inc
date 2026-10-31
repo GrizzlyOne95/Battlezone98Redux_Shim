@@ -30,7 +30,7 @@ static const char* const kShimSettingsUnderAttackValues[] = { "Normal", "Minimal
 static const char* const kShimSettingsExplosionFlashValues[] = { "Stock", "Soft", "Off" };
 static const char* const kShimSettingsUnitVoValues[] = { "Normal", "Reduced", "None" };
 static const char* const kShimSettingsTargetPolicyValues[] = { "Default", "NeutralOnly", "ExplicitOnly" };
-static const char* const kShimSettingsTargetPolicyLabels[] = { "Default", "Neutral Only", "Explicit Only" };
+static const char* const kShimSettingsTargetPolicyLabels[] = { "Stock", "Suppress Neutral", "Suppress All" };
 static const char* const kShimSettingsScrapHudValues[] = { "Legacy", "Stock" };
 static const char* const kShimSettingsRadarScaleValues[] =
     { "1.0", "1.25", "1.5", "1.75", "2.0" };
@@ -212,7 +212,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Color of custom reticles and target-contact brackets; stock artwork keeps its own colors." },
     { "Reticle Size", "Display", "ReticleSize", nullptr, 0,
       kShimReticleSizes, kShimReticleSizeLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
-      "Scale custom reticles and feedback with the game's current UI scale. Applies live." },
+      "Scale of the custom cross/dot and contact brackets, following the game's UI scale. "
+      "Hit markers have their own size. Applies live." },
     { "Reticle Thickness", "Display", "ReticleThickness", nullptr, 0,
       kShimReticleThickness, kShimReticleThicknessLabels, 3, 1, ShimSettingApplyGroup::HudFeedback,
       "Line thickness for custom reticles and feedback. Applies live." },
@@ -221,15 +222,16 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Dark outline for custom reticles and feedback, for contrast on bright terrain. Applies live." },
     { "Reticle Opacity", "Display", "ReticleOpacity", nullptr, 0,
       kShimReticleOpacity, kShimReticleOpacityLabels, 3, 2, ShimSettingApplyGroup::HudFeedback,
-      "Opacity of custom reticles and feedback. Stock artwork is unchanged." },
+      "Opacity of the custom cross/dot and contact brackets. Hit markers have their own "
+      "opacity; stock artwork is unchanged." },
     { "Reactive Reticle", "Display", "ReactiveReticle", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-      "Over a target, contract a custom cross, add brackets and tint red for enemies or green for allies. "
-      "Visual only; disguised units stay untinted. Single player only." },
+      "Over a target, add brackets and contract a custom cross; tint red for enemies, green for "
+      "allies. Neutral or disguised units keep your color. Visual only." },
     { "Hit Markers", "Display", "HitMarkers", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-      "Ticks pop out when your weapon actually reduces health; hitting several targets at once enlarges them. "
-      "No marker for blocked/zero damage, collisions, self hits or AI shots. Single player only." },
+      "Ticks pop out when your weapon actually lowers health, larger when one shot hits several targets. "
+      "None for zero damage, collisions, self hits or AI shots. Single player only." },
     { "Marker Duration", "Display", "HitMarkerDuration", nullptr, 0,
       kShimHitDurations, kShimHitDurationLabels, 4, 1, ShimSettingApplyGroup::HudFeedback,
       "How long confirmed-hit ticks remain visible before fading. Applies live." },
@@ -254,7 +256,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Pilot title/value color. Default preserves the selected Stock/Legacy palette. Independent of scrap color." },
     { "Base Palette", "Display", "HudColorPreset", nullptr, 0,
       kShimPalettePresets, kShimPalettePresetLabels, 3, 0, ShimSettingApplyGroup::HudPalette,
-      "Base colors for Default rows: Stock, Classic or High Contrast. Explicit color choices stay independent. Scrap/pilot and reticle settings are separate." },
+      "Base colors for Default rows. Classic: green/amber/red health, blue ammo. High Contrast: "
+      "cyan/amber/magenta health, white ammo, darker radar. Explicit colors stay independent." },
     { "Radar Backdrop", "Display", "RadarBackgroundOpacity", nullptr, 0,
       kShimBackgroundOpacity, kShimBackgroundOpacity, 6, 0, ShimSettingApplyGroup::HudPalette,
       "Radar backdrop opacity (percent). Default follows the base palette. Terrain lines and contacts remain visible independently." },
@@ -342,8 +345,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "HD Terrain Tiles", "Terrain", "TerrainHdEnabled", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
-      "Full-resolution authored terrain tiles, with optional normal/specular maps. "
-      "Requires a compatible pack and DX11 Enhanced; other profiles keep the original atlas. Restart required." },
+      "Full-resolution authored terrain tiles, with optional normal/specular maps, from a compatible "
+      "pack. DX11 Enhanced only; other profiles keep the original atlas. Restart required." },
     { "Terrain Micro Detail", "Terrain", "TerrainMicroRelief", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
@@ -364,7 +367,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Attack Alert", "Display", "UnderAttackAlert", nullptr, 0,
       kShimSettingsUnderAttackValues, kShimSettingsUnderAttackValues, 3, 0,
       ShimSettingApplyGroup::UnderAttackAlert,
-      "Under-attack warning style: Normal, Minimal (quieter), or None." },
+      "How often the under-attack growl can play: Normal (once a second at most), Minimal "
+      "(once every 10 seconds at most) or None (never)." },
     { "Hop-Out Alert Fix", "General", "SuppressHopOutAttackAlert", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::LiveEngineToggle,
@@ -373,7 +377,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsTargetPolicyAltKeys, 1,
       kShimSettingsTargetPolicyValues, kShimSettingsTargetPolicyLabels, 3, 0,
       ShimSettingApplyGroup::TargetReticle,
-      "When the reticle target popup appears: always, neutral objects only, or explicit targets only." },
+      "Stock pops up target info on anything you recently hit. Suppress Neutral stops that on neutral "
+      "objects; Suppress All stops it everywhere, so it shows only for a target you select." },
     { "Scrap/Pilot HUD", "Display", "ScrapPilotHud", nullptr, 0,
       kShimSettingsScrapHudValues, kShimSettingsScrapHudValues, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -428,11 +433,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Fast Menu Transitions", "General", "FastMenuTransitions", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Instant Action, Multiplayer and Custom Campaigns open and close without reloading every material; content loads once, before the mission or in the multiplayer game room. Restart required." },
+      "Instant Action, Multiplayer and Custom Campaigns open and close without reloading every "
+      "material; content loads once, before the mission or in the game room. Restart required." },
     { "Sound Channels", "General", "SoundChannels", nullptr, 0,
       kShimSettingsSoundChannelValues, kShimSettingsSoundChannelLabels, 5, 4,
       ShimSettingApplyGroup::RestartRequired,
-      "Simultaneous sound objects. Stock leaves the engine limit alone; 256 is the ceiling. Restart required." },
+      "Voices that can play at once; Stock keeps Redux's 64. The 100-sound limit is "
+      "separately raised to 512, whatever this is set to. Restart required." },
     { "Background Music", "General", "MusicGlobalFocus", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -490,11 +497,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Muzzle Flashes", "SinglePlayer", "MuzzleFlash", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Enable authored weapon ODF mesh flashes and muzzle render effects (smoke/light). Requires mod assets and ODF configuration; no generic fallback. Experimental GOG single-player cannons. Restart required." },
+      "Authored muzzle flash meshes and smoke/light effects from weapon ODFs. Needs mod assets and "
+      "ODF setup; no generic fallback. Experimental GOG single-player cannons. Restart required." },
     { "Muzzle Recoil", "SinglePlayer", "MeshRecoil", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Enable authored craft ODF barrel-node or animation recoil. Requires model nodes/clips and ODF configuration; no generic fallback. Clips need EXU. Experimental GOG single-player cannons. Restart required." },
+      "Authored barrel-node or animation recoil from craft ODFs. Needs model nodes/clips and ODF "
+      "setup; clips need EXU. Experimental GOG single-player cannons. Restart required." },
     // Absent key = off, so defaultIndex 1 selects "0" (Off).
     { "Shell Casings", "General", "ShellCasings", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
@@ -510,9 +519,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "GPU Skinning", "Experimental", "GpuSkinning", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::ReadOnNextUse,
-      "DX11 only: animate craft on the GPU instead of the CPU, which "
-      "frees CPU time with many craft on screen. Edges may differ from stock by a "
-      "fraction of a pixel. Takes effect on the next mission load." },
+      "DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many "
+      "craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission." },
     { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
       kShimSettingsReticleConvAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -521,9 +529,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Reticle Range", "SinglePlayer", "SmartReticleRange", nullptr, 0,
       kShimSettingsReticleRangeValues, kShimSettingsReticleRangeLabels, 4, 3,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Smart-reticle targeting distance; Stock is Redux's 200. OpenShim's own "
-      "value is single-player only. A mission that calls EXU SetReticleRange "
-      "(BZP, Reloaded) is honored in network games too." },
+      "Smart-reticle targeting distance; Stock is Redux's 200. This value is single player "
+      "only; a mission calling EXU SetReticleRange (BZP, Reloaded) also sets it online." },
     { "Smart Scavengers", "SinglePlayer", "SmartScavengerPathing",
       kShimSettingsScavengerAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -555,8 +562,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "AI Howitzer Volley", "SinglePlayer", "AiWeaponMaskArtillery", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Artillery AI fires every fitted hardpoint as one volley instead of the first. "
-      "A stock howitzer fires four rounds per cycle. Single player only." },
+      "Artillery AI fires every hardpoint its weaponMask names as one volley instead of the "
+      "first. A stock howitzer fires four rounds per cycle. Single player only." },
     { "AI Mine Volley", "SinglePlayer", "AiWeaponMaskMinelayer", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -569,7 +576,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "A built class gets every producer that can make it, not just the first one found. "
       "Single player only." },
-    { "Neutral Attack Orders", "Gameplay", "AllowNeutralAttackOrders", nullptr, 0,
+    { "Attack Neutrals", "Gameplay", "AllowNeutralAttackOrders", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
       "Allow explicit player attack orders against team-0 neutral objects. "
@@ -581,19 +588,20 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Satellite Fog Of War", "SinglePlayer", "SatelliteVisibilityFix", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::LiveEngineToggle,
-      "Restore the BZ 1.5 satellite gate so unilluminated enemies stay hidden. Single player only." },
+      "In satellite view, hide enemies your team has not lit up, as BZ 1.5 did. Also applies "
+      "online, where you then see less than players without it." },
     { "Player Headlight", "SinglePlayer", "Headlights", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::Headlights,
-      "Headlight on your vehicle. Single player only." },
+      "Headlight on your vehicle." },
     { "Headlight Brightness", "SinglePlayer", "HeadlightBrightness", nullptr, 0,
       kShimSettingsHeadlightBrightnessValues, kShimSettingsHeadlightBrightnessLabels, 5, 2,
       ShimSettingApplyGroup::Headlights,
-      "Player-vehicle headlight intensity relative to stock. Applies live; single player only." },
+      "Player-vehicle headlight intensity relative to stock. Applies live." },
     { "AI Headlights", "SinglePlayer", "OtherHeadlights", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::Headlights,
-      "AI vehicles run headlights too. Single player only." },
+      "AI vehicles run headlights too." },
     { "Headlight Color", "SinglePlayer", "HeadlightColor", nullptr, 0,
       kShimSettingsHeadlightColorValues, kShimSettingsHeadlightColorValues, 12, 0,
       ShimSettingApplyGroup::Headlights,
@@ -610,7 +618,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Pilot Flashlight", "SinglePlayer", "PilotFlashlight", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::PilotFlashlight,
-      "Flashlight on your pilot while on foot. Single player only." },
+      "Flashlight on your pilot while on foot." },
     { "Pilot Light Color", "SinglePlayer", "PilotFlashlightColor", nullptr, 0,
       kShimSettingsHeadlightColorValues, kShimSettingsHeadlightColorValues, 12, 0,
       ShimSettingApplyGroup::PilotFlashlight,
@@ -693,14 +701,14 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Net Route", "Network", "RoutePreference", nullptr, 0,
       kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
       ShimSettingApplyGroup::BzrNetRoute,
-      "Preferred peer path: try LAN then direct WAN, or force the BZRNet relay. "
-      "Does not add LAN or direct-IP hosting." },
+      "Peer path: Stock leaves Redux's choice; Prefer Direct tries LAN, then direct WAN, then "
+      "the relay; Force Relay always uses BZRNet. Does not add LAN or direct-IP hosting." },
     // Parsed once at startup (0 = Winsock picks an ephemeral port); a hand-set port shows as Custom.
     { "UDP Port", "Network", "UdpPort", nullptr, 0,
       kShimSettingsUdpPortValues, kShimSettingsUdpPortLabels, 5, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Fixed local UDP port for multiplayer peer traffic, for hosts who forward a port on their router. "
-      "Automatic lets Windows choose. Any other port can be set in openshim.ini. Restart required." },
+      "Fixed local UDP port for multiplayer peer traffic, for hosts who forward a router port. "
+      "Automatic lets Windows choose; set others in openshim.ini. Restart required." },
     { "Net Improvements", "Network", "NetImprovements", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -731,9 +739,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Persistent Mutes", "Network", "PersistentPlayerMute", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::ReadOnNextUse,
-      "Remember muted players across sessions, by stable identity, so a rename "
-      "or reconnect does not undo it. Off is stock: the mute lasts the session. "
-      "Local only; /mute works either way and your mute list is kept." },
+      "Remember muted players across sessions by stable identity, so a rename or reconnect "
+      "does not undo it. Off is stock: mutes last the session; your list is kept." },
     { "Lobby Readouts", "Network", "LobbyReadouts", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -744,17 +751,14 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Live Nickname", "Network", "ReauthOnNicknameChange", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::ReadOnNextUse,
-      "Experimental: recycle the lounge BZRNet connection after a nickname "
-      "edit so stock reconnects and authorizes the new name. Expect a brief "
-      "lounge drop / possible Not Ready flicker. In-match remains persist-only." },
+      "Experimental: after a nickname edit, reconnect the lounge so the new name is "
+      "authorized. Expect a brief drop or Not Ready flicker. In a match it is only saved." },
     // defaultIndex 0 selects "1", matching an absent key (default on).
     { "MP Setup Screen", "Network", "PreLobby", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::ReadOnNextUse,
-      "Multiplayer opens a setup screen first (nickname, flag, matchmaking "
-      "server: Rebellion, Custom or Local) instead of going straight to the lobby. "
-      "While on, the nickname and flag pickers move to that screen and are "
-      "no longer built in the lobby. Read when Multiplayer is clicked." },
+      "Multiplayer opens a setup screen first (nickname, flag, server: Rebellion, Custom or "
+      "Local); those pickers leave the lobby. Read when Multiplayer is clicked." },
     // defaultIndex 0 selects "1", matching an absent key (default on).
     { "Auto-Install Updates", "Updater", "AutoStage", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,

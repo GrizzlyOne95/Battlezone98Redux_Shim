@@ -109,6 +109,11 @@ namespace BZROpenShim
             // Custom planets only; a .pvi sidecar opts into time-based loop
             // points and screen-owned intro audio. Stock planet calls stay stock.
             { 0, HookEngine::PatchType::REL32, {}, "Custom Planet Video Playback", false, {} },
+            // The map-description loader has a 2400-byte stack array and
+            // appends a NUL after copying. Clamp to 2399, not 2400: the stock
+            // limit triggers its range-check failure for any larger .des.
+            // One guarded write changes both the comparison and assignment.
+            { 0, HookEngine::PatchType::BYTES, { 0x81, 0xBD, 0x54, 0xF6, 0xFF, 0xFF, 0x5F, 0x09, 0x00, 0x00, 0x76, 0x0A, 0xC7, 0x85, 0x54, 0xF6, 0xFF, 0xFF, 0x5F, 0x09, 0x00, 0x00 }, "Map Description Bounds Guard", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Map Sorting", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "GameObject Handle Stale Slot Guard", false, {} },
             // ODF legacy-section compatibility (odf_item_hooks.cpp): JMP5
