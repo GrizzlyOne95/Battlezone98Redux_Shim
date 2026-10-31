@@ -6,6 +6,11 @@ project(BzrNetProtocolTests LANGUAGES CXX)
 # suite can be configured, built, and run with plain CMake + CTest:
 #   cmake -S tests -B tests/build && cmake --build tests/build -j && ctest --test-dir tests/build --output-on-failure
 enable_testing()
+add_executable(socket_tunnel_protocol_tests socket_tunnel_protocol_tests.cpp)
+target_include_directories(socket_tunnel_protocol_tests PRIVATE ../include)
+target_compile_features(socket_tunnel_protocol_tests PRIVATE cxx_std_17)
+add_test(NAME socket_tunnel_protocol_tests COMMAND socket_tunnel_protocol_tests)
+
 if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_executable(map_description_bounds_tests map_description_bounds_tests.cpp)
     target_include_directories(map_description_bounds_tests PRIVATE ../include ../third_party)
@@ -41,6 +46,15 @@ target_compile_features(p2p_early_unreliable_policy_tests PRIVATE cxx_std_14)
 add_test(NAME p2p_early_unreliable_policy_tests COMMAND p2p_early_unreliable_policy_tests)
 
 if(WIN32)
+    add_executable(socket_tunnel_config_tests socket_tunnel_config_tests.cpp
+        ../src/patches/socket_tunnel.cpp ../src/patches/socket_tunnel_client.cpp)
+    target_include_directories(socket_tunnel_config_tests PRIVATE ../include)
+    target_compile_features(socket_tunnel_config_tests PRIVATE cxx_std_17)
+    target_link_libraries(socket_tunnel_config_tests PRIVATE ws2_32)
+    foreach(mode disabled steam invalid startup)
+        add_test(NAME socket_tunnel_config_${mode} COMMAND socket_tunnel_config_tests ${mode})
+    endforeach()
+    set_tests_properties(socket_tunnel_config_startup PROPERTIES RESOURCE_LOCK socket_tunnel_ports)
     add_executable(iat_patch_tests iat_patch_tests.cpp)
     target_include_directories(iat_patch_tests PRIVATE ../include)
     target_compile_features(iat_patch_tests PRIVATE cxx_std_17)

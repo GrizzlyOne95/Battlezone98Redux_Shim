@@ -8,6 +8,7 @@
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
 #include "net_optimizer.h"
+#include "socket_tunnel.h"
 #include "patcher.h"
 #include "shim_log.h"
 
@@ -590,13 +591,13 @@ namespace BZROpenShim
 
         static void ApplyBzrNetRoutePreference()
         {
-            if (g_BzrNetRoutePreference == BzrNetRoutePreference::Stock)
+            if (!SocketTunnel::Requested() && g_BzrNetRoutePreference == BzrNetRoutePreference::Stock)
                 return;
             if (!VerifyBzrNetGlobals())
                 return;
 
             const uint32_t value =
-                (g_BzrNetRoutePreference == BzrNetRoutePreference::Relay) ? 1u : 0u;
+                (SocketTunnel::Requested() || g_BzrNetRoutePreference == BzrNetRoutePreference::Relay) ? 1u : 0u;
             __try
             {
                 *reinterpret_cast<volatile uint32_t*>(g_BzrNetForceRelayFlagAddr) = value;
@@ -689,6 +690,17 @@ namespace BZROpenShim
     }
 
     using namespace Hooks;
+
+    bool EnsureBzrNetTunnelRelay()
+    {
+        if (!VerifyBzrNetGlobals()) return false;
+        __try
+        {
+            *reinterpret_cast<volatile uint32_t*>(g_BzrNetForceRelayFlagAddr) = 1;
+            return *reinterpret_cast<volatile uint32_t*>(g_BzrNetForceRelayFlagAddr) == 1;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
 
     // The stock readiness gate (0x00764870, int __cdecl(void)): the Steam or
     // Galaxy identity is up and the BZRNet client is authorised. -1 when the
