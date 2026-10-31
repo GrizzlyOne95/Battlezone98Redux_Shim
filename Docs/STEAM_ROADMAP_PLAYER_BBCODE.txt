@@ -49,7 +49,7 @@ These are known problems we are still tracking down. Detailed reports and log fi
 
 Not part of the release, and may never be: DLSS frame generation and ray-traced shadows, terrain tessellation, and fog that swirls around passing hovercraft.
 
-A Steam tunnel for home-hosted multiplayer is in development. The local tunnel prototype passes socket and synthetic lobby checks; Steam transport and in-game matches are still untested. It is not ready for players.
+A Steam tunnel for home-hosted multiplayer is in development. The local tunnel passes socket and synthetic lobby checks, and the Steam transport is implemented. Live Steam initialization and two-account matches still need testing. It is not ready for players.
 
 [h2]Install and Update[/h2]
 
@@ -76,3 +76,5 @@ A Steam tunnel for home-hosted multiplayer is in development. The local tunnel p
 Post in this discussion or open an issue on [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/issues]GitHub[/url]. Say what you were doing, and attach the files from the [b]logs[/b] folder in your game folder, especially [b]openshim_crash.log[/b] if there is one.
 
 The full technical roadmap, with test evidence for every item, is on [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/blob/main/Docs/STEAM_ROADMAP_BBCODE.txt]GitHub[/url].
+
+[quote]Steam tunnel review (2026-10-29): opt-in M1/M2 remain development previews. Review fixes bound local startup waiting and explain missing/uninitialized Steam-session failures. All 162 Win32 CTests pass. Native GOG reports an uninitialized Steam API; a fresh standalone Steam init failed. Remote SDR without publisher configuration and host-account coexistence remain UNKNOWN. Steam transport identity is not bound to the lobby user ID. Two-account gameplay and Proton/Wine acceptance are still required; no release.[/quote]

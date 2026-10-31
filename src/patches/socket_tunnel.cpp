@@ -1,11 +1,16 @@
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #define FD_SETSIZE 1024
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
 #include "socket_tunnel.h"
 #include "socket_tunnel_protocol.h"
+#include "steam_tunnel_transport.h"
 #include <algorithm>
 #include <cstdio>
 #include <map>
@@ -79,6 +84,9 @@ namespace
         sockaddr_in address{};
         std::string sourceIp;
         bool connected = false, failed = false;
+        uint32_t connection = 0;
+        bool pendingNative = false;
+        Frame nativeFrame;
         ReliableQueue reliable;
         std::map<uint32_t, Stream> streams;
         std::map<uint16_t, UdpSource> udp;
@@ -92,6 +100,9 @@ namespace
         std::map<uint64_t, Peer> peers;
         std::set<uint16_t> localSources;
         std::vector<uint32_t> allowed;
+        std::unique_ptr<SteamTransport> steam;
+        SteamIdentityMap identityMap;
+        HANDLE identityLock = INVALID_HANDLE_VALUE;
         uint32_t nextStream = 1;
         uint64_t tx = 0, rx = 0, retries = 0, drops = 0;
         explicit Runtime(const Config& c, Logger l) : cfg(c), logger(l) {}
@@ -107,27 +118,83 @@ namespace
             Peer p; p.session = NewSession(); p.address = Address(cfg.remote, cfg.port); p.seen = now;
             peers.emplace(p.session, std::move(p));
         }
-        void Start(uint64_t now)
+        static std::wstring Wide(const std::string& text)
+        {
+            const int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.c_str(), -1, nullptr, 0);
+            if (!n) throw std::runtime_error("identity-map path is not UTF-8");
+            std::wstring result(size_t(n), 0);
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.c_str(), -1, result.data(), n);
+            result.resize(size_t(n - 1)); return result;
+        }
+        void LoadIdentities()
+        {
+            if (cfg.identityMap.empty()) throw std::runtime_error("Steam bridge requires an identity-map path");
+            const auto path = Wide(cfg.identityMap);
+            identityLock = CreateFileW((path + L".lock").c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (identityLock == INVALID_HANDLE_VALUE) throw std::runtime_error("identity-map lock unavailable (directory missing or another bridge running)");
+            HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+            {
+                if (GetLastError() == ERROR_FILE_NOT_FOUND) return;
+                throw std::runtime_error("cannot read Steam identity map");
+            }
+            LARGE_INTEGER size{}; DWORD read = 0;
+            const bool sized = GetFileSizeEx(file, &size) && size.QuadPart <= 16384;
+            std::string text(sized ? size_t(size.QuadPart) : 0, 0);
+            const bool ok = sized && ReadFile(file, text.data(), DWORD(text.size()), &read, nullptr) && read == text.size();
+            CloseHandle(file);
+            if (!ok || !identityMap.Load(text)) throw std::runtime_error("invalid Steam identity map; preserve/repair it before retrying");
+            for (const auto& entry : identityMap.slots)
+                if (SteamIdentityMap::Ip(entry.second) == cfg.server) throw std::runtime_error("identity-map address conflicts with server address");
+        }
+        std::string SteamSource(uint64_t id)
+        {
+            if (auto slot = identityMap.Find(id)) return SteamIdentityMap::Ip(slot);
+            auto updated = identityMap;
+            const auto slot = updated.Assign(id, cfg.server);
+            if (!slot) throw std::runtime_error("Steam identity map exhausted; new peer refused");
+            const auto text = updated.Save(), pathText = cfg.identityMap;
+            const auto path = Wide(pathText), temporary = path + L".tmp";
+            HANDLE file = CreateFileW(temporary.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE) throw std::runtime_error("cannot write Steam identity map");
+            DWORD written = 0;
+            const bool ok = WriteFile(file, text.data(), DWORD(text.size()), &written, nullptr) && written == text.size() && FlushFileBuffers(file);
+            CloseHandle(file);
+            if (!ok || !MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                throw std::runtime_error("cannot persist Steam peer identity; peer refused");
+            identityMap = std::move(updated);
+            return SteamIdentityMap::Ip(slot);
+        }
+        void Start(uint64_t now, std::atomic<bool>& stop)
         {
             if (!cfg.bridge && cfg.listen != "127.0.0.1") throw std::runtime_error("agent must bind 127.0.0.1");
             if (cfg.bridge && !IsLoopback(cfg.server)) throw std::runtime_error("bridge server must be loopback");
-            size_t start = 0;
-            do
+            if (cfg.steam)
             {
-                const auto comma = cfg.allow.find(',', start);
-                allowed.push_back(Address(cfg.allow.substr(start, comma - start), 0).sin_addr.s_addr);
-                if (comma == std::string::npos) break;
-                start = comma + 1;
-            } while (allowed.size() <= 8);
-            if (allowed.size() > 8) throw std::runtime_error("at most eight allowed client addresses");
-            Address(cfg.remote, 0);
-            wire = Bound(SOCK_DGRAM, cfg.listen, cfg.bridge ? cfg.port : 0);
+                if (cfg.bridge) LoadIdentities();
+                steam.reset(new SteamTransport);
+                steam->Start(cfg, stop, logger);
+            }
+            else
+            {
+                size_t start = 0;
+                do
+                {
+                    const auto comma = cfg.allow.find(',', start);
+                    allowed.push_back(Address(cfg.allow.substr(start, comma - start), 0).sin_addr.s_addr);
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                } while (allowed.size() <= 8);
+                if (allowed.size() > 8) throw std::runtime_error("at most eight allowed client addresses");
+                Address(cfg.remote, 0);
+                wire = Bound(SOCK_DGRAM, cfg.listen, cfg.bridge ? cfg.port : 0);
+            }
             if (!cfg.bridge)
             {
                 listener = Bound(SOCK_STREAM, cfg.listen, 1337);
                 if (listen(listener.s, 8)) throw std::runtime_error("listen failed");
                 for (uint16_t port = 1338; port <= 1369; ++port) ports.emplace(port, Bound(SOCK_DGRAM, cfg.listen, port));
-                NewClient(now);
+                if (!cfg.steam) NewClient(now);
             }
             Log(cfg.bridge ? "bridge ready (TCP 1337 / UDP 1338-1369 only)" : "agent ready on 127.0.0.1 (TCP 1337 / UDP 1338-1369)");
         }
@@ -135,6 +202,14 @@ namespace
         {
             f.session = p.session;
             auto b = Encode(f);
+            if (steam)
+            {
+                const bool reliable = Reliable(f.kind) || f.kind == Kind::Hello || f.kind == Kind::Welcome;
+                const auto sent = steam->Send(p.connection, b, reliable);
+                if (sent == SteamSend::Sent) tx += b.size();
+                else { ++drops; if (reliable || sent == SteamSend::Failed) p.failed = true; }
+                return;
+            }
             const int n = sendto(wire.s, reinterpret_cast<const char*>(b.data()), int(b.size()), 0,
                                  reinterpret_cast<const sockaddr*>(&p.address), sizeof(p.address));
             if (n >= 0) tx += uint64_t(n); else ++drops;
@@ -214,6 +289,7 @@ namespace
         }
         void Receive(uint64_t now)
         {
+            if (steam) { ReceiveSteam(now); return; }
             uint8_t bytes[65536];
             for (unsigned count = 0; count < 256; ++count)
             {
@@ -242,6 +318,71 @@ namespace
                     { if (f.sequence == q.received + 1 && Deliver(*p, f, now)) q.received = f.sequence; }
                     catch (const std::exception&) { p->failed = true; }
                     if (f.sequence <= q.received) Send(*p, Frame{Kind::Ack, 0, f.sequence});
+                }
+            }
+        }
+        void ReceiveSteam(uint64_t now)
+        {
+            for (const auto& event : steam->Poll(now))
+            {
+                const auto key = uint64_t(event.connection);
+                if (!event.connected) { peers.erase(key); if (!cfg.bridge) localSources.clear(); continue; }
+                Peer p; p.connection = event.connection; p.seen = now;
+                if (!cfg.bridge)
+                {
+                    peers.clear(); localSources.clear();
+                    p.session = NewSession();
+                }
+                else
+                {
+                    try { p.sourceIp = SteamSource(event.identity); }
+                    catch (const std::exception& error) { Log(error.what()); steam->Close(event.connection); continue; }
+                    char message[160]; std::snprintf(message, sizeof(message), "Steam peer=%llu source=%s (persistent)",
+                        static_cast<unsigned long long>(event.identity), p.sourceIp.c_str()); Log(message);
+                }
+                peers.emplace(key, std::move(p));
+                if (!cfg.bridge) Send(peers.at(key), Frame{Kind::Hello});
+            }
+            for (auto& entry : peers)
+            {
+                auto& p = entry.second;
+                for (unsigned count = 0; count < 32 && !p.failed; ++count)
+                {
+                    Frame frame;
+                    if (p.pendingNative) { frame = std::move(p.nativeFrame); p.pendingNative = false; }
+                    else
+                    {
+                        std::vector<uint8_t> bytes; bool reliable = false;
+                        const int n = steam->Receive(p.connection, bytes, reliable);
+                        if (!n) break;
+                        if (n < 0 || !Decode(bytes.data(), bytes.size(), frame) ||
+                            reliable != (Reliable(frame.kind) || frame.kind == Kind::Hello || frame.kind == Kind::Welcome))
+                        { p.failed = true; break; }
+                        rx += bytes.size();
+                        p.seen = now;
+                    }
+                    if (cfg.bridge && !p.session && frame.kind == Kind::Hello) p.session = frame.session;
+                    if (!p.session || frame.session != p.session) { ++drops; continue; }
+                    if (cfg.bridge && frame.kind == Kind::Hello)
+                    { p.connected = true; Send(p, Frame{Kind::Welcome}); }
+                    else if (!cfg.bridge && frame.kind == Kind::Welcome)
+                    { if (!p.connected) Log("Steam tunnel handshake complete"); p.connected = true; }
+                    else if (frame.kind == Kind::Datagram && p.connected)
+                    {
+                        try { Datagram(p, frame); } catch (const std::exception&) { p.failed = true; }
+                    }
+                    else if (Reliable(frame.kind) && p.connected)
+                    {
+                        if (frame.sequence != p.reliable.received + 1) { p.failed = true; break; }
+                        try
+                        {
+                            if (!Deliver(p, frame, now))
+                            { p.nativeFrame = std::move(frame); p.pendingNative = true; break; }
+                            p.reliable.received = frame.sequence;
+                        }
+                        catch (const std::exception&) { p.failed = true; }
+                    }
+                    else if (frame.kind != Kind::Ping) { p.failed = true; break; }
                 }
             }
         }
@@ -344,9 +485,10 @@ namespace
                 if (p.failed || now - p.seen > kIdleMs || p.reliable.Expired(now))
                 {
                     Log("peer timeout: closing TCP streams and releasing UDP sockets");
+                    if (steam) steam->Close(p.connection);
                     it = peers.erase(it); continue;
                 }
-                if (now - p.ping >= 1000)
+                if (now - p.ping >= 1000 && (!steam || p.session))
                 {
                     Send(p, Frame{p.connected ? Kind::Ping : Kind::Hello}); p.ping = now;
                 }
@@ -356,18 +498,36 @@ namespace
                 {
                     PumpStreams(p, now); PumpUdp(p);
                     auto& q = p.reliable;
-                    if (q.Due(now)) { if (q.sentAt) ++retries; Send(p, q.pending.front()); q.Sent(now); }
+                    if (steam)
+                    {
+                        // Steam owns reliability and ordering: consume a frame
+                        // on successful SDK submission, never on our UDP ACKs.
+                        for (unsigned count = 0; count < 32 && !q.pending.empty(); ++count)
+                        {
+                            const auto bytes = Encode(q.pending.front());
+                            const auto sent = steam->Send(p.connection, bytes, true);
+                            if (sent == SteamSend::Busy) { if (!q.startedAt) q.startedAt = now; break; }
+                            if (sent == SteamSend::Failed) { p.failed = true; break; }
+                            tx += bytes.size(); q.Ack(q.pending.front().sequence);
+                        }
+                    }
+                    else if (q.Due(now)) { if (q.sentAt) ++retries; Send(p, q.pending.front()); q.Sent(now); }
                 }
                 ++it;
             }
-            if (!cfg.bridge && peers.empty()) NewClient(now);
+            if (!cfg.bridge && peers.empty() && !steam) NewClient(now);
+            if (!cfg.bridge && peers.empty() && steam)
+            {
+                // Refuse game streams while Steam reconnects; drain stale UDP.
+                Peer offline; Accept(offline, now); PumpUdp(offline);
+            }
         }
         void Wait()
         {
             // Socket readiness wakes immediately. Sleep(1) rounds up to a
             // Windows timer tick and adds tens of ms across four tunnel hops.
             fd_set read, write, error; FD_ZERO(&read); FD_ZERO(&write); FD_ZERO(&error);
-            FD_SET(wire.s, &read);
+            if (wire.s != INVALID_SOCKET) FD_SET(wire.s, &read);
             if (!cfg.bridge) FD_SET(listener.s, &read);
             for (auto& port : ports) FD_SET(port.second.s, &read);
             for (auto& entry : peers)
@@ -384,10 +544,13 @@ namespace
                 }
             }
             timeval timeout{0, 5000};
-            select(0, &read, &write, &error, &timeout);
+            if (read.fd_count || write.fd_count || error.fd_count) select(0, &read, &write, &error, &timeout);
+            else Sleep(5);
         }
         ~Runtime()
         {
+            steam.reset(); // stop callbacks/connections before peer state and WSA cleanup
+            if (identityLock != INVALID_HANDLE_VALUE) CloseHandle(identityLock);
             char message[200]; std::snprintf(message, sizeof(message), "tunnel stopped: wire tx=%llu rx=%llu retransmits=%llu drops=%llu",
                 static_cast<unsigned long long>(tx), static_cast<unsigned long long>(rx),
                 static_cast<unsigned long long>(retries), static_cast<unsigned long long>(drops)); Log(message);
@@ -418,9 +581,9 @@ namespace
         int result = 0;
         try
         {
-            if (cfg.bridge && !IsLoopback(cfg.listen) && logger)
+            if (cfg.bridge && !cfg.steam && !IsLoopback(cfg.listen) && logger)
                 logger("WARNING: plain-UDP bridge is listening beyond loopback WITHOUT authentication or encryption; trusted private test networks only; never port-forward it");
-            Runtime runtime(cfg, logger); runtime.Start(GetTickCount64()); ready = 1;
+            Runtime runtime(cfg, logger); runtime.Start(GetTickCount64(), stop); ready = 1;
             while (!stop.load()) { runtime.Tick(GetTickCount64()); runtime.Wait(); }
         }
         catch (const std::exception& error) { if (logger) logger(error.what()); ready = -1; result = 2; }

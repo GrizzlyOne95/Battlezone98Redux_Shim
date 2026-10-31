@@ -4136,6 +4136,13 @@ namespace
             }
             ReleaseSRWLockShared(&g_WithholdLock);
         }
+        if (result && SocketTunnel::Requested())
+        {
+            // Separate tunnel hosts must not receive the same per-server key
+            // merely because their physical local endpoint is 127.0.0.1.
+            endpoint = SocketTunnel::CommunityEndpoint();
+            official = endpoint.empty();
+        }
         AcquireSRWLockExclusive(&g_EffectiveEndpointLock);
         g_EffectiveEndpoint = endpoint;
         g_EffectiveEndpointOfficial = official;

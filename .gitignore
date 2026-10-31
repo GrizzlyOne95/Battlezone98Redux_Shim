@@ -102,6 +102,7 @@ ref/
 # default; ignore generated output by specific directory instead of whitelists.
 # ---------------------------------------------------------------------------
 third_party/ogre-1.10.0-bzr/_work/
+third_party/steam-networking/
 tmp/dx11-hardening-fxc/
 
 # ---------------------------------------------------------------------------
