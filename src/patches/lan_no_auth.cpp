@@ -95,10 +95,18 @@ void SelectEndpoint(const char* endpoint, bool lanSelection)
     char redirect[256]{};
     const bool valid = want && endpoint && PrivateEndpoint(endpoint,canonical) &&
         !GetMatchmakingRedirectTarget(redirect,sizeof(redirect));
+    bool changed;
     selected = false;
-    { std::lock_guard<std::mutex> lock(selectionLock); selectedEndpoint=valid ? canonical : ""; }
+    {
+        std::lock_guard<std::mutex> lock(selectionLock);
+        const std::string next=valid ? canonical : "";
+        changed=next!=selectedEndpoint || want!=requested.load();
+        selectedEndpoint=next;
+    }
     requested=want; selected=valid;
-    generation.fetch_add(1);
+    // Re-selecting the same host (Start local host after a saved LAN boot)
+    // must not start a second connection beside the pending stock retry.
+    if (changed) generation.fetch_add(1);
     if (want) Log(L"[LAN-NOAUTH] selection %hs; platform credentials unchanged\n",valid ? canonical.c_str() : "blocked: private numeric LAN address required, with no test redirect");
 }
 bool Ready() { return EffectiveSelection() && ReadNativeReady(); }
