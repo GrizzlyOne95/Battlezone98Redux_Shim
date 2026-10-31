@@ -646,16 +646,15 @@ namespace BZROpenShim
             // Deliberately NOT gated on EXU. The EXU stand-down on stock
             // headlights exists because both write the same engine-owned light;
             // this light is created by the shim, belongs to no ODF or campaign
-            // script, and nothing else can touch it.
-            const bool wantActive =
-                g_PilotFlashlightEnabled && ReadLocalPlayerNetIdValue() == 0;
+            // script, and nothing else can touch it. Not gated on multiplayer
+            // either: it is a local Ogre light and no peer can see it.
+            const bool wantActive = g_PilotFlashlightEnabled;
             if (!wantActive)
             {
                 if (g_PilotFlashlightRuntimeActive || g_PilotFlashlightLight)
                 {
                     RetirePilotFlashlight(L"feature inactive");
-                    Log(L"[PILOTLIGHT] Stood down (%hs)\n",
-                        g_PilotFlashlightEnabled ? "multiplayer" : "disabled");
+                    Log(L"[PILOTLIGHT] Stood down (disabled)\n");
                 }
                 g_PilotFlashlightRuntimeActive = false;
                 g_PilotFlashlightLastRefreshTick = 0;
@@ -666,7 +665,7 @@ namespace BZROpenShim
             {
                 g_PilotFlashlightRuntimeActive = true;
                 g_PilotFlashlightLastRefreshTick = 0;
-                Log(L"[PILOTLIGHT] Pilot flashlight active (SP-only)\n");
+                Log(L"[PILOTLIGHT] Pilot flashlight active\n");
             }
 
             const DWORD now = GetTickCount();
@@ -920,7 +919,7 @@ namespace BZROpenShim
                 g_PilotFlashlightBeamMode == PilotFlashlightBeamMode::Focused ? "focused" :
                 (g_PilotFlashlightBeamMode == PilotFlashlightBeamMode::Wide ? "wide" : "stock");
             Log(L"[PILOTLIGHT] Baseline enabled=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs "
-                L"bone=*%hs offset=(%.3f,%.3f,%.3f) pitch=%.1f (SP-only)\n",
+                L"bone=*%hs offset=(%.3f,%.3f,%.3f) pitch=%.1f\n",
                 g_PilotFlashlightEnabled ? "yes" : "no",
                 g_PilotFlashlightRainbow ? "rainbow" : "fixed",
                 static_cast<double>(g_PilotFlashlightColourR),
