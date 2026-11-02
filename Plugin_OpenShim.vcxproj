@@ -279,6 +279,8 @@
     <ClCompile Include="src\patches\mouse_every_frame.cpp" />
     <ClCompile Include="src\patches\thread_scheduling.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
+    <ClCompile Include="src\patches\socket_tunnel.cpp" />
+    <ClCompile Include="src\patches\socket_tunnel_client.cpp" />
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
     <ClCompile Include="src\patches\odf_compat.cpp" />
     <ClCompile Include="src\patches\map_folder_items.cpp" />
@@ -445,6 +447,8 @@
     <ClInclude Include="include\mouse_every_frame.h" />
     <ClInclude Include="include\thread_scheduling.h" />
     <ClInclude Include="include\net_optimizer.h" />
+    <ClInclude Include="include\socket_tunnel.h" />
+    <ClInclude Include="include\socket_tunnel_protocol.h" />
     <ClInclude Include="include\net_reorder_core.h" />
     <ClInclude Include="include\shim_log.h" />
     <ClInclude Include="include\winmm_proxy.h" />

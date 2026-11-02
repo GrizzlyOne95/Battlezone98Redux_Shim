@@ -1,4 +1,5 @@
 #include "net_optimizer.h"
+#include "socket_tunnel.h"
 #include "bool_token.h"
 #include "netcode_hooks.h"
 #include "bzrnet_protocol.h"
@@ -1041,6 +1042,11 @@ namespace
             Logf("[OpenShimNet] Ignoring MatchmakingRedirectAddress containing a URL/path; use a hostname or IP only");
             g_Config.matchmakingRedirectAddress.clear();
         }
+
+        SocketTunnel::Configure(ReadIniString("OpenShimSocket", "SteamTunnelHost"),
+                                ReadIniString("OpenShimSocket", "TunnelUdpBridge"));
+        if (SocketTunnel::Requested())
+            g_Config.matchmakingRedirectAddress = "127.0.0.1";
 
         if (!g_Config.matchmakingRedirectAddress.empty())
         {
@@ -4119,7 +4125,7 @@ namespace
             endpoint = (ipv6 ? "[" + host + "]" : host) + ":" + std::to_string(port);
 
             official = EqualsHostNoCase(host, kBzrNetMatchmakingHost) ||
-                       (!g_Config.matchmakingRedirectAddress.empty() &&
+                       (!SocketTunnel::Requested() && !g_Config.matchmakingRedirectAddress.empty() &&
                         EqualsHostNoCase(nodeName ? nodeName : "", kBzrNetMatchmakingHost));
             AcquireSRWLockShared(&g_WithholdLock);
             for (const ADDRINFOA* ai = result; ai && !official; ai = ai->ai_next)
@@ -4150,7 +4156,20 @@ namespace
         char overridePortText[8] = {};
         if (nodeName && MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
             ApplyReconnectDelayOnce();
-        if (nodeName &&
+        if (nodeName && SocketTunnel::Requested() && IsBzrNetLookupName(nodeName))
+        {
+            // Wins over environment/test redirects, saved server choices and
+            // /bzrserver=. Bind/route qualification failure never reaches an
+            // unrelated local service or falls back to official matchmaking.
+            if (!SocketTunnel::WaitReady() || !EnsureBzrNetTunnelRelay())
+            {
+                if (result) *result = nullptr;
+                return EAI_FAIL;
+            }
+            resolvedNode = "127.0.0.1";
+            resolvedService = "1337";
+        }
+        else if (nodeName &&
             !g_Config.matchmakingRedirectAddress.empty() &&
             _stricmp(nodeName, kBzrNetMatchmakingHost) == 0)
         {
@@ -5322,7 +5341,7 @@ namespace
             LogShimA(LogLevel::Info, "net", "[OpenShimNet] netcode_manifest.json detected; runtime buffer minimums aligned to manifest profile");
 
         const bool observationOnly = !g_Config.enabled &&
-            (g_Config.enableRelayCapture || g_Config.enableBufferLog);
+            (g_Config.enableRelayCapture || g_Config.enableBufferLog || SocketTunnel::Requested());
         if (!g_Config.enabled && !observationOnly)
         {
             LogShimA(LogLevel::Info, "net", "[OpenShimNet] Socket optimizer disabled by configuration");
@@ -5440,6 +5459,7 @@ namespace
 
     void ShutdownNetworkOptimizer()
     {
+        SocketTunnel::Stop();
         InterlockedExchange(&g_WakeStop, 1);
         InterlockedExchange(&g_DupStop, 1);
         InterlockedExchange(&g_GovStop, 1);

@@ -49,6 +49,8 @@ These are known problems we are still tracking down. Detailed reports and log fi
 
 Not part of the release, and may never be: DLSS frame generation and ray-traced shadows, terrain tessellation, and fog that swirls around passing hovercraft.
 
+A Steam tunnel for home-hosted multiplayer is in development. The local tunnel prototype passes socket and synthetic lobby checks; Steam transport and in-game matches are still untested. It is not ready for players.
+
 [h2]Install and Update[/h2]
 
 [list]
