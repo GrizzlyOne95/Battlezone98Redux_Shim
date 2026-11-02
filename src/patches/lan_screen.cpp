@@ -154,7 +154,6 @@ namespace BZROpenShim
             }
             Shell::AddButton(panel, panel, "OpenShimLAN_Next", {870, 787, 280, 50}, "Next page", skin, 0.75f, 0, &Next);
             Shell::AddLabel(panel, panel, "OpenShimLAN_ManualLabel", {260, 795, 590, 35}, "Join by IP (optional :port):");
-            Shell::AddPanel(panel, panel, "OpenShimLAN_EntryWell", {260, 845, 590, 48}, "optionhv.png");
             Shell::AddButton(panel, panel, "OpenShimLAN_Manual", {870, 840, 280, 60}, "Use address", skin, 0.8f, 0, &ManualJoin);
             Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {260, 905, 920, 40}, LanNoAuth::Enabled() ? "Hosted by this game. No accounts or helper. Stop Host disconnects players." : "Steam/Galaxy sign-in is still required. Stop Host disconnects its players.");
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimLAN_Back", {0, 0, 342, 77}, "Back", Shell::kSkinTopCorner, 1, 28, &Back) != nullptr;
