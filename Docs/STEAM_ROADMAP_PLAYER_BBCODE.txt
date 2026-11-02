@@ -47,6 +47,8 @@ These are known problems we are still tracking down. Detailed reports and log fi
 
 [h2]Experiments[/h2]
 
+Local host tools are in development on separate branches, keeping Official, Custom and Local choices. The older helper preview still needs Steam/Galaxy sign-in. A newer opt-in LAN prototype hosts the session inside the game with local identities and no helper or sign-in. Native GOG lobby entry/game creation and automated protocol checks pass; guest join, completed launch and two-PC matches still need qualification. Neither is included in the release.
+
 Not part of the release, and may never be: DLSS frame generation and ray-traced shadows, terrain tessellation, and fog that swirls around passing hovercraft.
 
 A Steam tunnel for home-hosted multiplayer is in development. The local tunnel passes socket and synthetic lobby checks, and the Steam transport is implemented. Live Steam initialization and two-account matches still need testing. It is not ready for players.
@@ -77,4 +79,5 @@ Post in this discussion or open an issue on [url=https://github.com/GrizzlyOne95
 
 The full technical roadmap, with test evidence for every item, is on [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/blob/main/Docs/STEAM_ROADMAP_BBCODE.txt]GitHub[/url].
 
+[quote]LAN development review (2026-10-29): duplicate Direct LAN mesh PR #644 was closed; its branch is retained for research. Local host tools still require stock platform sign-in. Review fixes bind services to the selected private adapter, prefer the routed adapter and expose startup errors. All 155 Win32 CTests and the real-helper lifecycle check pass; isolated GOG startup reached readiness reporting, but native LAN UI and two-PC gameplay acceptance remain open. Nothing was released.[/quote]
 [quote]Steam tunnel review (2026-10-29): opt-in M1/M2 remain development previews. Review fixes bound local startup waiting and explain missing/uninitialized Steam-session failures. All 162 Win32 CTests pass. Native GOG reports an uninitialized Steam API; a fresh standalone Steam init failed. Remote SDR without publisher configuration and host-account coexistence remain UNKNOWN. Steam transport identity is not bound to the lobby user ID. Two-account gameplay and Proton/Wine acceptance are still required; no release.[/quote]
