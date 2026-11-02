@@ -20,7 +20,7 @@ jobs:
   release-win32:
     name: Release Win32
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Check out repository
