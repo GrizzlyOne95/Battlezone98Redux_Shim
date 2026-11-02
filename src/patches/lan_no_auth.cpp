@@ -35,7 +35,8 @@ namespace
     LobbyFn getLobby=nullptr;
     LocalIdFn getLocal=nullptr;
     using ConnectFn = void(__thiscall*)(void*,void*);
-    ConnectFn connectClient=nullptr;
+    ConnectFn connectClient=nullptr, originalConnect=nullptr;
+    InlineDetour32 connectDetour;
     uintptr_t holderAddress=0,relayAddress=0;
     uint32_t lobbyVtable=0, clientStateOffset=0;
     std::atomic<unsigned> generation{0};
@@ -71,6 +72,25 @@ namespace
     {
         if (Requested()) return !Available();
         return originalEmpty(text);
+    }
+    bool ConnectionLive(void* client)
+    {
+        __try { return *reinterpret_cast<void**>(static_cast<uint8_t*>(client)+0x2E0)!=nullptr; }
+        __except(EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    void __fastcall SingleConnect(void* client,void*,void* error)
+    {
+        // The pump, the close handler (0x6BF0D0) and the retry timer all enter
+        // here. A live active_con (+0x2E0) means another path already
+        // connected: a second connection with the same local id is refused by
+        // the host as a duplicate, and replacing active_con makes the first
+        // one's open handler throw remote_endpoint.
+        if (Requested() && ConnectionLive(client))
+        {
+            Log(L"[LAN-NOAUTH] connection already live; skipped a second connect\n");
+            return;
+        }
+        originalConnect(client,error);
     }
     uint32_t CallTarget(uint32_t site)
     {
@@ -152,7 +172,7 @@ void PumpMainThread()
         // session reconnects at once, state still 0). A second connect replaces
         // active_con, and the first connection's open handler then throws
         // remote_endpoint on the unopened one. The stock path owns the retries.
-        if (*reinterpret_cast<void**>(static_cast<uint8_t*>(client)+0x2E0))
+        if (ConnectionLive(client))
         {
             Log(L"[LAN-NOAUTH] native connection already in flight; leaving it to the stock reconnect\n");
             return;
@@ -211,6 +231,11 @@ void InstallIfPossible(bool authorizationHookReady)
     if (!Hooks::RedirectCallTarget(nameSite,emptySite,reinterpret_cast<uintptr_t>(&LocalCredentialEmpty)) ||
         !Hooks::RedirectCallTarget(ticketSite,emptySite,reinterpret_cast<uintptr_t>(&LocalCredentialEmpty)))
     { Log(L"[LAN-NOAUTH] local identity installation incomplete; LAN unavailable\n"); return; }
+    // push ebp; mov ebp,esp; sub esp,34h; mov [ebp-4],ecx
+    static const uint8_t connectPrologue[]={0x55,0x8B,0xEC,0x83,0xEC,0x34,0x89,0x4D,0xFC};
+    if (!InstallInlineDetour32(connectDetour,connectSite,reinterpret_cast<void*>(&SingleConnect),
+            sizeof(connectPrologue),connectPrologue,sizeof(connectPrologue),reinterpret_cast<void* volatile*>(&originalConnect)))
+        Log(L"[LAN-NOAUTH] single-connect guard not installed; stock retries may duplicate a LAN connection\n");
     installed=true;
     Log(L"[LAN-NOAUTH] local B identity and admission readiness installed; no platform sign-in, helper or fake platform IDs\n");
 }
