@@ -31,6 +31,9 @@ namespace BZROpenShim
     // group, or a native terrain snapshot is requested. Capture/readback and
     // deferred surface installation stay on the game thread.
     void TerrainProxyRenderFrameTick();
+    // Test-only OPENSHIM_FRAME_CAPTURE: registers the per-frame capture
+    // listener once. Main thread, after Ogre Root exists.
+    void InstallFrameCaptureListener();
     // Read-only immediate-context draw evidence. Fails closed if the terrain
     // owner cannot be locked or the actual PS resource differs from our atlas.
     bool TerrainSurfaceNormalBound(ID3D11DeviceContext* context);
