@@ -479,8 +479,8 @@ Map lists. Ganymede: evolve_3, evolve_4, bdmisn01-06, 08, 12-15 and chmisn01-04,
 in `tro_cam.zfs`: extract their hg2, mat and trn files (Modding Toolbox
 `ZFSArchive`) into `TRO_DIR` (default `<out dir>/zfsmaps/tro_cam`) and the build
 takes them as plain map names. The fingerprint comes from the HG2 content, so
-maps that share files (chmisn08 with evolve_3, bdmisn10 with evolve_2) share an
-entry, and the co-op copies (`bdmisnNNcr`, `chmisn0Ncr`) match through the
+maps with identical files (bdmisn10 with evolve_2) share an entry (chmisn08 only
+resembles evolve_3 and gets its own), and the co-op copies (`bdmisnNNcr`, `chmisn0Ncr`) match through the
 stock files they reuse. chmisn07 is a Europa map and `sammy__1` has no HG2;
 neither is covered.
 

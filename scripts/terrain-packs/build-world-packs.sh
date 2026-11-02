@@ -40,7 +40,10 @@ for w in ${@:-moon mars venus io europa titan achilles ganymede elysium}; do
       cmp -s "$(pick hg2)" "$STOCK/$m.hg2" && cmp -s "$(pick mat)" "$STOCK/$m.mat" && continue
     fi
     [ -f "$STOCK/$m.mat" ] && args+=(--map "${m}_stock=$STOCK/$m")
-    [ ! -f "$STOCK/$m.mat" ] && [ -f "$TRO/$m.mat" ] && args+=(--map "$m=$TRO/$m")
+    if [ ! -f "$STOCK/$m.mat" ]; then
+      [ -f "$TRO/$m.mat" ] || { echo "error: $m has no CR, stock or TRO_DIR ($TRO) map files" >&2; exit 1; }
+      args+=(--map "$m=$TRO/$m")
+    fi
   done
   echo "=== $w"
   python scripts/Build-TerrainAutoPaint.py --recipe "scripts/terrain-packs/$w-autopaint.json" --source-root "$ART" \
