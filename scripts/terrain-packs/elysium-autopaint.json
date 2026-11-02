@@ -1,7 +1,7 @@
 {
   "schema": "bzr-openshim-terrain-autopaint-v1",
   "material": "EL_DETAIL_ATLAS",
-  "diffuseResource": "elysium_atlas_d.dds",
+  "diffuseResource": "ELYSIUM_ATLAS_D.dds",
   "typeNames": {
     "0": "Packed Dirt",
     "1": "Rocky Sand",

@@ -3,7 +3,7 @@
   "materials": {
     "EL_DETAIL_ATLAS": {
       "sliceCount": 18,
-      "diffuseResource": "elysium_atlas_d.dds",
+      "diffuseResource": "ELYSIUM_ATLAS_D.dds",
       "fallback": "openshim_elysium_auto_layer0.png",
       "tiles": {
         "0": "openshim_elysium_auto_layer0.png",

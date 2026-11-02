@@ -3,7 +3,7 @@
   "materials": {
     "GA_DETAIL_ATLAS": {
       "sliceCount": 18,
-      "diffuseResource": "ganymede_atlas_d.dds",
+      "diffuseResource": "GANYMEDE_ATLAS_D.dds",
       "fallback": "openshim_ganymede_auto_layer0.png",
       "tiles": {
         "0": "openshim_ganymede_auto_layer0.png",

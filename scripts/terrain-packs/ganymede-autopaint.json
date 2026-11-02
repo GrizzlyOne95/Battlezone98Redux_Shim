@@ -1,7 +1,7 @@
 {
   "schema": "bzr-openshim-terrain-autopaint-v1",
   "material": "GA_DETAIL_ATLAS",
-  "diffuseResource": "ganymede_atlas_d.dds",
+  "diffuseResource": "GANYMEDE_ATLAS_D.dds",
   "typeNames": {
     "0": "Dark rock",
     "1": "light rock",
