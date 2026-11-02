@@ -857,7 +857,7 @@ collect_and_upload() {
     local fresh_dump_count=0
     if [[ -d "$game_dir/logs" ]]; then
         local dump
-        for dump in "$game_dir/logs"/openshim_crash_*.dmp; do
+        for dump in "$game_dir/logs"/openshim_crash_*.dmp "$game_dir/logs"/openshim_crash_*.log; do
             [[ -f "$dump" ]] || continue
             if [[ -n "${start_epoch:-}" ]] && \
                (( $(stat -c %Y "$dump" 2>/dev/null || echo 0) < start_epoch )); then

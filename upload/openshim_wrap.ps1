@@ -469,7 +469,7 @@ function New-BundleAndUpload {
     $hasFreshDump = $false
     if (Test-Path -LiteralPath $logDir) {
         foreach ($dump in (Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue |
-                           Where-Object { $_.Name -like "openshim_crash_*.dmp" })) {
+                           Where-Object { $_.Name -like "openshim_crash_*.dmp" -or $_.Name -like "openshim_crash_*.log" })) {
             if ($dump.LastWriteTimeUtc -lt $SessionStart) {
                 Write-WrapLog "skipping stale $($dump.Name) (predates this session)"
                 continue
