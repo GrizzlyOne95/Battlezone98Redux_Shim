@@ -35,6 +35,7 @@
 //    verified through the exported getter afterwards.
 
 #include "ogre_shader_cache.h"
+#include "shader_source_fingerprint.h"
 #include "shim_log.h"
 #include "ui_file_scan_hooks.h"
 
@@ -133,26 +134,9 @@ namespace BZROpenShim
             return GetGameRootDirectory() / L"shader_cache" / L"ogre_microcode.fp";
         }
 
-        static bool IsShaderSourceExtension(const std::wstring& extLower)
-        {
-            return extLower == L".program" || extLower == L".hlsl" ||
-                   extLower == L".cg" || extLower == L".glsl" ||
-                   extLower == L".glsles" || extLower == L".frag" ||
-                   extLower == L".vert";
-        }
-
-        // FNV-1a over (relative path, size, mtime) of every shader source file
-        // under the mod content roots. Stock shader sources live inside the
-        // game's archives and never change between sessions; mod shaders are
-        // the ones users edit, and stale microcode after an edit would be
-        // silently wrong, so their fingerprint keys the cache file.
-        //
-        // OpenShim's own Enhanced payload is scanned for the same reason and
-        // was missing from this list until 2026-09-20. It is not user content,
-        // but it is redeployed whenever the DLL ships new shaders, and a cache
-        // keyed only on mod content happily served microcode compiled from the
-        // previous payload across that swap -- silently wrong in exactly the
-        // way this fingerprint exists to prevent.
+        // Fingerprint of the mod shader sources (see shader_source_fingerprint.h
+        // for the scanned roots); stale microcode after an edit would be
+        // silently wrong, so it keys the cache file.
         // This scan is suppressed from the generic UiPerf file-scan counters:
         // it is reported separately as [UIPERF][SHADER] cache_init and must not
         // be misclassified as addon/Workshop menu scanning.
@@ -160,62 +144,8 @@ namespace BZROpenShim
         {
             BZROpenShim::UiFileScan::SetSuppress(true);
             struct SuppressReset { ~SuppressReset() { BZROpenShim::UiFileScan::SetSuppress(false); } } _reset;
-            uint64_t hash = 1469598103934665603ull;
-            const auto mix = [&hash](const void* data, size_t size)
-            {
-                const auto* bytes = static_cast<const uint8_t*>(data);
-                for (size_t i = 0; i < size; ++i)
-                {
-                    hash ^= bytes[i];
-                    hash *= 1099511628211ull;
-                }
-            };
-
-            const std::filesystem::path root = GetGameRootDirectory();
-            const std::filesystem::path scanRoots[] =
-            {
-                root / L"mods",
-                root / L"packaged_mods",
-                // Steam install: workshop content sits outside the game root.
-                root / L".." / L".." / L"workshop" / L"content" / L"301650",
-                // OpenShim's own Enhanced shader payload.
-                root / L"openshim" / L"renderer" / L"enhanced",
-            };
-
-            size_t filesSeen = 0;
-            for (const auto& scanRoot : scanRoots)
-            {
-                std::error_code ec;
-                if (!std::filesystem::is_directory(scanRoot, ec))
-                    continue;
-                std::filesystem::recursive_directory_iterator it(
-                    scanRoot,
-                    std::filesystem::directory_options::skip_permission_denied,
-                    ec);
-                const std::filesystem::recursive_directory_iterator end;
-                for (; !ec && it != end && filesSeen < 50000; it.increment(ec))
-                {
-                    if (!it->is_regular_file(ec))
-                        continue;
-                    std::wstring ext = it->path().extension().wstring();
-                    for (auto& ch : ext)
-                        ch = static_cast<wchar_t>(::towlower(ch));
-                    if (!IsShaderSourceExtension(ext))
-                        continue;
-
-                    std::wstring name = it->path().filename().wstring();
-                    for (auto& ch : name)
-                        ch = static_cast<wchar_t>(::towlower(ch));
-                    mix(name.data(), name.size() * sizeof(wchar_t));
-                    const uintmax_t size = it->file_size(ec);
-                    mix(&size, sizeof(size));
-                    const auto mtime = it->last_write_time(ec).time_since_epoch().count();
-                    mix(&mtime, sizeof(mtime));
-                    ++filesSeen;
-                }
-            }
-            mix(&filesSeen, sizeof(filesSeen));
-            return hash ? hash : 1ull;
+            return BZROpenShim::ShaderSourceFingerprint::Compute(
+                BZROpenShim::ShaderSourceFingerprint::ScanRoots(GetGameRootDirectory()));
         }
 
         static bool ReadStoredFingerprint(uint64_t& outFingerprint)
