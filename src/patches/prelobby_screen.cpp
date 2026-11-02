@@ -65,13 +65,14 @@ namespace BZROpenShim
 
         // Inside the PLAYER box the nickname panel (240x144) and the flag
         // picker (224x170 preview, 8 gap, 48x51 arrows: 229 tall) each sit
-        // centred in a half of the box, starting kRowTop below its top.
+        // centred in a half of the box, the column centred under the header.
         constexpr float kNicknameW = 240.0f;
         constexpr float kNicknameH = 144.0f;
         constexpr float kFlagW = 224.0f;
         constexpr float kFlagColumnH = 229.0f;
         constexpr float kFlagPreviewToArrows = 178.0f;  // 170 high plus the 8 gap
-        constexpr float kColumnTop = kPlayerBox.y + kRowTop - 4.0f;
+        constexpr float kColumnTop =
+            kPlayerBox.y + kBoxHeaderH + (kPlayerBox.h - kBoxHeaderH - kFlagColumnH) * 0.5f;
         constexpr float kNicknameX = kPlayerBox.x + (kPlayerBox.w * 0.5f - kNicknameW) * 0.5f;
         constexpr float kNicknameY = kColumnTop + (kFlagColumnH - kNicknameH) * 0.5f;
         constexpr float kFlagX = kPlayerBox.x + kPlayerBox.w * 0.5f + (kPlayerBox.w * 0.5f - kFlagW) * 0.5f;
@@ -89,9 +90,14 @@ namespace BZROpenShim
         constexpr float kServerSlotX = kServerCaptionX + kServerCaptionW + kServerSlotGap;
         constexpr float kServerWellX = kServerSlotX + 3.0f * (kServerSlotW + kServerSlotGap);
         constexpr float kServerWellW = kConnectionBox.x + kConnectionBox.w - kBoxPadX - kServerWellX;
-        constexpr float kServerNoteY = kServerRowY + kServerRowH + 8.0f;
+        constexpr float kServerNoteY = kServerRowY + kServerRowH + 14.0f;
+        // Labels draw from their top edge; this drops a caption onto the
+        // centred text of the slot buttons beside it.
+        constexpr float kCaptionDrop = 10.0f;
 
-        constexpr Shell::Rect kHintRect = { 244.0f, 828.0f, 680.0f, 46.0f };
+        // The hint and the LAN tools button share one row under the box.
+        constexpr Shell::Rect kLocalToolsRect = { 926.0f, 828.0f, 246.0f, 56.0f };  // clears the frame chamfer
+        constexpr Shell::Rect kHintRect = { 244.0f, kLocalToolsRect.y + kCaptionDrop + 2.0f, 660.0f, 40.0f };
 
         // The stock top-corner Back button, as Career builds it.
         constexpr Shell::Rect kBackRect = { 0.0f, 0.0f, 342.0f, 77.0f };
@@ -615,7 +621,7 @@ namespace BZROpenShim
             else
             {
                 Shell::AddLabel(panel, panel, "OpenShimPreLobby_Server",
-                                { kServerCaptionX, kServerRowY, kServerCaptionW, kServerRowH },
+                                { kServerCaptionX, kServerRowY + kCaptionDrop, kServerCaptionW, kServerRowH },
                                 "Server:");
 
                 // As the settings pages' value buttons: the slot is painted
@@ -654,8 +660,8 @@ namespace BZROpenShim
                             "Press Continue to apply a new name or server.");
             if (g_ServerSelector)
                 Shell::AddButton(panel, panel, "OpenShimPreLobby_LocalTools",
-                                 { 950.0f, 832.0f, 246.0f, 52.0f }, LanNoAuth::Enabled() ? "LAN (no sign-in)" : "Local host tools",
-                                 Shell::kSkinToMainMenu, 0.72f, 0.0f, &OnLocalToolsClicked);
+                                 kLocalToolsRect, LanNoAuth::Enabled() ? "LAN (no sign-in)" : "Local host tools",
+                                 Shell::kSkinToMainMenu, 0.88f, 0.0f, &OnLocalToolsClicked);
             RefreshStatus(true);
 
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimPreLobby_Back", kBackRect,

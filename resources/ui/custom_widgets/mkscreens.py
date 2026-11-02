@@ -13,7 +13,8 @@ the stock background shows through.
 
 The box rectangles here are the layout contract with the screen code: keep
 CAREER_LAYOUT in step with the constants in src/patches/career_screen.cpp, and
-PRELOBBY_LAYOUT with src/patches/prelobby_screen.cpp.
+PRELOBBY_LAYOUT with src/patches/prelobby_screen.cpp, and LAN_LAYOUT with
+src/patches/lan_screen.cpp.
 
     python mkscreens.py            # writes every osh_*_center.png and button skin
     python mkscreens.py --preview  # also writes *_preview.png over black
@@ -223,6 +224,42 @@ def connector(d, x, y, w, h):
         d.rectangle([s(gx), s(y + 6), s(gx + 3), s(y + h - 6)], fill=ACCENT if k == 3 else LINE)
 
 
+# Layout contract with src/patches/lan_screen.cpp (1440x1080 design space).
+# HOST: the start/stop slots, then three text rows. GAMES: the scan line with
+# Refresh / Next page slots, then one well per host row. JOIN: the address
+# well and its Use address slot. Everything ends above the frame's lower
+# chamfer (y 828 at x 208).
+LAN_LAYOUT = {
+    'title': (470, 132, 500, 56),
+    'boxes': [
+        (244, 238, 952, 196),   # Host
+        (244, 450, 952, 272),   # Games
+        (244, 738, 952, 110),   # Join
+    ],
+    'slots': [
+        (272, 294, 220, 42),    # Start local host
+        (508, 294, 220, 42),    # Stop host
+        (832, 504, 160, 40),    # Refresh
+        (1008, 504, 160, 40),   # Next page
+        (1008, 792, 160, 42),   # Use address
+    ],
+    'row_wells': [(272, 556 + 40 * k, 896, 36) for k in range(4)],
+    'address_well': (412, 792, 580, 42),
+}
+
+
+def lan_center():
+    img, d = new_panel()
+    title_plate(d, *LAN_LAYOUT['title'])
+    for b in LAN_LAYOUT['boxes']:
+        box(d, *b)
+    for sl in LAN_LAYOUT['slots']:
+        slot(d, *sl)
+    for well in LAN_LAYOUT['row_wells'] + [LAN_LAYOUT['address_well']]:
+        text_well(d, *well)
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def text_well(d, x, y, w, h):
     """A recessed strip for a row caption."""
     d.rectangle([s(x), s(y), s(x + w), s(y + h)], fill=(0, 14, 1, 255))
@@ -380,6 +417,7 @@ def main():
         'osh_preview_white.png': Image.new('RGBA', (2, 2), (255, 255, 255, 255)),
         'osh_career_center.png': career_center(),
         'osh_prelobby_center.png': prelobby_center(),
+        'osh_lan_center.png': lan_center(),
         'osh_options_center.png': options_center(),
         'osh_hub_center.png': hub_center(),
         'osh_category_center.png': category_center(),

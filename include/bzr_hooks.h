@@ -40,6 +40,10 @@ namespace BZROpenShim
     // (each call re-sweeps loaded modules); a no-op unless the flag is set.
     // See src/patches/never_activate.cpp.
     void InstallNeverActivateHooks();
+    // OPENSHIM_UNCLAMP_WINDOW: GetMonitorInfo reports a large work area so a
+    // windowed test client keeps its Ogre.cfg size on a small (disconnected)
+    // desktop. A no-op unless the flag is set. See src/patches/window_unclamp.cpp.
+    void InstallWindowUnclampIfRequested();
     // For a patch whose trampoline or hook depends on engine addresses from
     // the engine address table (scripts/patches.json "engine_addresses"):
     // the name of the first one that failed to bind, or nullptr when the
