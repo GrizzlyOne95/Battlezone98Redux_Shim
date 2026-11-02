@@ -281,6 +281,9 @@
     <ClCompile Include="src\patches\net_optimizer.cpp" />
     <ClCompile Include="src\patches\socket_tunnel.cpp" />
     <ClCompile Include="src\patches\socket_tunnel_client.cpp" />
+    <ClCompile Include="src\patches\steam_tunnel_transport.cpp">
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\steam-networking;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
     <ClCompile Include="src\patches\numeric_locale_compat.cpp" />
     <ClCompile Include="src\patches\odf_compat.cpp" />
     <ClCompile Include="src\patches\map_folder_items.cpp" />
@@ -449,6 +452,8 @@
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\socket_tunnel.h" />
     <ClInclude Include="include\socket_tunnel_protocol.h" />
+    <ClInclude Include="include\steam_tunnel_policy.h" />
+    <ClInclude Include="include\steam_tunnel_transport.h" />
     <ClInclude Include="include\net_reorder_core.h" />
     <ClInclude Include="include\shim_log.h" />
     <ClInclude Include="include\winmm_proxy.h" />
@@ -516,5 +521,8 @@
     <None Include="README.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="FetchSteamTunnelHeaders" BeforeTargets="ClCompile">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(ProjectDir)scripts\Fetch-SteamNetworkingHeaders.ps1&quot;" />
+  </Target>
   <ImportGroup Label="ExtensionTargets" />
 </Project>
