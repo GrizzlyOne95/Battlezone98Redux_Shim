@@ -1,0 +1,420 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "material": "GA_DETAIL_ATLAS",
+  "diffuseResource": "GANYMEDE_ATLAS_D.dds",
+  "typeNames": {
+    "0": "Dark rock",
+    "1": "light rock",
+    "2": "Ice  ( cream coloured texture )",
+    "3": "Geyser",
+    "4": "Base"
+  },
+  "typeWeights": {
+    "0": [
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "1": [
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "2": [
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "3": [
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0
+    ],
+    "4": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0
+    ]
+  },
+  "transition": {
+    "cap": 0.3,
+    "diagonal": 0.5
+  },
+  "weightSize": 2048,
+  "blurMeters": 14,
+  "outsideWeights": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "variation": [
+    {
+      "meters": 200,
+      "amount": 0.4,
+      "types": {
+        "0": [
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "1": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 90,
+      "amount": 0.6,
+      "types": {
+        "0": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 130,
+      "amount": 0.6,
+      "types": {
+        "1": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ],
+        "2": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 60,
+      "amount": 0.5,
+      "types": {
+        "3": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    }
+  ],
+  "shape": [
+    {
+      "radiusMeters": 400,
+      "rangeMeters": 8,
+      "amount": 0.8,
+      "hollow": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ridge": [
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "from": [
+        0,
+        1
+      ]
+    },
+    {
+      "radiusMeters": 40,
+      "rangeMeters": 3,
+      "amount": 0.5,
+      "hollow": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "ridge": [
+        0,
+        0,
+        0.5,
+        0,
+        0,
+        0.5,
+        0,
+        0
+      ],
+      "from": [
+        0,
+        1
+      ]
+    }
+  ],
+  "erosion": {
+    "talus": {
+      "weights": [
+        0,
+        0.2,
+        0.3,
+        0,
+        0,
+        0,
+        0,
+        0.5
+      ],
+      "amount": 0.6,
+      "coverage": 0.06,
+      "types": [
+        0,
+        1,
+        2
+      ]
+    },
+    "deposit": {
+      "weights": [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "amount": 0.5,
+      "coverage": 0.08,
+      "types": [
+        1
+      ]
+    },
+    "scour": {
+      "weights": [
+        0,
+        0,
+        0.5,
+        0,
+        0,
+        0,
+        0.5,
+        0
+      ],
+      "amount": 0.35,
+      "coverage": 0.06,
+      "types": [
+        0,
+        1
+      ]
+    }
+  },
+  "slope": {
+    "weights": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0.7,
+      0,
+      0.3
+    ],
+    "startDegrees": 24,
+    "fullDegrees": 38
+  },
+  "layers": [
+    {
+      "name": "Dark rock dust",
+      "detile": true,
+      "repeatMeters": 20,
+      "archive": "icelandic_sand_with_pebbles_tbklac1n_8k.zip",
+      "member": "Icelandic_Sand_With_Pebbles_tbklac1n_8K_BaseColor.jpg",
+      "matchMean": "crhd_ganymede_ga00sa0_d.dds",
+      "contrast": 2.0,
+      "heightMeters": 0.4,
+      "proceduralDetail": 0.4
+    },
+    {
+      "name": "Light rock soil",
+      "detile": true,
+      "repeatMeters": 16,
+      "archive": "icelandic_rocky_ground_vglndb0g_8k.zip",
+      "member": "Icelandic_Rocky_Ground_vglndb0g_8K_BaseColor.jpg",
+      "matchMean": "crhd_ganymede_ga11sa0_d.dds",
+      "contrast": 1.8,
+      "heightMeters": 0.8,
+      "proceduralDetail": 0.6
+    },
+    {
+      "name": "Ice",
+      "detile": true,
+      "repeatMeters": 18,
+      "archive": "icelandic_glacier_vf0nbbtn_8k.zip",
+      "member": "Icelandic_Glacier_vf0nbbtn_8K_BaseColor.jpg",
+      "matchMean": "crhd_ganymede_ga22sa0_d.dds",
+      "contrast": 1.3,
+      "heightMeters": 0.5,
+      "proceduralDetail": 0.5
+    },
+    {
+      "name": "Geyser floor",
+      "detile": true,
+      "repeatMeters": 12,
+      "archive": "icelandic_rocky_ground_ve2kbizn_8k.zip",
+      "member": "Icelandic_Rocky_Ground_ve2kbizn_8K_BaseColor.jpg",
+      "matchMean": "crhd_ganymede_ga33sa0_d.dds",
+      "contrast": 1.4,
+      "heightMeters": 0.5,
+      "proceduralDetail": 0.5
+    },
+    {
+      "name": "Base pad",
+      "repeatMeters": 20,
+      "cellAligned": true,
+      "file": "crhd_ganymede_ga44sa0_d.dds",
+      "heightMeters": 0.1,
+      "edge": {
+        "meters": 8,
+        "ragged": 0.12,
+        "raggedMeters": 12
+      }
+    },
+    {
+      "name": "Jagged rock",
+      "detile": true,
+      "repeatMeters": 24,
+      "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
+      "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
+      "matchMean": "crhd_ganymede_ga22sa0_d.dds",
+      "contrast": 1.5,
+      "heightMeters": 2.0,
+      "proceduralDetail": 1
+    },
+    {
+      "name": "Dust drift",
+      "detile": true,
+      "repeatMeters": 14,
+      "archive": "icelandic_sand_with_pebbles_tbklac1n_8k.zip",
+      "member": "Icelandic_Sand_With_Pebbles_tbklac1n_8K_BaseColor.jpg",
+      "matchMean": "crhd_ganymede_ga11sa0_d.dds",
+      "contrast": 1.3,
+      "heightMeters": 0.3,
+      "proceduralDetail": 0.4,
+      "gain": [
+        1.05,
+        1.0,
+        0.95
+      ]
+    },
+    {
+      "name": "Rubble",
+      "detile": true,
+      "repeatMeters": 10,
+      "archive": "icelandic_rocky_ground_ve2kbizn_8k.zip",
+      "member": "Icelandic_Rocky_Ground_ve2kbizn_8K_BaseColor.jpg",
+      "matchMean": "crhd_ganymede_ga00sa0_d.dds",
+      "contrast": 1.2,
+      "heightMeters": 0.6,
+      "proceduralDetail": 0.5,
+      "gain": [
+        0.85,
+        0.82,
+        0.8
+      ]
+    }
+  ],
+  "heightBlend": 0.5,
+  "far": {
+    "scale": 5,
+    "startMeters": 40,
+    "endMeters": 250,
+    "amount": 0.6
+  },
+  "macro": {
+    "meters": 260,
+    "brightness": 0.12,
+    "saturation": 0.15
+  },
+  "detail": {
+    "waveMeters": 60,
+    "heightMeters": 1.5,
+    "octaves": 4,
+    "damping": 1
+  },
+  "parallax": {
+    "scale": 1,
+    "fadeMeters": 30,
+    "steps": 12
+  }
+}
