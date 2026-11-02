@@ -13,12 +13,15 @@ ART=${1:?ART_DIR}; OUT=${2:?OUT_DIR}; shift 2
 GAME=${GAME_DIR:-"/c/Program Files (x86)/GOG Galaxy/Games/Battlezone 98 Redux"}
 CR=${CR_DIR:-"$GAME/mods/3686673790"}
 STOCK="$GAME/StockODFFiles"
+# The Black Dog and Chinese campaign maps live only in tro_cam.zfs: extract their hg2, mat and trn files into
+# TRO_DIR (default OUT_DIR/zfsmaps/tro_cam) and they are built as plain map names.
+TRO=${TRO_DIR:-"$OUT/zfsmaps/tro_cam"}
 cd "$(dirname "$0")/../.."
 declare -A MAPS=(
   [moon]="misn01 misn02 misn02b misn03 crsetup"
   [mars]="misn04 misn05 misn06"
-  [ganymede]="evolve_3 evolve_4"
-  [elysium]="evolve_1 evolve_2 evolve_5"
+  [ganymede]="evolve_3 evolve_4 bdmisn01 bdmisn02 bdmisn03 bdmisn04 bdmisn05 bdmisn06 bdmisn08 bdmisn12 bdmisn13 bdmisn14 bdmisn15 chmisn01 chmisn02 chmisn03 chmisn04 chmisn08"
+  [elysium]="evolve_1 evolve_2 evolve_5 bdmisn07 bdmisn09 bdmisn10 bdmisn11 chmisn05 chmisn06"
   [venus]="misn07 misn08 misn09"
   [io]="misn10 misn11 misns4"
   [europa]="misn12 misn13"
@@ -37,6 +40,7 @@ for w in ${@:-moon mars venus io europa titan achilles ganymede elysium}; do
       cmp -s "$(pick hg2)" "$STOCK/$m.hg2" && cmp -s "$(pick mat)" "$STOCK/$m.mat" && continue
     fi
     [ -f "$STOCK/$m.mat" ] && args+=(--map "${m}_stock=$STOCK/$m")
+    [ ! -f "$STOCK/$m.mat" ] && [ -f "$TRO/$m.mat" ] && args+=(--map "$m=$TRO/$m")
   done
   echo "=== $w"
   python scripts/Build-TerrainAutoPaint.py --recipe "scripts/terrain-packs/$w-autopaint.json" --source-root "$ART" \

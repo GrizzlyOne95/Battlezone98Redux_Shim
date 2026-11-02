@@ -462,18 +462,33 @@ gravel and crust (6%, 0.35). The weight maps are 2048 for the pad edges. CR
 overrides only `misn05.hg2`, so `build-world-packs.sh` takes each of a map's
 HG2, MAT and TRN from CR when present and from the stock folder otherwise.
 
-Ganymede (`evolve_3`, `evolve_4`) and Elysium (`evolve_1`, `evolve_2`, `evolve_5`)
-follow the Mars layout: eight layers, with the base pad (`ga44sa0` and `el04sa0`,
-`cellAligned`) at layer 4 and the same variation, shape, erosion and slope
-rules, matched to CR's crhd tiles. Ganymede's types are Dark rock, light rock,
-Ice (cream), Geyser and Base: Icelandic sand with pebbles, rocky ground and
-glacier ice, with Icelandic rocky ground as the Geyser floor, plus jagged rock
-(slopes), dust drift and rubble. Elysium's are Packed Dirt, Rocky Sand,
-Weathered Rock, Geyser and Base Grid-iron: rocky steppe, arid gravel, cracked
-boulder rock and dark rock detail, plus dark streaks, lava stone crust and
-scree. Both worlds ship only in stock maps (CR does not override them), so each
-map is built once as `evolve_N_stock`. The base pads have no art normal; it is
-derived from their height.
+Ganymede and Elysium follow the Mars layout: eight layers, with the base pad
+(`ga44sa0` and `el04sa0`, `cellAligned`) at layer 4 and the same variation,
+shape, erosion and slope rules, matched to CR's crhd tiles. Ganymede's types are
+Dark rock, light rock, Ice (cream), Geyser and Base: Icelandic sand with
+pebbles, rocky ground and glacier ice, with Icelandic rocky ground as the Geyser
+floor, plus jagged rock (slopes), dust drift and rubble. Elysium's are Packed
+Dirt, Rocky Sand, Weathered Rock, Geyser and Base Grid-iron: rocky steppe, arid
+gravel, cracked boulder rock and dark rock detail, plus dark streaks, lava stone
+crust and scree. The base pads have no art normal; it is derived from their
+height.
+
+Map lists. Ganymede: evolve_3, evolve_4, bdmisn01-06, 08, 12-15 and chmisn01-04,
+08. Elysium: evolve_1, evolve_2, evolve_5, bdmisn07, 09, 10, 11 and chmisn05,
+06. CR does not override any of them. The Black Dog and Chinese maps exist only
+in `tro_cam.zfs`: extract their hg2, mat and trn files (Modding Toolbox
+`ZFSArchive`) into `TRO_DIR` (default `<out dir>/zfsmaps/tro_cam`) and the build
+takes them as plain map names. The fingerprint comes from the HG2 content, so
+maps that share files (chmisn08 with evolve_3, bdmisn10 with evolve_2) share an
+entry, and the co-op copies (`bdmisnNNcr`, `chmisn0Ncr`) match through the
+stock files they reuse. chmisn07 is a Europa map and `sammy__1` has no HG2;
+neither is covered.
+
+A Ganymede or Elysium map with no entry in the pack (a user map, or one whose
+HG2 differs) is declined at load: the shim logs `paint pack has no map entry
+for this mission` and `stock atlas retained`, and the world renders its stock
+atlas with no paint. The crhd DDS tiles are not involved in that path, so
+removing them from CR loses nothing there.
 
 **Build.**
 

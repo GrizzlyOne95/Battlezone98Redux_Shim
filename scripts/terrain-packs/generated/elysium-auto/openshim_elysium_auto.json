@@ -71,6 +71,61 @@
             ],
             "control": "openshim_elysium_auto_evolve_5_stock_control.png",
             "control2": "openshim_elysium_auto_evolve_5_stock_control2.png"
+          },
+          {
+            "terrainFingerprint": "2dad267a358bc93d",
+            "boundsMeters": [
+              -1910.0,
+              -2570.0,
+              1930.0,
+              2550.0
+            ],
+            "control": "openshim_elysium_auto_bdmisn07_control.png",
+            "control2": "openshim_elysium_auto_bdmisn07_control2.png"
+          },
+          {
+            "terrainFingerprint": "04aabd9c798ede21",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_elysium_auto_bdmisn09_control.png",
+            "control2": "openshim_elysium_auto_bdmisn09_control2.png"
+          },
+          {
+            "terrainFingerprint": "1b0c635657cf5221",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_elysium_auto_bdmisn11_control.png",
+            "control2": "openshim_elysium_auto_bdmisn11_control2.png"
+          },
+          {
+            "terrainFingerprint": "6aab8b337f9fd7ac",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_elysium_auto_chmisn05_control.png",
+            "control2": "openshim_elysium_auto_chmisn05_control2.png"
+          },
+          {
+            "terrainFingerprint": "a57d25a46ee777de",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_elysium_auto_chmisn06_control.png",
+            "control2": "openshim_elysium_auto_chmisn06_control2.png"
           }
         ],
         "detile": [
