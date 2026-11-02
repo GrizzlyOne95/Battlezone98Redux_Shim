@@ -2112,7 +2112,6 @@ namespace BZROpenShim
         // GPU, which would filter the 1-bpp mask into mush.
         static bool WriteFlagPreviewPng(
             const std::array<uint8_t, kLegacyFlagPayloadBytes>& payload,
-            const std::string& title,
             const std::filesystem::path& outPath)
         {
             std::string gdiplusError;
@@ -2156,24 +2155,6 @@ namespace BZROpenShim
                 gfx.FillRectangle(&edgeBright, kFlagPanelBorder, 40, inner, 4);
                 gfx.FillRectangle(&edgeMid, kFlagPanelBorder, 44, inner, 3);
                 gfx.FillRectangle(&edgeDark, kFlagPanelBorder, 47, inner, 2);
-
-                if (!title.empty())
-                {
-                    std::wstring wide(title.begin(), title.end());
-                    Gdiplus::Font font(L"Lucida Console", 13.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-                    Gdiplus::StringFormat format;
-                    format.SetAlignment(Gdiplus::StringAlignmentCenter);
-                    format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-                    format.SetTrimming(Gdiplus::StringTrimmingEllipsisCharacter);
-                    format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-                    Gdiplus::SolidBrush text(Gdiplus::Color(255, 64, 220, 64));
-                    const Gdiplus::RectF layout(
-                        static_cast<float>(kFlagPanelBorder),
-                        9.0f,
-                        static_cast<float>(inner),
-                        30.0f);
-                    gfx.DrawString(wide.c_str(), -1, &font, layout, &format, &text);
-                }
             }
 
             for (int y = 0; y < kFlagPreviewHeight; ++y)
@@ -2223,6 +2204,65 @@ namespace BZROpenShim
             return true;
         }
 
+        // The panel header carries both the flag name and the position in
+        // the catalogue, which keeps the counter off the lobby's bottom
+        // Options strip below the arrows.
+        static std::string GetSelectedFlagTitle()
+        {
+            std::string title;
+            if (const FlagCatalogEntry* entry = GetSelectedFlagEntry())
+            {
+                char compactTitle[96] = {};
+                std::snprintf(
+                    compactTitle,
+                    sizeof(compactTitle),
+                    "%s  %d/%u",
+                    entry->displayName.c_str(),
+                    g_SelectedFlagIndex + 1,
+                    static_cast<unsigned>(g_FlagCatalog.size()));
+                title = compactTitle;
+            }
+            for (char& ch : title)
+                ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+            return title.empty() ? std::string("FLAGS") : title;
+        }
+
+        static void MakeViewInputTransparent(void* view);
+        constexpr float kPanelCaptionTextScale = 0.8f;
+        static void __cdecl CaptionNoop() {}
+
+        // Panel header text is a native button caption rather than GDI+ text
+        // baked into the plate, so it renders in the game font. The caption
+        // never takes input: clicks fall through to the widget underneath.
+        // A caption over a clickable widget also gets that widget's callbacks,
+        // in case the engine re-enables its input when the dialog activates.
+        static void* CreateCaptionWidget(
+            void* parent, const char* name, float x, float y, float w, float h, const char* text,
+            void* onClick = nullptr, void* onHover = nullptr)
+        {
+            if (!parent || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild || !g_BzrFn_SetOnClick || !g_BzrFn_SetOnHover)
+                return nullptr;
+            void* mem = ::operator new(0x1EC, std::nothrow);
+            if (!mem)
+                return nullptr;
+            std::memset(mem, 0, 0x1EC);
+            void* caption = g_BzrFn_ButtonCtor(mem, name, x, y, w, h, 0x20, parent, 0, 0);
+            if (!caption)
+                return nullptr;
+            if (g_BzrFn_SetButtonLabel) g_BzrFn_SetButtonLabel(caption, text ? text : "");
+            if (g_BzrFn_SetButtonTextScale) g_BzrFn_SetButtonTextScale(caption, kPanelCaptionTextScale);
+            // Both callback slots must be non-null on an active dialog child.
+            g_BzrFn_SetOnClick(caption, onClick ? onClick : reinterpret_cast<void*>(&CaptionNoop));
+            g_BzrFn_SetOnHover(caption, onHover ? onHover : reinterpret_cast<void*>(&CaptionNoop));
+            g_BzrFn_AddChild(parent, caption, 0);
+            MakeViewInputTransparent(caption);
+            return caption;
+        }
+
+        // Preview widget -> its header caption. Both are children of the same
+        // dialog, so they live and die together.
+        static std::unordered_map<void*, void*> g_FlagTitleCaptions;
+
         // Ensure the preview PNG for the current selection exists on disk and
         // return its bare texture name (empty on failure). Generated once per
         // flag per session.
@@ -2240,29 +2280,7 @@ namespace BZROpenShim
             if (name == s_LastPreviewName && std::filesystem::exists(outPath, ec))
                 return name;
 
-            // The panel header carries both the flag name and the position in
-            // the catalogue. Keeping the counter in the texture removes the
-            // old label below the arrows, where it collided with the lobby's
-            // bottom Options strip.
-            std::string title;
-            if (const FlagCatalogEntry* entry = GetSelectedFlagEntry())
-            {
-                char compactTitle[96] = {};
-                std::snprintf(
-                    compactTitle,
-                    sizeof(compactTitle),
-                    "%s  %d/%u",
-                    entry->displayName.c_str(),
-                    g_SelectedFlagIndex + 1,
-                    static_cast<unsigned>(g_FlagCatalog.size()));
-                title = compactTitle;
-            }
-            for (char& ch : title)
-                ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
-            if (title.empty())
-                title = "FLAGS";
-
-            if (!WriteFlagPreviewPng(g_SelectedFlagPayload, title, outPath))
+            if (!WriteFlagPreviewPng(g_SelectedFlagPayload, outPath))
                 return std::string();
             s_LastPreviewName = name;
             Log(L"[FLAG] wrote lobby preview name=%hs path=%hs\n",
@@ -2281,6 +2299,9 @@ namespace BZROpenShim
             if (g_BzrFn_SetTextureOff) g_BzrFn_SetTextureOff(widget, name.c_str());
             if (g_BzrFn_SetTextureOver) g_BzrFn_SetTextureOver(widget, name.c_str());
             if (g_BzrFn_SetTextureOn) g_BzrFn_SetTextureOn(widget, name.c_str());
+            const auto caption = g_FlagTitleCaptions.find(widget);
+            if (caption != g_FlagTitleCaptions.end() && caption->second && g_BzrFn_SetButtonLabel)
+                g_BzrFn_SetButtonLabel(caption->second, GetSelectedFlagTitle().c_str());
         }
 
         // 1.5 shell pixels scale onto the 1440x1080 Redux canvas by a single
@@ -2408,10 +2429,22 @@ namespace BZROpenShim
                         0);
                     if (*outPreview)
                     {
+                        // A reused address must not inherit a dead dialog's caption.
+                        g_FlagTitleCaptions.erase(*outPreview);
                         UpdateFlagPreviewWidget(*outPreview);
                         if (g_BzrFn_SetOnClick && onClick) g_BzrFn_SetOnClick(*outPreview, onClick);
                         if (g_BzrFn_SetOnHover && onHover) g_BzrFn_SetOnHover(*outPreview, onHover);
                         g_BzrFn_AddChild(parent, *outPreview, 0);
+                        g_FlagTitleCaptions[*outPreview] = CreateCaptionWidget(
+                            parent,
+                            "Flag Title",
+                            x + kFlagPanelBorder,
+                            previewY + 9.0f,
+                            static_cast<float>(kFlagPanelWidth - 2 * kFlagPanelBorder),
+                            30.0f,
+                            GetSelectedFlagTitle().c_str(),
+                            onClick,
+                            onHover);
                     }
                 }
             }
@@ -2751,15 +2784,6 @@ namespace BZROpenShim
                 gfx.FillRectangle(&edgeBright, 9, 32, inner, 4);
                 gfx.FillRectangle(&edgeMid, 9, 36, inner, 2);
                 gfx.FillRectangle(&edgeDark, 9, 38, inner, 2);
-
-                Gdiplus::Font font(L"Lucida Console", 13.0f, Gdiplus::FontStyleBold, Gdiplus::UnitPixel);
-                Gdiplus::StringFormat format;
-                format.SetAlignment(Gdiplus::StringAlignmentCenter);
-                format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
-                format.SetFormatFlags(Gdiplus::StringFormatFlagsNoWrap);
-                Gdiplus::SolidBrush text(Gdiplus::Color(255, 64, 220, 64));
-                const Gdiplus::RectF layout(9.0f, 4.0f, static_cast<float>(inner), 28.0f);
-                gfx.DrawString(L"PLAYER NAME", -1, &font, layout, &format, &text);
             }
 
             CLSID pngClsid = {};
@@ -2875,6 +2899,14 @@ namespace BZROpenShim
                                 g_BzrFn_SetTextureOff(*outPanel, textureName.c_str());
                             MakeViewInputTransparent(*outPanel);
                             g_BzrFn_AddChild(parent, *outPanel, 0);
+                            CreateCaptionWidget(
+                                parent,
+                                "Nickname Title",
+                                x + 9.0f,
+                                y + 4.0f,
+                                static_cast<float>(kNicknamePanelWidth - 18),
+                                28.0f,
+                                "PLAYER NAME");
                         }
                     }
                 }
