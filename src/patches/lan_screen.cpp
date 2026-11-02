@@ -8,6 +8,7 @@
 #include "matchmaking_server.h"
 #include "net_optimizer.h"
 #include "shell_screens.h"
+#include "patcher.h"
 #include <windows.h>
 #include <array>
 #include <filesystem>
@@ -61,6 +62,8 @@ namespace BZROpenShim
         {
             g_Note.clear();
             g_JoinHostedWhenReady = LanSession::StartHost(GameRoot(),LanNoAuth::Enabled());
+            const auto status = LanSession::Status();
+            Log(L"[LAN-HOST] start %hs: %hs\n", g_JoinHostedWhenReady ? "ok" : "failed", status.hostMessage.c_str());
         }
         void __cdecl Stop()
         {
@@ -133,8 +136,6 @@ namespace BZROpenShim
             g_StatusText.clear(); g_SearchText.clear(); g_RowText.fill("");
             void* panel = Shell::AddPanel(screen, nullptr, "OpenShimLAN", {0, 0, 1440, 1080}, nullptr);
             if (!panel) return false;
-            void* body = Shell::AddPanel(panel, panel, "OpenShimLAN_Body", {230, 225, 980, 735}, nullptr);
-            Shell::SetPanelRectColor(body, {230, 225, 980, 735}, 0xD8101820);
             Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {420, 132, 600, 56}, LanNoAuth::Enabled() ? "LAN (NO SIGN-IN)" : "LOCAL HOST TOOLS", Shell::kTitleLabelFlags);
             Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {260, 230, 920, 40}, "Hosting opens LAN listeners; Windows may ask for firewall access.");
             const auto& skin = Shell::kSkinToMainMenu;
@@ -153,7 +154,6 @@ namespace BZROpenShim
             }
             Shell::AddButton(panel, panel, "OpenShimLAN_Next", {870, 787, 280, 50}, "Next page", skin, 0.75f, 0, &Next);
             Shell::AddLabel(panel, panel, "OpenShimLAN_ManualLabel", {260, 795, 590, 35}, "Join by IP (optional :port):");
-            Shell::AddPanel(panel, panel, "OpenShimLAN_EntryWell", {260, 845, 590, 48}, "optionhv.png");
             Shell::AddButton(panel, panel, "OpenShimLAN_Manual", {870, 840, 280, 60}, "Use address", skin, 0.8f, 0, &ManualJoin);
             Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {260, 905, 920, 40}, LanNoAuth::Enabled() ? "Hosted by this game. No accounts or helper. Stop Host disconnects players." : "Steam/Galaxy sign-in is still required. Stop Host disconnects its players.");
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimLAN_Back", {0, 0, 342, 77}, "Back", Shell::kSkinTopCorner, 1, 28, &Back) != nullptr;
