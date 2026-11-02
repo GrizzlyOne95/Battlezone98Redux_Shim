@@ -1,0 +1,307 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "GA_DETAIL_ATLAS": {
+      "sliceCount": 18,
+      "diffuseResource": "GANYMEDE_ATLAS_D.dds",
+      "fallback": "openshim_ganymede_auto_layer0.png",
+      "tiles": {
+        "0": "openshim_ganymede_auto_layer0.png",
+        "1": "openshim_ganymede_auto_layer1.png",
+        "2": "openshim_ganymede_auto_layer2.png",
+        "3": "openshim_ganymede_auto_layer3.png",
+        "9": "openshim_ganymede_auto_layer4.png",
+        "10": "openshim_ganymede_auto_layer5.png",
+        "11": "openshim_ganymede_auto_layer6.png",
+        "12": "openshim_ganymede_auto_layer7.png",
+        "4": "openshim_ganymede_auto_evolve_3_stock_control.png",
+        "13": "openshim_ganymede_auto_evolve_3_stock_control2.png",
+        "5": "openshim_ganymede_auto_layer0_n.png",
+        "6": "openshim_ganymede_auto_layer1_n.png",
+        "7": "openshim_ganymede_auto_layer2_n.png",
+        "8": "openshim_ganymede_auto_layer3_n.png",
+        "14": "openshim_ganymede_auto_layer4_n.png",
+        "15": "openshim_ganymede_auto_layer5_n.png",
+        "16": "openshim_ganymede_auto_layer6_n.png",
+        "17": "openshim_ganymede_auto_layer7_n.png"
+      },
+      "paint": {
+        "schema": "bzr-openshim-terrain-paint-v1",
+        "rowZero": "minZ",
+        "repeatMeters": [
+          20,
+          16,
+          18,
+          12,
+          20,
+          24,
+          14,
+          10
+        ],
+        "maps": [
+          {
+            "terrainFingerprint": "0f70e1efac1a3283",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_ganymede_auto_evolve_3_stock_control.png",
+            "control2": "openshim_ganymede_auto_evolve_3_stock_control2.png"
+          },
+          {
+            "terrainFingerprint": "381b6825b813ec6c",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_evolve_4_stock_control.png",
+            "control2": "openshim_ganymede_auto_evolve_4_stock_control2.png"
+          },
+          {
+            "terrainFingerprint": "ecffb9d655e27cb2",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn01_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn01_control2.png"
+          },
+          {
+            "terrainFingerprint": "e13c4bd7f48b0bf6",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn02_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn02_control2.png"
+          },
+          {
+            "terrainFingerprint": "1540d352dbbaeb5e",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn03_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn03_control2.png"
+          },
+          {
+            "terrainFingerprint": "ac0506cd2e4c401e",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn04_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn04_control2.png"
+          },
+          {
+            "terrainFingerprint": "37690f12b89124c8",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn05_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn05_control2.png"
+          },
+          {
+            "terrainFingerprint": "26329aecf477196f",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn06_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn06_control2.png"
+          },
+          {
+            "terrainFingerprint": "3745257515d4658f",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn08_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn08_control2.png"
+          },
+          {
+            "terrainFingerprint": "e391314e538d33fe",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn12_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn12_control2.png"
+          },
+          {
+            "terrainFingerprint": "459e9fa945a65057",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn13_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn13_control2.png"
+          },
+          {
+            "terrainFingerprint": "7eb15dc34f8b2be6",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn14_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn14_control2.png"
+          },
+          {
+            "terrainFingerprint": "cc38384f93d297f7",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_ganymede_auto_bdmisn15_control.png",
+            "control2": "openshim_ganymede_auto_bdmisn15_control2.png"
+          },
+          {
+            "terrainFingerprint": "457dd5da359a2466",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_ganymede_auto_chmisn01_control.png",
+            "control2": "openshim_ganymede_auto_chmisn01_control2.png"
+          },
+          {
+            "terrainFingerprint": "e596cac30300a67b",
+            "boundsMeters": [
+              -2550.0,
+              -2570.0,
+              2570.0,
+              2550.0
+            ],
+            "control": "openshim_ganymede_auto_chmisn02_control.png",
+            "control2": "openshim_ganymede_auto_chmisn02_control2.png"
+          },
+          {
+            "terrainFingerprint": "d3f618d2beeb51bd",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_ganymede_auto_chmisn03_control.png",
+            "control2": "openshim_ganymede_auto_chmisn03_control2.png"
+          },
+          {
+            "terrainFingerprint": "ac5a478b8b2a74d8",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_ganymede_auto_chmisn04_control.png",
+            "control2": "openshim_ganymede_auto_chmisn04_control2.png"
+          },
+          {
+            "terrainFingerprint": "546e2680e5f53b4f",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_ganymede_auto_chmisn08_control.png",
+            "control2": "openshim_ganymede_auto_chmisn08_control2.png"
+          }
+        ],
+        "detile": [
+          1,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1
+        ],
+        "nearOnly": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "far": [
+          5,
+          40,
+          250,
+          0.6
+        ],
+        "macro": [
+          260,
+          0.12,
+          0.15
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.4,
+          0.8,
+          0.5,
+          0.5,
+          0.1,
+          2.0,
+          0.3,
+          0.6
+        ],
+        "detail": [
+          60,
+          1.5,
+          4,
+          1
+        ],
+        "detailLayers": [
+          0.4,
+          0.6,
+          0.5,
+          0.5,
+          0.0,
+          1.0,
+          0.4,
+          0.5
+        ],
+        "parallax": [
+          1,
+          30,
+          12
+        ]
+      }
+    }
+  }
+}
