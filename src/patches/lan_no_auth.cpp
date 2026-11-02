@@ -146,6 +146,17 @@ void PumpMainThread()
             *reinterpret_cast<void**>(static_cast<uint8_t*>(client)+0xC38)!=lobby ||
             *reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(client)+clientStateOffset)!=0 || started==client) return;
         started=client;
+        // active_con (+0x2E0) is set by the connect and cleared by the close and
+        // failure handlers (0x6BF0D0, 0x6C35C0). Non-null means the stock
+        // reconnect is already in flight (switching from an authorised official
+        // session reconnects at once, state still 0). A second connect replaces
+        // active_con, and the first connection's open handler then throws
+        // remote_endpoint on the unopened one. The stock path owns the retries.
+        if (*reinterpret_cast<void**>(static_cast<uint8_t*>(client)+0x2E0))
+        {
+            Log(L"[LAN-NOAUTH] native connection already in flight; leaving it to the stock reconnect\n");
+            return;
+        }
         uint32_t error[2]{};
         connectClient(client,error);
         Log(L"[LAN-NOAUTH] starting native LAN connection without a platform credential callback\n");
