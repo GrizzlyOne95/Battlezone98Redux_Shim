@@ -11,6 +11,8 @@ namespace BZROpenShim
 
     // Flushes optional network diagnostics before the shim unloads.
     void ShutdownNetworkOptimizer();
+    // Existing signature-qualified BZRNet route flag, shared with tunnel DNS guard.
+    bool EnsureBzrNetTunnelRelay();
 
     // Drop the live BZRNet control WebSocket (TCP peer port 1337) so stock
     // reconnects and sends a fresh Authorization. Lounge nickname recycle
