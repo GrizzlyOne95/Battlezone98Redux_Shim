@@ -76,7 +76,7 @@ On every wrapped exit it zips (Windows) or xz-compresses (Linux) and POSTs:
 - `BZLogger.txt` plus its pre-launch snapshot
 - `winmm_proxy.log` / `dsound_proxy.log` when present
 - `multi.ini`
-- session-fresh buffer-capture files and `openshim_crash_*.dmp` minidumps
+- session-fresh buffer-capture files, `openshim_crash_*.dmp` minidumps and the `openshim_crash_*.log` report saved beside each
 - `openshim_wrap.log.tail.txt` (the last 200 wrapper diagnostics)
 - on abnormal Linux exits, the best matching `systemd-coredump` metadata and
   a bounded `coredumpctl` backtrace when accessible (never the raw core)
