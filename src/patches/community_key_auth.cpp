@@ -9,6 +9,7 @@
 #include "bzr_options_ui.h"
 #include "bzr_string.h"
 #include "community_key.h"
+#include "lan_no_auth.h"
 #include "community_key_secret.h"
 #include "hook_engine.h"
 #include "patcher.h"
@@ -74,7 +75,7 @@ namespace BZROpenShim
         // Engine calls only, in a function free of unwindable objects so it
         // can use __try (C2712). Builds the two engine strings, stores the
         // value under "communityKey" in the content object, destroys both.
-        static bool AttachEngineKey(void* content, const char* hex)
+        static bool AttachEngineString(void* content, const char* field, const char* hex)
         {
             __declspec(align(8)) BzrString key;
             __declspec(align(8)) BzrString value;
@@ -83,7 +84,7 @@ namespace BZROpenShim
             bool ok = false;
             __try
             {
-                g_StringCtor(&key, "communityKey");
+                g_StringCtor(&key, field);
                 keyBuilt = true;
                 g_StringCtor(&value, hex);
                 valueBuilt = true;
@@ -116,6 +117,21 @@ namespace BZROpenShim
             {
                 if (!content)
                     return;
+                if (LanNoAuth::Requested())
+                {
+                    std::string id, name;
+                    const bool local = LanNoAuth::Identity(id,name);
+                    bool attached = true;
+                    for (const char* field : {"steamAppTicket","gogAppTicket","authTicket","platformTicket","communityKey"})
+                        attached = AttachEngineString(content,field,"") && attached;
+                    attached = AttachEngineString(content,"authtype","") && attached;
+                    attached = AttachEngineString(content,"id",local ? id.c_str() : "") && attached;
+                    attached = AttachEngineString(content,"name",local ? name.c_str() : "") && attached;
+                    attached = AttachEngineString(content,"realname",local ? name.c_str() : "") && attached;
+                    if (local && attached) attached=AttachEngineString(content,"authtype","lan");
+                    Log(L"[LAN-NOAUTH] local admission profile %hs (no platform credentials)\n",local && attached ? "attached" : "blocked");
+                    return;
+                }
                 if (!IsCommunityKeyEnabled())
                 {
                     if (!s_loggedDisabled)
@@ -160,7 +176,7 @@ namespace BZROpenShim
                 }
                 if (hex.empty())
                     return;
-                const bool attached = AttachEngineKey(content, hex.c_str());
+                const bool attached = AttachEngineString(content, "communityKey", hex.c_str());
                 SecureZeroMemory(&hex[0], hex.size());
                 if (attached)
                     Log(L"[BZRNET] Community identity key attached for %hs\n", server.c_str());
@@ -193,7 +209,10 @@ namespace BZROpenShim
         void InstallCommunityKeyAuthHookIfPossible()
         {
             if (g_CommunityKeyHookDone)
+            {
+                LanNoAuth::InstallIfPossible(g_OriginalSerialize != 0);
                 return;
+            }
             g_CommunityKeyHookDone = true;
 
             uint32_t serializeRow = 0, contentLocal = 0, jsonIndex = 0, jsonAssign = 0, stringCtor = 0, stringDtor = 0;
@@ -227,6 +246,8 @@ namespace BZROpenShim
                     }
                 }
             }
+            if (!installed) g_OriginalSerialize = 0;
+            LanNoAuth::InstallIfPossible(installed);
             if (installed)
                 Log(L"[BZRNET] Community identity key hook installed\n");
             else

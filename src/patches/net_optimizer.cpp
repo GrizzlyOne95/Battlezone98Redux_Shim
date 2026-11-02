@@ -1,4 +1,5 @@
 #include "net_optimizer.h"
+#include "lan_no_auth.h"
 #include "socket_tunnel.h"
 #include "bool_token.h"
 #include "netcode_hooks.h"
@@ -396,6 +397,7 @@ namespace
     // test redirect is set.
     SRWLOCK g_ServerOverrideLock = SRWLOCK_INIT;
     std::string g_ServerOverrideHost;
+    std::atomic<bool> g_OverrideAllowOfficialFallback{true};
 
     // The last non-1337 port a BZRNet lookup resolved for (a selected port or
     // a /bzrserver= one; 0: none). Never cleared, so a socket still on that
@@ -3794,12 +3796,12 @@ namespace
         MatchmakingServer::Mode mode = MatchmakingServer::Mode::None;
         if (!MatchmakingServer::ParseMode(modeText, mode))
         {
-            Logf("[OpenShimNet] Ignoring [Network] Server=%s (expected Rebellion, Custom or Local)",
+            Logf("[OpenShimNet] Ignoring [Network] Server=%s (expected Rebellion, Custom, Local or LAN)",
                 modeText.c_str());
             return;
         }
         const std::string host = MatchmakingServer::ResolveSavedHost(mode, customText);  // host[:port]
-        if (mode == MatchmakingServer::Mode::Custom && host.empty())
+        if ((mode == MatchmakingServer::Mode::Custom || mode == MatchmakingServer::Mode::Lan) && host.empty())
         {
             Logf("[OpenShimNet] [Network] Server=Custom ignored: CustomServer is empty or invalid");
             return;
@@ -3808,7 +3810,9 @@ namespace
             return;
         AcquireSRWLockExclusive(&g_ServerOverrideLock);
         g_ServerOverrideHost = host;
+        g_OverrideAllowOfficialFallback.store(mode != MatchmakingServer::Mode::Lan);
         ReleaseSRWLockExclusive(&g_ServerOverrideLock);
+        LanNoAuth::SelectEndpoint(host.c_str(),mode == MatchmakingServer::Mode::Lan);
         Logf("[OpenShimNet] Saved server selection: %s -> %s",
             MatchmakingServer::ModeName(mode), host.c_str());
     }
@@ -4195,7 +4199,8 @@ namespace
             const bool custom =
                 !MatchmakingServer::EqualsNoCase(overrideHost, kBzrNetMatchmakingHost) &&
                 !MatchmakingServer::EqualsNoCase(overrideHost, GetLaunchServerHostCached());
-            if (custom && g_OverrideAttemptPending.load() && !g_OverrideReached.load())
+            if (custom && g_OverrideAllowOfficialFallback.load() &&
+                g_OverrideAttemptPending.load() && !g_OverrideReached.load())
             {
                 SetMatchmakingServerOverride(nullptr);
                 Logf("[OpenShimNet] Custom server %s did not answer; using %s for this session "
@@ -5571,13 +5576,15 @@ namespace
         return true;
     }
 
-    void SetMatchmakingServerOverride(const char* host)
+    void SetMatchmakingServerOverride(const char* host, bool allowOfficialFallback)
     {
         AcquireSRWLockExclusive(&g_ServerOverrideLock);
         g_ServerOverrideHost = host ? host : "";
+        g_OverrideAllowOfficialFallback.store(allowOfficialFallback);
         ReleaseSRWLockExclusive(&g_ServerOverrideLock);
         g_OverrideAttemptPending.store(false);
         g_OverrideReached.store(false);
+        LanNoAuth::SelectEndpoint(host,!allowOfficialFallback);
         Logf("[OpenShimNet] Matchmaking server override %s%s",
             host && *host ? "set to " : "cleared",
             host && *host ? host : "");

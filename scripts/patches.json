@@ -4998,6 +4998,36 @@
       "identity": "cNetFriends::GetReadyState: call PlatformReady, test, call BzrNetGetLobby, test, mov eax,3; the MP ready explainer replaces its entry"
     },
     {
+      "name": "LanNoAuthNameEmptyCall",
+      "address": "0x006C35F3",
+      "expected": "E8 98 C2 D5 FF 0F B6 C0 85 C0 75 23",
+      "identity": "BZRNet connection initializer FUN_006C35C0: std::string::empty on client realname +0x304, call target independently agrees with ticket-empty call and StringEmpty. Read-only live GOG PID 72140 qualified 2026-10-29; no string storage is changed."
+    },
+    {
+      "name": "LanNoAuthTicketEmptyCall",
+      "address": "0x006C3616",
+      "expected": "E8 75 C2 D5 FF 0F B6 C0 85 C0 74 05",
+      "identity": "Second std::string::empty in the same connection initializer, after the use-Steam byte test; this checks ticket +0x2EC. Both empty calls use ECX, no stack arguments, AL return."
+    },
+    {
+      "name": "LanNoAuthStringEmpty",
+      "address": "0x0041F890",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 83 78 10 00",
+      "identity": "Released string-empty leaf: compares size at +0x10, returns AL, no stack arguments; independently confirmed from both connection-initializer call sites."
+    },
+    {
+      "name": "LanNoAuthConnect",
+      "address": "0x006C35C0",
+      "expected": "55 8B EC 83 EC 34 89 4D FC 8B 4D 08 E8 CF 4F E0 FF 0F B6 C0",
+      "identity": "Released native asynchronous connection initializer. ECX client, stack pointer to zero error_code (two dwords), ret4. Called by provider credential callback and stock retry timer. Isolated native GOG PID 71792 reached admission state 3 using this boundary without a provider callback on 2026-10-29; client holder, lobby pairing and state are checked before calling."
+    },
+    {
+      "name": "LanNoAuthGetLocalId",
+      "address": "0x0074B670",
+      "expected": "55 8B EC 51 89 4D FC 68 C8 B1 60 02 8B 4D 08 E8 BC F0 FE FF 8B 45 08 8B E5 5D C2 04 00",
+      "identity": "BZRNetLobby +0x38 GetMyID: ECX lobby, explicit hidden output pointer on stack, native copy preserves offset 4, EAX output and ret4. Used only to require the actual local admission identity before LAN readiness."
+    },
+    {
       "name": "PlatformReady",
       "address": "0x00764870",
       "expected": "55 8B EC 83 3D 70 04 8F 00 02 75 13",
