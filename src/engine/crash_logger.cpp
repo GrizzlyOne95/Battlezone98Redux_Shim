@@ -9,7 +9,9 @@
 // reentrancy guard. The text report goes to logs\openshim_crash.log and a
 // minidump is written beside it so faulting addresses for engine bugs
 // (weaponMask follow crash, renderCount allocation, ODF parse order) can
-// be recovered from a single user repro.
+// be recovered from a single user repro. Each crash also copies the log to
+// openshim_crash_<time>.log beside its .dmp, since the next launch
+// truncates openshim_crash.log.
 
 #include "crash_logger.h"
 #include "shim_log.h"
@@ -245,30 +247,60 @@ namespace BZROpenShim
 #endif
         }
 
-        void WriteMinidump(EXCEPTION_POINTERS* pointers)
+        // <logdir>\openshim_crash_YYYYMMDD_HHMMSS, shared by the .dmp and the .log copy.
+        size_t BuildCrashStem(char* path, size_t capacity)
         {
-            if (!g_MiniDumpWriteDump || !g_DumpDirectory[0]) return;
-            char path[MAX_PATH] = {};
             size_t offset = 0;
-            AppendString(path, sizeof(path), offset, g_DumpDirectory);
-            AppendString(path, sizeof(path), offset, "\\openshim_crash_");
+            AppendString(path, capacity, offset, g_DumpDirectory);
+            AppendString(path, capacity, offset, "\\openshim_crash_");
             SYSTEMTIME st = {};
             GetLocalTime(&st);
-            AppendDecimal(path, sizeof(path), offset, st.wYear);
-            if (st.wMonth < 10) AppendChar(path, sizeof(path), offset, '0');
-            AppendDecimal(path, sizeof(path), offset, st.wMonth);
-            if (st.wDay < 10) AppendChar(path, sizeof(path), offset, '0');
-            AppendDecimal(path, sizeof(path), offset, st.wDay);
-            AppendChar(path, sizeof(path), offset, '_');
-            if (st.wHour < 10) AppendChar(path, sizeof(path), offset, '0');
-            AppendDecimal(path, sizeof(path), offset, st.wHour);
-            if (st.wMinute < 10) AppendChar(path, sizeof(path), offset, '0');
-            AppendDecimal(path, sizeof(path), offset, st.wMinute);
-            if (st.wSecond < 10) AppendChar(path, sizeof(path), offset, '0');
-            AppendDecimal(path, sizeof(path), offset, st.wSecond);
-            AppendString(path, sizeof(path), offset, ".dmp");
-            path[offset < sizeof(path) ? offset : sizeof(path) - 1] = '\0';
+            AppendDecimal(path, capacity, offset, st.wYear);
+            if (st.wMonth < 10) AppendChar(path, capacity, offset, '0');
+            AppendDecimal(path, capacity, offset, st.wMonth);
+            if (st.wDay < 10) AppendChar(path, capacity, offset, '0');
+            AppendDecimal(path, capacity, offset, st.wDay);
+            AppendChar(path, capacity, offset, '_');
+            if (st.wHour < 10) AppendChar(path, capacity, offset, '0');
+            AppendDecimal(path, capacity, offset, st.wHour);
+            if (st.wMinute < 10) AppendChar(path, capacity, offset, '0');
+            AppendDecimal(path, capacity, offset, st.wMinute);
+            if (st.wSecond < 10) AppendChar(path, capacity, offset, '0');
+            AppendDecimal(path, capacity, offset, st.wSecond);
+            return offset;
+        }
 
+        void SetExtension(char* path, size_t capacity, size_t stemLength, const char* extension)
+        {
+            size_t offset = stemLength;
+            AppendString(path, capacity, offset, extension);
+            path[offset < capacity ? offset : capacity - 1] = '\0';
+        }
+
+        // CopyFileA allocates on the process heap; copy through a static buffer instead.
+        void CopyCrashLog(const char* destination)
+        {
+            HANDLE source = CreateFileA(g_CrashLogPath, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (source == INVALID_HANDLE_VALUE) return;
+            HANDLE target = CreateFileA(destination, GENERIC_WRITE, 0, nullptr,
+                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (target != INVALID_HANDLE_VALUE)
+            {
+                static char chunk[16384];
+                DWORD read = 0;
+                DWORD written = 0;
+                while (ReadFile(source, chunk, sizeof(chunk), &read, nullptr) && read)
+                    if (!WriteFile(target, chunk, read, &written, nullptr)) break;
+                CloseHandle(target);
+            }
+            CloseHandle(source);
+        }
+
+        void WriteMinidump(EXCEPTION_POINTERS* pointers, char* path, size_t capacity, size_t stemLength)
+        {
+            if (!g_MiniDumpWriteDump) return;
+            SetExtension(path, capacity, stemLength, ".dmp");
             HANDLE file = CreateFileA(path, GENERIC_WRITE, 0, nullptr,
                                       CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (file == INVALID_HANDLE_VALUE) return;
@@ -291,8 +323,15 @@ namespace BZROpenShim
             AppendRegisters(buffer, sizeof(buffer), offset, pointers->ContextRecord);
             AppendStackScan(buffer, sizeof(buffer), offset, pointers->ContextRecord);
             WriteToCrashLog(buffer, offset);
-            if (withDump && !g_CrashDumpDisabled)
-                WriteMinidump(pointers);
+            if (!withDump || !g_DumpDirectory[0]) return;
+            static char path[MAX_PATH];
+            const size_t stemLength = BuildCrashStem(path, sizeof(path));
+            if (stemLength + sizeof(".dmp") > sizeof(path)) return; // no room for an extension
+            // The next launch truncates openshim_crash.log, so keep this crash's copy beside its dump.
+            SetExtension(path, sizeof(path), stemLength, ".log");
+            CopyCrashLog(path);
+            if (!g_CrashDumpDisabled)
+                WriteMinidump(pointers, path, sizeof(path), stemLength);
         }
 
         LONG WINAPI UnhandledFilter(EXCEPTION_POINTERS* pointers)
