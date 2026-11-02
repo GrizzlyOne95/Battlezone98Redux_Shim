@@ -17,13 +17,15 @@ cd "$(dirname "$0")/../.."
 declare -A MAPS=(
   [moon]="misn01 misn02 misn02b misn03 crsetup"
   [mars]="misn04 misn05 misn06"
+  [ganymede]="evolve_3 evolve_4"
+  [elysium]="evolve_1 evolve_2 evolve_5"
   [venus]="misn07 misn08 misn09"
   [io]="misn10 misn11 misns4"
   [europa]="misn12 misn13"
   [titan]="misn14 misn15 misn16 misn15b misn16b"
   [achilles]="misn17 misn18"
 )
-for w in ${@:-moon mars venus io europa titan achilles}; do
+for w in ${@:-moon mars venus io europa titan achilles ganymede elysium}; do
   args=()
   for m in ${MAPS[$w]}; do
     # CR may override only some of a map's files (misn05 ships just its HG2): take each from CR when present.

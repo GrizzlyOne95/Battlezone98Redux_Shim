@@ -1,0 +1,142 @@
+{
+  "schema": "bzr-openshim-terrain-hd-v1",
+  "materials": {
+    "EL_DETAIL_ATLAS": {
+      "sliceCount": 18,
+      "diffuseResource": "elysium_atlas_d.dds",
+      "fallback": "openshim_elysium_auto_layer0.png",
+      "tiles": {
+        "0": "openshim_elysium_auto_layer0.png",
+        "1": "openshim_elysium_auto_layer1.png",
+        "2": "openshim_elysium_auto_layer2.png",
+        "3": "openshim_elysium_auto_layer3.png",
+        "9": "openshim_elysium_auto_layer4.png",
+        "10": "openshim_elysium_auto_layer5.png",
+        "11": "openshim_elysium_auto_layer6.png",
+        "12": "openshim_elysium_auto_layer7.png",
+        "4": "openshim_elysium_auto_evolve_1_stock_control.png",
+        "13": "openshim_elysium_auto_evolve_1_stock_control2.png",
+        "5": "openshim_elysium_auto_layer0_n.png",
+        "6": "openshim_elysium_auto_layer1_n.png",
+        "7": "openshim_elysium_auto_layer2_n.png",
+        "8": "openshim_elysium_auto_layer3_n.png",
+        "14": "openshim_elysium_auto_layer4_n.png",
+        "15": "openshim_elysium_auto_layer5_n.png",
+        "16": "openshim_elysium_auto_layer6_n.png",
+        "17": "openshim_elysium_auto_layer7_n.png"
+      },
+      "paint": {
+        "schema": "bzr-openshim-terrain-paint-v1",
+        "rowZero": "minZ",
+        "repeatMeters": [
+          20,
+          12,
+          24,
+          16,
+          20,
+          18,
+          14,
+          10
+        ],
+        "maps": [
+          {
+            "terrainFingerprint": "b278c3b5d8bf4e02",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_elysium_auto_evolve_1_stock_control.png",
+            "control2": "openshim_elysium_auto_evolve_1_stock_control2.png"
+          },
+          {
+            "terrainFingerprint": "7682e99f8430b282",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_elysium_auto_evolve_2_stock_control.png",
+            "control2": "openshim_elysium_auto_evolve_2_stock_control2.png"
+          },
+          {
+            "terrainFingerprint": "d017998bbe2ec20c",
+            "boundsMeters": [
+              -1910.0,
+              -1930.0,
+              1930.0,
+              1910.0
+            ],
+            "control": "openshim_elysium_auto_evolve_5_stock_control.png",
+            "control2": "openshim_elysium_auto_evolve_5_stock_control2.png"
+          }
+        ],
+        "detile": [
+          1,
+          1,
+          1,
+          1,
+          0,
+          1,
+          1,
+          1
+        ],
+        "nearOnly": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        "far": [
+          5,
+          40,
+          250,
+          0.6
+        ],
+        "macro": [
+          260,
+          0.12,
+          0.15
+        ],
+        "heightBlend": 0.5,
+        "heightMeters": [
+          0.4,
+          0.5,
+          2.0,
+          0.8,
+          0.1,
+          0.8,
+          0.3,
+          0.6
+        ],
+        "detail": [
+          60,
+          1.5,
+          4,
+          1
+        ],
+        "detailLayers": [
+          0.4,
+          0.5,
+          1.0,
+          0.6,
+          0.0,
+          0.6,
+          0.4,
+          0.5
+        ],
+        "parallax": [
+          1,
+          30,
+          12
+        ]
+      }
+    }
+  }
+}

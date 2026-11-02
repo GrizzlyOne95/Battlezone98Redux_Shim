@@ -352,7 +352,7 @@ layer, give that layer the stock tile as `cellAligned` art and add an `edge`:
 
 ## World packs
 
-Each stock world (Moon, Mars, Venus, Io, Europa, Titan, Achilles) has one recipe,
+Each stock world (Moon, Mars, Ganymede, Elysium, Venus, Io, Europa, Titan, Achilles) has one recipe,
 `scripts/terrain-packs/<world>-autopaint.json`, and one pack that covers every
 mission on it. `mars-paint.json` and `mars-pilot.json` are the earlier
 hand-painted and tile-array prototypes.
@@ -408,7 +408,7 @@ hand-painted and tile-array prototypes.
   stock tile whose mean colour the layer is matched to), height and specular.
 - `heightBlend`, `far`, `macro` and (Moon only) `craters`.
 
-All seven worlds use detile on every layer, plus `far` {5, 40, 250, 0.6} and
+All nine worlds use detile on every layer, plus `far` {5, 40, 250, 0.6} and
 `macro` {260, 0.12, 0.15}. The Moon dust layers drop the baked craters for
 `proceduralCraters` (0.6 on Dust, 1 on Cratered dust), with `craters` set to
 cell 8 m, depth 0.2, coverage 0.35 and three octaves. The first setting
@@ -461,6 +461,19 @@ scree on small crests. Erosion puts talus on scree, gravel and rocky soil
 gravel and crust (6%, 0.35). The weight maps are 2048 for the pad edges. CR
 overrides only `misn05.hg2`, so `build-world-packs.sh` takes each of a map's
 HG2, MAT and TRN from CR when present and from the stock folder otherwise.
+
+Ganymede (`evolve_3`, `evolve_4`) and Elysium (`evolve_1`, `evolve_2`, `evolve_5`)
+follow the Mars layout: eight layers, with the base pad (`ga44sa0` and `el04sa0`,
+`cellAligned`) at layer 4 and the same variation, shape, erosion and slope
+rules, matched to CR's crhd tiles. Ganymede's types are Dark rock, light rock,
+Ice (cream), Geyser and Base: Icelandic sand with pebbles, rocky ground and
+glacier ice, with Icelandic rocky ground as the Geyser floor, plus jagged rock
+(slopes), dust drift and rubble. Elysium's are Packed Dirt, Rocky Sand,
+Weathered Rock, Geyser and Base Grid-iron: rocky steppe, arid gravel, cracked
+boulder rock and dark rock detail, plus dark streaks, lava stone crust and
+scree. Both worlds ship only in stock maps (CR does not override them), so each
+map is built once as `evolve_N_stock`. The base pads have no art normal; it is
+derived from their height.
 
 **Build.**
 
