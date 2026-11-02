@@ -5933,10 +5933,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         ForgetTerrainProxy(TerrainForgetReason::ProcessShutdown, false, false);
     }
 
-    // Test-only: OPENSHIM_FRAME_CAPTURE="600,1200" writes those rendered world
-    // frames next to the exe. Reads back the render window, so it still works
-    // when the desktop is locked or the session is disconnected and screen
-    // grabs come back black.
+    // Test-only: OPENSHIM_FRAME_CAPTURE="600,1200" writes those rendered
+    // frames (counted from the first shell screen, menus included) next to
+    // the exe. Reads back the render window, so it still works when the
+    // desktop is locked or the session is disconnected and screen grabs come
+    // back black.
     static void MaybeCaptureTestFrame()
     {
         static int state = 0; // 0 unread, 1 armed, 2 off
@@ -6023,9 +6024,61 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
     }
 
+    // Ogre::FrameListener, laid out to its vtable: frameStarted,
+    // frameRenderingQueued, frameEnded, virtual destructor. Root fires
+    // frameRenderingQueued once per frame after every target has rendered and
+    // before the buffers swap, on menus as well as in missions.
+    class FrameCaptureListener
+    {
+    public:
+        virtual bool frameStarted(const void*) { return true; }
+        virtual bool frameRenderingQueued(const void*)
+        {
+            MaybeCaptureTestFrame();
+            return true;
+        }
+        virtual bool frameEnded(const void*) { return true; }
+        virtual ~FrameCaptureListener() = default;
+    };
+
+    void InstallFrameCaptureListener()
+    {
+        static bool done = false;
+        static bool warned = false;
+        if (done)
+            return;
+        std::string list;
+        if (!ReadEnvString("OPENSHIM_FRAME_CAPTURE", list))
+        {
+            done = true;
+            return;
+        }
+        using FnAddFrameListener = void(__thiscall*)(void*, void*);
+        HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
+        const auto getRoot = ogre ? Resolve<FnGetSingleton>(ogre,
+            "?getSingletonPtr@Root@Ogre@@SAPAV12@XZ") : nullptr;
+        const auto addFrameListener = ogre ? Resolve<FnAddFrameListener>(ogre,
+            "?addFrameListener@Root@Ogre@@QAEXPAVFrameListener@2@@Z") : nullptr;
+        void* root = getRoot ? getRoot() : nullptr;
+        if (!root || !addFrameListener)
+        {
+            // Retried on the next seam call; Root may not exist yet.
+            if (!warned)
+                LogShimA(LogLevel::Warn, "terrain-proxy",
+                    "[FRAME-CAPTURE] Ogre Root unavailable; will retry");
+            warned = true;
+            return;
+        }
+        done = true;
+        static FrameCaptureListener listener;
+        addFrameListener(root, &listener);
+        LogShimA(LogLevel::Info, "terrain-proxy", "[FRAME-CAPTURE] frame listener installed");
+    }
+
     void TerrainProxyRenderFrameTick()
     {
-        MaybeCaptureTestFrame();
+        // Fallback install for a run whose first frames are a mission.
+        InstallFrameCaptureListener();
         // Cheap early-out: this runs on every rendered world frame and must
         // cost nothing when the opt-in capture is off.
         if ((g_config.semanticFrameCaptures <= 0 && g_config.surfaceManifest.empty() && g_config.geometryExport.empty() && !g_config.hdEnabled) || !g_active.load() ||
