@@ -159,6 +159,7 @@
     <ClCompile Include="src\patches\ai_unit_fixes.cpp" />
     <ClCompile Include="src\patches\ai_weapon_mask.cpp" />
     <ClCompile Include="src\patches\alert_reticle_modes.cpp" />
+    <ClCompile Include="src\patches\autosave_notice.cpp" />
     <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\community_key_auth.cpp" />
@@ -380,6 +381,8 @@
     <ClInclude Include="include\lcbench_safety_policy.h" />
     <ClInclude Include="include\autosave.h" />
     <ClInclude Include="include\autosave_gate.h" />
+    <ClInclude Include="include\autosave_notice.h" />
+    <ClInclude Include="include\autosave_notice_layout.h" />
     <ClInclude Include="include\bzr_hooks.h" />
     <ClInclude Include="include\unit_damage.h" />
     <ClInclude Include="include\unit_damage_policy.h" />
