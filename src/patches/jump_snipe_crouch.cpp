@@ -86,7 +86,10 @@ namespace BZROpenShim
                 const HookEngine::EngineRow rows[] = {
                     { "PersonCrouchBranch", &g_PersonCrouchBranchAddr },
                 };
-                return HookEngine::BindEngineRows("Jump-snipe crouch", rows);
+                const bool ok = HookEngine::BindEngineRows("Jump-snipe crouch", rows);
+                if (!ok)
+                    MarkOptionHookFailed("JumpSnipeCrouch", "Unavailable: Jump-snipe crouch fix did not hook on this game build (see openshim.log).");
+                return ok;
             }();
             return bound;
         }
@@ -108,11 +111,13 @@ namespace BZROpenShim
                                           kPersonCrouchBranchExpected,
                                           sizeof(kPersonCrouchBranchExpected)))
                 {
+                    MarkOptionHookFailed("JumpSnipeCrouch", "Unavailable: Jump-snipe crouch fix did not hook on this game build (see openshim.log).");
                     return;
                 }
                 if (WritePersonCrouchBranchBytes(kPersonCrouchBranchPatched))
                 {
                     g_JumpSnipeCrouchPatchActive = true;
+                    ClearOptionHookFailed("JumpSnipeCrouch");
                     Log(L"[JUMPSNIPE] Applied legacy crouch-on-landing fix at 0x%08X (SP-only)\n",
                         static_cast<uint32_t>(g_PersonCrouchBranchAddr));
                 }

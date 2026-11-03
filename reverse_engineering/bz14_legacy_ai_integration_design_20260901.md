@@ -136,7 +136,17 @@ The setup was one cvtnk (`TankEnemy`, `legacyAI = 1`, team 2) against three avtn
 
 The user confirmed the strafing looked like the familiar 1.4 movement.
 
-**Open question:** the attacker in that flee was logged as the player craft (`asuser`). This is UNVERIFIED and was not investigated.
+**Flee attacker (`asuser`), live probe 2026-11-03:**
+* Setup: sxshow, two cvtnk on team 2 vs three avtank on team 3, with the player idle 480+ m away.
+* `GetWhoShotMe` on the first legacy cvtnk changed from `nil` to `avtank/t3` (BZLogger `[LP] red FDF00210 whoShotMe=avtank/t3`).
+* So the shooter the stock code records, which is what the flee reads, is the AI attacker. `asuser` is the trace label for that last-shooter field and does not mean the player shot it.
+* The decompile line for the craft+0x1F4 last-shooter field was not re-checked in this pass, so that offset is UNVERIFIED.
+
+**Bomber close range after the fold into `AiOdfGameplayTuning`, same probe:**
+* An svhr13 was spawned 60 m from an avtank.
+* With tuning on: `[BOMBERRANGE] original=299.00 final=299.00 close=20.00`, so the range was unchanged for this ODF.
+* The bomber held 60-93 m and did no damage in about 60 s, with tuning on and with tuning off alike.
+* So the fold does not make bombers worse under 250 m; the idle hover is stock behaviour in this setup. Not tested: a bomber whose ODF range differs from its stock range.
 
 ### Global option
 
@@ -145,4 +155,4 @@ The user confirmed the strafing looked like the familiar 1.4 movement.
 * `legacyAI = 1` forces legacy AI with the option off.
 * `legacyAI = 0` opts a unit out with the option on.
 
-There is no Lua/EXU toggle yet.
+Lua: `exu.SetLegacyTankAiEnabled(bool)` (EXU → `OpenShimSetLegacyTankAiEnabled`) sets a mission override that is reset at mission end. The live probe logged `ret=true` and `[MISSIONHOOK] legacy tank AI override enabled (active=true)`.

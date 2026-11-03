@@ -545,7 +545,10 @@ namespace BZROpenShim
                 s_bound = s_helpers.isStuck && s_helpers.doSlide && s_helpers.doFlee &&
                     s_helpers.sidewaysAndClose && s_helpers.isBuilding && s_helpers.distanceSquared2D;
                 if (!s_bound)
+                {
                     Log(L"[LEGACY] 1.4 slide and flee disabled: an AttackTask helper row does not bind\n");
+                    MarkOptionHookFailed("LegacyTankAi", "Unavailable: Legacy tank AI did not hook on this game build (see openshim.log).");
+                }
             }
             return s_bound ? &s_helpers : nullptr;
         }
@@ -1184,12 +1187,16 @@ namespace BZROpenShim
 
             g_AttackTaskDoStateEntryAddr = HookEngine::EngineAddress("AttackTaskDoState");
             if (g_AttackTaskDoStateEntryAddr == 0 || TerrainGetIntersectionAddr() == 0)
+            {
+                MarkOptionHookFailed("LegacyTankAi", "Unavailable: Legacy tank AI did not hook on this game build (see openshim.log).");
                 return;
+            }
 
             if (!ExpectedBytesMatchAt(g_AttackTaskDoStateEntryAddr,
                                       kExpectedAttackTaskDoStateBytes,
                                       sizeof(kExpectedAttackTaskDoStateBytes)))
             {
+                MarkOptionHookFailed("LegacyTankAi", "Unavailable: Legacy tank AI did not hook on this game build (see openshim.log).");
                 return;
             }
 
@@ -1202,6 +1209,7 @@ namespace BZROpenShim
             {
                 Log(L"[AIKITE] Failed installing AttackTask::DoState hook at 0x%08X\n",
                     static_cast<uint32_t>(g_AttackTaskDoStateEntryAddr));
+                MarkOptionHookFailed("LegacyTankAi", "Unavailable: Legacy tank AI did not hook on this game build (see openshim.log).");
                 return;
             }
 
@@ -1609,6 +1617,7 @@ namespace BZROpenShim
             if (currentTarget != g_Dist3DSquaredAddr)
             {
                 Log(L"[SCAVPATH] Redux helper/call-site bytes mismatch; path-scored scrap selection disabled\n");
+                MarkOptionHookFailed("SmartScavengerPathing", "Unavailable: Smart scavenger pathing did not hook on this game build (see openshim.log).");
                 return;
             }
 
@@ -1800,6 +1809,7 @@ namespace BZROpenShim
             {
                 Log(L"[SCAVPATH] RecycleTask::DoGotoScrap bytes mismatch at 0x%08X; en-route retargeting disabled\n",
                     static_cast<uint32_t>(g_RecycleTaskDoGotoScrapAddr));
+                MarkOptionHookFailed("SmartScavengerPathing", "Unavailable: Smart scavenger pathing did not hook on this game build (see openshim.log).");
                 return;
             }
 
@@ -1812,6 +1822,7 @@ namespace BZROpenShim
             {
                 Log(L"[SCAVPATH] Failed installing RecycleTask::DoGotoScrap retarget hook at 0x%08X\n",
                     static_cast<uint32_t>(g_RecycleTaskDoGotoScrapAddr));
+                MarkOptionHookFailed("SmartScavengerPathing", "Unavailable: Smart scavenger pathing did not hook on this game build (see openshim.log).");
                 return;
             }
 
@@ -1906,7 +1917,7 @@ namespace BZROpenShim
                 tuning.hasWeaponRangeMinAI &&
                 !tuning.derivedBomberWeaponRangeAI;
             const bool useDerivedBomberRange =
-                g_BomberAiRangeActive &&
+                g_AiOdfGameplayTuningActive &&
                 tuning.bomberAiRole &&
                 tuning.hasWeaponRangeMinAI &&
                 tuning.derivedBomberWeaponRangeAI;
@@ -2290,6 +2301,12 @@ namespace BZROpenShim
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();
+            // These installs are retried, so a hook that lands on a later
+            // pass takes back an earlier Unavailable mark.
+            if (g_AttackTaskDoStateHookInstalled && GetLegacyAttackHelpers())
+                ClearOptionHookFailed("LegacyTankAi");
+            if (g_ScrapPathScoreHookInstalled && g_ScrapRetargetHookInstalled)
+                ClearOptionHookFailed("SmartScavengerPathing");
 
             if (g_CalcRangeCraftHookInstalled &&
                 g_RetargetPeriodHooksInstalled &&
@@ -2301,6 +2318,7 @@ namespace BZROpenShim
             if (g_CalcRangeCraftDetour.trampoline && g_BzrFn_CalcRangeCraft)
             {
                 g_CalcRangeCraftHookInstalled = true;
+                ClearOptionHookFailed("AiOdfGameplayTuning");
             }
 
             if (!g_CalcRangeCraftHookInstalled)
@@ -2316,6 +2334,7 @@ namespace BZROpenShim
                 if (calcRangeCraftEntryAddr == 0)
                 {
                     Log(L"[AIODF] CalcRange(Craft) resolver failed; AI ODF range tuning disabled\n");
+                    MarkOptionHookFailed("AiOdfGameplayTuning", "Unavailable: AI ODF range tuning did not hook on this game build (see openshim.log).");
                 }
                 else if (!ExpectedBytesMatchAt(calcRangeCraftEntryAddr,
                                           kExpectedCalcRangeCraftBytes,
@@ -2323,6 +2342,7 @@ namespace BZROpenShim
                 {
                     Log(L"[AIODF] CalcRange(Craft) entry bytes mismatch at 0x%08X; AI ODF range tuning disabled\n",
                         static_cast<uint32_t>(calcRangeCraftEntryAddr));
+                    MarkOptionHookFailed("AiOdfGameplayTuning", "Unavailable: AI ODF range tuning did not hook on this game build (see openshim.log).");
                 }
                 else if (!InstallInlineDetour32(g_CalcRangeCraftDetour,
                                                 calcRangeCraftEntryAddr,
@@ -2333,6 +2353,7 @@ namespace BZROpenShim
                 {
                     Log(L"[AIODF] Failed installing CalcRange(Craft) hook at 0x%08X\n",
                         static_cast<uint32_t>(calcRangeCraftEntryAddr));
+                    MarkOptionHookFailed("AiOdfGameplayTuning", "Unavailable: AI ODF range tuning did not hook on this game build (see openshim.log).");
                 }
                 else
                 {
@@ -2341,6 +2362,7 @@ namespace BZROpenShim
                     g_CalcRangeCraftHookInstalled = (g_BzrFn_CalcRangeCraft != nullptr);
                     if (g_CalcRangeCraftHookInstalled)
                     {
+                        ClearOptionHookFailed("AiOdfGameplayTuning");
                         Log(L"[AIODF] Installed CalcRange(Craft) hook entry=0x%08X trampoline=0x%08X\n",
                             static_cast<uint32_t>(calcRangeCraftEntryAddr),
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CalcRangeCraftDetour.trampoline)));

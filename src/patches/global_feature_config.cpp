@@ -75,15 +75,65 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
-        bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
-        bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        namespace
+        {
+            struct OptionHookFailure { const char* key; const char* why; };
+            std::mutex g_OptionHookFailureLock;
+            OptionHookFailure g_OptionHookFailures[16];
+        }
+
+        void MarkOptionHookFailed(const char* iniKey, const char* why)
+        {
+            if (!iniKey || !why) return;
+            std::lock_guard<std::mutex> guard(g_OptionHookFailureLock);
+            for (auto& entry : g_OptionHookFailures)
+            {
+                if (entry.key && std::strcmp(entry.key, iniKey) == 0)
+                {
+                    if (!entry.why)
+                    {
+                        entry.why = why;
+                        Log(L"[OPTIONS] %hs marked unavailable: %hs\n", iniKey, why);
+                    }
+                    return;
+                }
+                if (!entry.key)
+                {
+                    entry.key = iniKey;
+                    entry.why = why;
+                    Log(L"[OPTIONS] %hs marked unavailable: %hs\n", iniKey, why);
+                    return;
+                }
+            }
+            Log(L"[OPTIONS] failure registry full; %hs not marked: %hs\n", iniKey, why);
+        }
+
+        void ClearOptionHookFailed(const char* iniKey)
+        {
+            if (!iniKey) return;
+            std::lock_guard<std::mutex> guard(g_OptionHookFailureLock);
+            for (auto& entry : g_OptionHookFailures)
+            {
+                if (entry.key && std::strcmp(entry.key, iniKey) == 0)
+                {
+                    if (entry.why) Log(L"[OPTIONS] %hs available again\n", iniKey);
+                    entry.why = nullptr;
+                    return;
+                }
+            }
+        }
+
+        const char* OptionHookFailureReason(const char* iniKey)
+        {
+            if (!iniKey) return nullptr;
+            std::lock_guard<std::mutex> guard(g_OptionHookFailureLock);
+            for (const auto& entry : g_OptionHookFailures)
+                if (entry.key && std::strcmp(entry.key, iniKey) == 0) return entry.why;
+            return nullptr;
+        }
+
         bool g_LegacyTankAiBaselineEnabled = kLegacyTankAiEnabledDefault;
         bool g_LegacyTankAiEnabled = kLegacyTankAiEnabledDefault;
-        // Configured value AND'd with the single-player gate, same contract as
-        // g_AiOdfGameplayTuningActive below. This feature changes stock content
-        // (it raises bomber engagement range from the craft's own weapon ODFs),
-        // so it must never reach a network game.
-        bool g_BomberAiRangeActive = false;
         bool g_LegacyTankAiActive = false;
         bool g_HowitzerUndeployedRetaliationFixEnabled =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
@@ -207,18 +257,6 @@ namespace BZROpenShim
         {
             g_AiOdfGameplayTuningEnabled = g_AiOdfGameplayTuningBaselineEnabled;
             RefreshAiOdfGameplayTuningState();
-        }
-
-        void RefreshBomberAiRangeState()
-        {
-            g_BomberAiRangeActive =
-                g_BomberAiRangeEnabled && IsSinglePlayerSession();
-        }
-
-        static void RevertBomberAiRangeToBaseline()
-        {
-            g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
-            RefreshBomberAiRangeState();
         }
 
         void RefreshLegacyTankAiState()
@@ -486,12 +524,6 @@ namespace BZROpenShim
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiWeaponMaskMinelayer", value))
                 g_AiWeaponMaskMinelayerEnabled = value;
 
-            g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
-            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "BomberAiRange", value))
-                g_BomberAiRangeBaselineEnabled = value;
-            g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
-            RefreshBomberAiRangeState();
-
             g_LegacyTankAiBaselineEnabled = kLegacyTankAiEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "LegacyTankAi", value))
                 g_LegacyTankAiBaselineEnabled = value;
@@ -631,8 +663,6 @@ namespace BZROpenShim
               &RevertAiWeaponMaskMinelayerToBaseline, &RefreshAiWeaponMaskMinelayerState },
             { "AiOdfGameplayTuning", FeatureTier::SinglePlayer,
               &RevertAiOdfGameplayTuningToBaseline, &RefreshAiOdfGameplayTuningState },
-            { "BomberAiRange", FeatureTier::SinglePlayer,
-              &RevertBomberAiRangeToBaseline, &RefreshBomberAiRangeState },
             { "LegacyTankAi", FeatureTier::SinglePlayer,
               &RevertLegacyTankAiToBaseline, &RefreshLegacyTankAiState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,

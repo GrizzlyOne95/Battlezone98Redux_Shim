@@ -115,6 +115,9 @@ OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetGeometryContactStats, OpenSh
 // Local-client BZR UDP observations; copied versioned record, no payload/addresses.
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetNetworkTrafficSnapshot, OpenShimImpl_GetNetworkTrafficSnapshot, (void* output, DWORD size), (output, size), FALSE)
 
+// Mission-scoped OpenShim Legacy Tank AI (1.4/TRO attack AI) switch.
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetLegacyTankAiEnabled, OpenShimImpl_SetLegacyTankAiEnabled, (BOOL enabled), (enabled), FALSE)
+
 #ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_APPEND
 #undef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED

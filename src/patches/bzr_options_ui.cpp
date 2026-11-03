@@ -17,6 +17,7 @@
 
 #include "autosave.h"
 #include "bzr_hooks.h"
+#include "bzr_hooks_internal.h"
 #include "native_ui.h"
 #include "openshim_assets.h"
 #include "openshim_ini.h"
@@ -3101,6 +3102,9 @@ namespace BZROpenShim
                 return ContextualHud::UnavailableReason();
             if (setting.applyGroup == ShimSettingApplyGroup::HudPalette)
                 return HudPalette::UnavailableReason();
+            if (setting.key)
+                if (const char* failed = Hooks::OptionHookFailureReason(setting.key))
+                    return failed;
             const auto caps = Assets::GetAssetCapabilities();
             if (caps.state == Assets::AssetPackState::Unknown || !setting.section || !setting.key)
                 return nullptr;

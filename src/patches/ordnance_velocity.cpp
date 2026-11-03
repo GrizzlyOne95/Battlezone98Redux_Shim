@@ -472,6 +472,7 @@ namespace BZROpenShim
                 g_OrdnanceVelocityDetourFailureLogged = true;
                 if (!g_OrdnanceSpawnVelocityDetourInstalled)
                 {
+                    MarkOptionHookFailed("OrdnanceVelocityInheritance", "Unavailable: Ordnance velocity inheritance did not hook on this game build (see openshim.log).");
                     Log(L"[ORDVEL] Spawn-velocity site at 0x%08X never matched after %d "
                         L"attempts; ordnance velocity inheritance unavailable on this build\n",
                         static_cast<uint32_t>(g_OrdnanceSpawnVelocityAddr),
@@ -505,7 +506,10 @@ namespace BZROpenShim
                     { "CannonLeadVelocitySite", &g_CannonLeadVelocityAddr },
                     { "CannonLeadToleranceBranch", &g_CannonLeadToleranceAddr },
                 };
-                return HookEngine::BindEngineRows("Ordnance velocity inheritance", rows);
+                const bool ok = HookEngine::BindEngineRows("Ordnance velocity inheritance", rows);
+                if (!ok)
+                    MarkOptionHookFailed("OrdnanceVelocityInheritance", "Unavailable: Ordnance velocity inheritance did not hook on this game build (see openshim.log).");
+                return ok;
             }();
             return bound;
         }

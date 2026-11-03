@@ -5,6 +5,7 @@
 #include "hook_engine.h"
 #include "patch_config_parse.h"
 #include "patches.h"
+#include "../patches/bzr_hooks_internal.h"
 #include "odf_item_hooks.h"
 #include "scroll_helper.h"
 #include "trampolines.h"
@@ -1405,6 +1406,19 @@ namespace BZROpenShim
         }
     }
 
+    // A gameplay patch that did not land leaves its option dead; tell the
+    // Options menu so it shows Unavailable instead of On.
+    static void MarkPatchOptionFailed(const char* patchName) {
+        const std::string name = patchName;
+        if (name.find("Aim Pitch Multiplier") != std::string::npos)
+            Hooks::MarkOptionHookFailed("TurretAimPitch", "Unavailable: Turret anti-air pitch did not hook on this game build (see openshim.log).");
+        else if (name.find("Artillery Weapon Mask") != std::string::npos ||
+                 name.find("Artillery Volley Trigger Hook") != std::string::npos)
+            Hooks::MarkOptionHookFailed("AiWeaponMaskArtillery", "Unavailable: AI howitzer volley did not hook on this game build (see openshim.log).");
+        else if (name.find("LayMines Weapon Mask") != std::string::npos)
+            Hooks::MarkOptionHookFailed("AiWeaponMaskMinelayer", "Unavailable: AI mine volley did not hook on this game build (see openshim.log).");
+    }
+
     // The four artillery volley sites replace a whole 5-byte instruction pair
     // (`mov r32,[vtbl+8]` + `call r32`) rather than a rel32 operand, so the
     // payload is built here as an explicit CALL rel32 instead of going through
@@ -1616,6 +1630,7 @@ namespace BZROpenShim
             const char* missing = FindUnboundEngineHelperForPatch(patch.name.c_str());
             if (!missing) return false;
             Log(L"[ADDR] %hs stands down: engine helper %hs is unbound\n", patch.name.c_str(), missing);
+            MarkPatchOptionFailed(patch.name.c_str());
             return true;
         }), patches.end());
         FillJmp5Payloads(patches); FillDwordPayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
@@ -1650,6 +1665,7 @@ namespace BZROpenShim
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
             } else {
                 Log(L"[SKIP] %hs address=0x%08X verified=%hs payload=%u\n", p.name.c_str(), p.address, p.verified ? "yes" : "no", static_cast<unsigned>(p.payload.size()));
+                MarkPatchOptionFailed(p.name.c_str());
             }
         }
         // Shared firing sites must be committed before the ODF/presentation

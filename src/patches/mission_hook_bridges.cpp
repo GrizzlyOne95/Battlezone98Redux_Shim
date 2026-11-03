@@ -1,6 +1,6 @@
 // mission_hook_bridges.cpp
 // BZR Open Shim - mission hook bridge setters: the SDK-facing per-mission
-// overrides (bomber AI range, AI ODF gameplay tuning, per-unit AI tuning,
+// overrides (AI ODF gameplay tuning, per-unit AI tuning, legacy tank AI,
 // turret aim pitch), the mission-reset that restores them, and the
 // mission-running query, split out of bzr_hooks.cpp.
 #include "native_hud_runtime.h"
@@ -76,14 +76,23 @@ namespace BZROpenShim
 {
     using namespace Hooks;
 
-    bool SetBomberAiRangeEnabledFromBridge(bool enabled)
+    bool SetLegacyTankAiEnabledFromBridge(bool enabled)
     {
         RetryDeferredRuntimeHooks();
-        g_BomberAiRangeEnabled = enabled;
-        RefreshBomberAiRangeState();
-        Log(L"[MISSIONHOOK] bomber AI range override %hs (active=%hs)\n",
+        g_LegacyTankAiEnabled = enabled;
+        RefreshLegacyTankAiState();
+        Log(L"[MISSIONHOOK] legacy tank AI override %hs (active=%hs)\n",
             enabled ? "enabled" : "disabled",
-            BoolText(g_BomberAiRangeActive));
+            BoolText(g_LegacyTankAiActive));
+        return true;
+    }
+
+    bool SetBomberAiRangeEnabledFromBridge(bool enabled)
+    {
+        // Bomber range is now part of AI ODF gameplay tuning; the export
+        // stays for old callers and does nothing.
+        Log(L"[MISSIONHOOK] bomber AI range override %hs ignored: folded into AI ODF gameplay tuning\n",
+            enabled ? "enabled" : "disabled");
         return true;
     }
 
@@ -218,7 +227,8 @@ namespace BZROpenShim
     bool ResetMissionHookOverridesFromBridge()
     {
         RetryDeferredRuntimeHooks();
-        g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
+        g_LegacyTankAiEnabled = g_LegacyTankAiBaselineEnabled;
+        RefreshLegacyTankAiState();
         // Content render-profile requests are mission/session scoped: the
         // authoritative lifecycle seam clears them so an EXU override from one
         // mission can never leak into the shell or unrelated content.

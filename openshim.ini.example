@@ -2373,10 +2373,18 @@ AiWeaponMaskMinelayer = 0
 ;   scrapRetargetPeriodAI
 ;   scrapRetargetMinImprovementAI
 ;
-; Every path this gates ALSO requires the ODF to declare the matching key, so
-; content that does not author them -- the stock campaign included -- behaves
-; identically whether this is on or off. That is why it defaults ON: it is a
-; capability switch for authored content, not a behaviour change.
+; Every path this gates ALSO requires the ODF to declare the matching key,
+; with one exception: bomber range. A bomber-role craft (aiName / aiName2 =
+; bomberfriend or bomberenemy) that authors neither engageRangeAI nor
+; weaponRangeMinAI gets the longest range among its own weapon ODFs as its
+; outer engagement floor, so stock bombers start their runs further out
+; instead of closing to gun distance. Its too-close range is unchanged, so a
+; bomber caught at short range still fires. Everything else is a capability
+; switch for authored content, which is why this defaults ON.
+;
+; Bomber range used to be its own BomberAiRange key (default OFF); that key
+; and exu.SetBomberAiRangeEnabled are now ignored. Trace bomber range with
+; OPENSHIM_TRACE_BOMBER_RANGE=1 (logs [BOMBERRANGE] original/final range).
 ;
 ; Turn it off to make OpenShim ignore those keys entirely and run every unit on
 ; stock/global values, which is the fastest way to tell whether a mod's AI
@@ -2391,30 +2399,6 @@ AiWeaponMaskMinelayer = 0
 ; These fields do not change CraftClass.rangeScan or periodScan, do not affect
 ; player-fired weapon range, and never bypass the stock offensive state gates.
 AiOdfGameplayTuning = 1
-
-; Give bomber-role AI a minimum engagement range.
-;
-; Stock bomber AI (aiName / aiName2 = bomberfriend or bomberenemy) closes to
-; ordinary gun distance before attacking, which wastes the standoff its bomb
-; weapon actually has. This raises the engagement range for those craft.
-;
-; UNLIKE AiOdfGameplayTuning above, this one changes stock content. When the
-; ODF authors neither engageRangeAI nor weaponRangeMinAI, the range is derived
-; from the longest range among the craft's own weapon ODFs -- and every stock
-; bomber has those. Expect stock bombers to start their runs further out.
-;
-; Was previously reachable only through the EXU bridge
-; (exu.SetBomberAiRangeEnabled) from Campaign Reimagined's settings, which
-; enabled it. Set this to 1 to keep that behaviour outside CR.
-;
-; Because it changes stock content it honours the section gate and never runs
-; in a network game, including when Campaign Reimagined or another mod enables
-; it through the EXU bridge.
-;
-; Accepted: boolean. Default: OFF.
-; Trace: OPENSHIM_TRACE_BOMBER_RANGE=1 or OPENSHIM_TRACE_AI_RANGE=1
-;        (logs [BOMBERRANGE] original/final range per engagement)
-BomberAiRange = 0
 
 ; Legacy (1.4 / TRO 1.3) attack AI for every unit that runs the stock attack
 ; task. Instead of parking and shooting, a unit strafes around its target;
