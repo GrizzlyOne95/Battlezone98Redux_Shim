@@ -27,6 +27,7 @@
 #include "patcher.h"
 #include "render_profile_runtime.h"
 #include "shim_log.h"
+#include "troubleshooting_bundle.h"
 #include "ui_decor.h"
 #include "BZROpenShim.h"
 
@@ -2671,7 +2672,8 @@ namespace BZROpenShim
         static bool IsShimSettingActionRow(const ShimSettingDescriptor& setting)
         {
             return setting.applyGroup == ShimSettingApplyGroup::CareerStatsReset ||
-                   setting.applyGroup == ShimSettingApplyGroup::ResetToStock;
+                   setting.applyGroup == ShimSettingApplyGroup::ResetToStock ||
+                   setting.applyGroup == ShimSettingApplyGroup::TroubleshootingBundle;
         }
 
         // Which action row, if any, is one click away from firing. Registry
@@ -2679,6 +2681,14 @@ namespace BZROpenShim
         // must never happen on a single click of a row the player was only
         // trying to read, so the first click arms and the second commits.
         static size_t g_ShimSettingsArmedActionIndex = kShimSettingsRegistryCount;
+
+        // The bundle copies up to a few hundred MB, so it runs on a worker and a
+        // UI-thread timer collects the result, as the update check does. The
+        // worker touches only files; g_ShimBundleResult is read after the
+        // thread handle signals.
+        static HANDLE g_ShimBundleThread = nullptr;
+        static UINT_PTR g_ShimBundleTimer = 0;
+        static TroubleshootingBundleResult g_ShimBundleResult;
 
         static void DisarmShimSettingsAction()
         {
@@ -2691,7 +2701,10 @@ namespace BZROpenShim
         {
             if (IsShimSettingActionRow(setting))
             {
-                // Index 0 is the resting label, index 1 the armed one.
+                // Index 0 is the resting label, index 1 the armed one (for the
+                // bundle row, "Building...").
+                if (setting.applyGroup == ShimSettingApplyGroup::TroubleshootingBundle)
+                    return g_ShimBundleThread ? 1u : 0u;
                 const size_t index =
                     static_cast<size_t>(&setting - &g_ShimSettingsRegistry[0]);
                 return (g_ShimSettingsArmedActionIndex == index) ? 1u : 0u;
@@ -3858,6 +3871,84 @@ namespace BZROpenShim
             return registered;
         }
 
+        static DWORD WINAPI ShimBundleWorker(LPVOID)
+        {
+            g_ShimBundleResult = BuildTroubleshootingBundle();
+            return 0;
+        }
+
+        static void FinishTroubleshootingBundle(std::string& status)
+        {
+            const TroubleshootingBundleResult& result = g_ShimBundleResult;
+            if (!result.ok)
+            {
+                Log(L"[SETTINGSUI] Troubleshooting bundle failed: %hs\n", result.error.c_str());
+                status = ShimFormat("openshim_ui:bundle_failed", "Troubleshooting bundle failed: %s",
+                                    result.error.c_str());
+                return;
+            }
+            Log(L"[SETTINGSUI] Troubleshooting bundle: %zu files, %llu bytes -> %ls\n", result.fileCount,
+                static_cast<unsigned long long>(result.zipBytes), result.zipPath.c_str());
+            // Under Proton the Windows path means nothing to the player; show the Linux one.
+            std::string shown = HostPathForDisplay(result.zipPath);
+            if (shown.empty())
+            {
+                const size_t slash = result.zipPath.find_last_of(L'\\');
+                const std::wstring name = result.zipPath.substr(slash == std::wstring::npos ? 0 : slash + 1);
+                shown = "logs\\";
+                for (const wchar_t c : name)
+                    shown.push_back(static_cast<char>(c)); // the name is ASCII
+            }
+            status = ShimFormat("openshim_ui:bundle_done", "Saved %s - send this file with your report.",
+                                shown.c_str());
+            // Only while the player is still on the Options screen: a window
+            // popping up in the middle of a mission would steal focus.
+            if (g_ShimCategoryUi.screen)
+                RevealTroubleshootingBundle(result.zipPath);
+        }
+
+        static void CALLBACK ShimBundleTimerProc(HWND, UINT, UINT_PTR, DWORD)
+        {
+            if (!g_ShimBundleThread || WaitForSingleObject(g_ShimBundleThread, 0) != WAIT_OBJECT_0)
+                return;
+            KillTimer(nullptr, g_ShimBundleTimer);
+            g_ShimBundleTimer = 0;
+            CloseHandle(g_ShimBundleThread);
+            g_ShimBundleThread = nullptr;
+            FinishTroubleshootingBundle(g_ShimCategoryUi.status);
+            if (g_ShimCategoryUi.screen)
+                RefreshShimCategoryValues();
+        }
+
+        static void StartTroubleshootingBundle(std::string& status)
+        {
+            if (g_ShimBundleThread)
+            {
+                status = ShimText("openshim_ui:bundle_busy", "The troubleshooting bundle is still being built.");
+                return;
+            }
+            g_ShimBundleResult = {};
+            g_ShimBundleThread = CreateThread(nullptr, 0, ShimBundleWorker, nullptr, 0, nullptr);
+            if (!g_ShimBundleThread)
+            {
+                g_ShimBundleResult = BuildTroubleshootingBundle();  // no thread: build inline
+                FinishTroubleshootingBundle(status);
+                return;
+            }
+            g_ShimBundleTimer = SetTimer(nullptr, 0, 250, ShimBundleTimerProc);
+            if (!g_ShimBundleTimer)
+            {
+                // No timer to collect it: wait here, as the synchronous build did.
+                WaitForSingleObject(g_ShimBundleThread, INFINITE);
+                CloseHandle(g_ShimBundleThread);
+                g_ShimBundleThread = nullptr;
+                FinishTroubleshootingBundle(status);
+                return;
+            }
+            status = ShimText("openshim_ui:bundle_started",
+                              "Building the troubleshooting bundle; you can keep playing.");
+        }
+
         // Two-click confirmation for a destructive row. The first click arms
         // it and repaints the value cell; the second runs it. Clicking any
         // other row or leaving the screen disarms.
@@ -3865,6 +3956,13 @@ namespace BZROpenShim
                                                    const ShimSettingDescriptor& setting)
         {
             std::string& status = g_ShimCategoryUi.status;
+            if (setting.applyGroup == ShimSettingApplyGroup::TroubleshootingBundle)
+            {
+                // Changes nothing, so it needs no confirming click.
+                DisarmShimSettingsAction();
+                StartTroubleshootingBundle(status);
+                return;
+            }
             if (g_ShimSettingsArmedActionIndex != settingIndex)
             {
                 g_ShimSettingsArmedActionIndex = settingIndex;

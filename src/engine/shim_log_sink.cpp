@@ -156,6 +156,17 @@ namespace
         const std::string logPath = BuildLogPath();
         strncpy_s(g_LogPath, logPath.c_str(), _TRUNCATE);
 
+        // Keep the last run's log: a player who restarts after a crash would
+        // otherwise lose it before they can send it. Only the game rotates,
+        // so another exe in the folder loading winmm.dll cannot push the
+        // crash run out. Fails harmlessly while another instance holds it.
+        char exePath[MAX_PATH] = {};
+        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+        const char* exeName = std::strrchr(exePath, '\\');
+        exeName = exeName ? exeName + 1 : exePath;
+        if (_stricmp(exeName, "battlezone98redux.exe") == 0)
+            MoveFileExA(logPath.c_str(), GetGameLogPath("openshim.prev.log").c_str(), MOVEFILE_REPLACE_EXISTING);
+
         // _SH_DENYWR instead of fopen_s's deny-all sharing so the log can be
         // tailed by external tools while the game is running.
         g_LogFile = _fsopen(logPath.c_str(), "w", _SH_DENYWR);
