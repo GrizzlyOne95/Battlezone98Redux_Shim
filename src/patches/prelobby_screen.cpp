@@ -54,50 +54,54 @@ namespace BZROpenShim
 
         constexpr const char* kPreLobbyPanelTexture = "osh_prelobby_center.png";
 
-        // mkscreens.py PRELOBBY_LAYOUT.
+        // mkscreens.py PRELOBBY_LAYOUT, after the 1.5 multiplayer setup
+        // screen: FLAG, PILOT and SERVER boxes across the top, a wide STATUS
+        // box below them.
         constexpr Shell::Rect kTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
-        constexpr Shell::Rect kPlayerBox = { 244.0f, 238.0f, 952.0f, 330.0f };
-        constexpr Shell::Rect kConnectionBox = { 244.0f, 596.0f, 952.0f, 220.0f };
+        constexpr Shell::Rect kFlagBox = { 244.0f, 238.0f, 272.0f, 300.0f };
+        constexpr Shell::Rect kPilotBox = { 528.0f, 238.0f, 272.0f, 300.0f };
+        constexpr Shell::Rect kServerBox = { 812.0f, 238.0f, 384.0f, 300.0f };
+        constexpr Shell::Rect kStatusBox = { 244.0f, 554.0f, 952.0f, 262.0f };  // ends above the frame chamfer
         constexpr float kBoxHeaderH = 44.0f;   // painted header band
         constexpr float kBoxPadX = 28.0f;
         constexpr float kRowTop = 62.0f;       // first row, below the header band
-        constexpr float kRowH = 46.0f;
 
-        // Inside the PLAYER box the nickname panel (240x144) and the flag
-        // picker (224x170 preview, 8 gap, 48x51 arrows: 229 tall) each sit
-        // centred in a half of the box, the column centred under the header.
+        // The flag picker (224x170 preview, 8 gap, 48x51 arrows: 229 tall)
+        // and the nickname panel (240x144) each sit centred in their box.
         constexpr float kNicknameW = 240.0f;
         constexpr float kNicknameH = 144.0f;
         constexpr float kFlagW = 224.0f;
         constexpr float kFlagColumnH = 229.0f;
         constexpr float kFlagPreviewToArrows = 178.0f;  // 170 high plus the 8 gap
-        constexpr float kColumnTop =
-            kPlayerBox.y + kBoxHeaderH + (kPlayerBox.h - kBoxHeaderH - kFlagColumnH) * 0.5f;
-        constexpr float kNicknameX = kPlayerBox.x + (kPlayerBox.w * 0.5f - kNicknameW) * 0.5f;
-        constexpr float kNicknameY = kColumnTop + (kFlagColumnH - kNicknameH) * 0.5f;
-        constexpr float kFlagX = kPlayerBox.x + kPlayerBox.w * 0.5f + (kPlayerBox.w * 0.5f - kFlagW) * 0.5f;
-        constexpr float kFlagArrowsY = kColumnTop + kFlagPreviewToArrows;
+        constexpr float kBoxBodyH = kFlagBox.h - kBoxHeaderH;
+        constexpr float kFlagX = kFlagBox.x + (kFlagBox.w - kFlagW) * 0.5f;
+        constexpr float kFlagArrowsY =
+            kFlagBox.y + kBoxHeaderH + (kBoxBodyH - kFlagColumnH) * 0.5f + kFlagPreviewToArrows;
+        constexpr float kNicknameX = kPilotBox.x + (kPilotBox.w - kNicknameW) * 0.5f;
+        constexpr float kNicknameY = kPilotBox.y + kBoxHeaderH + (kBoxBodyH - kNicknameH) * 0.5f;
 
-        // The Server row: caption, the three toggle slots, then the
-        // custom-host well to the box's right padding. The note sits one gap
-        // below. mkscreens.py PRELOBBY_LAYOUT paints the same rectangles.
-        constexpr float kServerRowY = kConnectionBox.y + kRowTop + kRowH;
+        // SERVER box: a 2x2 grid of slots (Rebellion, Custom / Local, LAN
+        // tools) with the custom-host well across the full width below.
         constexpr float kServerRowH = 42.0f;
-        constexpr float kServerCaptionW = 110.0f;
-        constexpr float kServerSlotW = 160.0f;
-        constexpr float kServerSlotGap = 10.0f;
-        constexpr float kServerCaptionX = kConnectionBox.x + kBoxPadX;
-        constexpr float kServerSlotX = kServerCaptionX + kServerCaptionW + kServerSlotGap;
-        constexpr float kServerWellX = kServerSlotX + 3.0f * (kServerSlotW + kServerSlotGap);
-        constexpr float kServerWellW = kConnectionBox.x + kConnectionBox.w - kBoxPadX - kServerWellX;
-        constexpr float kServerNoteY = kServerRowY + kServerRowH + 14.0f;
-        // Labels draw from their top edge; this drops a caption onto the
-        // centred text of the slot buttons beside it.
-        constexpr float kCaptionDrop = 10.0f;
+        constexpr float kServerGap = 12.0f;
+        constexpr float kServerX = kServerBox.x + kBoxPadX;
+        constexpr float kServerW = kServerBox.w - 2.0f * kBoxPadX;
+        constexpr float kServerSlotW = (kServerW - kServerGap) * 0.5f;
+        constexpr float kServerRowY = kServerBox.y + kRowTop;
+        constexpr float kServerRowPitch = kServerRowH + 10.0f;
+        constexpr float kServerWellY = kServerRowY + 2.0f * kServerRowPitch;
+        constexpr Shell::Rect ServerSlot(int column, int row)
+        {
+            return { kServerX + column * (kServerSlotW + kServerGap), kServerRowY + row * kServerRowPitch,
+                     kServerSlotW, kServerRowH };
+        }
 
-        // The hint and the LAN tools button share one row under the box.
-        constexpr Shell::Rect kLocalToolsRect = { 926.0f, 828.0f, 246.0f, 56.0f };  // clears the frame chamfer
-        constexpr Shell::Rect kHintRect = { 244.0f, kLocalToolsRect.y + kCaptionDrop + 2.0f, 660.0f, 40.0f };
+        // STATUS box rows: network state, server note, then the hint.
+        constexpr float kStatusX = kStatusBox.x + kBoxPadX;
+        constexpr float kStatusW = kStatusBox.w - 2.0f * kBoxPadX;
+        constexpr Shell::Rect kNetworkRect = { kStatusX, kStatusBox.y + kRowTop, kStatusW, 46.0f };
+        constexpr Shell::Rect kNoteRect = { kStatusX, kNetworkRect.y + 54.0f, kStatusW, 34.0f };
+        constexpr Shell::Rect kHintRect = { kStatusX, kNoteRect.y + 54.0f, kStatusW, 40.0f };
 
         // The stock top-corner Back button, as Career builds it.
         constexpr Shell::Rect kBackRect = { 0.0f, 0.0f, 342.0f, 77.0f };
@@ -533,8 +537,8 @@ namespace BZROpenShim
             ServerChoice choice = ServerChoice::Rebellion;
             std::string customText;
             ReadServerState(choice, customText);
-            CreatePreLobbyServerEntry(panel, kServerWellX + 8.0f, kServerRowY,
-                                      kServerWellW - 16.0f, kServerRowH, customText.c_str());
+            CreatePreLobbyServerEntry(panel, kServerX + 8.0f, kServerWellY,
+                                      kServerW - 16.0f, kServerRowH, customText.c_str());
             RefreshServerSelector();
         }
 
@@ -594,8 +598,10 @@ namespace BZROpenShim
                 const Shell::Rect& box;
                 const char* title;
             } headers[] = {
-                { "OpenShimPreLobby_PlayerHdr", kPlayerBox, "PLAYER" },
-                { "OpenShimPreLobby_ConnectionHdr", kConnectionBox, "CONNECTION" },
+                { "OpenShimPreLobby_FlagHdr", kFlagBox, "FLAG" },
+                { "OpenShimPreLobby_PilotHdr", kPilotBox, "PILOT" },
+                { "OpenShimPreLobby_ServerHdr", kServerBox, "SERVER" },
+                { "OpenShimPreLobby_StatusHdr", kStatusBox, "STATUS" },
             };
             for (const auto& header : headers)
             {
@@ -605,25 +611,17 @@ namespace BZROpenShim
                                 header.title);
             }
 
-            const float rowW = kConnectionBox.w - 2.0f * kBoxPadX;
-            g_NetworkLabel = Shell::AddLabel(
-                panel, panel, "OpenShimPreLobby_Network",
-                { kConnectionBox.x + kBoxPadX, kConnectionBox.y + kRowTop, rowW, kRowH }, "");
+            g_NetworkLabel = Shell::AddLabel(panel, panel, "OpenShimPreLobby_Network", kNetworkRect, "");
             char redirect[80] = {};
             if (GetMatchmakingRedirectTarget(redirect, sizeof(redirect)) && redirect[0])
             {
                 // The test redirect owns the endpoint: show it, build no toggle.
                 char text[128] = {};
                 _snprintf_s(text, _TRUNCATE, "Server: %s (test redirect)", redirect);
-                Shell::AddLabel(panel, panel, "OpenShimPreLobby_Server",
-                                { kServerCaptionX, kServerRowY, rowW, kRowH }, text);
+                Shell::AddLabel(panel, panel, "OpenShimPreLobby_Server", kNoteRect, text);
             }
             else
             {
-                Shell::AddLabel(panel, panel, "OpenShimPreLobby_Server",
-                                { kServerCaptionX, kServerRowY + kCaptionDrop, kServerCaptionW, kServerRowH },
-                                "Server:");
-
                 // As the settings pages' value buttons: the slot is painted
                 // into the panel and the button only supplies hover/press.
                 Shell::ButtonSkin slotSkin = { "optionhv.png", "optionhv.png", "optionck.png" };
@@ -639,29 +637,21 @@ namespace BZROpenShim
                 g_Choice = choice;
                 g_ServerSelector = true;
                 g_RebellionButton = Shell::AddButton(
-                    panel, panel, "OpenShimPreLobby_ServerRebellion",
-                    { kServerSlotX, kServerRowY, kServerSlotW, kServerRowH },
+                    panel, panel, "OpenShimPreLobby_ServerRebellion", ServerSlot(0, 0),
                     ServerCaption(ServerChoice::Rebellion), slotSkin, 1.0f, 0.0f, &OnRebellionClicked);
                 g_CustomButton = Shell::AddButton(
-                    panel, panel, "OpenShimPreLobby_ServerCustom",
-                    { kServerSlotX + kServerSlotW + kServerSlotGap, kServerRowY, kServerSlotW,
-                      kServerRowH },
+                    panel, panel, "OpenShimPreLobby_ServerCustom", ServerSlot(1, 0),
                     ServerCaption(ServerChoice::Custom), slotSkin, 1.0f, 0.0f, &OnCustomClicked);
                 g_LocalButton = Shell::AddButton(
-                    panel, panel, "OpenShimPreLobby_ServerLocal",
-                    { kServerSlotX + 2.0f * (kServerSlotW + kServerSlotGap), kServerRowY, kServerSlotW,
-                      kServerRowH },
+                    panel, panel, "OpenShimPreLobby_ServerLocal", ServerSlot(0, 1),
                     ServerCaption(ServerChoice::Local), slotSkin, 1.0f, 0.0f, &OnLocalClicked);
-                g_ServerNoteLabel = Shell::AddLabel(
-                    panel, panel, "OpenShimPreLobby_ServerNote",
-                    { kServerCaptionX, kServerNoteY, rowW, 34.0f }, "");
+                Shell::AddButton(panel, panel, "OpenShimPreLobby_LocalTools", ServerSlot(1, 1),
+                                 LanNoAuth::Enabled() ? "LAN (no sign-in)" : "Local host tools",
+                                 slotSkin, 0.85f, 0.0f, &OnLocalToolsClicked);
+                g_ServerNoteLabel = Shell::AddLabel(panel, panel, "OpenShimPreLobby_ServerNote", kNoteRect, "");
             }
             Shell::AddLabel(panel, panel, "OpenShimPreLobby_Hint", kHintRect,
                             "Press Continue to apply a new name or server.");
-            if (g_ServerSelector)
-                Shell::AddButton(panel, panel, "OpenShimPreLobby_LocalTools",
-                                 kLocalToolsRect, LanNoAuth::Enabled() ? "LAN (no sign-in)" : "Local host tools",
-                                 Shell::kSkinToMainMenu, 0.88f, 0.0f, &OnLocalToolsClicked);
             RefreshStatus(true);
 
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimPreLobby_Back", kBackRect,
