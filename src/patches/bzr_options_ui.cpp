@@ -2681,6 +2681,14 @@ namespace BZROpenShim
         // trying to read, so the first click arms and the second commits.
         static size_t g_ShimSettingsArmedActionIndex = kShimSettingsRegistryCount;
 
+        // The bundle copies up to a few hundred MB, so it runs on a worker and a
+        // UI-thread timer collects the result, as the update check does. The
+        // worker touches only files; g_ShimBundleResult is read after the
+        // thread handle signals.
+        static HANDLE g_ShimBundleThread = nullptr;
+        static UINT_PTR g_ShimBundleTimer = 0;
+        static TroubleshootingBundleResult g_ShimBundleResult;
+
         static void DisarmShimSettingsAction()
         {
             g_ShimSettingsArmedActionIndex = kShimSettingsRegistryCount;
@@ -2692,7 +2700,10 @@ namespace BZROpenShim
         {
             if (IsShimSettingActionRow(setting))
             {
-                // Index 0 is the resting label, index 1 the armed one.
+                // Index 0 is the resting label, index 1 the armed one (for the
+                // bundle row, "Building...").
+                if (setting.applyGroup == ShimSettingApplyGroup::TroubleshootingBundle)
+                    return g_ShimBundleThread ? 1u : 0u;
                 const size_t index =
                     static_cast<size_t>(&setting - &g_ShimSettingsRegistry[0]);
                 return (g_ShimSettingsArmedActionIndex == index) ? 1u : 0u;
@@ -3856,9 +3867,15 @@ namespace BZROpenShim
             return registered;
         }
 
-        static void BuildTroubleshootingBundleNow(std::string& status)
+        static DWORD WINAPI ShimBundleWorker(LPVOID)
         {
-            const TroubleshootingBundleResult result = BuildTroubleshootingBundle();
+            g_ShimBundleResult = BuildTroubleshootingBundle();
+            return 0;
+        }
+
+        static void FinishTroubleshootingBundle(std::string& status)
+        {
+            const TroubleshootingBundleResult& result = g_ShimBundleResult;
             if (!result.ok)
             {
                 Log(L"[SETTINGSUI] Troubleshooting bundle failed: %hs\n", result.error.c_str());
@@ -3880,7 +3897,52 @@ namespace BZROpenShim
             }
             status = ShimFormat("openshim_ui:bundle_done", "Saved %s - send this file with your report.",
                                 shown.c_str());
-            RevealTroubleshootingBundle(result.zipPath);
+            // Only while the player is still on the Options screen: a window
+            // popping up in the middle of a mission would steal focus.
+            if (g_ShimCategoryUi.screen)
+                RevealTroubleshootingBundle(result.zipPath);
+        }
+
+        static void CALLBACK ShimBundleTimerProc(HWND, UINT, UINT_PTR, DWORD)
+        {
+            if (!g_ShimBundleThread || WaitForSingleObject(g_ShimBundleThread, 0) != WAIT_OBJECT_0)
+                return;
+            KillTimer(nullptr, g_ShimBundleTimer);
+            g_ShimBundleTimer = 0;
+            CloseHandle(g_ShimBundleThread);
+            g_ShimBundleThread = nullptr;
+            FinishTroubleshootingBundle(g_ShimCategoryUi.status);
+            if (g_ShimCategoryUi.screen)
+                RefreshShimCategoryValues();
+        }
+
+        static void StartTroubleshootingBundle(std::string& status)
+        {
+            if (g_ShimBundleThread)
+            {
+                status = ShimText("openshim_ui:bundle_busy", "The troubleshooting bundle is still being built.");
+                return;
+            }
+            g_ShimBundleResult = {};
+            g_ShimBundleThread = CreateThread(nullptr, 0, ShimBundleWorker, nullptr, 0, nullptr);
+            if (!g_ShimBundleThread)
+            {
+                g_ShimBundleResult = BuildTroubleshootingBundle();  // no thread: build inline
+                FinishTroubleshootingBundle(status);
+                return;
+            }
+            g_ShimBundleTimer = SetTimer(nullptr, 0, 250, ShimBundleTimerProc);
+            if (!g_ShimBundleTimer)
+            {
+                // No timer to collect it: wait here, as the synchronous build did.
+                WaitForSingleObject(g_ShimBundleThread, INFINITE);
+                CloseHandle(g_ShimBundleThread);
+                g_ShimBundleThread = nullptr;
+                FinishTroubleshootingBundle(status);
+                return;
+            }
+            status = ShimText("openshim_ui:bundle_started",
+                              "Building the troubleshooting bundle; you can keep playing.");
         }
 
         // Two-click confirmation for a destructive row. The first click arms
@@ -3894,7 +3956,7 @@ namespace BZROpenShim
             {
                 // Changes nothing, so it needs no confirming click.
                 DisarmShimSettingsAction();
-                BuildTroubleshootingBundleNow(status);
+                StartTroubleshootingBundle(status);
                 return;
             }
             if (g_ShimSettingsArmedActionIndex != settingIndex)

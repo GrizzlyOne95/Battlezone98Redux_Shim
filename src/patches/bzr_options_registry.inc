@@ -23,8 +23,9 @@ static const char* const kShimSettingsOnOffValues[] = { "1", "0" };
 // Action-row "values" are confirmation states, not settings. Index 0 is
 // the resting cell, index 1 is what an armed row shows.
 static const char* const kShimSettingsActionValues[] = { "Reset", "Confirm?" };
-// Non-destructive action: runs on the first click, so it is never armed.
-static const char* const kShimSettingsBuildValues[] = { "Build", "Build" };
+// Non-destructive action: runs on the first click, so it is never armed;
+// index 1 shows while it is running.
+static const char* const kShimSettingsBuildValues[] = { "Build", "Building..." };
 static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
 static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
 static const char* const kShimSettingsAutoSaveIntervalLabels[] = { "1 min", "2 min", "3 min", "5 min", "10 min" };
@@ -799,7 +800,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Pack the logs, settings and newest crash dump into one zip in the game's logs folder, "
       "ready to send with a bug report. Network traces and the dump can hold player names, "
       "addresses and session data, so send it privately rather than posting it. "
-      "The game pauses for a few seconds while it runs." },
+      "It is built in the background and the file is named here when it is ready." },
 };
 
 // Reset to Stock writes these values, by canonical key, and nothing else.
