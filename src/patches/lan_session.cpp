@@ -408,7 +408,7 @@ namespace BZROpenShim::LanSession
         {
             StopScan();
             s.snapshot.scanMessage = s.snapshot.hosts.empty() ?
-                "No hosts found. Try Refresh or enter the host IP below." : "Select a host below.";
+                "No hosts found. Refresh, or join by address below." : "Select a host below.";
         }
         else if (now - s.lastQuery >= 750) SendQuery();
     }

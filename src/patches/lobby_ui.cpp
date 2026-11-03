@@ -2332,7 +2332,8 @@ namespace BZROpenShim
             void** outPreview,
             void* onClickLeft,
             void* onClickRight,
-            void* onHover)
+            void* onHover,
+            bool centreArrows = false)
         {
             // Both callback slots must be set on an active dialog child (see
             // below), so the setters are required up front.
@@ -2362,6 +2363,10 @@ namespace BZROpenShim
                 { outButtonRight, "Flag Next", ">", kFlagArrowWidth + kFlagArrowGap,    onClickRight },
             };
 
+            // The pre-lobby centres the pair under the preview; the lobby keeps
+            // them on the preview's left edge.
+            const float arrowInset = centreArrows
+                ? (kFlagPreviewDisplayWidth - 2.0f * kFlagArrowWidth - kFlagArrowGap) * 0.5f : 0.0f;
             for (const FlagArrowSpec& arrow : arrows)
             {
                 if (!arrow.out)
@@ -2375,7 +2380,7 @@ namespace BZROpenShim
                 *arrow.out = g_BzrFn_ButtonCtor(
                     buttonMem,
                     arrow.name,
-                    x + arrow.offsetX,
+                    x + arrow.offsetX + arrowInset,
                     y,
                     kFlagArrowWidth,
                     kFlagArrowHeight,
@@ -3630,7 +3635,8 @@ namespace BZROpenShim
                 &g_FlagPreviewPreLobby,
                 reinterpret_cast<void*>(FlagButtonOnClickPrevPreLobby),
                 reinterpret_cast<void*>(FlagButtonOnClickPreLobby),
-                reinterpret_cast<void*>(FlagButtonOnHoverPreLobby));
+                reinterpret_cast<void*>(FlagButtonOnHoverPreLobby),
+                true);
         }
 
         // The panel is decoration only; a failed panel texture must not make

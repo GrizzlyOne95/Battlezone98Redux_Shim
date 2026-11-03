@@ -485,6 +485,7 @@ extern "C" BZLOADER_API int32_t BZLOADER_CALL BZPlugin_Load(const BZHostApi* hos
     // OPENSHIM_NEVER_ACTIVATE hooks go in before the patch worker runs, so the
     // game window is created under them; a no-op unless the flag is set.
     BZROpenShim::InstallNeverActivateHooks();
+    BZROpenShim::InstallWindowUnclampIfRequested();
 
     ResumeThread(reinterpret_cast<HANDLE>(g_PatchThread));
     return 1;

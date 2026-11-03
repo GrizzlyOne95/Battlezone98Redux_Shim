@@ -21,8 +21,19 @@ namespace BZROpenShim
         namespace Shell = ShellScreens;
         void* g_Status = nullptr;
         void* g_Search = nullptr;
-        std::array<void*, 8> g_Rows{};
-        std::array<std::string, 8> g_RowText{};
+        // mkscreens.py LAN_LAYOUT paints the panel these rects sit on.
+        constexpr const char* kLanPanelTexture = "osh_lan_center.png";
+        constexpr float kPadX = 28.0f;          // box text inset, as the pre-lobby
+        constexpr float kCaptionDrop = 10.0f;   // label top -> centred slot text
+        constexpr Shell::Rect kHostBox = {244, 238, 952, 196};
+        constexpr Shell::Rect kGamesBox = {244, 450, 952, 272};
+        constexpr Shell::Rect kJoinBox = {244, 738, 952, 110};
+        constexpr float kTextX = kHostBox.x + kPadX;
+        constexpr float kTextW = kHostBox.w - 2 * kPadX;
+        constexpr float kRowY = 556, kRowPitch = 40, kRowH = 36;
+
+        std::array<void*, 4> g_Rows{};
+        std::array<std::string, 4> g_RowText{};
         std::string g_StatusText, g_SearchText;
         size_t g_Page = 0;
         bool g_JoinHostedWhenReady = false;
@@ -97,7 +108,8 @@ namespace BZROpenShim
         void __cdecl Next()
         {
             const size_t count = LanSession::Status().hosts.size();
-            g_Page = count ? (g_Page + 1) % ((count + 7) / 8) : 0;
+            const size_t rows = g_Rows.size();
+            g_Page = count ? (g_Page + 1) % ((count + rows - 1) / rows) : 0;
         }
         void Tick(void*)
         {
@@ -114,13 +126,17 @@ namespace BZROpenShim
             const auto statusText = g_Note.empty() ? status.hostMessage : g_Note;
             if (statusText != g_StatusText)
             { Shell::SetLabelText(g_Status, statusText.c_str()); g_StatusText = statusText; }
-            const auto search = status.scanMessage + " (" + std::to_string(status.hosts.size()) + " found)";
+            // The count only matters with hosts; the label must end before Refresh.
+            const auto search = status.hosts.empty() ? status.scanMessage
+                : status.scanMessage + " (" + std::to_string(status.hosts.size()) + " found)";
             if (search != g_SearchText)
             { Shell::SetLabelText(g_Search, search.c_str()); g_SearchText = search; }
+            // Hosts expire; keep the page on the list instead of showing blanks.
+            if (g_Page && g_Page * g_Rows.size() >= status.hosts.size()) g_Page = 0;
             for (size_t row = 0; row < g_Rows.size(); ++row)
             {
                 const auto index = g_Page * g_Rows.size() + row;
-                std::string text = "-";
+                std::string text;
                 if (index < status.hosts.size())
                 {
                     const auto& host = status.hosts[index];
@@ -134,31 +150,48 @@ namespace BZROpenShim
         {
             g_Note.clear(); g_Page = 0; g_JoinHostedWhenReady = false;
             g_StatusText.clear(); g_SearchText.clear(); g_RowText.fill("");
-            void* panel = Shell::AddPanel(screen, nullptr, "OpenShimLAN", {0, 0, 1440, 1080}, nullptr);
+            const char* texture = Shell::IsTextureDeployed(kLanPanelTexture) ? kLanPanelTexture : nullptr;
+            if (!texture) Log(L"[LAN] %hs is not deployed; the screen shows the bare stock background\n", kLanPanelTexture);
+            void* panel = Shell::AddPanel(screen, nullptr, "OpenShimLAN", {0, 0, 1440, 1080}, texture);
             if (!panel) return false;
-            Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {420, 132, 600, 56}, LanNoAuth::Enabled() ? "LAN (NO SIGN-IN)" : "LOCAL HOST TOOLS", Shell::kTitleLabelFlags);
-            Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {260, 230, 920, 40}, "Hosting opens LAN listeners; Windows may ask for firewall access.");
-            const auto& skin = Shell::kSkinToMainMenu;
-            Shell::AddButton(panel, panel, "OpenShimLAN_Host", {260, 285, 280, 60}, "Start local host", skin, 0.85f, 0, &Start);
-            Shell::AddButton(panel, panel, "OpenShimLAN_Stop", {565, 285, 280, 60}, "Stop Host", skin, 0.85f, 0, &Stop);
-            Shell::AddButton(panel, panel, "OpenShimLAN_Refresh", {870, 285, 280, 60}, "Refresh", skin, 0.85f, 0, &Refresh);
-            g_Status = Shell::AddLabel(panel, panel, "OpenShimLAN_Status", {260, 350, 920, 40}, "");
-            g_Search = Shell::AddLabel(panel, panel, "OpenShimLAN_Search", {260, 395, 920, 40}, "");
-            const std::array<void(__cdecl*)(), 8> callbacks = {&Select<0>, &Select<1>, &Select<2>, &Select<3>, &Select<4>, &Select<5>, &Select<6>, &Select<7>};
+            const bool noAuth = LanNoAuth::Enabled();
+            Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {470, 132, 500, 56}, noAuth ? "LAN (NO SIGN-IN)" : "LOCAL HOST TOOLS", Shell::kTitleLabelFlags);
+            const struct { const char* name; const Shell::Rect& box; const char* title; } headers[] = {
+                {"OpenShimLAN_HostHdr", kHostBox, "HOST"},
+                {"OpenShimLAN_GamesHdr", kGamesBox, "GAMES ON THIS NETWORK"},
+                {"OpenShimLAN_JoinHdr", kJoinBox, "JOIN BY ADDRESS"},
+            };
+            for (const auto& h : headers)
+                Shell::AddLabel(panel, panel, h.name, {h.box.x + kPadX, h.box.y + 4, h.box.w - 2 * kPadX, 38}, h.title);
+
+            // Slot buttons: the slot is painted into the panel, the button
+            // only supplies hover/press, as on the pre-lobby Server row.
+            Shell::ButtonSkin slot{"optionhv.png", "optionhv.png", "optionck.png"};
+            if (texture && Shell::IsTextureDeployed("osh_value_hv.png") && Shell::IsTextureDeployed("osh_value_ck.png"))
+                slot = {nullptr, "osh_value_hv.png", "osh_value_ck.png"};
+            Shell::AddButton(panel, panel, "OpenShimLAN_Host", {272, 294, 220, 42}, "Start host", slot, 1.0f, 0, &Start);
+            Shell::AddButton(panel, panel, "OpenShimLAN_Stop", {508, 294, 220, 42}, "Stop host", slot, 1.0f, 0, &Stop);
+            g_Status = Shell::AddLabel(panel, panel, "OpenShimLAN_Status", {kTextX, 346, kTextW, 28}, "");
+            Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {kTextX, 374, kTextW, 28}, "Hosting opens LAN listeners; Windows may ask for firewall access.");
+            Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {kTextX, 402, kTextW, 28}, noAuth ? "Hosted by this game. No accounts or helper. Stop host disconnects players." : "Steam/Galaxy sign-in is still required. Stop host disconnects its players.");
+
+            g_Search = Shell::AddLabel(panel, panel, "OpenShimLAN_Search", {kTextX, 504 + kCaptionDrop - 2, 540, 32}, "");
+            Shell::AddButton(panel, panel, "OpenShimLAN_Refresh", {832, 504, 160, 40}, "Refresh", slot, 1.0f, 0, &Refresh);
+            Shell::AddButton(panel, panel, "OpenShimLAN_Next", {1008, 504, 160, 40}, "Next page", slot, 1.0f, 0, &Next);
+            const std::array<void(__cdecl*)(), 4> callbacks = {&Select<0>, &Select<1>, &Select<2>, &Select<3>};
             Shell::ButtonSkin rowSkin{nullptr, "optionhv.png", "optionck.png"};
             for (size_t row = 0; row < g_Rows.size(); ++row)
             {
                 const std::string name = "OpenShimLAN_Host" + std::to_string(row);
                 g_Rows[row] = Shell::AddButton(panel, panel, name.c_str(),
-                    {260, 440 + 43.0f * row, 920, 40}, "-", rowSkin, 0.8f, 0, callbacks[row]);
+                    {kTextX, kRowY + kRowPitch * row, kTextW, kRowH}, "", rowSkin, 0.9f, 0, callbacks[row]);
             }
-            Shell::AddButton(panel, panel, "OpenShimLAN_Next", {870, 787, 280, 50}, "Next page", skin, 0.75f, 0, &Next);
-            Shell::AddLabel(panel, panel, "OpenShimLAN_ManualLabel", {260, 795, 590, 35}, "Join by IP (optional :port):");
-            Shell::AddButton(panel, panel, "OpenShimLAN_Manual", {870, 840, 280, 60}, "Use address", skin, 0.8f, 0, &ManualJoin);
-            Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {260, 905, 920, 40}, LanNoAuth::Enabled() ? "Hosted by this game. No accounts or helper. Stop Host disconnects players." : "Steam/Galaxy sign-in is still required. Stop Host disconnects its players.");
+
+            Shell::AddLabel(panel, panel, "OpenShimLAN_ManualLabel", {kTextX, 792 + kCaptionDrop, 130, 42}, "Address:");
+            Shell::AddButton(panel, panel, "OpenShimLAN_Manual", {1008, 792, 160, 42}, "Use address", slot, 1.0f, 0, &ManualJoin);
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimLAN_Back", {0, 0, 342, 77}, "Back", Shell::kSkinTopCorner, 1, 28, &Back) != nullptr;
             // Borrowed entry uses the same ownership/char routing as setup.
-            CreatePreLobbyServerEntry(panel, 268, 845, 574, 48, "");
+            CreatePreLobbyServerEntry(panel, 420, 792, 564, 42, "");
             PreLobbySetServerEntryVisible(true);
             Refresh(); Tick(screen);
             return back;
