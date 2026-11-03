@@ -785,4 +785,95 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Clear every recorded kill, death and mission play. Takes two clicks, "
       "and keeps the previous record as career_stats.cfg.openshim.bak. "
       "Does not turn tracking off." },
+    // Action row: writes kShimSettingsStockValues in one save. Same
+    // null section/key contract as Reset Career Stats.
+    { "Reset to Stock", nullptr, nullptr, nullptr, 0,
+      kShimSettingsActionValues, kShimSettingsActionValues, 2, 0,
+      ShimSettingApplyGroup::ResetToStock,
+      "Set every OpenShim feature back to the stock game in one save. Bug fixes stay on, and each "
+      "row can still be turned back on by itself. Most rows take effect after a restart." },
+};
+
+// Reset to Stock writes these values, by canonical key, and nothing else.
+// defaultIndex is what an absent key does, which for many rows is the
+// OpenShim feature, so stock has to be written explicitly rather than by
+// removing keys. Every non-action row must appear here or in
+// kShimSettingsStockKeepKeys (tests/options_ui_l10n_tests.cpp).
+struct ShimSettingStockValue
+{
+    const char* key;
+    const char* value;  // one of the row's values
+};
+
+static const ShimSettingStockValue kShimSettingsStockValues[] =
+{
+    { "RadarHudFade", "0" }, { "HullHudFade", "0" }, { "AmmoHudFade", "0" },
+    { "CommandHudFade", "0" }, { "WeaponListFade", "0" }, { "ScrapHudFade", "0" },
+    { "PilotHudFade", "0" }, { "DamageIndicators", "0" }, { "ReticleStyle", "Stock" },
+    { "ReactiveReticle", "0" }, { "HitMarkers", "0" },
+    { "ScrapHudColor", "Default" }, { "PilotHudColor", "Default" }, { "HudColorPreset", "Stock" },
+    { "RadarBackgroundOpacity", "Default" }, { "RadarGridColor", "Default" },
+    { "RadarFriendlyColor", "Default" }, { "RadarEnemyColor", "Default" },
+    { "RadarNeutralColor", "Default" }, { "HullHighColor", "Default" },
+    { "HullMediumColor", "Default" }, { "HullLowColor", "Default" }, { "AmmoHudColor", "Default" },
+    { "UnitHealthHighColor", "Default" }, { "UnitHealthMediumColor", "Default" },
+    { "UnitHealthLowColor", "Default" }, { "UnitAmmoColor", "Default" },
+    { "UnitEmptyColor", "Default" },
+    { "FieldOfView", "0" }, { "RenderProfile", "Redux" }, { "FXAA", "0" }, { "DxgiFlipModel", "0" },
+    { "ShadowFarDistance", "stock" }, { "EnhancedLightSelectionV2", "0" },
+    { "TerrainHdEnabled", "0" }, { "TerrainMicroRelief", "0" },
+    // Stock draws the sun flash, so this one is On.
+    { "SunFlashbang", "1" }, { "ExplosionFlash", "Stock" }, { "DamageFlash", "Stock" },
+    { "UnderAttackAlert", "Normal" }, { "SuppressHopOutAttackAlert", "0" },
+    { "TargetPolicy", "Default" }, { "ScrapPilotHud", "Stock" }, { "RadarSizeScale", "1.0" },
+    { "SatelliteZoomOut", "1.0" }, { "SatellitePanSpeed", "1.0" }, { "JetFlames", "0" },
+    { "EmptyCraftLights", "0" }, { "EmissivePulse", "0" }, { "StarTwinkle", "0" },
+    { "UnitVoFeedback", "Normal" }, { "MultiplayerFlags", "0" },
+    { "MultiplayerFlagShowOwnCraft", "0" }, { "ChunkMeshes", "0" },
+    { "FastMenuTransitions", "0" }, { "SoundChannels", "0" }, { "CustomBindsUi", "0" },
+    { "RawMouseInput", "0" }, { "DisableControlSmoothing", "0" }, { "MouseEveryFrame", "0" },
+    { "MapFilterExtras", "0" }, { "Enabled", "0" }, { "WeaponConvergence", "0" },
+    { "MuzzleFlash", "0" }, { "MeshRecoil", "0" }, { "ShellCasings", "0" },
+    { "SkinnedGibs", "0" }, { "GpuSkinning", "0" }, { "PlayerReticleConvergence", "0" },
+    { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
+    { "OrdnanceVelocityInheritance", "0" }, { "BomberAiRange", "0" },
+    { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
+    { "AllowNeutralAttackOrders", "0" }, { "Turbo", "0" }, { "HeadlightBrightness", "1.00" },
+    { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
+    { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
+    { "RoutePreference", "Stock" }, { "UdpPort", "0" }, { "GovernorTuning", "Stock" },
+    { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
+    { "LobbyReadouts", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
+};
+
+// Rows Reset to Stock leaves alone:
+// - confirmed stock-bug fixes, and the MP net fixes behind Net Improvements;
+// - Thread Scheduling and the two effect-batching rows, which change cost,
+//   not output;
+// - the updater and career rows;
+// - Renderer (Auto writes nothing to Ogre.cfg) and Player Headlight (stock
+//   is an absent key, and both values force an override);
+// - sub-options that only matter while their parent row is on.
+static const char* const kShimSettingsStockKeepKeys[] =
+{
+    "MusicGlobalFocus", "OgreMaterialCollisionGuard", "MapRefreshFixes",
+    "EditorOverheadPlacementOrder", "JumpSnipeCrouch", "AiMultiProducerMakers",
+    "SatelliteVisibilityFix", "UnfocusedMouseRelease", "ApcAlliedTargetDeploy", "SplinterUndead",
+    "HowitzerUndeployedRetaliation", "TugCargoPostLoad", "ConstructorRecycleStaleTarget",
+    "PreciseTimestep", "MusicSingleFill", "ConstructorRemoteBuild", "RestoreCraftBounds",
+    "NetImprovements",
+    "ThreadScheduling", "DynamicGeometryPieceReuse", "DynamicGeometryFastSort",
+    "AutoStage", "StatsTracking",
+    "Renderer", "Headlights",
+    "RadarHudIdleOpacity", "RadarHudFadeDelay", "RadarHudFadeDuration", "RadarCompassAlwaysVisible",
+    "HullHudIdleOpacity", "HullHudFadeDelay", "HullHudFadeDuration",
+    "AmmoHudIdleOpacity", "AmmoHudFadeDelay", "AmmoHudFadeDuration",
+    "CommandHudIdleOpacity", "CommandHudFadeDelay", "CommandHudFadeDuration",
+    "WeaponListIdleOpacity", "WeaponListFadeDelay", "WeaponListFadeDuration",
+    "ScrapHudIdleOpacity", "ScrapHudFadeDelay", "ScrapHudFadeDuration",
+    "PilotHudIdleOpacity", "PilotHudFadeDelay", "PilotHudFadeDuration",
+    "DamageIndicatorColor", "DamageIndicatorSize", "DamageIndicatorOpacity", "DamageIndicatorDuration",
+    "ReticleColor", "ReticleSize", "ReticleThickness", "ReticleOutline", "ReticleOpacity",
+    "HitMarkerDuration", "HitMarkerColor", "HitMarkerSize", "HitMarkerOpacity", "StockReticleShader",
+    "IntervalSeconds", "BackupExisting", "PilotFlashlightColor", "PilotFlashlightBeam",
 };

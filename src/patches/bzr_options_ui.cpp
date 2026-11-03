@@ -2670,7 +2670,8 @@ namespace BZROpenShim
         // treat it as a setting.
         static bool IsShimSettingActionRow(const ShimSettingDescriptor& setting)
         {
-            return setting.applyGroup == ShimSettingApplyGroup::CareerStatsReset;
+            return setting.applyGroup == ShimSettingApplyGroup::CareerStatsReset ||
+                   setting.applyGroup == ShimSettingApplyGroup::ResetToStock;
         }
 
         // Which action row, if any, is one click away from firing. Registry
@@ -3511,6 +3512,89 @@ namespace BZROpenShim
             g_ShimCategoryUi.status = update.message;
         }
 
+        // Re-applies one group after its keys were saved. False when a live
+        // reload reported failure.
+        static bool ApplyShimSettingGroupNow(ShimSettingApplyGroup group)
+        {
+            switch (group)
+            {
+            case ShimSettingApplyGroup::AutoSave:
+                return ReloadAutoSaveConfig();
+            case ShimSettingApplyGroup::HudFeedback:
+                return HudFeedback::ReloadConfig();
+            case ShimSettingApplyGroup::ContextualHud:
+                return ContextualHud::ReloadConfig();
+            case ShimSettingApplyGroup::HudPalette:
+                return HudPalette::ReloadConfig();
+            default:
+                ApplyShimSettingLive(group);
+                return true;
+            }
+        }
+
+        // Reset to Stock: every kShimSettingsStockValues row in one atomic
+        // save (legacy alias keys rewritten in place), then each touched
+        // group re-applied once.
+        static void ResetShimSettingsToStock(std::string& status)
+        {
+            const auto path = GetUserConfigPath();
+            if (path.empty())
+            {
+                status = ShimFormat("openshim_ui:save_failed", "Save failed: %s", "config directory unavailable");
+                return;
+            }
+
+            InputBindingDocument document;
+            document.loaded = true;
+            document.lines = ReadTextFileLines(path);
+            std::vector<ShimSettingApplyGroup> groups;
+            bool restartNeeded = false;
+            size_t written = 0;
+            for (const ShimSettingStockValue& stock : kShimSettingsStockValues)
+            {
+                const ShimSettingDescriptor* setting = nullptr;
+                for (const ShimSettingDescriptor& row : g_ShimSettingsRegistry)
+                {
+                    if (row.key && std::strcmp(row.key, stock.key) == 0)
+                    {
+                        setting = &row;
+                        break;
+                    }
+                }
+                if (!setting)
+                    continue;
+                UpdateIniDocumentValueLossless(document.lines, setting->section, setting->key,
+                                               setting->altKeys, setting->altKeyCount, stock.value);
+                ++written;
+                restartNeeded |= setting->applyGroup == ShimSettingApplyGroup::RestartRequired;
+                if (std::find(groups.begin(), groups.end(), setting->applyGroup) == groups.end())
+                    groups.push_back(setting->applyGroup);
+            }
+            // The inverted legacy spelling wins over SunFlashbang when present.
+            std::string legacySunFlash;
+            if (TryGetUserConfigString("Display", "DisableSunFlashbang", legacySunFlash))
+                UpdateIniDocumentValueLossless(document.lines, "Display", "DisableSunFlashbang", nullptr, 0, "0");
+
+            std::string error;
+            if (!WriteInputBindingDocumentAtomic(path, document, error))
+            {
+                status = ShimFormat("openshim_ui:save_failed", "Save failed: %s", error);
+                Log(L"[SETTINGSUI] Reset to Stock save failed: %hs\n", error.c_str());
+                return;
+            }
+            Log(L"[SETTINGSUI] Reset to Stock wrote %zu keys\n", written);
+
+            bool liveApplyOk = true;
+            for (const ShimSettingApplyGroup group : groups)
+                liveApplyOk &= ApplyShimSettingGroupNow(group);
+
+            status = ShimText("openshim_ui:reset_stock_done", "OpenShim features set to stock; bug fixes left on.");
+            if (!liveApplyOk)
+                status += ShimText("openshim_ui:status_apply_failed", "  (saved; runtime apply failed - see openshim.log)");
+            else if (restartNeeded)
+                status += ShimText("openshim_ui:status_after_restart", "  (takes effect after restart)");
+        }
+
         // Cycles a setting to its next value, saves it, and applies it live
         // where the feature supports that.
         static void CycleShimSetting(size_t index)
@@ -3542,17 +3626,7 @@ namespace BZROpenShim
                 return;
             }
 
-            bool liveApplyOk = true;
-            if (setting.applyGroup == ShimSettingApplyGroup::AutoSave)
-                liveApplyOk = ReloadAutoSaveConfig();
-            else if (setting.applyGroup == ShimSettingApplyGroup::HudFeedback)
-                liveApplyOk = HudFeedback::ReloadConfig();
-            else if (setting.applyGroup == ShimSettingApplyGroup::ContextualHud)
-                liveApplyOk = ContextualHud::ReloadConfig();
-            else if (setting.applyGroup == ShimSettingApplyGroup::HudPalette)
-                liveApplyOk = HudPalette::ReloadConfig();
-            else
-                ApplyShimSettingLive(setting.applyGroup);
+            const bool liveApplyOk = ApplyShimSettingGroupNow(setting.applyGroup);
 
             status = std::string(ShimSettingLabel(setting)) + " = " + ShimSettingValueLabel(setting, nextIndex);
             if (setting.applyGroup == ShimSettingApplyGroup::RestartRequired)
@@ -3794,8 +3868,13 @@ namespace BZROpenShim
             if (g_ShimSettingsArmedActionIndex != settingIndex)
             {
                 g_ShimSettingsArmedActionIndex = settingIndex;
-                status = ShimFormat("openshim_ui:action_confirm", "%s: click again to confirm. This cannot be undone.",
-                                    ShimSettingLabel(setting));
+                if (setting.applyGroup == ShimSettingApplyGroup::ResetToStock)
+                    status = ShimFormat("openshim_ui:reset_stock_confirm",
+                                        "%s: click again to set every OpenShim feature to stock. Bug fixes stay on.",
+                                        ShimSettingLabel(setting));
+                else
+                    status = ShimFormat("openshim_ui:action_confirm", "%s: click again to confirm. This cannot be undone.",
+                                        ShimSettingLabel(setting));
                 return;
             }
 
@@ -3803,6 +3882,9 @@ namespace BZROpenShim
 
             switch (setting.applyGroup)
             {
+            case ShimSettingApplyGroup::ResetToStock:
+                ResetShimSettingsToStock(status);
+                break;
             case ShimSettingApplyGroup::CareerStatsReset:
                 switch (ResetCareerStatsFromBridge())
                 {
