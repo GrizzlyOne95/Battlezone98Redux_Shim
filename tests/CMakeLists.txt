@@ -299,6 +299,12 @@ if(WIN32 AND MSVC)
     )
     target_compile_definitions(community_key_secret_win32_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
+if(WIN32 AND MSVC)
+    openshim_add_test(troubleshooting_bundle_tests STD 17 SOURCES
+        troubleshooting_bundle_tests.cpp
+        ../src/engine/troubleshooting_bundle.cpp
+    )
+endif()
 
 openshim_add_test(bzrnet_protocol_tests STD 20 SOURCES
     bzrnet_protocol_tests.cpp

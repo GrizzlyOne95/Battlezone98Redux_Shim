@@ -26,6 +26,7 @@
 #include "patcher.h"
 #include "render_profile_runtime.h"
 #include "shim_log.h"
+#include "troubleshooting_bundle.h"
 #include "ui_decor.h"
 #include "BZROpenShim.h"
 
@@ -2670,7 +2671,8 @@ namespace BZROpenShim
         static bool IsShimSettingActionRow(const ShimSettingDescriptor& setting)
         {
             return setting.applyGroup == ShimSettingApplyGroup::CareerStatsReset ||
-                   setting.applyGroup == ShimSettingApplyGroup::ResetToStock;
+                   setting.applyGroup == ShimSettingApplyGroup::ResetToStock ||
+                   setting.applyGroup == ShimSettingApplyGroup::TroubleshootingBundle;
         }
 
         // Which action row, if any, is one click away from firing. Registry
@@ -3854,6 +3856,33 @@ namespace BZROpenShim
             return registered;
         }
 
+        static void BuildTroubleshootingBundleNow(std::string& status)
+        {
+            const TroubleshootingBundleResult result = BuildTroubleshootingBundle();
+            if (!result.ok)
+            {
+                Log(L"[SETTINGSUI] Troubleshooting bundle failed: %hs\n", result.error.c_str());
+                status = ShimFormat("openshim_ui:bundle_failed", "Troubleshooting bundle failed: %s",
+                                    result.error.c_str());
+                return;
+            }
+            Log(L"[SETTINGSUI] Troubleshooting bundle: %zu files, %llu bytes -> %ls\n", result.fileCount,
+                static_cast<unsigned long long>(result.zipBytes), result.zipPath.c_str());
+            // Under Proton the Windows path means nothing to the player; show the Linux one.
+            std::string shown = HostPathForDisplay(result.zipPath);
+            if (shown.empty())
+            {
+                const size_t slash = result.zipPath.find_last_of(L'\\');
+                const std::wstring name = result.zipPath.substr(slash == std::wstring::npos ? 0 : slash + 1);
+                shown = "logs\\";
+                for (const wchar_t c : name)
+                    shown.push_back(static_cast<char>(c)); // the name is ASCII
+            }
+            status = ShimFormat("openshim_ui:bundle_done", "Saved %s - send this file with your report.",
+                                shown.c_str());
+            RevealTroubleshootingBundle(result.zipPath);
+        }
+
         // Two-click confirmation for a destructive row. The first click arms
         // it and repaints the value cell; the second runs it. Clicking any
         // other row or leaving the screen disarms.
@@ -3861,6 +3890,13 @@ namespace BZROpenShim
                                                    const ShimSettingDescriptor& setting)
         {
             std::string& status = g_ShimCategoryUi.status;
+            if (setting.applyGroup == ShimSettingApplyGroup::TroubleshootingBundle)
+            {
+                // Changes nothing, so it needs no confirming click.
+                DisarmShimSettingsAction();
+                BuildTroubleshootingBundleNow(status);
+                return;
+            }
             if (g_ShimSettingsArmedActionIndex != settingIndex)
             {
                 g_ShimSettingsArmedActionIndex = settingIndex;

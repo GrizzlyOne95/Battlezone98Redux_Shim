@@ -117,6 +117,7 @@
   <ItemGroup>
     <ClCompile Include="src\engine\backend_selection.cpp" />
     <ClCompile Include="src\engine\crash_logger.cpp" />
+    <ClCompile Include="src\engine\troubleshooting_bundle.cpp" />
     <ClCompile Include="src\engine\dx11_legacy_material_compat.cpp" />
     <ClCompile Include="src\engine\enhanced_light_selection.cpp" />
     <ClCompile Include="src\engine\enhanced_resource_bootstrap.cpp" />
@@ -407,6 +408,7 @@
     <ClInclude Include="include\bzrnet_trace.h" />
     <ClInclude Include="include\bzrnet_instrumentation.h" />
     <ClInclude Include="include\crash_logger.h" />
+    <ClInclude Include="include\troubleshooting_bundle.h" />
     <ClInclude Include="include\gas_copy_pool.h" />
     <ClInclude Include="include\bzr_string.h" />
     <ClInclude Include="include\d3d_startup_hooks.h" />

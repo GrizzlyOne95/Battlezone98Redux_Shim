@@ -29,7 +29,7 @@ namespace Registry
         GlobalImprovement, UnderAttackAlert, TargetReticle, JetFlames, UnitVo, GlobalTurbo,
         Headlights, PilotFlashlight, AutoSave, HudFeedback, HudPalette, ContextualHud,
         BzrNetRoute, RenderProfile, LiveEngineToggle, ReadOnNextUse, RestartRequired,
-        CareerStatsReset, ResetToStock,
+        CareerStatsReset, ResetToStock, TroubleshootingBundle,
     };
 
 #include "../src/patches/bzr_options_registry.inc"

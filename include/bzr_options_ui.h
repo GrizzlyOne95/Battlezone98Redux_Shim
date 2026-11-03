@@ -183,6 +183,7 @@ namespace BZROpenShim
         // IsShimSettingActionRow in bzr_options_ui.cpp.
         CareerStatsReset,
         ResetToStock,       // writes kShimSettingsStockValues in one save
+        TroubleshootingBundle, // zips logs and settings for a bug report
     };
     void ApplyShimSettingLive(ShimSettingApplyGroup group);
 
