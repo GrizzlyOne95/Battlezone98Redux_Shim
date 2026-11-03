@@ -31,7 +31,46 @@ $ogreCommit     = "f1f1937fd6cbad05a4b9170b9882da91f42f53a5"
 $ogreDir        = Join-Path $PSScriptRoot "third_party\ogre-1.10.0-bzr\_work"
 $headerSentinel = Join-Path $ogreDir "OgreMain\include\OgreEntity.h"
 
+# Install the secret guard. The test-crew log uploader takes its Discord
+# webhook from OPENSHIM_WEBHOOK at install time and the URL is never committed:
+# GitHub secret scanning revokes a webhook it finds in a push, which breaks log
+# collection for everyone until it is reissued. This hook refuses such a commit.
+function Install-SecretGuard {
+    $hookSource = Join-Path $PSScriptRoot "scripts\pre-commit-secret-guard.sh"
+    if (-not (Test-Path -LiteralPath $hookSource)) { return }
+
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Warning "git.exe was not found on PATH; skipped the pre-commit secret guard."
+        return
+    }
+
+    # Ask git for the hooks directory: in a linked worktree .git is a file and
+    # the hooks live in the main checkout's .git (or core.hooksPath). The
+    # answer may be relative to the directory git ran in.
+    $hookDir = git -C $PSScriptRoot rev-parse --git-path hooks
+    if ($LASTEXITCODE -ne 0 -or -not $hookDir) {
+        Write-Warning "Not a git checkout; skipped the pre-commit secret guard."
+        return
+    }
+    if (-not [System.IO.Path]::IsPathRooted($hookDir)) {
+        $hookDir = Join-Path $PSScriptRoot $hookDir
+    }
+    if (-not (Test-Path -LiteralPath $hookDir)) {
+        New-Item -ItemType Directory -Path $hookDir | Out-Null
+    }
+
+    # Normalise to LF. A CRLF hook still runs under Git for Windows but
+    # its `exit 1` becomes `exit 1`r`, which is not a valid numeric
+    # argument, so the guard prints its refusal and then exits 0 --
+    # allowing the commit it just rejected.
+    $hookText = [System.IO.File]::ReadAllText($hookSource) -replace "`r`n", "`n"
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText((Join-Path $hookDir "pre-commit"), $hookText, $utf8NoBom)
+    Write-Host "Installed pre-commit secret guard in: $hookDir"
+}
+
 if (Test-Path $headerSentinel) {
+    Install-SecretGuard
     Write-Host "Ogre reference headers already present at: $ogreDir"
     Write-Host "Setup complete."
     exit 0
@@ -69,27 +108,7 @@ if ($LASTEXITCODE -ne 0) { throw "git fetch failed" }
 git -C $ogreDir checkout $ogreCommit
 if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
 
-# Install the secret guard. The test-crew log uploader takes its Discord
-# webhook from OPENSHIM_WEBHOOK at install time and the URL is never committed:
-# GitHub secret scanning revokes a webhook it finds in a push, which breaks log
-# collection for everyone until it is reissued. This hook refuses such a commit.
-$hookSource = Join-Path $PSScriptRoot "scripts\pre-commit-secret-guard.sh"
-$hookTarget = Join-Path $PSScriptRoot ".git\hooks\pre-commit"
-if (Test-Path -LiteralPath $hookSource) {
-    $hookDir = Split-Path -Parent $hookTarget
-    if (Test-Path -LiteralPath $hookDir) {
-        # Normalise to LF. A CRLF hook still runs under Git for Windows but
-        # its `exit 1` becomes `exit 1`r`, which is not a valid numeric
-        # argument, so the guard prints its refusal and then exits 0 --
-        # allowing the commit it just rejected.
-        $hookText = [System.IO.File]::ReadAllText($hookSource) -replace "`r`n", "`n"
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($hookTarget, $hookText, $utf8NoBom)
-        Write-Host "Installed pre-commit secret guard."
-    } else {
-        Write-Warning "No .git\hooks directory; skipped the pre-commit secret guard."
-    }
-}
+Install-SecretGuard
 
 Write-Host ""
 Write-Host "Done. Ogre reference headers are ready at: $ogreDir"
