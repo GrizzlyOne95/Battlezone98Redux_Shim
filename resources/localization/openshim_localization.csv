@@ -236,6 +236,8 @@ openshim_opt:OrdnanceVelocityInheritance:label~Ordnance Velocity~~~~~~
 openshim_opt:OrdnanceVelocityInheritance:desc~Shots inherit the shooter's velocity, and cannon lead compensates for it. Single player only.~~~~~~
 openshim_opt:BomberAiRange:label~Bomber AI Range~~~~~~
 openshim_opt:BomberAiRange:desc~Bombers engage at the range their own weapon ODFs declare. Single player only.~~~~~~
+openshim_opt:LegacyTankAi:label~Legacy Tank AI~~~~~~
+openshim_opt:LegacyTankAi:desc~1.4/TRO attack AI: units strafe around their target, and a unit shot while holding position retreats. For older missions balanced around the less aggressive AI. Rocket tanks and turrets are unchanged. An ODF can opt out with legacyAI = 0. Single player only.~~~~~~
 openshim_opt:AiWeaponMaskArtillery:label~AI Howitzer Volley~~~~~~
 openshim_opt:AiWeaponMaskArtillery:desc~Artillery AI fires every hardpoint its weaponMask names as one volley instead of the first. A stock howitzer fires four rounds per cycle. Single player only.~~~~~~
 openshim_opt:AiWeaponMaskMinelayer:label~AI Mine Volley~~~~~~

@@ -104,6 +104,8 @@ Both: `CombineVectors(followDx/Dz, him front/right) -> followPoint = himPos+offs
 
 Use `*craft+0x1E0 > *task+0x100` for `D4` fresh-hit check in Redux.
 
+> **Correction (2026-11-03): wrong for the damage time. (PROVEN)** Redux stand (`0x00478EAB`) does `mov ecx,[task+0x10]; call 0x0046D040`, and that getter is `fld [ecx+0x1E8]`; the result is compared with `task+0x100` (`jbe` = not fresh). Use `craft+0x1E8 > task+0x100`. The `+4` shift guess does not hold for this field.
+
 ---
 
 ## 5. D2 enemy state read — pinned
@@ -122,6 +124,8 @@ sub eax,2 ; je ->10 ; sub 3 ; je ->10 ; sub 2 ; je ->10 // {2,5,7}->10
 **1.5/Redux:** replaced by `IsBuilding(target)` + `Get_Time() <= start+10.0` + `IsStuck/DoSlide/SidewaysAndClose`.
 
 **Redux offsets:** handle `+0x14` (was `+0x1C`), target `+0x18`, `GetTask +0x30`, state `+0x08` (was `+0xAC` in 1.4 decompiler comment; actual cur is `+0x08` per `kAttackTaskCurStateOffset`). **Very High** via verbatim line + `0x40CFA3` bytes `8B 80 AC 00 00 00`.
+
+> **Correction (2026-11-03): this section is wrong. (PROVEN)** Entity vtbl slot 12 (`+0x30`) returns the target's **class info**, not a task. 1.4 `+0xAC` there is a class-type field, and {2,5,7} -> 10 is the same target-class test Redux keeps as `0x00477D70` (`classInfo+0x84` in {2,5,7,10}). There is no enemy task-state read to port. See the correction under §7 of `bz14_evasive_ai_investigation_20260823.md` for the deltas that are real (slide while able, flee without firing).
 
 ---
 
@@ -142,3 +146,5 @@ sub eax,2 ; je ->10 ; sub 3 ; je ->10 ; sub 2 ; je ->10 // {2,5,7}->10
 Helpers `Very High`/`Proven`, Redux `0x1E0/0x100` `Proven`, `D2` `Very High`, `14` tasks: `2` true deletions (`Scav/Tug` 45/25L), `2` init/clean adds (`9/5/7`), `10` minor. All combat helpers now `≥Very High` and usable.
 
 Next: implement `D2` read via `GameObjectHandle::Find` + `vtbl+0x30` + `+0x08`, and `IsStuck` `flags&4`/`0x20000` gate at `Redux 0x606027F0`.
+
+> **Superseded (2026-11-03):** the `D2` and `0x1E0` verdicts above are wrong (see the corrections in §4 and §5). Redux `IsStuck` is `0x006027F0`, not `0x606027F0`.

@@ -559,6 +559,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
       "Bombers engage at the range their own weapon ODFs declare. Single player only." },
+    { "Legacy Tank AI", "SinglePlayer", "LegacyTankAi", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "1.4/TRO attack AI: units strafe around their target, and a unit shot while holding "
+      "position retreats. For older missions balanced around the less aggressive AI. "
+      "Rocket tanks and turrets are unchanged. An ODF can opt out with legacyAI = 0. "
+      "Single player only." },
     { "AI Howitzer Volley", "SinglePlayer", "AiWeaponMaskArtillery", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,

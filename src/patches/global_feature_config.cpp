@@ -77,11 +77,14 @@ namespace BZROpenShim
     {
         bool g_BomberAiRangeBaselineEnabled = kBomberAiRangeEnabledDefault;
         bool g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        bool g_LegacyTankAiBaselineEnabled = kLegacyTankAiEnabledDefault;
+        bool g_LegacyTankAiEnabled = kLegacyTankAiEnabledDefault;
         // Configured value AND'd with the single-player gate, same contract as
         // g_AiOdfGameplayTuningActive below. This feature changes stock content
         // (it raises bomber engagement range from the craft's own weapon ODFs),
         // so it must never reach a network game.
         bool g_BomberAiRangeActive = false;
+        bool g_LegacyTankAiActive = false;
         bool g_HowitzerUndeployedRetaliationFixEnabled =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
         bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
@@ -216,6 +219,18 @@ namespace BZROpenShim
         {
             g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
             RefreshBomberAiRangeState();
+        }
+
+        void RefreshLegacyTankAiState()
+        {
+            g_LegacyTankAiActive =
+                g_LegacyTankAiEnabled && IsSinglePlayerSession();
+        }
+
+        static void RevertLegacyTankAiToBaseline()
+        {
+            g_LegacyTankAiEnabled = g_LegacyTankAiBaselineEnabled;
+            RefreshLegacyTankAiState();
         }
 
         // --- [Fixes] multiplayer gate reconcilers ------------------------------
@@ -477,6 +492,12 @@ namespace BZROpenShim
             g_BomberAiRangeEnabled = g_BomberAiRangeBaselineEnabled;
             RefreshBomberAiRangeState();
 
+            g_LegacyTankAiBaselineEnabled = kLegacyTankAiEnabledDefault;
+            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "LegacyTankAi", value))
+                g_LegacyTankAiBaselineEnabled = value;
+            g_LegacyTankAiEnabled = g_LegacyTankAiBaselineEnabled;
+            RefreshLegacyTankAiState();
+
             g_AiOdfGameplayTuningBaselineEnabled = kAiOdfGameplayTuningEnabledDefault;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "AiOdfGameplayTuning", value))
                 g_AiOdfGameplayTuningBaselineEnabled = value;
@@ -612,6 +633,8 @@ namespace BZROpenShim
               &RevertAiOdfGameplayTuningToBaseline, &RefreshAiOdfGameplayTuningState },
             { "BomberAiRange", FeatureTier::SinglePlayer,
               &RevertBomberAiRangeToBaseline, &RefreshBomberAiRangeState },
+            { "LegacyTankAi", FeatureTier::SinglePlayer,
+              &RevertLegacyTankAiToBaseline, &RefreshLegacyTankAiState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config

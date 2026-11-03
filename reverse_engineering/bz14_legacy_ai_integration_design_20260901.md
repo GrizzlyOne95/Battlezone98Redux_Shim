@@ -27,7 +27,7 @@ Both legacy names fit `char[32]` at `GameObjectClass+0x8C/+0xAC` (proven). The 8
 **Least-invasive, narrow hooks:**
 
 1. **Chase-routing site D1** — state 2 `AbleToHit` branch: `if (legacy14) next=7 (slide) else next=10 (blast)` (1.4 `0x40D190: call AbleToHit; je …; mov [esi+0x10],7` vs 1.5 `LAB_0040F59D: state=10`).
-2. **Slide-exit predicate D2** — state 7: replace `IsBuilding(target) || now>start+10.0` with `enemyTaskState in {2,5,7} → 10 else SidewaysAndClose → 8 else stay`, uncapped. Requires resolving enemy task: `enemyHandle at Task+0x1C → object → vtbl+0x30 → state at +0xAC` (1.4 pattern at 0x40CFA3). Use Redux offsets (`curState+0x8`/`nextState+0xC` etc; see evasive doc S11 table: craft damage +0x1E0/+0x1EC vs 1.4 +0x1DC/+0x1E8).
+2. **(Wrong; see the 2026-11-03 correction under §7 of the evasive investigation doc. `+0xAC` is the target's class type and Redux keeps that test.)** **Slide-exit predicate D2** — state 7: replace `IsBuilding(target) || now>start+10.0` with `enemyTaskState in {2,5,7} → 10 else SidewaysAndClose → 8 else stay`, uncapped. Requires resolving enemy task: `enemyHandle at Task+0x1C → object → vtbl+0x30 → state at +0xAC` (1.4 pattern at 0x40CFA3). Use Redux offsets (`curState+0x8`/`nextState+0xC` etc; see evasive doc S11 table: craft damage +0x1E0/+0x1EC vs 1.4 +0x1DC/+0x1E8).
 3. **State-8 expiry D4** — `now>start+8.0` writes `next=7` (rotate) if legacy else `next=9` (flee) and `fleeFrom=GetHandle(him)`.
 4. **Flee bound D3** — suppress `start+3.0 → 10` re-evaluation in state 9; keep distance/gone/stuck exits and `5625`/`75²` gate.
 
@@ -113,3 +113,36 @@ Use identical `ODF` (e.g., `avtnk` Light Tank), same `weaponName1/2`, `maxHealth
 * Constants shared: flee exit `5625.0` (`75²`) at `0x5E6EA4`, stand cap `-8.0`, `3.0`/`15.0`/`50.0` abeam, slide table `0x604CD0`/`0x6267C0` (320 floats, identical).
 * Specs: `bz14_evasive_ai_investigation_20260823.md` §7 D1-D4, §11 port design; `bz14_ai_behaviour_spec_20260901.md` §0-4; `bz14_vs_bz15_ai_census_20260901.md` §2-5.
 
+## 9. Verified behaviour, live evidence and the global option (2026-11-03)
+
+Citations are to `Battlezone_Source/BZ1/decomp1.4/FUN_0040cde0.c` (1.4 `AttackTask::DoState`) unless noted. Redux line numbers are from bzr-ghidra decompiles of the GOG exe made in this session (not stored in the corpus).
+
+* **Slide (case 7) has no hit check.** FUN_0040cde0.c L172-175: case 7 refreshes the fire flag (`FUN_0046e280`) and jumps to the shared slide body; nothing reads last-damage time. A hit during slide does not flee in 1.4 either.
+* **Stand (case 8) flees only on a hit taken while standing.** FUN_0040cde0.c L214-235: if `craft+0x1DC` (last-damage time) is greater than `task+0xD4` (stand start), the code falls to `LAB_0040d08c` (L233-235), which sets the flee target to `craft+0x1E8` (last attacker) and the next state to 9. Otherwise the unit leaves stand for slide (7) after `_DAT_005e6ea0` (8 s).
+* **Flee (case 9) ends at 75 m.** FUN_0040cde0.c L250-258: when squared XZ distance to the attacker exceeds `_DAT_005e6ea4` (5625 = 75²), the next state is 7. A missing attacker also returns to 7.
+* **Redux keeps the states but not the hit check.** UNVERIFIED in this note (line numbers carried from an earlier Ghidra pass, not rechecked): Redux `0x478A50` (AttackTask::DoState) L225-275 and init `0x478770` L44-48 show no last-damage test in stand. The OpenShim hook (`ai_odf_tuning.cpp`, AttackTaskDoStateTuningBody) restores the stand → flee and flee → slide transitions.
+* **CR uses different AI on these ODFs.** Campaign Reimagined's `cvtnk`, `cvltnk` and `cvrckt` use `RocketTank` AI, which never runs AttackTask, so neither ODF `legacyAI = 1` nor the global option affects them. Stock `cvtnk` is `TankFriend/TankEnemy`. Stock `cvfigh` is `ScoutFriend/ScoutEnemy`.
+* **Gun towers can be the attacker.** In the CR showcase map (`sxshow`), towers hitting from 130 m or more became `craft+0x1E8`, so the flee ran away from a tower rather than the duel opponent. The probe removed them.
+* **Team 1 ignores Lua Attack in sxshow.** Use team 2 against team 3 for scripted duels.
+
+### Live run (2026-11-03, GOG, `OPENSHIM_TRACE_LEGACY_AI=1`)
+
+The setup was one cvtnk (`TankEnemy`, `legacyAI = 1`, team 2) against three avtnk (team 3), with both sides healed every frame. The trace showed:
+
+* `stand hit => flee 9` twice.
+* The cvtnk fled from 12 m to about 72 m under fire for about 8 s.
+* The flee exited with `75 m clear => 7` (dist 75.1).
+* 8 stand timeouts and 8 search → slide transitions.
+
+The user confirmed the strafing looked like the familiar 1.4 movement.
+
+**Open question:** the attacker in that flee was logged as the player craft (`asuser`). This is UNVERIFIED and was not investigated.
+
+### Global option
+
+`[SinglePlayer] LegacyTankAi` (default off) applies the hook to every AttackTask user. It is gated by `g_LegacyTankAiActive = g_LegacyTankAiEnabled && IsSinglePlayerSession()` (`global_feature_config.cpp`, `RefreshLegacyTankAiState`) and follows the BomberAiRange pattern: a baseline, a live apply, an MP reconcile and a revert at mission end. In the ODF:
+
+* `legacyAI = 1` forces legacy AI with the option off.
+* `legacyAI = 0` opts a unit out with the option on.
+
+There is no Lua/EXU toggle yet.

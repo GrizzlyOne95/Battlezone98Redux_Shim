@@ -90,6 +90,13 @@ namespace BZROpenShim
         return s_value;
     }
 
+    // Legacy transitions fire per craft per tick, so cap the trace.
+    static volatile long g_LegacyAiTraceBudget = 2000;
+    static bool LegacyAiTraceAllowed()
+    {
+        return TraceLegacyAiEnabled() && InterlockedDecrement(&g_LegacyAiTraceBudget) >= 0;
+    }
+
     static bool TraceAiRangeEnabled()
     {
         static const bool s_value = EnvFlagEnabled("OPENSHIM_TRACE_AI_RANGE");
@@ -196,25 +203,46 @@ namespace BZROpenShim
 
         constexpr int kAttackTaskFiringState = 5;
 
-        // AttackTask flee (state 9) and blast (state 10), and the stuck sample
-        // IsStuck (FUN_006027f0) keeps on the task: FUN_00602920 rewrites the
-        // sample time to now + 5 and the sample position to the craft's
-        // position whenever the window has elapsed.
+        // AttackTask states the legacy (1.4) profile rewrites. Numbers are
+        // the same in 1.4 (FUN_0040cde0) and Redux (FUN_00478a50).
+        constexpr int kAttackTaskSearchState = 2;
+
+        constexpr int kAttackTaskStuckState = 3;
+
+        constexpr int kAttackTaskSlideState = 7;
+
+        constexpr int kAttackTaskStandState = 8;
+
         constexpr int kAttackTaskFleeState = 9;
 
         constexpr int kAttackTaskBlastState = 10;
 
-        constexpr size_t kAttackTaskStuckSampleTimeOffset = 0x84;
+        constexpr int kAttackTaskDoneState = 13;
 
-        constexpr size_t kAttackTaskStuckSamplePosOffset = 0x88;
+        // Written to the current state while stock runs the legacy flee tick:
+        // outside the switch's 2..12 range, so stock runs only its prolog and
+        // its tail, and the tail holds fire because the prolog cleared +0xC4.
+        constexpr int kAttackTaskLegacyPlaceholderState = 100;
 
-        constexpr size_t kCraftVehicleOffset = 0x230;
+        constexpr int kAttackTaskNextUnsetSentinel = 0x4C454731;
 
-        constexpr size_t kVehicleStuckFlagsOffset = 0x114;
+        constexpr size_t kAttackTaskSlideForceOffset = 0x4C;
 
-        // IsStuck's first test: bool __cdecl(const float* position), true on
-        // terrain cell types 5 and 6. It only reads the terrain.
-        uint32_t g_TerrainBlocksCraftAddr = 0;
+        constexpr size_t kAttackTaskAbleToHitOffset = 0xC4;
+
+        constexpr size_t kAttackTaskStartTimeOffset = 0x100;
+
+        constexpr size_t kAttackTaskFleeFromHandleOffset = 0x13C;
+
+        // Read by the getter FUN_0046d040 that stock stand and blast compare
+        // with the task start time to detect a fresh hit.
+        constexpr size_t kCraftLastDamageTimeOffset = 0x1E8;
+
+        // 1.4 and Redux share these: 1.4 _DAT_005e6e9c = 5.0 and
+        // _DAT_005e6ea4 = 5625.0; Redux 0x8a285c = 5.0 and 0x8a2e00 = 5625.0.
+        constexpr float kLegacySlideMinForce = 5.0f;
+
+        constexpr float kLegacyFleeRangeSq = 5625.0f;
 
         // Process vtables are rows, each checked by RTTI name below before its
         // slot is touched. Slot 11
@@ -428,14 +456,15 @@ namespace BZROpenShim
         {
             if (!craft) return false;
             const auto unitIt = g_AiUnitTuningOverridesByObject.find(reinterpret_cast<uintptr_t>(craft));
-            if (unitIt != g_AiUnitTuningOverridesByObject.end() && unitIt->second.hasLegacyAi && unitIt->second.legacyAi)
-                return true;
+            if (unitIt != g_AiUnitTuningOverridesByObject.end() && unitIt->second.hasLegacyAi)
+                return unitIt->second.legacyAi;
             AiTuningConfig odfCfg = {};
-            if (TryGetAiTuningForObject(craft, odfCfg) && odfCfg.legacyAiRole)
+            const bool hasOdfCfg = TryGetAiTuningForObject(craft, odfCfg);
+            if (hasOdfCfg && odfCfg.legacyAiRole)
                 return true;
-            // Also check ODF-driven legacy via direct aiName string fallback (if map not yet populated)
-            // The TryGetAiTuningForObject path already reads aiName, so above is sufficient.
-            return false;
+            // The global option covers every AttackTask user, as 1.4 did.
+            // odfCfg is filled even when parsed is false (opt-out only).
+            return g_LegacyTankAiActive && !odfCfg.legacyAiOptOut;
         }
 
         static bool TryGetTaskState(uint8_t* taskBytes, int& outState, int& outNextState, float& outStartTime)
@@ -446,7 +475,7 @@ namespace BZROpenShim
                 outState = *reinterpret_cast<int*>(taskBytes + kAttackTaskCurStateOffset);
                 outNextState = *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset);
                 // startTime is at +0x100 in Redux (was +0xD4 in 1.4)
-                outStartTime = *reinterpret_cast<float*>(taskBytes + 0x100);
+                outStartTime = *reinterpret_cast<float*>(taskBytes + kAttackTaskStartTimeOffset);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -476,89 +505,215 @@ namespace BZROpenShim
             }
         }
 
-        static bool TryReadAttackTaskStuckSample(uint8_t* taskBytes, float& outTime, float (&outPos)[3])
+        // The AttackTask helpers the 1.4 slide and flee call. Each comes from
+        // an engine_addresses row; if any row fails to bind, the legacy slide
+        // and flee stay stock.
+        using FnAttackTaskThiscallBool = bool(__thiscall*)(void* task);
+        using FnAttackTaskThiscallVoid = void(__thiscall*)(void* task);
+        using FnSidewaysAndClose = bool(__cdecl*)(void* craftInfo, void* targetInfo);
+        using FnIsBuildingClass = int(__cdecl*)(void* targetInfo);
+        using FnDistanceSquared2D = float(__cdecl*)(const float* a, const float* b);
+
+        struct LegacyAttackHelpers
         {
-            if (!taskBytes)
-                return false;
+            FnAttackTaskThiscallBool isStuck = nullptr;
+            FnAttackTaskThiscallVoid doSlide = nullptr;
+            FnAttackTaskThiscallVoid doFlee = nullptr;
+            FnSidewaysAndClose sidewaysAndClose = nullptr;
+            FnIsBuildingClass isBuilding = nullptr;
+            FnDistanceSquared2D distanceSquared2D = nullptr;
+        };
+
+        static const LegacyAttackHelpers* GetLegacyAttackHelpers()
+        {
+            static LegacyAttackHelpers s_helpers;
+            static int s_bound = -1;
+            if (s_bound < 0)
+            {
+                s_helpers.isStuck = reinterpret_cast<FnAttackTaskThiscallBool>(
+                    HookEngine::EngineAddress("AttackTaskIsStuck"));
+                s_helpers.doSlide = reinterpret_cast<FnAttackTaskThiscallVoid>(
+                    HookEngine::EngineAddress("AttackTaskDoSlide"));
+                s_helpers.doFlee = reinterpret_cast<FnAttackTaskThiscallVoid>(
+                    HookEngine::EngineAddress("AttackTaskDoFlee"));
+                s_helpers.sidewaysAndClose = reinterpret_cast<FnSidewaysAndClose>(
+                    HookEngine::EngineAddress("AttackTaskSidewaysAndClose"));
+                s_helpers.isBuilding = reinterpret_cast<FnIsBuildingClass>(
+                    HookEngine::EngineAddress("AttackTaskIsBuildingClass"));
+                s_helpers.distanceSquared2D = reinterpret_cast<FnDistanceSquared2D>(
+                    HookEngine::EngineAddress("DistanceSquared2D"));
+                s_bound = s_helpers.isStuck && s_helpers.doSlide && s_helpers.doFlee &&
+                    s_helpers.sidewaysAndClose && s_helpers.isBuilding && s_helpers.distanceSquared2D;
+                if (!s_bound)
+                    Log(L"[LEGACY] 1.4 slide and flee disabled: an AttackTask helper row does not bind\n");
+            }
+            return s_bound ? &s_helpers : nullptr;
+        }
+
+        // Entity vtable slot 12 (+0x30) of the interface at object+0x18: the
+        // class info stock passes to SidewaysAndClose and IsBuildingClass.
+        void* TryCallEntityClassInfo(void* gameObject)
+        {
+            if (!gameObject)
+                return nullptr;
             __try
             {
-                outTime = *reinterpret_cast<float*>(taskBytes + kAttackTaskStuckSampleTimeOffset);
-                const auto* pos = reinterpret_cast<float*>(taskBytes + kAttackTaskStuckSamplePosOffset);
-                outPos[0] = pos[0];
-                outPos[1] = pos[1];
-                outPos[2] = pos[2];
-                return true;
+                void* entity = reinterpret_cast<uint8_t*>(gameObject) + 0x18;
+                void** vtable = *reinterpret_cast<void***>(entity);
+                if (!vtable || !vtable[12])
+                    return nullptr;
+                using FnEntityClassInfo = void*(__thiscall*)(void* entity);
+                return reinterpret_cast<FnEntityClassInfo>(vtable[12])(entity);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                return false;
+                return nullptr;
             }
         }
 
-        // Stock flee (FUN_00478a50, state 9) leaves for blast either because
-        // IsStuck returned true or because the 3 s timeout ran out. Work out
-        // which after the fact, without calling IsStuck again: a second call
-        // would take a fresh stuck sample. If the sample window elapsed during
-        // the stock call, IsStuck compared the old sample with the new one
-        // (stuck when under 5 m). If it did not, only its terrain test could
-        // have said stuck, and that test has no side effects, so repeat it.
-        // Returns false when the verdict cannot be read; the caller then keeps
-        // stock behaviour.
-        static bool TryJudgeLegacyFleeExitWasStuck(uint8_t* taskBytes,
-                                                   void* craft,
-                                                   float sampleTimeBefore,
-                                                   const float (&samplePosBefore)[3],
-                                                   bool& outStuck)
+        static void SetAttackTaskNextState(uint8_t* taskBytes, int next)
         {
-            outStuck = true;
-            float sampleTimeAfter = 0.0f;
-            float samplePosAfter[3] = {};
-            if (!TryReadAttackTaskStuckSample(taskBytes, sampleTimeAfter, samplePosAfter))
-                return false;
+            *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = next;
+        }
 
-            if (sampleTimeAfter != sampleTimeBefore)
-            {
-                const float dx = samplePosAfter[0] - samplePosBefore[0];
-                const float dy = samplePosAfter[1] - samplePosBefore[1];
-                const float dz = samplePosAfter[2] - samplePosBefore[2];
-                outStuck = (dx * dx + dy * dy + dz * dz) < 25.0f;
-                return true;
-            }
+        // 1.4 slide (FUN_0040cde0 case 7) keeps sliding while it can hit and
+        // blasts only once the slide force drops under 5. Redux slide (case 7
+        // at 0x00478cec) blasts as soon as it can hit and leaves for search
+        // after 10 s. Stock has already run this tick, firing if able, so
+        // finish the two branches where they differ:
+        //   next 2 while in range and not a building: the 10 s timeout. 1.4
+        //     has none, so carry on with its stuck, sideways and slide tests.
+        //   next 10 with the able flag set and not a building: stock's able,
+        //     not stuck, not sideways branch. Slide instead.
+        // Out of range (2), target class (10), stuck (3), sideways (8) and
+        // the not-able slide already match 1.4. 1.4's class test is
+        // 1.4 never branches on the able flag here, so the timeout branch
+        // tests sideways whether or not it can hit, as 1.4 does.
+        // Not ported: Redux's class test (0x00477D70) also takes class 10,
+        // where 1.4's takes {2,5,7}, so class-10 targets keep Redux's blast;
+        // and within 10 s, a craft that cannot hit slides on without 1.4's
+        // sideways test.
+        static void ApplyLegacySlide(const LegacyAttackHelpers& helpers,
+                                     uint8_t* taskBytes,
+                                     void* taskPtr,
+                                     void* craft,
+                                     int nextAfter)
+        {
+            if (nextAfter != kAttackTaskSearchState && nextAfter != kAttackTaskBlastState)
+                return;
 
-            static int s_terrainTestVerified = -1;
-            if (s_terrainTestVerified < 0)
-            {
-                g_TerrainBlocksCraftAddr = HookEngine::EngineAddress("TerrainBlocksCraft");
-                s_terrainTestVerified = g_TerrainBlocksCraftAddr != 0 ? 1 : 0;
-                if (!s_terrainTestVerified)
-                    Log(L"[LEGACY] D3 disabled: terrain test row does not bind; legacy flee follows stock\n");
-            }
-            if (!s_terrainTestVerified)
-                return false;
+            void* target = *reinterpret_cast<void**>(taskBytes + kAttackTaskTargetOffset);
+            void* targetInfo = TryCallEntityClassInfo(target);
+            void* craftInfo = TryCallEntityClassInfo(craft);
+            if (!targetInfo || !craftInfo || helpers.isBuilding(targetInfo) != 0)
+                return;
 
-            __try
+            if (nextAfter == kAttackTaskSearchState)
             {
-                void* vehicle = *reinterpret_cast<void**>(reinterpret_cast<uint8_t*>(craft) + kCraftVehicleOffset);
-                if (!vehicle)
-                    return false;
-                const uint32_t flags = *reinterpret_cast<uint32_t*>(
-                    reinterpret_cast<uint8_t*>(vehicle) + kVehicleStuckFlagsOffset);
-                if ((flags & 4) != 0)
+                const float* craftPos = TryCallEntityGetPosition(craft);
+                const float* targetPos = TryCallEntityGetPosition(target);
+                if (!craftPos || !targetPos)
+                    return;
+                const float rangeSq = *reinterpret_cast<float*>(taskBytes + kAttackTaskRangeSqOffset);
+                if (helpers.distanceSquared2D(craftPos, targetPos) > rangeSq)
+                    return;
+                if (helpers.isStuck(taskPtr))
                 {
-                    outStuck = false;
-                    return true;
+                    SetAttackTaskNextState(taskBytes, kAttackTaskStuckState);
+                    return;
                 }
-                const float* position = TryCallEntityGetPosition(craft);
-                if (!position)
-                    return false;
-                using FnTerrainBlocksCraft = bool(__cdecl*)(const float* position);
-                outStuck = reinterpret_cast<FnTerrainBlocksCraft>(g_TerrainBlocksCraftAddr)(position);
-                return true;
+                if (helpers.sidewaysAndClose(craftInfo, targetInfo))
+                {
+                    SetAttackTaskNextState(taskBytes, kAttackTaskStandState);
+                    return;
+                }
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            else if (*(taskBytes + kAttackTaskAbleToHitOffset) == 0)
             {
-                return false;
+                return;
             }
+
+            helpers.doSlide(taskPtr);
+            const auto* force = reinterpret_cast<const float*>(taskBytes + kAttackTaskSlideForceOffset);
+            const float forceSq = force[0] * force[0] + force[1] * force[1] + force[2] * force[2];
+            const int next = forceSq < kLegacySlideMinForce * kLegacySlideMinForce
+                ? kAttackTaskBlastState
+                : kAttackTaskSlideState;
+            SetAttackTaskNextState(taskBytes, next);
+            if (next != kAttackTaskSlideState && LegacyAiTraceAllowed())
+                Log(L"[LEGACY] slide craft=0x%08X stock next %d => %d\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)), nextAfter, next);
+        }
+
+        static void CallStockAttackTaskDoState(void* taskPtr);
+
+        // 1.4 flee (FUN_0040cde0 case 9) holds fire and has no timer: it
+        // leaves when the attacker is gone or 75 m away (to slide) or when
+        // stuck (to blast). Redux flee (case 9 at 0x00478f5c) shoots the
+        // attacker and gives up after 3 s. Run stock with a placeholder state
+        // so only its prolog (target, avoidance, done checks) and its tail
+        // (weapon update, holding fire) run, then do the 1.4 flee.
+        static void RunLegacyFlee(const LegacyAttackHelpers& helpers,
+                                  uint8_t* taskBytes,
+                                  void* taskPtr,
+                                  void* craft)
+        {
+            auto* cur = reinterpret_cast<int*>(taskBytes + kAttackTaskCurStateOffset);
+            auto* next = reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset);
+            const int nextBefore = *next;
+            *cur = kAttackTaskLegacyPlaceholderState;
+            *next = kAttackTaskNextUnsetSentinel;
+            CallStockAttackTaskDoState(taskPtr);
+            if (*cur == kAttackTaskLegacyPlaceholderState)
+                *cur = kAttackTaskFleeState;
+            if (*next != kAttackTaskNextUnsetSentinel)
+                return; // the prolog decided (target gone, task done)
+            *next = nextBefore;
+            if (*cur == kAttackTaskDoneState)
+                return;
+
+            const int fleeFromHandle = *reinterpret_cast<int*>(taskBytes + kAttackTaskFleeFromHandleOffset);
+            void* fleeFrom = GameObjectFromHandleGog(fleeFromHandle);
+            const float* craftPos = TryCallEntityGetPosition(craft);
+            const float* fleeFromPos = TryCallEntityGetPosition(fleeFrom);
+            const char* exitReason = nullptr;
+            float fleeDistSq = -1.0f;
+            if (fleeFrom && craftPos && fleeFromPos)
+                fleeDistSq = helpers.distanceSquared2D(craftPos, fleeFromPos);
+            if (!fleeFrom || !craftPos || !fleeFromPos)
+            {
+                *next = kAttackTaskSlideState;
+                exitReason = "attacker gone";
+            }
+            else if (fleeDistSq > kLegacyFleeRangeSq)
+            {
+                *next = kAttackTaskSlideState;
+                exitReason = "75 m clear";
+            }
+            else if (helpers.isStuck(taskPtr))
+            {
+                *next = kAttackTaskBlastState;
+                exitReason = "stuck";
+            }
+            if (exitReason)
+            {
+                if (LegacyAiTraceAllowed())
+                {
+                    char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                    if (fleeFrom)
+                        TryGetObjectOdfToken(fleeFrom, odfToken);
+                    Log(L"[LEGACY] flee craft=0x%08X from=0x%08X odf=%hs dist=%.1f %S => %d\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                        static_cast<uint32_t>(fleeFromHandle), odfToken[0] ? odfToken : "-",
+                        static_cast<double>(fleeDistSq >= 0.0f ? std::sqrt(fleeDistSq) : -1.0f),
+                        exitReason, *next);
+                }
+                return;
+            }
+            // Stock points the task's target at the attacker before DoFlee;
+            // the next tick's prolog resolves the real target again.
+            *reinterpret_cast<void**>(taskBytes + kAttackTaskTargetOffset) = fleeFrom;
+            helpers.doFlee(taskPtr);
         }
 
         // OPENSHIM_PROFILE_ATTACK_TASK=1: splits this hook's time into the
@@ -580,6 +735,62 @@ namespace BZROpenShim
             g_BzrFn_AttackTaskDoState(taskPtr);
             QueryPerformanceCounter(&after);
             g_AttackTaskProfileStockTicks += after.QuadPart - before.QuadPart;
+        }
+
+        static void ReadLegacySnapshotFields(uint8_t* taskBytes, void* craft, float& lastDamage,
+                                             float& forceMag, int& able, float& range)
+        {
+            __try
+            {
+                lastDamage = *reinterpret_cast<float*>(
+                    reinterpret_cast<uint8_t*>(craft) + kCraftLastDamageTimeOffset);
+                const auto* force = reinterpret_cast<const float*>(taskBytes + kAttackTaskSlideForceOffset);
+                forceMag = std::sqrt(force[0] * force[0] + force[1] * force[1] + force[2] * force[2]);
+                able = *(taskBytes + kAttackTaskAbleToHitOffset);
+                range = std::sqrt(*reinterpret_cast<float*>(taskBytes + kAttackTaskRangeSqOffset));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+
+        // OPENSHIM_TRACE_LEGACY_AI: one line per legacy craft every 0.5 s with
+        // what the state machine reads, so a stuck state can be explained.
+        static void TraceLegacySnapshot(const LegacyAttackHelpers* helpers,
+                                        uint8_t* taskBytes,
+                                        void* craft,
+                                        int curBefore,
+                                        int nextStock)
+        {
+            static volatile long s_budget = 1500;
+            static std::unordered_map<uintptr_t, float> s_lastLogByCraft;
+            if (!TraceLegacyAiEnabled() || !g_BzrFn_GetGameTime || s_budget <= 0)
+                return;
+            const float now = g_BzrFn_GetGameTime();
+            float& last = s_lastLogByCraft[reinterpret_cast<uintptr_t>(craft)];
+            if (now - last < 0.5f && now >= last)
+                return;
+            last = now;
+            if (InterlockedDecrement(&s_budget) < 0)
+                return;
+
+            int cur = 0, next = 0;
+            float start = 0.0f;
+            TryGetTaskState(taskBytes, cur, next, start);
+            float lastDamage = -1.0f, forceMag = -1.0f, dist = -1.0f, range = -1.0f;
+            int able = -1;
+            ReadLegacySnapshotFields(taskBytes, craft, lastDamage, forceMag, able, range);
+            void* target = *reinterpret_cast<void**>(taskBytes + kAttackTaskTargetOffset);
+            const float* craftPos = TryCallEntityGetPosition(craft);
+            const float* targetPos = TryCallEntityGetPosition(target);
+            if (helpers && craftPos && targetPos)
+                dist = std::sqrt(helpers->distanceSquared2D(craftPos, targetPos));
+            char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+            TryGetObjectOdfToken(craft, odfToken);
+            Log(L"[LEGACY] snap craft=0x%08X odf=%hs cur %d->%d stock %d final %d able=%d force=%.2f "
+                L"dist=%.1f range=%.1f start=%.2f now=%.2f hit=%.2f\n",
+                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                odfToken[0] ? odfToken : "-", curBefore, cur, nextStock, next, able,
+                static_cast<double>(forceMag), static_cast<double>(dist), static_cast<double>(range),
+                static_cast<double>(start), static_cast<double>(now), static_cast<double>(lastDamage));
         }
 
         static void AttackTaskDoStateTuningBody(void* taskPtr)
@@ -618,80 +829,61 @@ namespace BZROpenShim
             {
                 // The port is partial, and a modder who sets legacyAI=1 should
                 // be able to read which parts of 1.4 they are getting.
+                const LegacyAttackHelpers* helpers = GetLegacyAttackHelpers();
                 static volatile LONG s_legacyPartialLogged = 0;
                 if (InterlockedCompareExchange(&s_legacyPartialLogged, 1, 0) == 0)
                 {
-                    Log(L"[LEGACY] 1.4 AI profile active (first craft 0x%08X): D1 (able-to-hit -> slide), "
-                        L"D3 (flee without the 3 s cap) and D4 (stand timeout -> slide) apply; D2 (slide exit) "
-                        L"is not ported, so slide exits follow stock Redux\n",
-                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
+                    Log(L"[LEGACY] 1.4 AI profile active (first craft 0x%08X): search able-to-hit -> slide, "
+                        L"stand timeout -> slide, %s; not ported: sideways check while unable to hit\n",
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)),
+                        helpers ? L"slide while able to hit, flee without firing or the 3 s cap"
+                                : L"slide and flee follow stock Redux (helper rows missing)");
                 }
                 int curBefore = 0, nextBefore = 0;
                 float startBefore = 0.0f;
                 TryGetTaskState(taskBytes, curBefore, nextBefore, startBefore);
-                float stuckSampleTimeBefore = 0.0f;
-                float stuckSamplePosBefore[3] = {};
-                const bool haveStuckSample =
-                    curBefore == kAttackTaskFleeState &&
-                    TryReadAttackTaskStuckSample(taskBytes, stuckSampleTimeBefore, stuckSamplePosBefore);
+                if (helpers && curBefore == kAttackTaskFleeState)
+                {
+                    RunLegacyFlee(*helpers, taskBytes, taskPtr, craft);
+                    TraceLegacySnapshot(helpers, taskBytes, craft, curBefore, -1);
+                    return;
+                }
                 CallStockAttackTaskDoState(taskPtr);
                 int curAfter = 0, nextAfter = 0;
                 float startAfter = 0.0f;
                 TryGetTaskState(taskBytes, curAfter, nextAfter, startAfter);
-                // Apply legacy D1, D3, D4 post-hoc. D2 requires enemy state read.
-                // D1: case 2 AbleToHit -> slide (7) not blast (10)
-                if (curBefore == 2 && nextAfter == 10)
+                if (helpers && curBefore == kAttackTaskSlideState)
+                    ApplyLegacySlide(*helpers, taskBytes, taskPtr, craft, nextAfter);
+                // Search: 1.4 goes to slide when able to hit; Redux goes to blast.
+                if (curBefore == kAttackTaskSearchState && nextAfter == kAttackTaskBlastState)
                 {
-                    // Stock 1.5/Redux goes to blast; 1.4 goes to slide
-                    *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                    if (TraceLegacyAiEnabled() || TraceAiRangeEnabled())
-                    {
-                        Log(L"[LEGACY] D1 override craft=0x%08X cur=2 next 10->7\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
-                    }
+                    SetAttackTaskNextState(taskBytes, kAttackTaskSlideState);
+                    if (LegacyAiTraceAllowed())
+                        Log(L"[LEGACY] search craft=0x%08X next 10 => 7\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                 }
-                // D4: case 8 stand expiry (>8s) -> slide (7) not flee (9)
-                // Detect 8->9 transition; distinguish hit vs timeout via damage time vs start
-                if (curBefore == 8 && nextAfter == 9)
+                // Stand: both builds flee on a fresh hit, but on the 8 s timeout
+                // 1.4 slides where Redux flees. Stock's fresh-hit test is
+                // craft last-damage time > task start (FUN_0046d040, jbe).
+                if (curBefore == kAttackTaskStandState && nextAfter == kAttackTaskFleeState)
                 {
-                    // Check if this was timeout (not fresh hit). Fresh hit would also be 8->9 but we want to keep hit as 9.
-                    // Use craft damage time vs task start: if lastDamageTime > startAfter (fresh), keep 9.
-                    bool isFreshHit = false;
+                    bool isFreshHit = true;
                     __try
                     {
-                        // craft damage fields: +0x1E0 time, task start at +0x100 (Redux)
-                        float* craftDamageTime = reinterpret_cast<float*>(reinterpret_cast<uint8_t*>(craft) + 0x1E0);
-                        float* taskStart = reinterpret_cast<float*>(taskBytes + 0x100);
-                        if (craftDamageTime && taskStart && *craftDamageTime > *taskStart)
-                            isFreshHit = true;
+                        const float lastDamage = *reinterpret_cast<float*>(
+                            reinterpret_cast<uint8_t*>(craft) + kCraftLastDamageTimeOffset);
+                        isFreshHit = lastDamage > startBefore;
                     }
                     __except (EXCEPTION_EXECUTE_HANDLER) {}
                     if (!isFreshHit)
-                    {
-                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = 7;
-                        if (TraceLegacyAiEnabled())
-                            Log(L"[LEGACY] D4 override craft=0x%08X 8->9 => 8->7 (timeout)\n", static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
-                    }
+                        SetAttackTaskNextState(taskBytes, kAttackTaskSlideState);
+                    if (LegacyAiTraceAllowed())
+                        Log(isFreshHit
+                                ? L"[LEGACY] stand hit craft=0x%08X => flee 9\n"
+                                : L"[LEGACY] stand timeout craft=0x%08X next 9 => 7\n",
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
                 }
-                // D3: 1.4 flee has no 3 s bound. Stock leaves flee (9) for blast
-                // (10) on IsStuck or on the timeout; keep only the stuck exit so
-                // a stuck legacy craft still gets out. Leaving the 75 m band
-                // (9 -> 7) is untouched.
-                if (curBefore == kAttackTaskFleeState && nextAfter == kAttackTaskBlastState && haveStuckSample)
-                {
-                    bool stuck = true;
-                    if (TryJudgeLegacyFleeExitWasStuck(taskBytes, craft, stuckSampleTimeBefore,
-                                                       stuckSamplePosBefore, stuck) &&
-                        !stuck)
-                    {
-                        *reinterpret_cast<int*>(taskBytes + kAttackTaskNextStateOffset) = kAttackTaskFleeState;
-                        if (TraceLegacyAiEnabled())
-                            Log(L"[LEGACY] D3 override craft=0x%08X 9->10 => stay 9 (timeout, not stuck)\n",
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(craft)));
-                    }
-                }
-                // D2: case 7 slide-exit enemy state {2,5,7} uncapped vs IsBuilding+10s
-                // TODO: implement enemy task state read: handle at +0x14 -> object -> +0x30 -> state at +0x08
-                // Not ported: slide exits follow stock Redux.
+                TraceLegacySnapshot(helpers, taskBytes, craft, curBefore, nextAfter);
                 return;
             }
 
@@ -2560,10 +2752,14 @@ namespace BZROpenShim
                          _stricmp(key, "legacy14") == 0 || _stricmp(key, "legacy14AI") == 0)
                 {
                     bool parsedLegacy = false;
-                    if (TryParseBoolValue(value, parsedLegacy) && parsedLegacy)
+                    if (TryParseBoolValue(value, parsedLegacy))
                     {
-                        outConfig.legacyAiRole = true;
-                        foundAny = true;
+                        outConfig.legacyAiRole = parsedLegacy;
+                        outConfig.legacyAiOptOut = !parsedLegacy;
+                        // An opt-out alone is not tuning: the ODF keeps the
+                        // stock range path, as before the global option.
+                        if (parsedLegacy)
+                            foundAny = true;
                     }
                     else
                     {

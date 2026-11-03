@@ -1270,6 +1270,9 @@ namespace BZROpenShim
             bool parsed = false;
             bool bomberAiRole = false;
             bool legacyAiRole = false;
+            // legacyAI = 0: keeps the craft on Redux AI when the global
+            // Legacy Tank AI option is on.
+            bool legacyAiOptOut = false;
             bool hasEngageRangeAI = false;
             float engageRangeAI = 0.0f;
             bool hasWeaponRangeMinAI = false;
@@ -1343,6 +1346,7 @@ namespace BZROpenShim
         extern InlineDetour32 g_AttackTaskDoStateDetour;
         extern bool g_AttackTaskDoStateHookInstalled;
         extern bool g_BomberAiRangeActive;
+        extern bool g_LegacyTankAiActive;
         extern bool g_CalcRangeCraftHookInstalled;
         extern std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject;
         extern volatile long g_CombatKiteTraceBudget;
@@ -1485,6 +1489,7 @@ namespace BZROpenShim
         inline constexpr float kSmartReticleRangeDefault = 500.0f;
         inline constexpr bool kConstructorRemoteBuildFixEnabledDefault = true;
         inline constexpr bool kBomberAiRangeEnabledDefault = false;
+        inline constexpr bool kLegacyTankAiEnabledDefault = false;
         inline constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
         // Master switch for the ODF-authored AI tuning keys (engageRangeAI,
         // weaponRangeMinAI, retargetPeriodAI, scrapPathingAI and friends).
@@ -1505,11 +1510,14 @@ namespace BZROpenShim
         extern bool g_AiOdfGameplayTuningEnabled;
         extern bool g_BomberAiRangeBaselineEnabled;
         extern bool g_BomberAiRangeEnabled;
+        extern bool g_LegacyTankAiBaselineEnabled;
+        extern bool g_LegacyTankAiEnabled;
         extern bool g_HowitzerUndeployedRetaliationFixEnabled;
         extern bool g_TurretAimPitchEnabled;
         void RefreshTurretAimPitchState();
         void RefreshAiOdfGameplayTuningState();
         void RefreshBomberAiRangeState();
+        void RefreshLegacyTankAiState();
         void RefreshSplinterUndeadFixState();
         void RefreshTugCargoPostLoadFixState();
         void RefreshConstructorRecycleStaleTargetFixState();
