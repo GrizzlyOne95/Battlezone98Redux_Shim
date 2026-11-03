@@ -195,6 +195,7 @@ namespace BZROpenShim
     void* SprayEmitterBuildOwnerHook();
     bool SetUnderAttackAlertModeFromBridge(int mode);
     bool SetBomberAiRangeEnabledFromBridge(bool enabled);
+    bool SetLegacyTankAiEnabledFromBridge(bool enabled);
     bool SetHowitzerVolleyEnabledFromBridge(bool enabled);
     bool SetWeaponMaskCarrierBiasEnabledFromBridge(bool enabled);
     bool SetAiOdfGameplayTuningEnabledFromBridge(bool enabled);

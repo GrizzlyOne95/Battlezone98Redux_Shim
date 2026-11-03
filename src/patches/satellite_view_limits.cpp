@@ -57,7 +57,11 @@ namespace BZROpenShim
                     { "SatellitePanSpeedLoad", &panSpeedLoad },      // movss xmm0,[m32]
                 };
                 if (!HookEngine::BindEngineRows("Satellite view limits", rows))
+                {
+                    MarkOptionHookFailed("SatelliteZoomOut", "Unavailable: Satellite zoom-out did not hook on this game build (see openshim.log).");
+                    MarkOptionHookFailed("SatellitePanSpeed", "Unavailable: Satellite pan speed did not hook on this game build (see openshim.log).");
                     return false;
+                }
                 g_SatelliteMaxZoomAddr = *reinterpret_cast<const uint32_t*>(maxZoomCompare + 3);
                 g_SatellitePanSpeedAddr = *reinterpret_cast<const uint32_t*>(panSpeedLoad + 4);
                 return true;
@@ -175,6 +179,8 @@ namespace BZROpenShim
                     Log(L"[SATELLITE] Could not write view limits at 0x%08X / 0x%08X\n",
                         static_cast<uint32_t>(g_SatelliteMaxZoomAddr),
                         static_cast<uint32_t>(g_SatellitePanSpeedAddr));
+                    MarkOptionHookFailed("SatelliteZoomOut", "Unavailable: Satellite zoom-out did not hook on this game build (see openshim.log).");
+                    MarkOptionHookFailed("SatellitePanSpeed", "Unavailable: Satellite pan speed did not hook on this game build (see openshim.log).");
                 }
                 return;
             }

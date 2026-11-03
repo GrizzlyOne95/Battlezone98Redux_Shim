@@ -804,7 +804,11 @@ namespace BZROpenShim
                     { "ReticleGlobal", &g_ReticleGlobalAddr },
                 };
                 if (!HookEngine::BindEngineRows("Shot convergence", rows))
+                {
+                    MarkOptionHookFailed("WeaponConvergence", "Unavailable: Weapon convergence did not hook on this game build (see openshim.log).");
+                    MarkOptionHookFailed("PlayerReticleConvergence", "Unavailable: Reticle convergence did not hook on this game build (see openshim.log).");
                     return false;
+                }
                 const ConvergenceVtable* vtables[] = {
                     &g_WingmanVtable, &g_TurretCraftVtable,
                     &g_TurretTankVtables[0], &g_TurretTankVtables[1],
@@ -815,6 +819,8 @@ namespace BZROpenShim
                         continue;
                     Log(L"[CONVERGE] %hs RTTI mismatch vtable=0x%08X; convergence stands down\n",
                         vtable->row, vtable->address);
+                    MarkOptionHookFailed("WeaponConvergence", "Unavailable: Weapon convergence did not hook on this game build (see openshim.log).");
+                    MarkOptionHookFailed("PlayerReticleConvergence", "Unavailable: Reticle convergence did not hook on this game build (see openshim.log).");
                     return false;
                 }
                 return true;
@@ -914,7 +920,10 @@ namespace BZROpenShim
                 for (size_t index = 0; index < std::size(sites); ++index)
                     rows[index + 1] = { kSmartReticleRangeSiteRows[index], &sites[index] };
                 if (!HookEngine::BindEngineRows("Smart-reticle range", rows))
+                {
+                    MarkOptionHookFailed("SmartReticleRange", "Unavailable: Smart reticle range did not hook on this game build (see openshim.log).");
                     return false;
+                }
                 for (size_t index = 0; index < std::size(sites); ++index)
                     g_SmartReticleRangeSites[index].instructionAddr = sites[index];
                 return true;
@@ -941,6 +950,7 @@ namespace BZROpenShim
                     Log(L"[RETICLE] Smart-reticle range redirect stood down: site 0x%08X does not hold the stock load; leaving the shared 200.0 literal alone\n",
                         static_cast<uint32_t>(site.instructionAddr));
                     g_SmartReticleRangeRedirectFaultLogged = true;
+                    MarkOptionHookFailed("SmartReticleRange", "Unavailable: Smart reticle range did not hook on this game build (see openshim.log).");
                 }
                 return false;
             }
@@ -978,6 +988,7 @@ namespace BZROpenShim
                         written,
                         std::size(g_SmartReticleRangeSites));
                     g_SmartReticleRangeRedirectFaultLogged = true;
+                    MarkOptionHookFailed("SmartReticleRange", "Unavailable: Smart reticle range did not hook on this game build (see openshim.log).");
                 }
                 return false;
             }

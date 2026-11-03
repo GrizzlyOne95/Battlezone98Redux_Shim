@@ -129,7 +129,7 @@ Verify both network tuning policies:
 While in a network game, verify `[SinglePlayer]` features remain inactive, especially:
 
 - `AttackRevealPerceivedTeam`
-- `BomberAiRange`
+- `AiOdfGameplayTuning` (includes bomber range)
 - `SatelliteVisibilityFix`
 - other feature-registry entries intended to hard-disable online
 

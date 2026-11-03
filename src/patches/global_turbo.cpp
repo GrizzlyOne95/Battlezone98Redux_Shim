@@ -55,7 +55,10 @@ namespace BZROpenShim
                     { "UnitTurboThrottleBlock", &block },
                 };
                 if (!HookEngine::BindEngineRows("Global turbo", rows))
+                {
+                    MarkOptionHookFailed("Turbo", "Unavailable: Global turbo did not hook on this game build (see openshim.log).");
                     return false;
+                }
                 g_UnitTurboBeginHookAddr = block;
                 g_GlobalTurboComissOperandAddr = block + 0x11;
                 g_GlobalTurboSecondGateAddr = block + 0x23;

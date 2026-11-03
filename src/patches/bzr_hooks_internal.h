@@ -1345,7 +1345,6 @@ namespace BZROpenShim
         extern volatile long g_AiUnitTuningTraceBudget;
         extern InlineDetour32 g_AttackTaskDoStateDetour;
         extern bool g_AttackTaskDoStateHookInstalled;
-        extern bool g_BomberAiRangeActive;
         extern bool g_LegacyTankAiActive;
         extern bool g_CalcRangeCraftHookInstalled;
         extern std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject;
@@ -1488,14 +1487,13 @@ namespace BZROpenShim
         inline constexpr bool kSplinterUndeadFixEnabledDefault = true;
         inline constexpr float kSmartReticleRangeDefault = 500.0f;
         inline constexpr bool kConstructorRemoteBuildFixEnabledDefault = true;
-        inline constexpr bool kBomberAiRangeEnabledDefault = false;
         inline constexpr bool kLegacyTankAiEnabledDefault = false;
         inline constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
         // Master switch for the ODF-authored AI tuning keys (engageRangeAI,
         // weaponRangeMinAI, retargetPeriodAI, scrapPathingAI and friends).
-        // Defaults ON: every path it gates additionally requires the ODF to
-        // declare one of those keys, so content that does not author them --
-        // the stock campaign included -- is completely unaffected.
+        // Defaults ON. Every path it gates requires the ODF to declare one of
+        // those keys, except bomber range: a bomber-role craft that authors
+        // neither range key gets its longest weapon range as the outer floor.
         inline constexpr bool kAiOdfGameplayTuningEnabledDefault = true;
         inline constexpr bool kTurretAimPitchEnabledDefault = true;
         inline constexpr bool kAllowNeutralAttackOrdersDefault = false;
@@ -1508,15 +1506,12 @@ namespace BZROpenShim
         inline constexpr bool kAiMultiProducerMakersDefault = true;
         inline constexpr char kUserConfigFixesSection[] = "Fixes";
         extern bool g_AiOdfGameplayTuningEnabled;
-        extern bool g_BomberAiRangeBaselineEnabled;
-        extern bool g_BomberAiRangeEnabled;
         extern bool g_LegacyTankAiBaselineEnabled;
         extern bool g_LegacyTankAiEnabled;
         extern bool g_HowitzerUndeployedRetaliationFixEnabled;
         extern bool g_TurretAimPitchEnabled;
         void RefreshTurretAimPitchState();
         void RefreshAiOdfGameplayTuningState();
-        void RefreshBomberAiRangeState();
         void RefreshLegacyTankAiState();
         void RefreshSplinterUndeadFixState();
         void RefreshTugCargoPostLoadFixState();
@@ -2067,5 +2062,10 @@ namespace BZROpenShim
         // Marks every cached light list dirty when the engine replaces the sun.
         void WatchSunLightReplacement();
         bool IsPilotOnFoot(void* player);
+        // Options whose native hook failed closed; the Options menu shows them Unavailable.
+        // Both take string literals (stored by pointer). Reason is null when not failed.
+        void MarkOptionHookFailed(const char* iniKey, const char* why);
+        void ClearOptionHookFailed(const char* iniKey);
+        const char* OptionHookFailureReason(const char* iniKey);
     }
 }

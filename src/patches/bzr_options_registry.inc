@@ -555,10 +555,6 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     // mission script, so they belong on the page rather than staying
     // ini-only. Each default index is what an ABSENT key does, which
     // is not the same as what a preset happens to ship.
-    { "Bomber AI Range", "SinglePlayer", "BomberAiRange", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::GlobalImprovement,
-      "Bombers engage at the range their own weapon ODFs declare. Single player only." },
     { "Legacy Tank AI", "SinglePlayer", "LegacyTankAi", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
