@@ -470,6 +470,7 @@ namespace BZROpenShim
         g_HudSpriteRectTableDiscoveryBackoffMs = 0;
         g_HudSpriteFallbackDiscoveryBackoffMs = 0;
         g_BomberAiRangeEnabled = kBomberAiRangeEnabledDefault;
+        g_LegacyTankAiEnabled = kLegacyTankAiEnabledDefault;
         g_HowitzerVolleyEnabled = kHowitzerVolleyEnabledDefault;
         g_HowitzerUndeployedRetaliationFixEnabled =
             !(EnvFlagEnabled("OPENSHIM_DISABLE_HOWITZER_DEPLOY_FIX") ||

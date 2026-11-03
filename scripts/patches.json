@@ -4878,10 +4878,40 @@
       "identity": "AttackTask::DoState epilog: mov ecx,[ebp-4]; call UpdateSpecial (+3). The lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) resolves avoidObj first when a special weapon is fitted"
     },
     {
-      "name": "TerrainBlocksCraft",
-      "address": "0x00466D40",
-      "expected": "55 8B EC 51 8B 45 08 51 F3 0F 10 40 08",
-      "identity": "IsStuck's first test, bool cdecl(const float* position), true on terrain cell types 5 and 6"
+      "name": "AttackTaskIsStuck",
+      "address": "0x006027F0",
+      "expected": "55 8B EC 83 EC 14 89 4D F8 8B 45 F8",
+      "identity": "AttackTask::IsStuck, bool thiscall(task); takes a new stuck sample when its window elapses. The legacy (1.4) slide and flee call it"
+    },
+    {
+      "name": "AttackTaskDoSlide",
+      "address": "0x00606E20",
+      "expected": "55 8B EC 83 EC 3C 89 4D FC 8B 45 FC",
+      "identity": "AttackTask::DoSlide, void thiscall(task); writes the slide force to task+0x4C. The legacy (1.4) slide calls it while able to hit"
+    },
+    {
+      "name": "AttackTaskDoFlee",
+      "address": "0x00607520",
+      "expected": "55 8B EC 81 EC 8C 01 00 00 A1 00 70",
+      "identity": "AttackTask::DoFlee, void thiscall(task); flees task+0x18. The legacy (1.4) flee calls it without firing"
+    },
+    {
+      "name": "AttackTaskSidewaysAndClose",
+      "address": "0x004788D0",
+      "expected": "55 8B EC 83 EC 2C 8B 45 0C 50 8B 4D",
+      "identity": "DoState's slide-to-stand test, bool cdecl(craftClassInfo, targetClassInfo); class info from entity vtable slot 12"
+    },
+    {
+      "name": "AttackTaskIsBuildingClass",
+      "address": "0x00477D70",
+      "expected": "55 8B EC 51 8B 45 08 8B 88 84 00 00",
+      "identity": "DoState's target-class test, int cdecl(targetClassInfo); 1 when classInfo+0x84 is 2, 5, 7 or 10 (1.4 slide tests classInfo+0xAC in 2, 5, 7)"
+    },
+    {
+      "name": "DistanceSquared2D",
+      "address": "0x00462010",
+      "expected": "55 8B EC 83 EC 0C 8B 45 08 8B 4D 0C",
+      "identity": "float cdecl(const float* a, const float* b), squared x/z distance; DoState's range and flee band tests"
     },
     {
       "name": "OffensiveProcessDoSubTask",

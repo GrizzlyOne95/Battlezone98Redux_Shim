@@ -1,5 +1,7 @@
 # BZ 1.4 legacy AI — implementation summary (2026-09-01 — research only)
 
+> **Superseded (2026-11-03).** The D2 plan below rests on a misread: 1.4's `+0xAC` is the target's class type, not an enemy task state. The deltas actually ported are D1, D4, slide while able to hit, and flee without firing or the 3 s cap. They live in `src/patches/ai_odf_tuning.cpp` (`legacyAI=1`), not `bzr_hooks.cpp`. See the correction under §7 of `bz14_evasive_ai_investigation_20260823.md`.
+
 **Status:** No runtime patch applied in this pass. Research phase only, per Implementation Policy (research first, narrow hooks, stock untouched by default).
 
 **Proven hook point:** `kGogAttackTaskDoStateEntryAddr = 0x00478A50` (`bzr_hooks.cpp:1029`, `ExpectedBytesMatchAt`). This is `AttackTask::DoState` in Redux (GOG v2.2.301), structurally identical to 1.5 `0x40F25B`.

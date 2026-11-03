@@ -279,6 +279,35 @@ Redux = FUN_00478A50):
 | D3 | Flee duration (case 9) | **no re-eval bound** — exits only attacker-gone / distSq>5625 / stuck->10 | bounded: `timer + 3.0 < now -> 10` (1.5 L25367-25392; Redux L262-268) |
 | D4 | State-8 stand expiry (>8 s) | -> state **7** (slide rotation) | -> state **9** flee (`state=9; fleeFrom=GetHandle(him)`; 1.5 L25352; Redux L233-239) |
 
+**Correction (2026-11-03), re-checked against `Battlezone_Source/BZ1/decomp1.4/FUN_0040cde0.c`
+(line numbers from `Get-Content`) and a capstone disassembly of the GOG exe. The rows above
+are partly wrong:**
+
+- **D2 is not an enemy task-state read. (PROVEN)** 1.4 case 7 (L342-426) calls target
+  entity vtbl slot 12 (`+0x30`) and reads `+0xAC` of the class info it returns. Values
+  2 and 5 go to `LAB_0040d17a` (state 10); 7 sets 10 (L364-372). That is the target-class
+  test Redux keeps at `0x00477D70` (`classInfo+0x84` in {2,5,7,10}). The only real D2
+  difference is Redux's 10 s slide cap (`now > start+10 -> 2`).
+- **Missed delta: 1.4 slides while able to hit. (PROVEN)** 1.4 case 7 stores
+  `AbleToHit` in `+0xA4` (L344-346) but never branches on it. Not stuck and not
+  sideways (`FUN_00414340`, L384-410), it always calls DoSlide (`FUN_0046ecf0`) and
+  blasts only when the slide force is under 5 (L392-400). Redux slide (jump-table
+  target `0x00478CEC`) goes to stand (sideways) or blast (not) as soon as it can hit,
+  and slides only while it cannot. This is the "stares you down" behaviour.
+- **Missed delta: 1.4 flee holds fire. (PROVEN)** 1.4 case 9 (L476-532) never sets
+  the fire flag `+0xA4`, so the tail at `switchD_0040ced6_default` (L371) skips the
+  weapon. Redux flee (`0x00478F5C`) sets `+0xC4 = AbleToHit` first and shoots the
+  attacker while fleeing.
+- **Craft last-damage time is `+0x1E8` in Redux, not `+0x1E0`. (PROVEN)** Redux stand
+  and blast read it through the getter `0x0046D040` (`fld [ecx+0x1E8]`) and compare it
+  with `task+0x100` (fresh hit when greater). 1.4 reads `craft+0x1DC` (L436). The
+  `+0x1E0/+0x1EC` row in the offset table below is unverified for the damage time.
+- D1, D3 (3 s flee cap) and D4 stand as written.
+
+OpenShim's legacy profile (`src/patches/ai_odf_tuning.cpp`) ports D1, D4, slide-while-able
+and flee-without-firing (including dropping the 3 s cap). Not ported: 1.4's sideways check
+while unable to hit, and the class-type-10 difference.
+
 Corrected earlier hypotheses (supersede wave2b Section 5 item 3; CONFIRMED-CODE
 per wave2c A.4):
 

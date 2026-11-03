@@ -2416,6 +2416,22 @@ AiOdfGameplayTuning = 1
 ;        (logs [BOMBERRANGE] original/final range per engagement)
 BomberAiRange = 0
 
+; Legacy (1.4 / TRO 1.3) attack AI for every unit that runs the stock attack
+; task. Instead of parking and shooting, a unit strafes around its target;
+; when it holds position and is shot it retreats from the attacker (up to
+; 75 m) before strafing again. Missions built for 1.4 were balanced around
+; this less aggressive AI and fielded more units, so this works as a
+; compatibility setting for them. Rocket tanks and turrets use other AI and
+; are unchanged.
+;
+; An ODF can still opt in on its own with legacyAI = 1 (this option off), or
+; opt out with legacyAI = 0 (this option on).
+;
+; Changes stock content, so it never runs in a network game.
+; Accepted: boolean. Default: OFF.
+; Trace: OPENSHIM_TRACE_LEGACY_AI=1 (logs [LEGACY] state transitions)
+LegacyTankAi = 0
+
 ; Make turbo available globally on drivable units.
 ; Accepted: boolean. Default: OFF.
 Turbo = 0
