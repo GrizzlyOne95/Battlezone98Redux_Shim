@@ -29,7 +29,7 @@ namespace Registry
         GlobalImprovement, UnderAttackAlert, TargetReticle, JetFlames, UnitVo, GlobalTurbo,
         Headlights, PilotFlashlight, AutoSave, HudFeedback, HudPalette, ContextualHud,
         BzrNetRoute, RenderProfile, LiveEngineToggle, ReadOnNextUse, RestartRequired,
-        CareerStatsReset,
+        CareerStatsReset, ResetToStock,
     };
 
 #include "../src/patches/bzr_options_registry.inc"
@@ -170,9 +170,45 @@ static void CheckFallback()
           "a value is named by the ini value it writes");
 }
 
+// Reset to Stock must classify every row: a new row has to be given a stock
+// value or an explicit reason to be left alone.
+static void CheckStockClassification()
+{
+    std::set<std::string> stockKeys, keepKeys;
+    for (const auto& stock : Registry::kShimSettingsStockValues)
+        Check(stockKeys.insert(stock.key).second, std::string("stock value listed once: ") + stock.key);
+    for (const char* key : Registry::kShimSettingsStockKeepKeys)
+    {
+        Check(keepKeys.insert(key).second, std::string("keep key listed once: ") + key);
+        Check(!stockKeys.count(key), std::string("key is both reset and kept: ") + key);
+    }
+
+    size_t rows = 0;
+    for (const auto& setting : Registry::g_ShimSettingsRegistry)
+    {
+        if (!setting.key)
+            continue;
+        ++rows;
+        const bool kept = keepKeys.count(setting.key) != 0;
+        const Registry::ShimSettingStockValue* stock = nullptr;
+        for (const auto& entry : Registry::kShimSettingsStockValues)
+            if (std::strcmp(entry.key, setting.key) == 0)
+                stock = &entry;
+        Check(kept || stock, std::string(setting.key) + " has a Reset to Stock classification");
+        if (!stock)
+            continue;
+        bool valid = false;
+        for (size_t i = 0; i < setting.valueCount; ++i)
+            valid |= std::strcmp(setting.values[i], stock->value) == 0;
+        Check(valid, std::string(setting.key) + " stock value is one of its values");
+    }
+    Check(stockKeys.size() + keepKeys.size() == rows, "every classified key is a registry row");
+}
+
 int main()
 {
     CheckFallback();
     CheckShippedTable();
+    CheckStockClassification();
     return OpenShimTest::ExitCode();
 }

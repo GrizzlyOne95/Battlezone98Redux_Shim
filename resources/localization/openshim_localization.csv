@@ -320,6 +320,8 @@ openshim_opt:StatsTracking:label~Career Stats~~~~~~
 openshim_opt:StatsTracking:desc~Record kills, deaths and missions played to career_stats.cfg across single player and multiplayer. Local file only; nothing is uploaded, and no mission script is required.~~~~~~
 openshim_opt:ResetCareerStats:label~Reset Career Stats~~~~~~
 openshim_opt:ResetCareerStats:desc~Clear every recorded kill, death and mission play. Takes two clicks, and keeps the previous record as career_stats.cfg.openshim.bak. Does not turn tracking off.~~~~~~
+openshim_opt:ResettoStock:label~Reset to Stock~~~~~~
+openshim_opt:ResettoStock:desc~Set every OpenShim feature back to the stock game in one save. Bug fixes stay on, and each row can still be turned back on by itself. Most rows take effect after a restart.~~~~~~
 ~~~~~~~
 openshim_value:On~On~~~~~~
 openshim_value:Off~Off~~~~~~
@@ -512,9 +514,10 @@ openshim_ui:preview_stock_note~Stock art stays in game.~~~~~~
 openshim_ui:preview_sample_note~Sample hit is shown even when off.~~~~~~
 openshim_ui:click_for~  Click for %s.~~~~~~
 openshim_ui:save_failed~Save failed: %s~~~~~~
+openshim_ui:reset_stock_done~OpenShim features set to stock; bug fixes left on.~~~~~~
+openshim_ui:status_apply_failed~  (saved; runtime apply failed - see openshim.log)~~~~~~
 openshim_ui:status_after_restart~  (takes effect after restart)~~~~~~
 openshim_ui:status_next_use~  (takes effect the next time it is used)~~~~~~
-openshim_ui:status_apply_failed~  (saved; runtime apply failed - see openshim.log)~~~~~~
 openshim_ui:status_applied~  (applied)~~~~~~
 openshim_ui:restart_failed~Could not restart (%s). Quit the game to install the update.~~~~~~
 openshim_ui:preview_idle~Idle~~~~~~
@@ -524,6 +527,7 @@ openshim_ui:preview_attackers_1~1 attacker~~~~~~
 openshim_ui:preview_attackers_2~2 attackers~~~~~~
 openshim_ui:preview_attackers_3~3 attackers~~~~~~
 openshim_ui:preview_not_installed~Preview artwork is not installed.~~~~~~
+openshim_ui:reset_stock_confirm~%s: click again to set every OpenShim feature to stock. Bug fixes stay on.~~~~~~
 openshim_ui:action_confirm~%s: click again to confirm. This cannot be undone.~~~~~~
 openshim_ui:career_cleared~Career statistics cleared. The previous record was kept as career_stats.cfg.openshim.bak~~~~~~
 openshim_ui:career_already_empty~Career statistics were already empty; nothing changed.~~~~~~

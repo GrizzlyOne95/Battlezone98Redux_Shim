@@ -182,6 +182,7 @@ namespace BZROpenShim
         // armed states of a confirmation, not settings. See
         // IsShimSettingActionRow in bzr_options_ui.cpp.
         CareerStatsReset,
+        ResetToStock,       // writes kShimSettingsStockValues in one save
     };
     void ApplyShimSettingLive(ShimSettingApplyGroup group);
 
