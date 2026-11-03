@@ -284,6 +284,26 @@ namespace BZROpenShim
 
         uint32_t g_GetGameTimeAddr = 0;
 
+        // TurretTankProcess (and its Friend/Enemy subclasses) caches its
+        // engage range only in Init/PostLoad. UnitTask::Execute re-runs
+        // CalcRange whenever the craft's weapon signature changes; the
+        // turret refresh below does the same. Offsets are from Init
+        // 0x005F6B50 (turret_charge_range_cache_20261103.md).
+        using FnCraftWeaponSignature = uint32_t(__cdecl*)(void* craft);
+        FnCraftWeaponSignature g_BzrFn_CraftWeaponSignature = nullptr;
+        uint32_t g_CraftWeaponSignatureAddr = 0;
+        uint32_t g_TurretTankFriendVtableAddr = 0;
+        uint32_t g_TurretTankEnemyVtableAddr = 0;
+        bool g_TurretRangeRefreshHooksInstalled = false;
+        std::unordered_map<uintptr_t, uint32_t> g_TurretRangeSignatureByProcess = {};
+
+        constexpr size_t kTurretCloseSqOffset = 0x68;
+        constexpr size_t kTurretRangeSqOffset = 0x6C;
+        constexpr size_t kTurretTimeOffset = 0x70;
+        constexpr size_t kTurretWeaponOffset = 0x74;
+        constexpr size_t kTurretRangePerTimeOffset = 0x78;
+        constexpr size_t kTurretTimePerRangeOffset = 0x7C;
+
         constexpr size_t kUnitProcessNextEnemyCheckOffset = 0x30;
 
         constexpr size_t kUnitProcessObjectOffset = 0x34;
@@ -2285,8 +2305,114 @@ namespace BZROpenShim
             return result;
         }
 
+        // Re-runs the turret's Init range computation when the craft's weapon
+        // signature changed (weapon mounted after Init, charge level moved).
+        static bool TryReadTurretWeaponSignature(void* processPtr,
+                                                 void*& outCraft,
+                                                 uint32_t& outSignature)
+        {
+            __try
+            {
+                outCraft = *reinterpret_cast<void**>(
+                    static_cast<uint8_t*>(processPtr) + kUnitProcessObjectOffset);
+                if (!outCraft)
+                    return false;
+                outSignature = g_BzrFn_CraftWeaponSignature(outCraft);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Same defaults and post-processing as Init 0x005F6B50.
+        static bool TryRecomputeTurretRange(void* processPtr,
+                                            void* craft,
+                                            float& outOldRange,
+                                            float& outRange)
+        {
+            __try
+            {
+                auto* process = static_cast<uint8_t*>(processPtr);
+                float& rangeSq = *reinterpret_cast<float*>(process + kTurretRangeSqOffset);
+                outOldRange = std::sqrt((std::max)(rangeSq, 0.0f));
+
+                // Same seeds as Init; compute into locals so a rejected or faulting
+                // call leaves the process untouched.
+                float close = 0.0f;
+                float range = 150.0f;
+                float newTime = 1.0f;
+                void* weapon = nullptr;
+                CalcRangeCraftHook(craft, &close, &range, &newTime, &weapon);
+                if (!std::isfinite(range) || !std::isfinite(newTime) ||
+                    range <= 0.0f || newTime <= 0.0f)
+                    return false;
+
+                *reinterpret_cast<void**>(process + kTurretWeaponOffset) = weapon;
+                *reinterpret_cast<float*>(process + kTurretTimeOffset) = newTime;
+                *reinterpret_cast<float*>(process + kTurretRangePerTimeOffset) = range / newTime;
+                *reinterpret_cast<float*>(process + kTurretTimePerRangeOffset) = newTime / range;
+                *reinterpret_cast<float*>(process + kTurretCloseSqOffset) = close * close;
+                rangeSq = range * range;
+                outRange = range;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void RefreshTurretRangeIfWeaponsChanged(void* processPtr)
+        {
+            if (!processPtr || !g_AiOdfGameplayTuningActive ||
+                !g_BzrFn_CraftWeaponSignature || !g_CalcRangeCraftHookInstalled)
+                return;
+
+            void* craft = nullptr;
+            uint32_t signature = 0;
+            if (!TryReadTurretWeaponSignature(processPtr, craft, signature))
+                return;
+
+            const uintptr_t processKey = reinterpret_cast<uintptr_t>(processPtr);
+            const auto it = g_TurretRangeSignatureByProcess.find(processKey);
+            if (it != g_TurretRangeSignatureByProcess.end() && it->second == signature)
+                return;
+
+            float oldRange = 0.0f;
+            float range = 0.0f;
+            if (!TryRecomputeTurretRange(processPtr, craft, oldRange, range))
+                return;
+            g_TurretRangeSignatureByProcess[processKey] = signature;
+
+            if (TraceAiRangeEnabled() && range != oldRange)
+            {
+                static volatile long s_TurretRangeTraceBudget = 64;
+                const long remaining = InterlockedDecrement(&s_TurretRangeTraceBudget);
+                if (remaining >= 0)
+                {
+                    char odfToken[kProducerBuildMenuTokenLen + 1] = {};
+                    const bool haveOdf = TryGetObjectOdfToken(craft, odfToken);
+                    Log(L"[AIODF] Turret range refresh process=0x%08X odf=%hs signature=0x%08X range=%.2f->%.2f remaining=%ld\n",
+                        static_cast<uint32_t>(processKey),
+                        haveOdf ? odfToken : "-",
+                        signature, oldRange, range, remaining);
+                }
+            }
+        }
+
+        bool __fastcall TurretTankRangeDoSubTaskHook(void* thisPtr, void* /*edx*/)
+        {
+            RefreshTurretRangeIfWeaponsChanged(thisPtr);
+            return g_BzrFn_TurretTankProcessDoSubTask
+                ? g_BzrFn_TurretTankProcessDoSubTask(thisPtr)
+                : false;
+        }
+
         bool __fastcall TurretTankProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
         {
+            RefreshTurretRangeIfWeaponsChanged(thisPtr);
             const bool result =
                 g_BzrFn_TurretTankProcessDoSubTask
                     ? g_BzrFn_TurretTankProcessDoSubTask(thisPtr)
@@ -2294,6 +2420,100 @@ namespace BZROpenShim
             RevealProcessOwnerPerceivedTeam(thisPtr, "turrettank_post_subtask");
             ApplyRetargetPeriodAfterDoSubTask(thisPtr);
             return result;
+        }
+
+        // TurretTankProcess's own slot is hooked by the retarget table below;
+        // this binds the signature function and hooks the Friend/Enemy
+        // subclasses, whose slot 11 is the same TurretTankProcess::DoSubTask.
+        static void InstallTurretRangeRefreshHooksIfPossible()
+        {
+            if (g_TurretRangeRefreshHooksInstalled)
+                return;
+
+            static int s_bound = 0;
+            if (s_bound == 0)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "CraftWeaponSignature", &g_CraftWeaponSignatureAddr },
+                    { "TurretTankFriendVtable", &g_TurretTankFriendVtableAddr },
+                    { "TurretTankEnemyVtable", &g_TurretTankEnemyVtableAddr },
+                    { "TurretTankProcessDoSubTask", &g_TurretTankProcessDoSubTaskAddr },
+                };
+                s_bound = HookEngine::BindEngineRows("AI turret range refresh", rows) ? 1 : -1;
+            }
+            if (s_bound < 0)
+            {
+                MarkOptionHookFailed("AiOdfGameplayTuning", "Unavailable: AI turret range refresh did not hook on this game build (see openshim.log).");
+                return;
+            }
+
+            g_BzrFn_TurretTankProcessDoSubTask =
+                reinterpret_cast<FnProcessDoSubTask>(g_TurretTankProcessDoSubTaskAddr);
+
+            const struct { const wchar_t* label; const char* rttiName; uintptr_t vtable; } specs[] =
+            {
+                { L"TurretTankFriend", ".?AVTurretTankFriend@@", g_TurretTankFriendVtableAddr },
+                { L"TurretTankEnemy", ".?AVTurretTankEnemy@@", g_TurretTankEnemyVtableAddr },
+            };
+
+            void* const hook = reinterpret_cast<void*>(TurretTankRangeDoSubTaskHook);
+            bool allInstalled = true;
+            for (const auto& spec : specs)
+            {
+                const uintptr_t slotAddress =
+                    spec.vtable + kProcessDoSubTaskVtableSlot * sizeof(void*);
+                if (!VtableTypeNameMatches(spec.vtable, spec.rttiName))
+                {
+                    Log(L"[AIODF] %ls RTTI mismatch vtable=0x%08X; turret range refresh disabled\n",
+                        spec.label, static_cast<uint32_t>(spec.vtable));
+                    allInstalled = false;
+                    continue;
+                }
+
+                void* current = nullptr;
+                __try
+                {
+                    current = *reinterpret_cast<void**>(slotAddress);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    current = nullptr;
+                }
+
+                if (current != hook &&
+                    current != reinterpret_cast<void*>(g_TurretTankProcessDoSubTaskAddr))
+                {
+                    Log(L"[AIODF] %ls::DoSubTask vtable mismatch slot=0x%08X current=0x%08X expected=0x%08X\n",
+                        spec.label,
+                        static_cast<uint32_t>(slotAddress),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)),
+                        g_TurretTankProcessDoSubTaskAddr);
+                    allInstalled = false;
+                    continue;
+                }
+
+                if (current != hook && !WritePointerValue(slotAddress, hook))
+                {
+                    Log(L"[AIODF] Failed installing %ls::DoSubTask vtable hook slot=0x%08X\n",
+                        spec.label, static_cast<uint32_t>(slotAddress));
+                    allInstalled = false;
+                    continue;
+                }
+            }
+
+            if (!allInstalled)
+            {
+                MarkOptionHookFailed("AiOdfGameplayTuning", "Unavailable: AI turret range refresh did not hook on this game build (see openshim.log).");
+                return;
+            }
+
+            g_BzrFn_CraftWeaponSignature =
+                reinterpret_cast<FnCraftWeaponSignature>(g_CraftWeaponSignatureAddr);
+            g_TurretRangeRefreshHooksInstalled = true;
+            Log(L"[AIODF] Turret range refresh active signature=0x%08X friend=0x%08X enemy=0x%08X\n",
+                g_CraftWeaponSignatureAddr,
+                g_TurretTankFriendVtableAddr,
+                g_TurretTankEnemyVtableAddr);
         }
 
 		void InstallAiTuningHooksIfPossible()
@@ -2310,6 +2530,7 @@ namespace BZROpenShim
 
             if (g_CalcRangeCraftHookInstalled &&
                 g_RetargetPeriodHooksInstalled &&
+                g_TurretRangeRefreshHooksInstalled &&
                 g_AttackTaskDoStateHookInstalled &&
                 g_ScrapPathScoreHookInstalled &&
                 g_ScrapRetargetHookInstalled)
@@ -2369,6 +2590,8 @@ namespace BZROpenShim
                     }
                 }
             }
+
+            InstallTurretRangeRefreshHooksIfPossible();
 
             if (g_RetargetPeriodHooksInstalled)
                 return;

@@ -4932,6 +4932,12 @@
       "identity": "TurretTankProcess::DoSubTask (vtable slot 11)"
     },
     {
+      "name": "CraftWeaponSignature",
+      "address": "0x005FED30",
+      "expected": "55 8B EC 83 EC 14 C7 45 FC 00 00 00 00 8B 4D 08",
+      "identity": "cdecl uint(Craft*) weapon signature: XOR of the craft's masked weapon pointers, their ordnance class (+0x0C) and weapon class sig. UnitTask::Execute 0x006002A0 compares it with its cached copy and re-runs CalcRange(Craft) on change; see reverse_engineering/turret_charge_range_cache_20261103.md"
+    },
+    {
       "name": "GetGameTime",
       "address": "0x00822D80",
       "expected": "55 8B EC D9 05 2C 1B CC 02 5D C3 CC",
@@ -5014,6 +5020,18 @@
       "address": "0x00889710",
       "kind": "data",
       "identity": "RTTI .?AVTurretTankProcess@@ vtable"
+    },
+    {
+      "name": "TurretTankFriendVtable",
+      "address": "0x008895EC",
+      "kind": "data",
+      "identity": "RTTI .?AVTurretTankFriend@@ vtable; slot 11 is TurretTankProcess::DoSubTask 0x005F6FF0"
+    },
+    {
+      "name": "TurretTankEnemyVtable",
+      "address": "0x008897F8",
+      "kind": "data",
+      "identity": "RTTI .?AVTurretTankEnemy@@ vtable; slot 11 is TurretTankProcess::DoSubTask 0x005F6FF0"
     },
     {
       "name": "HowitzerSecondaryVtable",
