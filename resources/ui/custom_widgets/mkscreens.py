@@ -140,24 +140,27 @@ def career_center():
     return img.resize((W, H), Image.LANCZOS)
 
 
-# Layout contract with src/patches/prelobby_screen.cpp (1440x1080 design space).
-# The PLAYER box holds the nickname panel (240x144) and the flag picker (224x170
-# preview with the 48px arrows 8 below it) side by side, each centred in a half.
-# The Connection box's Server row (y = box y + 62 + 46) holds three option
-# slots for the Rebellion / Custom / Local buttons and a text well for the
-# custom host.
+# Layout contract with src/patches/prelobby_screen.cpp (1440x1080 design space),
+# arranged after the 1.5 multiplayer setup screen. FLAG holds the flag picker
+# (224x170 preview, 48px arrows 8 below) and PILOT the nickname panel (240x144),
+# each centred under its header. SERVER holds a 2x2 grid of option slots
+# (Rebellion, Custom / Local, LAN tools) and the custom-host well below them.
+# STATUS is the wide box of text rows underneath.
 PRELOBBY_LAYOUT = {
     'title': (470, 132, 500, 56),
     'boxes': [
-        (244, 238, 952, 330),   # Player
-        (244, 596, 952, 220),   # Connection
+        (244, 238, 272, 300),   # Flag
+        (528, 238, 272, 300),   # Pilot
+        (812, 238, 384, 300),   # Server
+        (244, 554, 952, 262),   # Status
     ],
     'server_slots': [
-        (392, 704, 160, 42),    # Rebellion
-        (562, 704, 160, 42),    # Custom
-        (732, 704, 160, 42),    # Local
+        (840, 300, 158, 42),    # Rebellion
+        (1010, 300, 158, 42),   # Custom
+        (840, 352, 158, 42),    # Local
+        (1010, 352, 158, 42),   # LAN tools
     ],
-    'server_well': (902, 704, 266, 42),
+    'server_well': (840, 404, 328, 42),
 }
 
 
