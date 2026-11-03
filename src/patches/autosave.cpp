@@ -12,6 +12,7 @@
 #include "hook_engine.h"
 #include "engine_globals.h"
 #include "autosave_gate.h"
+#include "autosave_notice.h"
 #include "BZROpenShim.h"
 #include "game_state.h"
 #include "memory_access.h"
@@ -508,6 +509,7 @@ namespace BZROpenShim
         void ResetMissionState()
         {
             g_missionActive = false;
+            AutoSaveNotice::Hide();
             g_nextSaveTick = 0;
             g_haveObservedAutoSaveWriteTime = false;
             // A new mission gets a fresh attempt; the per-process budget in
@@ -721,6 +723,7 @@ namespace BZROpenShim
                     else
                     {
                         WriteAutoSaveLabel();
+                        AutoSaveNotice::Show();
                         success = true;
                         g_saveFaultCount = 0;
                         LogShimA(LogLevel::Info, "autosave", "Saved %s", filename.c_str());

@@ -34,6 +34,7 @@ OpenShim can own single-player autosaving without requiring EXU or mission Lua.
 - Writes the established autosave path used by Campaign Reimagined and OpenShim's injected load button:
   - `Save\auto.sav`
   - `Save\auto.label.txt`
+- After each successful save, shows "Game autosaved." on the HUD for about three seconds: a translucent black panel (16% of the viewport wide, 3% above the bottom edge) with centred light-green text in the stock HUD font, drawn with the stock HUD primitives (no EXU, no Ogre overlay). It is drawn after the stock scrap/pilot gauge each gameplay frame (`FUN_005c6f70`, text `FUN_004c0100`, fill `FUN_0068afb0`; rows in `scripts/patches.json`). A failed save shows nothing; if any engine row fails to bind the notice is skipped and logged once, and the save is unaffected. Code: `src/patches/autosave_notice.cpp`.
 - Before OpenShim overwrites an existing `auto.sav`, it preserves the pre-existing file once at:
   - `Save\AutoSaveBackups\auto.pre_autosave.sav`
 - If EXU or mission scripting updates `Save\auto.sav`, OpenShim notices the file timestamp change and resets its own interval instead of immediately writing another duplicate autosave.
@@ -69,7 +70,7 @@ Set `Enabled=0` to retain OpenShim's AutoSave load-button support while disablin
 
 EXU is not required. Its public C API does not currently expose the native save function, so OpenShim resolves the already-reverse-engineered BZR serializer directly rather than depending on Lua or `exu.dll`.
 
-If a mission still runs the older EXU-backed `AutoSave.lua`, both systems target the same `Save\auto.sav`. `RespectExternalAutoSave=1` makes OpenShim treat an external update of that file as the latest autosave and defer its own next write. Once mission-local autosave calls are removed, OpenShim continues the same schedule globally for stock campaigns, expansion/single-player missions, Instant Action, and custom single-player missions that support BZR's normal save/load serialization.
+Campaign Reimagined no longer ships its EXU-backed `AutoSave.lua`; OpenShim's schedule and notice cover stock campaigns, expansion/single-player missions, Instant Action, and custom single-player missions that support BZR's normal save/load serialization. If an older mod still runs a Lua autosave, both target the same `Save\auto.sav`; `RespectExternalAutoSave=1` makes OpenShim treat an external update of that file as the latest autosave and defer its own next write. Such a Lua autosave draws its own notice, if any.
 
 ## Runtime validation checklist
 

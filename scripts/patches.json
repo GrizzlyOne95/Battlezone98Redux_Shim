@@ -2862,6 +2862,30 @@
       "identity": "HUD 2D filled-rect helper, cdecl (buffer, x1, y1, x2, y2, colour, mode); mode 0 passes the colour through."
     },
     {
+      "name": "AutoSaveNoticeHudGauge",
+      "address": "0x005C6F70",
+      "expected": "55 8B EC 83 EC 74 A1 00 70 8E 00",
+      "identity": "Scrap/pilot gauge draw FUN_005c6f70, void(ECX unused), run once per gameplay HUD frame from the HUD draw (its callers sit inside the HUD pass, which is why 0x02BF041C/0x02BF0420 hold the HUD scale there). The autosave notice detours its first six bytes (push ebp; mov ebp,esp; sub esp,0x74) and draws after the original returns."
+    },
+    {
+      "name": "HudSpriteZ",
+      "address": "0x00920EF4",
+      "kind": "data",
+      "identity": "Ambient 2D sprite depth float (DAT_00920ef4). HUD text draw FUN_004c0100 adds the float at 0x0087B038 (0.01) to it around its background fill FUN_0068afb0 and restores it, so a backing rect sits one step behind the text; FUN_005c6f70 does the same with 0.001 for its plates."
+    },
+    {
+      "name": "HudTextStyle",
+      "address": "0x00917550",
+      "kind": "data",
+      "identity": "Pointer to the shared HUD text-style object (DAT_00917550). FUN_005c6f70 passes its value as FUN_004c0100's +0x20 argument; FUN_004c0100 hands it with the colour argument to FUN_00689950, which stores the colour in its first dword, then measures with it through FUN_00689ab0."
+    },
+    {
+      "name": "HudPaneBuffer",
+      "address": "0x00917580",
+      "kind": "data",
+      "identity": "Pointer to the HUD 2D draw buffer (DAT_00917580). FUN_005c6f70 passes its value as the first argument of FUN_004c0100 and FUN_0068ca30; HudFillRect takes the same pointer."
+    },
+    {
       "name": "HudFadeRadarRender",
       "address": "0x00493EC0",
       "expected": "55 8B EC 81 EC 48 03 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56",

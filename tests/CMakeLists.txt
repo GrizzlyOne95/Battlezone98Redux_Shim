@@ -661,6 +661,10 @@ openshim_add_test(autosave_gate_tests STD 20 SOURCES
     autosave_gate_tests.cpp
 )
 
+openshim_add_test(autosave_notice_layout_tests STD 20 SOURCES
+    autosave_notice_layout_tests.cpp
+)
+
 openshim_add_test(native_save_flag_tests STD 20 SOURCES
     native_save_flag_tests.cpp
 )
