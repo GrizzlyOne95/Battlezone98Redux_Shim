@@ -119,6 +119,11 @@ OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetNetworkTrafficSnapshot, Open
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetLegacyTankAiEnabled, OpenShimImpl_SetLegacyTankAiEnabled, (BOOL enabled), (enabled), FALSE)
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetLegacyTankAiMode, OpenShimImpl_SetLegacyTankAiMode, (int mode), (mode), FALSE)
 
+// Mission-scoped, single-player native AI orders (Docs/NATIVE_HOLD_DEFEND_FOLLOW.md).
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetAiFollowEngageEnabled, OpenShimImpl_SetAiFollowEngageEnabled, (BOOL enabled), (enabled), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetAiDefendRefreshEnabled, OpenShimImpl_SetAiDefendRefreshEnabled, (BOOL enabled), (enabled), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetAiHold, OpenShimImpl_SetAiHold, (int handle, BOOL hold), (handle, hold), FALSE)
+
 #ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_APPEND
 #undef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED

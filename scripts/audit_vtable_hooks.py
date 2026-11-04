@@ -69,6 +69,8 @@ HOOKS = [
      [VT(f"{c}{s}Vtable", 11) for c in AI_SUB for s in ("Friend", "Enemy")]),
     ("GunTowerProcessDoSubTask", "GunTowerProcessDoSubTask",
      [VT(f"GunTower{s}Vtable", 11) for s in ("Process", "Friend", "Enemy")]),
+    ("DefendTaskDoState", "DefendTaskDoState", [VT("DefendTaskVtable", 12)]),
+    ("SitTaskDoState", "SitTaskDoState", [VT("SitTaskVtable", 12)]),
     ("TurretTankProcessDoSubTask", "TurretTankProcessDoSubTask",
      [VT(f"TurretTank{s}Vtable", 11) for s in ("Process", "Friend", "Enemy")]),
 ]
