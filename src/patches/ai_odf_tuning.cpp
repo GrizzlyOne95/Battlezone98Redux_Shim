@@ -2381,6 +2381,10 @@ namespace BZROpenShim
 
 		bool __fastcall OffensiveProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
 		{
+			// A held craft (OpenShimSetAiHold) never switches to SUBATTACK.
+			if (IsAiHeldProcess(thisPtr))
+				return false;
+
 			void* suppressedCraft = nullptr;
 			void* suppressedDamageOrdnance = nullptr;
 			const bool suppressed = SuppressUndeployedHowitzerSniperRetaliation(
@@ -2633,6 +2637,7 @@ namespace BZROpenShim
 
 		void InstallAiTuningHooksIfPossible()
         {
+            InstallAiNativeOrdersHooksIfPossible();
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();

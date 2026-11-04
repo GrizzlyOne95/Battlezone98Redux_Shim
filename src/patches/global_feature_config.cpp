@@ -677,6 +677,10 @@ namespace BZROpenShim
               &RevertAiOdfGameplayTuningToBaseline, &RefreshAiOdfGameplayTuningState },
             { "LegacyTankAi", FeatureTier::SinglePlayer,
               &RevertLegacyTankAiToBaseline, &RefreshLegacyTankAiState },
+            // Mission-scripted only (no ini option): Follow as Formation, Defend
+            // refresh and Hold. Revert switches them off at mission end.
+            { "AiNativeOrders", FeatureTier::SinglePlayer,
+              &ResetAiNativeOrders, &RefreshAiNativeOrdersState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config
