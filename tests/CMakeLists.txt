@@ -95,6 +95,11 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/steam_tunnel_runtime_test.py" "$<TARGET_FILE:steam_tunnel_fixture>")
         set_tests_properties(steam_tunnel_runtime_test PROPERTIES TIMEOUT 60 RUN_SERIAL TRUE)
     endif()
+    # Full audit needs the GOG exe; without it only the patches.json rows are
+    # checked and the test reports skipped (exit 77).
+    add_test(NAME vtable_hook_audit
+        COMMAND "${Python3_EXECUTABLE}" -I "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/audit_vtable_hooks.py")
+    set_tests_properties(vtable_hook_audit PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME planet_video_catalog_tests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/planet_video_catalog_tests.py")
     add_test(NAME frame_bridge_scene_layer_inspection_tests

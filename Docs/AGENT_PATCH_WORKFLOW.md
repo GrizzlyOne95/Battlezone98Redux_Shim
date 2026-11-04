@@ -24,7 +24,7 @@ If the patch needs a hook target, add its `p.name == "..."` branch in `src/engin
 
 An entry present only in `patches.json` is never walked and produces no runtime diagnostic. An entry present only in `patches.h` resolves to zero and logs `[STALE-CONFIG]`. `tests/patch_registration_tests.cpp` checks both directions for `patches` and `globals` entries, and every `ResolveNamedAddress` literal anywhere under `src/`; run the test suite after changing either file. A `globals` entry kept deliberately unwalked carries a `"parked"` key giving the reason; the test fails if a parked entry is also listed.
 
-A vtable-slot hook only runs for objects whose class uses that vtable, and subclasses (for example the AI `*Friend`/`*Enemy` processes) carry their own copies. After adding or changing one, add it to `HOOKS` in `scripts/audit_vtable_hooks.py` and run `python -I scripts/audit_vtable_hooks.py`: it lists every vtable in the GOG exe that holds the same function in the same slot and exits 1 while any copy is unhooked without a stated reason.
+A vtable-slot hook only runs for objects whose class uses that vtable, and subclasses (for example the AI `*Friend`/`*Enemy` processes) carry their own copies. After adding or changing one, add it to `HOOKS` in `scripts/audit_vtable_hooks.py` and run `python -I scripts/audit_vtable_hooks.py`: it lists every vtable in the GOG exe that holds the same function in the same slot and exits 1 while any copy is unhooked without a stated reason. CTest runs it as `vtable_hook_audit`; without the GOG exe (CI) it only checks that every `HOOKS` row is in `patches.json` and reports skipped, so run ctest locally after changing a vtable hook.
 
 ## Deploying a test build
 
