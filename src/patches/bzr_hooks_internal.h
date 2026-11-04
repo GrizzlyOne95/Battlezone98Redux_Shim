@@ -1494,7 +1494,7 @@ namespace BZROpenShim
         // Defaults ON. Every path it gates requires the ODF to declare one of
         // those keys, except bomber range: a bomber-role craft that authors
         // neither range key gets its longest weapon range as the outer floor.
-        inline constexpr bool kAiOdfGameplayTuningEnabledDefault = true;
+        inline constexpr bool kAiOdfGameplayTuningEnabledDefault = false;
         inline constexpr bool kTurretAimPitchEnabledDefault = true;
         inline constexpr bool kAllowNeutralAttackOrdersDefault = false;
         // Pure instrumentation for the AIP construction program. Off by default
