@@ -575,6 +575,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Minelayer AI honours weaponMask instead of hard-coding hardpoint 0. "
       "Single player only." },
+    { "AI ODF Tuning", "SinglePlayer", "AiOdfGameplayTuning", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Honours the AI ODF keys engageRangeAI, weaponRangeMinAI, retargetPeriodAI and the "
+      "scrap pathing weights, gives bombers their weapon's range, and refreshes turret "
+      "range when weapons or charge change. Stock ODFs do not set these keys. "
+      "Single player only." },
     // [Fixes] rather than [SinglePlayer], and it ships ON, so the
     // default index is "On" (0).
     { "AI Multi-Producer", "Fixes", "AiMultiProducerMakers", nullptr, 0,
@@ -848,8 +855,8 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "MuzzleFlash", "0" }, { "MeshRecoil", "0" }, { "ShellCasings", "0" },
     { "SkinnedGibs", "0" }, { "GpuSkinning", "0" }, { "PlayerReticleConvergence", "0" },
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
-    { "OrdnanceVelocityInheritance", "0" }, { "BomberAiRange", "0" },
-    { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
+    { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
+    { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
     { "AllowNeutralAttackOrders", "0" }, { "Turbo", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
