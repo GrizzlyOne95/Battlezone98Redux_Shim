@@ -32,6 +32,9 @@ def VT(row, idx):
     return ("vt", row, idx)
 
 
+# Classes whose slot 38 is the inherited HoverCraft::UpdateWeaponAim.
+HOVERCRAFT = ["Wingman", "HoverCraft", "APC", "Minelayer", "SAV", "Scavenger", "Tug",
+              "Armory", "Producer", "Recycler", "Factory", "ConstructionRig"]
 AI = ["Artillery", "Bomber", "Gech", "Offensive", "Person", "RocketTank", "Scout", "Soldier", "Tank", "Wingman"]
 AI_SUB = ["RocketTank", "Scout", "Person", "Soldier", "Artillery", "Gech", "Bomber", "Tank"]
 PRODUCERS = ["Producer", "Recycler", "Factory"]
@@ -51,7 +54,7 @@ HOOKS = [
     ("ConstructionRigDeselect", "ConstructionRigDeselect", [P("ConstructionRig Deselect VTable Hook")]),
     ("ControlPanelPostLoad", "ControlPanelPostLoad", [P("ControlPanel PostLoad VTable Hook")]),
     ("ControlPanelCleanup", "ControlPanelCleanup", [P("ControlPanel Cleanup VTable Hook")]),
-    ("WingmanUpdateWeaponAim", "WingmanUpdateWeaponAim", [VT("WingmanVtable", 38)]),
+    ("WingmanUpdateWeaponAim", "WingmanUpdateWeaponAim", [VT(f"{c}Vtable", 38) for c in HOVERCRAFT]),
     ("TurretCraftUpdateWeaponAim", "TurretCraftUpdateWeaponAim", [VT("TurretCraftVtable", 38)]),
     ("TurretTankUpdateWeaponAim", "TurretTankUpdateWeaponAim", [VT("HowitzerVtable", 38), VT("TurretTankVtable", 38)]),
     ("ShieldTowerSimulate", "ShieldTowerSimulate", [VT("ShieldTowerVtable", 15)]),

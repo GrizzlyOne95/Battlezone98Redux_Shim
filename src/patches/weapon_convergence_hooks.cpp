@@ -65,7 +65,24 @@ namespace BZROpenShim
             uint32_t address;
         };
 
-        static ConvergenceVtable g_WingmanVtable = { "WingmanVtable", ".?AVWingman@@", 0 };
+        // Every class whose slot 38 is the inherited HoverCraft::UpdateWeaponAim
+        // (row WingmanUpdateWeaponAim). Wingman is required; the rest are bound
+        // and RTTI-checked one by one, and a bad row skips only that class.
+        static ConvergenceVtable g_HoverCraftVtables[] = {
+            { "WingmanVtable", ".?AVWingman@@", 0 },
+            { "HoverCraftVtable", ".?AVHoverCraft@@", 0 },
+            { "APCVtable", ".?AVAPC@@", 0 },
+            { "MinelayerVtable", ".?AVMinelayer@@", 0 },
+            { "SAVVtable", ".?AVSAV@@", 0 },
+            { "ScavengerVtable", ".?AVScavenger@@", 0 },
+            { "TugVtable", ".?AVTug@@", 0 },
+            { "ArmoryVtable", ".?AVArmory@@", 0 },
+            { "ProducerVtable", ".?AVProducer@@", 0 },
+            { "RecyclerVtable", ".?AVRecycler@@", 0 },
+            { "FactoryVtable", ".?AVFactory@@", 0 },
+            { "ConstructionRigVtable", ".?AVConstructionRig@@", 0 },
+        };
+        static ConvergenceVtable& g_WingmanVtable = g_HoverCraftVtables[0];
 
         static ConvergenceVtable g_TurretCraftVtable = { "TurretCraftVtable", ".?AVTurretCraft@@", 0 };
 
@@ -205,7 +222,8 @@ namespace BZROpenShim
         // ownership state separate from the user-facing feature states so
         // enabling PlayerReticleConvergence alone does not make
         // WeaponConvergence report itself as active.
-        static bool g_WingmanWeaponAimWrapperActive = false;
+        static bool g_HoverCraftWeaponAimWrapperActive[std::size(g_HoverCraftVtables)] = {};
+        static bool& g_WingmanWeaponAimWrapperActive = g_HoverCraftWeaponAimWrapperActive[0];
 
         static bool g_TurretCraftWeaponAimWrapperActive = false;
 
@@ -823,6 +841,17 @@ namespace BZROpenShim
                     MarkOptionHookFailed("PlayerReticleConvergence", "Unavailable: Reticle convergence did not hook on this game build (see openshim.log).");
                     return false;
                 }
+                for (size_t i = 1; i < std::size(g_HoverCraftVtables); ++i)
+                {
+                    ConvergenceVtable& vtable = g_HoverCraftVtables[i];
+                    const HookEngine::EngineRow row[] = { { vtable.row, &vtable.address } };
+                    if (HookEngine::BindEngineRows("Shot convergence HoverCraft classes", row) &&
+                        VtableTypeNameMatches(vtable.address, vtable.rttiName))
+                        continue;
+                    Log(L"[CONVERGE] %hs unbound or RTTI mismatch vtable=0x%08X; that class is skipped\n",
+                        vtable.row, vtable.address);
+                    vtable.address = 0;
+                }
                 return true;
             }();
             return bound;
@@ -837,8 +866,10 @@ namespace BZROpenShim
 
             // Nothing installed and nothing wanted: the slots are stock, and a
             // build without the rows has no reason to report a stand-down.
-            const bool anyWrapperActive =
-                g_WingmanWeaponAimWrapperActive || g_TurretCraftWeaponAimWrapperActive ||
+            bool anyWrapperActive = false;
+            for (bool active : g_HoverCraftWeaponAimWrapperActive)
+                anyWrapperActive |= active;
+            anyWrapperActive = anyWrapperActive || g_TurretCraftWeaponAimWrapperActive ||
                 g_TurretTankWeaponAimWrapperActive[0] || g_TurretTankWeaponAimWrapperActive[1];
             if ((!wantConvergenceWrapper && !anyWrapperActive) || !ShotConvergenceAddressesBound())
             {
@@ -847,13 +878,20 @@ namespace BZROpenShim
                 return;
             }
 
-            RefreshConvergenceVtableSlot(
-                UpdateWeaponAimSlot(g_WingmanVtable),
-                g_WingmanUpdateWeaponAimAddr,
-                reinterpret_cast<void*>(WingmanUpdateWeaponAimWithConvergence),
-                wantConvergenceWrapper,
-                g_WingmanWeaponAimWrapperActive,
-                L"wingman convergence dispatcher");
+            for (size_t index = 0; index < std::size(g_HoverCraftVtables); ++index)
+            {
+                if (!g_HoverCraftVtables[index].address)
+                    continue;
+                wchar_t label[64];
+                swprintf_s(label, L"%hs convergence dispatcher", g_HoverCraftVtables[index].row);
+                RefreshConvergenceVtableSlot(
+                    UpdateWeaponAimSlot(g_HoverCraftVtables[index]),
+                    g_WingmanUpdateWeaponAimAddr,
+                    reinterpret_cast<void*>(WingmanUpdateWeaponAimWithConvergence),
+                    wantConvergenceWrapper,
+                    g_HoverCraftWeaponAimWrapperActive[index],
+                    label);
+            }
             RefreshConvergenceVtableSlot(
                 UpdateWeaponAimSlot(g_TurretCraftVtable),
                 g_TurretCraftUpdateWeaponAimAddr,
@@ -878,8 +916,8 @@ namespace BZROpenShim
 
             // Feature state is reported independently even though the Wingman
             // dispatcher is shared. For normal player craft, the Wingman slot
-            // is the required dispatch path; the Hovercraft hook only extends
-            // coverage to direct base-derived craft.
+            // is the required dispatch path; the other HoverCraft-derived slots
+            // only extend coverage to those classes.
             g_ShotConvergencePatchActive =
                 g_ShotConvergenceEnabled &&
                 singlePlayer &&
