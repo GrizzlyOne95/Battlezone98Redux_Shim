@@ -60,8 +60,8 @@ static const char* const kShimCategoryControls[] = {
 static const char* const kShimCategoryGameplay[] = {
     "Weapon Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog Of War", "Attack Neutrals",
-    "Smart Scavengers", "Turret AA Pitch", "AI Howitzer Volley",
-    "AI Mine Volley", "Vehicle Geometry" };
+    "Smart Scavengers", "Turret AA Pitch", "Legacy Tank AI", "AI Howitzer Volley",
+    "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };
 static const char* const kShimCategoryFixes[] = {
     "AI Multi-Producer", "APC Allied Deploy", "Splinter Undead Fix", "Howitzer Deploy Fix",
     "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard" };
