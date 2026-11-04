@@ -284,6 +284,43 @@ namespace BZROpenShim
 
         uint32_t g_GetGameTimeAddr = 0;
 
+        // Stock ODFs name the *Friend/*Enemy subclasses (aiName/aiName2), and
+        // each subclass has its own vtable copy, so the base vtables above
+        // alone never reach a stock unit. Slot 11 of each is its base's
+        // DoSubTask (ai_subclass_retarget_20261103.md). TurretTankFriend/Enemy
+        // are hooked by the turret range refresh below.
+        struct AiSubclassVtable
+        {
+            const char* row;
+            const wchar_t* label;
+            const char* rttiName;
+            bool gunTower;
+        };
+        constexpr AiSubclassVtable kRetargetSubclassVtables[] =
+        {
+            { "GunTowerFriendVtable", L"GunTowerFriend", ".?AVGunTowerFriend@@", true },
+            { "GunTowerEnemyVtable", L"GunTowerEnemy", ".?AVGunTowerEnemy@@", true },
+            { "TankFriendVtable", L"TankFriend", ".?AVTankFriend@@", false },
+            { "TankEnemyVtable", L"TankEnemy", ".?AVTankEnemy@@", false },
+            { "RocketTankFriendVtable", L"RocketTankFriend", ".?AVRocketTankFriend@@", false },
+            { "RocketTankEnemyVtable", L"RocketTankEnemy", ".?AVRocketTankEnemy@@", false },
+            { "ScoutFriendVtable", L"ScoutFriend", ".?AVScoutFriend@@", false },
+            { "ScoutEnemyVtable", L"ScoutEnemy", ".?AVScoutEnemy@@", false },
+            { "PersonFriendVtable", L"PersonFriend", ".?AVPersonFriend@@", false },
+            { "PersonEnemyVtable", L"PersonEnemy", ".?AVPersonEnemy@@", false },
+            { "SoldierFriendVtable", L"SoldierFriend", ".?AVSoldierFriend@@", false },
+            { "SoldierEnemyVtable", L"SoldierEnemy", ".?AVSoldierEnemy@@", false },
+            { "ArtilleryFriendVtable", L"ArtilleryFriend", ".?AVArtilleryFriend@@", false },
+            { "ArtilleryEnemyVtable", L"ArtilleryEnemy", ".?AVArtilleryEnemy@@", false },
+            { "GechFriendVtable", L"GechFriend", ".?AVGechFriend@@", false },
+            { "GechEnemyVtable", L"GechEnemy", ".?AVGechEnemy@@", false },
+            { "BomberFriendVtable", L"BomberFriend", ".?AVBomberFriend@@", false },
+            { "BomberEnemyVtable", L"BomberEnemy", ".?AVBomberEnemy@@", false },
+        };
+        constexpr size_t kRetargetSubclassCount =
+            sizeof(kRetargetSubclassVtables) / sizeof(kRetargetSubclassVtables[0]);
+        uint32_t g_RetargetSubclassVtableAddrs[kRetargetSubclassCount] = {};
+
         // TurretTankProcess (and its Friend/Enemy subclasses) caches its
         // engage range only in Init/PostLoad. UnitTask::Execute re-runs
         // CalcRange whenever the craft's weapon signature changes; the
@@ -2126,10 +2163,14 @@ namespace BZROpenShim
                 }
             }
 
+            // The global/ODF period is simulation-affecting, so single player
+            // only like the rest of this section (it reaches every stock unit
+            // now). A per-unit period a mission set from Lua still applies.
             const uintptr_t processKey = reinterpret_cast<uintptr_t>(processPtr);
             if (!std::isfinite(retargetPeriod) ||
                 retargetPeriod <= 0.0f ||
-                !g_BzrFn_GetGameTime)
+                !g_BzrFn_GetGameTime ||
+                (!hasUnitRetargetPeriod && ReadLocalPlayerNetIdValue() != 0))
             {
                 g_RetargetPeriodStateByProcess.erase(processKey);
                 return;
@@ -2169,6 +2210,24 @@ namespace BZROpenShim
 			return secondary ? second : primary;
 		}
 
+		// Stock howitzers run ArtilleryFriend/ArtilleryEnemy, not the base.
+		static bool IsArtilleryProcessVtable(uint32_t vtable)
+		{
+			if (vtable == 0)
+				return false;
+			if (vtable == g_ArtilleryProcessVtableAddr)
+				return true;
+			for (size_t i = 0; i < kRetargetSubclassCount; ++i)
+			{
+				const char* row = kRetargetSubclassVtables[i].row;
+				if (vtable == g_RetargetSubclassVtableAddrs[i] &&
+					(std::strcmp(row, "ArtilleryFriendVtable") == 0 ||
+					 std::strcmp(row, "ArtilleryEnemyVtable") == 0))
+					return true;
+			}
+			return false;
+		}
+
 		static bool SuppressUndeployedHowitzerSniperRetaliation(
 			void* processPtr,
 			void** outCraft,
@@ -2195,8 +2254,7 @@ namespace BZROpenShim
 				constexpr size_t kOrdnanceClassSignature = 0x0C;
 				constexpr uint32_t kSniperSignature = 0x534E4950u; // 'SNIP'
 
-				if (*reinterpret_cast<const uint32_t*>(processPtr) !=
-					static_cast<uint32_t>(g_ArtilleryProcessVtableAddr))
+				if (!IsArtilleryProcessVtable(*reinterpret_cast<const uint32_t*>(processPtr)))
 					return false;
 
 				auto* process = static_cast<uint8_t*>(processPtr);
@@ -2402,14 +2460,6 @@ namespace BZROpenShim
             }
         }
 
-        bool __fastcall TurretTankRangeDoSubTaskHook(void* thisPtr, void* /*edx*/)
-        {
-            RefreshTurretRangeIfWeaponsChanged(thisPtr);
-            return g_BzrFn_TurretTankProcessDoSubTask
-                ? g_BzrFn_TurretTankProcessDoSubTask(thisPtr)
-                : false;
-        }
-
         bool __fastcall TurretTankProcessDoSubTaskHook(void* thisPtr, void* /*edx*/)
         {
             RefreshTurretRangeIfWeaponsChanged(thisPtr);
@@ -2424,7 +2474,8 @@ namespace BZROpenShim
 
         // TurretTankProcess's own slot is hooked by the retarget table below;
         // this binds the signature function and hooks the Friend/Enemy
-        // subclasses, whose slot 11 is the same TurretTankProcess::DoSubTask.
+        // subclasses, whose slot 11 is the same TurretTankProcess::DoSubTask,
+        // with the same hook (range refresh, then retarget period).
         static void InstallTurretRangeRefreshHooksIfPossible()
         {
             if (g_TurretRangeRefreshHooksInstalled)
@@ -2456,7 +2507,7 @@ namespace BZROpenShim
                 { L"TurretTankEnemy", ".?AVTurretTankEnemy@@", g_TurretTankEnemyVtableAddr },
             };
 
-            void* const hook = reinterpret_cast<void*>(TurretTankRangeDoSubTaskHook);
+            void* const hook = reinterpret_cast<void*>(TurretTankProcessDoSubTaskHook);
             bool allInstalled = true;
             for (const auto& spec : specs)
             {
@@ -2618,6 +2669,15 @@ namespace BZROpenShim
                     { "GetGameTime", &g_GetGameTimeAddr },
                 };
                 s_retargetBound = HookEngine::BindEngineRows("AI retarget period", rows) ? 1 : -1;
+                // One row at a time: an unbound subclass stays 0 and is
+                // skipped below without costing the others.
+                for (size_t i = 0; s_retargetBound > 0 && i < kRetargetSubclassCount; ++i)
+                {
+                    const HookEngine::EngineRow row =
+                        { kRetargetSubclassVtables[i].row, &g_RetargetSubclassVtableAddrs[i] };
+                    if (!HookEngine::BindEngineRows("AI retarget period subclasses", &row, 1))
+                        g_RetargetSubclassVtableAddrs[i] = 0;
+                }
             }
             if (s_retargetBound < 0)
                 return;
@@ -2634,7 +2694,10 @@ namespace BZROpenShim
                 FnProcessDoSubTask* original;
             };
 
-            RetargetVtableHookSpec hooks[] =
+            // The 12 base classes, then kRetargetSubclassVtables. A fixed
+            // array: this function uses __try, so no unwinding objects.
+            constexpr size_t kRetargetBaseCount = 12;
+            RetargetVtableHookSpec hooks[kRetargetBaseCount + kRetargetSubclassCount] =
             {
                 { L"ArtilleryProcess", ".?AVArtilleryProcess@@", g_ArtilleryProcessVtableAddr,
                   g_OffensiveProcessDoSubTaskAddr, reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook),
@@ -2675,6 +2738,26 @@ namespace BZROpenShim
                   reinterpret_cast<void*>(TurretTankProcessDoSubTaskHook),
                   &g_BzrFn_TurretTankProcessDoSubTask },
             };
+            for (size_t i = 0; i < kRetargetSubclassCount; ++i)
+            {
+                const AiSubclassVtable& sub = kRetargetSubclassVtables[i];
+                RetargetVtableHookSpec& spec = hooks[kRetargetBaseCount + i];
+                spec.label = sub.label;
+                spec.rttiName = sub.rttiName;
+                spec.vtableAddress = g_RetargetSubclassVtableAddrs[i];
+                if (sub.gunTower)
+                {
+                    spec.originalAddress = g_GunTowerProcessDoSubTaskAddr;
+                    spec.hook = reinterpret_cast<void*>(GunTowerProcessDoSubTaskHook);
+                    spec.original = &g_BzrFn_GunTowerProcessDoSubTask;
+                }
+                else
+                {
+                    spec.originalAddress = g_OffensiveProcessDoSubTaskAddr;
+                    spec.hook = reinterpret_cast<void*>(OffensiveProcessDoSubTaskHook);
+                    spec.original = &g_BzrFn_OffensiveProcessDoSubTask;
+                }
+            }
 
             bool allInstalled = true;
             for (RetargetVtableHookSpec& spec : hooks)
@@ -2683,9 +2766,10 @@ namespace BZROpenShim
                 const uintptr_t slotAddress =
                     spec.vtableAddress + kProcessDoSubTaskVtableSlot * sizeof(void*);
 
-                if (!VtableTypeNameMatches(spec.vtableAddress, spec.rttiName))
+                if (spec.vtableAddress == 0 ||
+                    !VtableTypeNameMatches(spec.vtableAddress, spec.rttiName))
                 {
-                    Log(L"[AIODF] %ls RTTI mismatch vtable=0x%08X; retarget tuning disabled there\n",
+                    Log(L"[AIODF] %ls unbound or RTTI mismatch vtable=0x%08X; retarget tuning disabled there\n",
                         spec.label, static_cast<uint32_t>(spec.vtableAddress));
                     allInstalled = false;
                     continue;
