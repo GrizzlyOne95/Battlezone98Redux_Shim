@@ -1491,7 +1491,7 @@ namespace BZROpenShim
         inline constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
         // Master switch for the ODF-authored AI tuning keys (engageRangeAI,
         // weaponRangeMinAI, retargetPeriodAI, scrapPathingAI and friends).
-        // Defaults ON. Every path it gates requires the ODF to declare one of
+        // Defaults OFF (options row AI ODF Tuning). Every path it gates requires the ODF to declare one of
         // those keys, except bomber range: a bomber-role craft that authors
         // neither range key gets its longest weapon range as the outer floor.
         inline constexpr bool kAiOdfGameplayTuningEnabledDefault = false;
