@@ -2998,7 +2998,8 @@ namespace BZROpenShim
             if (binding.paint.enabled)
             {
                 LogShimA(LogLevel::Info, "terrain-hd",
-                    "[TERRAIN-PAINT] coverage uses four material layers and control slice4; native tile indices do not select diffuse slices");
+                    "[TERRAIN-PAINT] coverage uses %u material layers (control slice4%s); native tile indices do not select diffuse slices",
+                    binding.paint.Layers(), binding.paint.Layers() == 8 ? " and slice13" : "");
                 return;
             }
             std::map<uint32_t, uint32_t> usage;
