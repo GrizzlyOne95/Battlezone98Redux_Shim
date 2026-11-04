@@ -5034,6 +5034,114 @@
       "identity": "RTTI .?AVTurretTankEnemy@@ vtable; slot 11 is TurretTankProcess::DoSubTask 0x005F6FF0"
     },
     {
+      "name": "GunTowerFriendVtable",
+      "address": "0x0087A794",
+      "kind": "data",
+      "identity": "RTTI .?AVGunTowerFriend@@ vtable; slot 11 is GunTowerProcess::DoSubTask 0x004E8780"
+    },
+    {
+      "name": "GunTowerEnemyVtable",
+      "address": "0x0087A9A0",
+      "kind": "data",
+      "identity": "RTTI .?AVGunTowerEnemy@@ vtable; slot 11 is GunTowerProcess::DoSubTask 0x004E8780"
+    },
+    {
+      "name": "TankFriendVtable",
+      "address": "0x0088B088",
+      "kind": "data",
+      "identity": "RTTI .?AVTankFriend@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "TankEnemyVtable",
+      "address": "0x0088AEA8",
+      "kind": "data",
+      "identity": "RTTI .?AVTankEnemy@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "RocketTankFriendVtable",
+      "address": "0x0088AC8C",
+      "kind": "data",
+      "identity": "RTTI .?AVRocketTankFriend@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "RocketTankEnemyVtable",
+      "address": "0x0088A7DC",
+      "kind": "data",
+      "identity": "RTTI .?AVRocketTankEnemy@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "ScoutFriendVtable",
+      "address": "0x0088AD7C",
+      "kind": "data",
+      "identity": "RTTI .?AVScoutFriend@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "ScoutEnemyVtable",
+      "address": "0x0088AAAC",
+      "kind": "data",
+      "identity": "RTTI .?AVScoutEnemy@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "PersonFriendVtable",
+      "address": "0x00885BE4",
+      "kind": "data",
+      "identity": "RTTI .?AVPersonFriend@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "PersonEnemyVtable",
+      "address": "0x00885A74",
+      "kind": "data",
+      "identity": "RTTI .?AVPersonEnemy@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "SoldierFriendVtable",
+      "address": "0x00887E08",
+      "kind": "data",
+      "identity": "RTTI .?AVSoldierFriend@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "SoldierEnemyVtable",
+      "address": "0x00887EF8",
+      "kind": "data",
+      "identity": "RTTI .?AVSoldierEnemy@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "ArtilleryFriendVtable",
+      "address": "0x00876204",
+      "kind": "data",
+      "identity": "RTTI .?AVArtilleryFriend@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "ArtilleryEnemyVtable",
+      "address": "0x00876114",
+      "kind": "data",
+      "identity": "RTTI .?AVArtilleryEnemy@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "GechFriendVtable",
+      "address": "0x0087A04C",
+      "kind": "data",
+      "identity": "RTTI .?AVGechFriend@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "GechEnemyVtable",
+      "address": "0x0087A268",
+      "kind": "data",
+      "identity": "RTTI .?AVGechEnemy@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "BomberFriendVtable",
+      "address": "0x0088A9BC",
+      "kind": "data",
+      "identity": "RTTI .?AVBomberFriend@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
+      "name": "BomberEnemyVtable",
+      "address": "0x0088A8CC",
+      "kind": "data",
+      "identity": "RTTI .?AVBomberEnemy@@ vtable; slot 11 is OffensiveProcess::DoSubTask 0x00583520"
+    },
+    {
       "name": "HowitzerSecondaryVtable",
       "address": "0x0087AE1C",
       "kind": "data",

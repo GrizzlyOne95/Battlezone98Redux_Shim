@@ -2358,46 +2358,53 @@ AiWeaponMaskArtillery = 0
 ; Accepted: boolean. Default: OFF.
 AiWeaponMaskMinelayer = 0
 
-; Honour the ODF-authored AI tuning keys.
+; AI ODF tuning keys, bomber range and turret range refresh.
 ;
-; Master switch for the AI fields OpenShim reads out of unit ODFs:
-;   engageRangeAI              floor for the stock weapon-aware outer range
-;   weaponRangeMinAI           floor for the native too-close/standoff range
-;   retargetPeriodAI           seconds between target reconsiderations
-;   scrapPathingAI             per-unit override of SmartScavengerPathing
-;   scrapPathLengthWeightAI    scrap scoring weights
-;   scrapStraightDistanceWeightAI
-;   scrapPathFailPenaltyAI
-;   scrapHardToGetCooldownAI
-;   scrapSearchRadiusAI
-;   scrapRetargetPeriodAI
-;   scrapRetargetMinImprovementAI
+; When ON (single player only), this does exactly these things:
 ;
-; Every path this gates ALSO requires the ODF to declare the matching key,
-; with one exception: bomber range. A bomber-role craft (aiName / aiName2 =
-; bomberfriend or bomberenemy) that authors neither engageRangeAI nor
-; weaponRangeMinAI gets the longest range among its own weapon ODFs as its
-; outer engagement floor, so stock bombers start their runs further out
-; instead of closing to gun distance. Its too-close range is unchanged, so a
-; bomber caught at short range still fires. Everything else is a capability
-; switch for authored content, which is why this defaults ON.
+; 1. Reads these keys from unit ODFs and applies them. A unit without the key
+;    is unchanged:
+;      engageRangeAI     minimum for the stock weapon-aware outer range
+;      weaponRangeMinAI  minimum for the native too-close/standoff range
+;      retargetPeriodAI  seconds between target searches while the unit has
+;                        no target (replaces the global 0.75 s; 0 restores
+;                        the stock 7-10 s)
+;      scrapPathingAI    per-unit override of SmartScavengerPathing
+;      scrapPathLengthWeightAI, scrapStraightDistanceWeightAI,
+;      scrapPathFailPenaltyAI, scrapHardToGetCooldownAI, scrapSearchRadiusAI,
+;      scrapRetargetPeriodAI, scrapRetargetMinImprovementAI
+;                        scavenger scrap scoring and re-pick tuning
+; 2. Bomber range, with no ODF key needed. A bomber (aiName / aiName2 =
+;    bomberfriend or bomberenemy) that sets neither engageRangeAI nor
+;    weaponRangeMinAI uses its longest weapon range as its minimum outer
+;    range, so it starts its run further out. Its too-close range is unchanged.
+;    (This replaces the old BomberAiRange key and exu.SetBomberAiRangeEnabled,
+;    which are now ignored. Trace it with OPENSHIM_TRACE_BOMBER_RANGE=1.)
+; 3. Turret range refresh, with no ODF key needed. Stock AI turrets work out
+;    their weapon range only when spawned or loaded, so a turret given a new
+;    weapon (or a charge gun changing charge level) keeps the old range until
+;    a pilot swap. OpenShim recomputes it whenever the weapons change.
 ;
-; Bomber range used to be its own BomberAiRange key (default OFF); that key
-; and exu.SetBomberAiRangeEnabled are now ignored. Trace bomber range with
-; OPENSHIM_TRACE_BOMBER_RANGE=1 (logs [BOMBERRANGE] original/final range).
+; NOT controlled by this switch:
+;   - The faster target search itself. Every stock combat AI (tanks, scouts,
+;     soldiers, howitzers, walkers, bombers, gun towers, turrets) looks for a
+;     new target every 0.75 s instead of the stock 7-10 s while it has none.
+;     This applies in single player even when this switch is OFF; only
+;     retargetPeriodAI (item 1) depends on the switch.
+;   - Per-unit tuning set from Lua through the EXU bridge, which applies
+;     whatever this switch says.
+;   - CraftClass.rangeScan / periodScan, player-fired weapon range and the
+;     stock offensive state gates.
 ;
-; Turn it off to make OpenShim ignore those keys entirely and run every unit on
-; stock/global values, which is the fastest way to tell whether a mod's AI
-; tuning is responsible for something you are seeing.
+; Turn it OFF to ignore every ODF key above and run all units on stock or global
+; values, which is the quickest way to tell whether a mod's AI tuning is the
+; cause of something you are seeing.
 ;
-; Was previously reachable only through the EXU bridge
-; (exu.SetAiOdfGameplayTuningEnabled) from Campaign Reimagined's settings.
-; A mission script may still override it for the duration of that mission;
-; the value here is what it reverts to when the mission ends.
+; A mission script can override this for one mission with
+; exu.SetAiOdfGameplayTuningEnabled; the value here comes back when that
+; mission ends.
 ;
 ; Accepted: boolean. Default: ON.
-; These fields do not change CraftClass.rangeScan or periodScan, do not affect
-; player-fired weapon range, and never bypass the stock offensive state gates.
 AiOdfGameplayTuning = 1
 
 ; Legacy (1.4 / TRO 1.3) attack AI for every unit that runs the stock attack
