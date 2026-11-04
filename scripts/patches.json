@@ -4962,6 +4962,18 @@
       "identity": "DoState's slide-to-stand test, bool cdecl(craftClassInfo, targetClassInfo); class info from entity vtable slot 12"
     },
     {
+      "name": "UnitTaskDoStand",
+      "address": "0x006057E0",
+      "expected": "55 8B EC 81 EC 20 01 00 00 A1 00 70",
+      "identity": "UnitTask::DoStand, void thiscall(task); backs away when targetDistSq (+0xD4) < closeSq (+0x9C), which 1.4's stand lacks. Target of the legacy (1.4) stand call site"
+    },
+    {
+      "name": "AttackTaskDoStandCall",
+      "address": "0x00478F4F",
+      "expected": "8B 4D FC E8 89 C8 18 00 E9 D5 04",
+      "identity": "AttackTask::DoState stand state: mov ecx,[ebp-4]; call DoStand (+3). The legacy (1.4) stand zeroes closeSq for this call only, so the craft holds instead of reversing"
+    },
+    {
       "name": "AttackTaskIsBuildingClass",
       "address": "0x00477D70",
       "expected": "55 8B EC 51 8B 45 08 8B 88 84 00 00",
