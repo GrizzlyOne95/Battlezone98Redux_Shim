@@ -133,8 +133,8 @@
       "name": "Rock",
       "detile": true,
       "repeatMeters": 20,
-      "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
-      "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
+      "archive": "rock_face_03_8k.zip",
+      "member": "rock_face_03_diff_8k.jpg",
       "matchMean": "crhd_titan_ti33sa0_d.dds",
       "heightMeters": 1.4
     },

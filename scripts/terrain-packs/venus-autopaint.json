@@ -146,8 +146,8 @@
       "name": "Crag",
       "detile": true,
       "repeatMeters": 40,
-      "archive": "icelandic_jagged_rock_ucumbgedy_8k.zip",
-      "member": "Icelandic_Jagged_Rock_ucumbgedy_8K_BaseColor.jpg",
+      "archive": "rock_06_8k.zip",
+      "member": "rock_06_diff_8k.jpg",
       "matchMean": "crhd_venus_ve33sa0_d.dds",
       "heightMeters": 2.6,
       "proceduralDetail": 1
