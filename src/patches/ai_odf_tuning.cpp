@@ -707,6 +707,51 @@ namespace BZROpenShim
 
         static void CallStockAttackTaskDoState(void* taskPtr);
 
+        // Redux UnitTask::DoStand (0x006057e0) pushes the craft away from the
+        // target while targetDistSq < closeSq; 1.4 stand (FUN_0046e6b0) has no
+        // such term, so a legacy craft reversed briefly before sliding. The
+        // DoState stand call site is redirected here, and the legacy path names
+        // its task around its stock call so closeSq reads 0 inside DoStand
+        // only; UpdateWeapon's closeSq checks after the switch are unchanged.
+        using FnUnitTaskDoStand = void(__thiscall*)(void* task);
+        static FnUnitTaskDoStand g_BzrFn_UnitTaskDoStand = nullptr;
+        static void* g_LegacyStandNoBackOffTask = nullptr;
+
+        static void __fastcall AttackTaskDoStandSiteHook(void* task)
+        {
+            if (task != g_LegacyStandNoBackOffTask)
+            {
+                g_BzrFn_UnitTaskDoStand(task);
+                return;
+            }
+            auto* closeSq = reinterpret_cast<float*>(
+                static_cast<uint8_t*>(task) + kAttackTaskCloseSqOffset);
+            const float savedCloseSq = *closeSq;
+            *closeSq = 0.0f;
+            g_BzrFn_UnitTaskDoStand(task);
+            *closeSq = savedCloseSq;
+        }
+
+        static void InstallLegacyStandSiteHook()
+        {
+            uint32_t doStand = 0, standSite = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "UnitTaskDoStand", &doStand },
+                { "AttackTaskDoStandCall", &standSite },
+            };
+            if (!HookEngine::BindEngineRows("Legacy stand", rows))
+                return;
+            // The row starts at "mov ecx,[ebp-4]"; the call is 3 bytes in.
+            g_BzrFn_UnitTaskDoStand = reinterpret_cast<FnUnitTaskDoStand>(doStand);
+            if (!RedirectCallTarget(standSite + 3u, doStand,
+                                    reinterpret_cast<uintptr_t>(&AttackTaskDoStandSiteHook)))
+            {
+                g_BzrFn_UnitTaskDoStand = nullptr;
+                Log(L"[LEGACY] stand call site 0x%08X did not match; stand keeps the Redux back-off\n",
+                    standSite + 3u);
+            }
+        }
+
         // 1.4 flee (FUN_0040cde0 case 9) holds fire and has no timer: it
         // leaves when the attacker is gone or 75 m away (to slide) or when
         // stuck (to blast). Redux flee (case 9 at 0x00478f5c) shoots the
@@ -908,7 +953,10 @@ namespace BZROpenShim
                     TraceLegacySnapshot(helpers, taskBytes, craft, curBefore, -1);
                     return;
                 }
+                g_LegacyStandNoBackOffTask =
+                    g_BzrFn_UnitTaskDoStand && curBefore == kAttackTaskStandState ? taskPtr : nullptr;
                 CallStockAttackTaskDoState(taskPtr);
+                g_LegacyStandNoBackOffTask = nullptr;
                 int curAfter = 0, nextAfter = 0;
                 float startAfter = 0.0f;
                 TryGetTaskState(taskBytes, curAfter, nextAfter, startAfter);
@@ -1278,6 +1326,7 @@ namespace BZROpenShim
                 g_BzrFn_AttackTaskDoState && g_BzrFn_TerrainGetIntersection;
             if (g_AttackTaskDoStateHookInstalled)
             {
+                InstallLegacyStandSiteHook();
                 g_AttackTaskProfileEnabled = EnvFlagEnabled("OPENSHIM_PROFILE_ATTACK_TASK");
                 Log(L"[AIKITE] Installed AttackTask::DoState hook entry=0x%08X trampoline=0x%08X terrainLos=0x%08X\n",
                     static_cast<uint32_t>(g_AttackTaskDoStateEntryAddr),
