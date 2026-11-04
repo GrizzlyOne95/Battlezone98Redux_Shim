@@ -59,6 +59,12 @@ namespace BZROpenShim::TerrainPaint
         // It carries only the relief finer than the displaced vertices.
         // Scale 0 is off.
         std::array<float, 4> parallax = {};
+        // Animated liquid layers (lava, sulphur): per layer 0 solid, else glow
+        // strength 0..4. liquidFlow: churn metres 0..8, loop period seconds
+        // (4000 / period a whole number, so the time wrap is seamless), bubble
+        // cell metres (0 none, else 0.5..50) and bubble rate 0..1.
+        std::array<float, 8> liquid = {};
+        std::array<float, 4> liquidFlow = {};
         bool Material() const { return sliceCount != 5; }
         unsigned Layers() const { return sliceCount == 18 ? 8 : 4; }
         // Deepest a crater stack can reach, for the displacement clamp.
@@ -96,7 +102,7 @@ namespace BZROpenShim::TerrainPaint
                 const bool used = i < Layers();
                 if (used ? !std::isfinite(repeatMeters[i]) || repeatMeters[i] < 1 || repeatMeters[i] > 4096 : repeatMeters[i] != 0)
                     throw std::runtime_error("paint material repeats must be 1..4096 metres");
-                if (!used && (heightMeters[i] != 0 || detile[i] != 0 || nearOnly[i] != 0 || craterLayers[i] != 0 || detailLayers[i] != 0))
+                if (!used && (heightMeters[i] != 0 || detile[i] != 0 || nearOnly[i] != 0 || craterLayers[i] != 0 || detailLayers[i] != 0 || liquid[i] != 0))
                     throw std::runtime_error("paint per-layer values must match the layer count");
             }
             if (!std::isfinite(heightBlend) || heightBlend < 0 || heightBlend > 4)
@@ -162,6 +168,21 @@ namespace BZROpenShim::TerrainPaint
             }
             else if (parallax != std::array<float, 4>{})
                 throw std::runtime_error("paint parallax is off; leave every parallax value 0");
+            for (float v : liquid) if (!(v >= 0 && v <= 4))
+                throw std::runtime_error("paint liquid must be 0..4 per layer");
+            for (float v : liquidFlow) if (!std::isfinite(v))
+                throw std::runtime_error("paint liquidFlow must be finite");
+            if (liquid != std::array<float, 8>{})
+            {
+                const float loops = liquidFlow[1] > 0 ? 4000.0f / liquidFlow[1] : 0.0f;
+                if (liquidFlow[0] < 0 || liquidFlow[0] > 8 || !(liquidFlow[1] >= 1 && liquidFlow[1] <= 4000) ||
+                    std::abs(loops - std::round(loops)) > 1e-4f ||
+                    (liquidFlow[2] != 0 && (liquidFlow[2] < 0.5f || liquidFlow[2] > 50)) ||
+                    liquidFlow[3] < 0 || liquidFlow[3] > 1)
+                    throw std::runtime_error("paint liquidFlow needs churn 0..8 metres, a 1..4000 s period that divides 4000 s, bubble cell 0 or 0.5..50 metres and rate 0..1");
+            }
+            else if (liquidFlow != std::array<float, 4>{})
+                throw std::runtime_error("paint liquid is off; leave every liquidFlow value 0");
             for (std::size_t i = 0; i < maps.size(); ++i)
             {
                 const auto& map = maps[i];
@@ -372,6 +393,7 @@ OpenShimCrater OpenShimDetailField(float2 p, float4 params, float foot)
         list("openShimPaintNearOnly", config.nearOnly);
         list("openShimPaintCraterLayers", config.craterLayers);
         list("openShimPaintDetailLayers", config.detailLayers);
+        list("openShimPaintLiquid", config.liquid);
         out << "static const float openShimPaintHeightBlend = " << config.heightBlend << ";\n";
         return out.str() + R"HLSL(
 struct OpenShimPaintMix { float w[OPENSHIM_PAINT_LAYERS]; };
@@ -436,18 +458,25 @@ float OpenShimPaintDot(OpenShimPaintMix m, float v[OPENSHIM_PAINT_LAYERS])
 #if OPENSHIM_PAINT_TRIPLANAR_SOURCE && defined(IBL_ENABLED) && defined(ENHANCED_MODE) &&     !defined(OG_RETRO_MODE) && !defined(VERTEX_LIGHTING)
 #define OPENSHIM_PAINT_TRIPLANAR 1
 #if OPENSHIM_PAINT_MATERIAL && OPENSHIM_PAINT_PARALLAX
-#define OPENSHIM_PAINT_GEO OpenShimPaintParallax(diffuseMap, diffuseSam, \
+#define OPENSHIM_PAINT_GEO_BASE OpenShimPaintParallax(diffuseMap, diffuseSam, \
     OpenShimPaintGeometryAt(openShimHdUV, openShimTileSlice, mul(inverseViewMatrix, float4(vViewNormal, 0.0)).xyz, OPENSHIM_PAINT_VIEW_DEPTH), \
     mul(inverseViewMatrix, float4(vViewPosition.xyz, 0.0)).xyz, OPENSHIM_PAINT_VIEW_DEPTH)
 #else
-#define OPENSHIM_PAINT_GEO OpenShimPaintGeometryAt(openShimHdUV, openShimTileSlice, mul(inverseViewMatrix, float4(vViewNormal, 0.0)).xyz, OPENSHIM_PAINT_VIEW_DEPTH)
+#define OPENSHIM_PAINT_GEO_BASE OpenShimPaintGeometryAt(openShimHdUV, openShimTileSlice, mul(inverseViewMatrix, float4(vViewNormal, 0.0)).xyz, OPENSHIM_PAINT_VIEW_DEPTH)
 #endif
 #define OPENSHIM_PAINT_TBN(n) OpenShimPaintTbn(n, inverseViewMatrix)
 #else
 #define OPENSHIM_PAINT_TRIPLANAR 0
-#define OPENSHIM_PAINT_GEO OpenShimPaintGeometryAt(openShimHdUV, 0.0, float3(0, 1, 0), OPENSHIM_PAINT_VIEW_DEPTH)
+#define OPENSHIM_PAINT_GEO_BASE OpenShimPaintGeometryAt(openShimHdUV, 0.0, float3(0, 1, 0), OPENSHIM_PAINT_VIEW_DEPTH)
 #define OPENSHIM_PAINT_TBN(n) cotangent_frame(n, vViewPosition.xyz, openShimHdUV)
 #endif
+// Liquid animation time: surfaceRainTime exists only in this pass form.
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+#define OPENSHIM_PAINT_TIME surfaceRainTime
+#else
+#define OPENSHIM_PAINT_TIME 0.0
+#endif
+#define OPENSHIM_PAINT_GEO OpenShimPaintAtTime(OPENSHIM_PAINT_GEO_BASE, OPENSHIM_PAINT_TIME)
 #ifndef OPENSHIM_PAINT_SAMPLE
 // Explicit gradients: frac-derived ones choose wrong mips at repeat
 // boundaries, and taps inside branches have none. Do not depend on the native
@@ -457,7 +486,12 @@ float OpenShimPaintDot(OpenShimPaintMix m, float v[OPENSHIM_PAINT_LAYERS])
 #define OPENSHIM_PAINT_DDY(v) ddy(v)
 #endif
 // farMix is the share of the larger copy; foot is metres per pixel.
-struct OpenShimPaintGeo { float3 pos; float3 n; float3 blend; float3 flip; float3 dpdx; float3 dpdy; float farMix; float foot; };
+struct OpenShimPaintGeo { float3 pos; float3 n; float3 blend; float3 flip; float3 dpdx; float3 dpdy; float farMix; float foot; float time; };
+OpenShimPaintGeo OpenShimPaintAtTime(OpenShimPaintGeo g, float time)
+{
+    g.time = time;
+    return g;
+}
 OpenShimPaintGeo OpenShimPaintGeometryAt(float2 worldXZ, float worldY, float3 worldNormal, float viewDepth)
 {
     OpenShimPaintGeo g;
@@ -469,6 +503,7 @@ OpenShimPaintGeo OpenShimPaintGeometryAt(float2 worldXZ, float worldY, float3 wo
     g.foot = max(length(g.dpdx), length(g.dpdy));
     g.farMix = openShimPaintFar.x > 0 ?
         saturate((viewDepth - openShimPaintFar.y) / (openShimPaintFar.z - openShimPaintFar.y)) * openShimPaintFar.w : 0.0;
+    g.time = 0.0;
     g.n = normalize(worldNormal);
     // Sharp blend: ground under about 30 degrees keeps the single top tap and
     // only real slopes pay for side projections.
@@ -659,6 +694,20 @@ OpenShimPaintGeo OpenShimPaintParallax(Texture2DArray tex, SamplerState sam, Ope
 OpenShimPaintGeo OpenShimPaintLayerGeo(OpenShimPaintGeo g, int i)
 {
     if (openShimPaintNearOnly[i] > 0) g.farMix = 0;
+#if OPENSHIM_PAINT_LIQUID
+    [branch] if (openShimPaintLiquid[i] > 0)
+    {
+        // Periodic domain warp: noise sampled around a circle in time, so the
+        // churn repeats exactly every period. Gradients stay as they were.
+        float churn = openShimPaintLiquidFlow.x, a = g.time * 6.2831853 / openShimPaintLiquidFlow.y;
+        float2 c = float2(cos(a), sin(a)) * 1.5, c2 = float2(cos(2.0 * a), sin(2.0 * a)) * 1.5;
+        float2 m = g.pos.xz / max(churn * 6.0, 0.01);
+        float2 warp = (float2(OpenShimDetileNoise(m + c), OpenShimDetileNoise(m - c.yx + 37.0)) - 0.5) * 2.0 * churn;
+        m *= 2.3;
+        warp += (float2(OpenShimDetileNoise(m + c2 + 11.0), OpenShimDetileNoise(m - c2.yx + 53.0)) - 0.5) * churn;
+        g.pos.xz += warp;
+    }
+#endif
     return g;
 }
 // Layers the blend left out cost nothing.
@@ -684,6 +733,27 @@ float4 OpenShimPaintDiffuse(Texture2DArray tex, SamplerState sam, OpenShimPaintG
     }
     return openShimPaintDiffuseCache;
 }
+#if OPENSHIM_PAINT_LIQUID
+// Emission the pixel shader adds just before final lighting (see Specialize).
+static float3 openShimPaintGlowColour = 0;
+static float openShimPaintGlowAmount = 0;
+// Bubbles swell from a point in a hashed cell, ring out and pop; life loops
+// with the period so the wrap at 4000 s is seamless. Radius stays inside the cell.
+float OpenShimLiquidBubbles(float2 xz, float time)
+{
+    float cell = openShimPaintLiquidFlow.z;
+    if (cell <= 0) return 0.0;
+    float2 p = xz / cell, id = floor(p), f = frac(p);
+    float h0 = OpenShimDetileHash(id), h1 = OpenShimDetileHash(id + 17.3);
+    float h2 = OpenShimDetileHash(id + 53.7), h3 = OpenShimDetileHash(id + 91.1);
+    if (h2 >= openShimPaintLiquidFlow.w) return 0.0;
+    float life = frac(3.0 * time / openShimPaintLiquidFlow.y + h0);
+    float d = length(f - (0.25 + 0.5 * float2(h1, h3)));
+    float rim = (1.0 - smoothstep(0.0, 0.025, abs(d - 0.25 * life))) * (1.0 - life);
+    float pop = smoothstep(0.9, 0.95, life) * (1.0 - smoothstep(0.95, 1.0, life)) * (1.0 - smoothstep(0.0, 0.1, d));
+    return rim + pop;
+}
+#endif
 float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
     // The fourth control channel is a weight, never terrain transparency, and
@@ -708,6 +778,18 @@ float4 OpenShimSampleTerrainPaint(Texture2DArray tex, SamplerState sam, OpenShim
             colour = max(y + float3(0.956 * iq.x + 0.621 * iq.y, -0.272 * iq.x - 0.647 * iq.y, -1.106 * iq.x + 1.703 * iq.y), 0.0);
         }
     }
+#if OPENSHIM_PAINT_LIQUID
+    float liquid = OpenShimPaintDot(OpenShimPaintWeights(tex, sam, g), openShimPaintLiquid);
+    [branch] if (liquid > 0)
+    {
+        // Hot (bright) paint glows, pulsing slowly; bubbles add rim flashes.
+        float heat = smoothstep(0.12, 0.75, dot(colour, float3(0.299, 0.587, 0.114)));
+        float a2 = 2.0 * g.time * 6.2831853 / openShimPaintLiquidFlow.y;
+        float pulse = 0.7 + 0.3 * OpenShimDetileNoise(g.pos.xz / max(openShimPaintLiquidFlow.z * 3.0, 4.0) + float2(cos(a2), sin(a2)) * 1.5);
+        openShimPaintGlowColour = saturate(colour);
+        openShimPaintGlowAmount = liquid * (heat * pulse + OpenShimLiquidBubbles(g.pos.xz, g.time));
+    }
+#endif
     return float4(colour, 1);
 }
 #if OPENSHIM_PAINT_MATERIAL
@@ -749,7 +831,8 @@ OpenShimPaintTaps OpenShimPaintNormalTaps(Texture2DArray tex, SamplerState sam, 
     [branch] if (g.farMix < 1)
     {
         [branch] if (g.blend.x > 0) nearTaps.x = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_X, s, slice, detile);
-        if (openShimPaintNearValid[i]) nearTaps.y = openShimPaintNearTop[i];
+        // A liquid layer's top projection is warped, unlike the height pass.
+        if (openShimPaintNearValid[i] && openShimPaintLiquid[i] == 0) nearTaps.y = openShimPaintNearTop[i];
         else
         {
             [branch] if (g.blend.y > 0) nearTaps.y = OPENSHIM_PAINT_TAP(tex, sam, g, OPENSHIM_PAINT_UV_Y, s, slice, detile);
@@ -862,6 +945,12 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             const bool parallax = config.parallax[0] > 0 && source.find("in float3 vViewPosition") != std::string::npos &&
                 source.find("in float vDepth") != std::string::npos;
             constants << "#define OPENSHIM_PAINT_PARALLAX " << (parallax ? 1 : 0) << "\n";
+            // Glow rides the emissive sum just before final lighting, in the
+            // pass that also has surfaceRainTime; a pass without it declines.
+            const bool liquid = config.liquid != std::array<float, 8>{};
+            const std::string anchor = "    oColor.xyz = aerialSurface * surfaceTransmission";
+            if (liquid && source.find(anchor) == std::string::npos) return false;
+            constants << "#define OPENSHIM_PAINT_LIQUID " << (liquid ? 1 : 0) << "\n";
             const auto vector = [&](const char* name, const float* v, int n) {
                 constants << "static const float" << n << " " << name << " = float" << n << "(";
                 for (int i = 0; i < n; ++i) constants << (i ? "," : "") << v[i];
@@ -872,6 +961,14 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             vector("openShimPaintDetail", config.detail.data(), 4);
             vector("openShimPaintParallax", config.parallax.data(), 4);
             vector("openShimPaintBounds", config.bounds.data(), 4);
+            vector("openShimPaintLiquidFlow", config.liquidFlow.data(), 4);
+            if (liquid)
+            {
+                // Re-found: the swaps above moved the text.
+                source.insert(source.find(anchor),"#if OPENSHIM_PAINT_LIQUID\n#if OSE_LINEAR_LIGHT_ACTIVE\n"
+                    "    openShimPaintGlowColour = srgb_to_linear(openShimPaintGlowColour);\n#endif\n"
+                    "    emissiveContribution += openShimPaintGlowColour * openShimPaintGlowAmount;\n#endif\n");
+            }
             source.insert(0, constants.str() + LayerHlsl(config) + DetileHlsl() + CraterHlsl() + BlendHlsl());
         }
         else

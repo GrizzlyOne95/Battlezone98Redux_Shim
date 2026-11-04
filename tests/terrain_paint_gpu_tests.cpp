@@ -174,7 +174,7 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         const std::string triplanarRaw = triplanarSource;
         check(TerrainPaint::Specialize(triplanarSource, true, material) &&
             triplanarSource.find("#define OPENSHIM_PAINT_TRIPLANAR_SOURCE 1") != std::string::npos, "triplanar PS specialization failed");
-        triplanarSource = "#define IBL_ENABLED\n#define ENHANCED_MODE\n" + triplanarSource;
+        triplanarSource = "#define IBL_ENABLED\n#define ENHANCED_MODE\nstatic float surfaceRainTime = 0;\n" + triplanarSource;
         compiled = D3DCompile(triplanarSource.data(),triplanarSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
         if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
         ok(compiled);
@@ -208,7 +208,7 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         TerrainPaint::Config detiled = material; detiled.detile = {1, 0, 0, 0};
         std::string detiledTriplanar = triplanarRaw;
         check(TerrainPaint::Specialize(detiledTriplanar, true, detiled), "detile PS specialization failed");
-        detiledTriplanar = "#define IBL_ENABLED\n#define ENHANCED_MODE\n" + frame + detiledTriplanar;
+        detiledTriplanar = "#define IBL_ENABLED\n#define ENHANCED_MODE\nstatic float surfaceRainTime = 0;\n" + frame + detiledTriplanar;
         compiled = D3DCompile(detiledTriplanar.data(),detiledTriplanar.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
         if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
         ok(compiled);
@@ -329,7 +329,7 @@ RWStructuredBuffer<float4> testResults : register(u0);
         varied.nearOnly = {0, 1, 0, 0};
         // Triplanar with IBL, and the top-projection material path.
         const std::pair<std::string, const char*> variants[] = {
-            {triplanarRaw, "#define IBL_ENABLED\n#define ENHANCED_MODE\n"}, {materialRaw, ""}};
+            {triplanarRaw, "#define IBL_ENABLED\n#define ENHANCED_MODE\nstatic float surfaceRainTime = 0;\n"}, {materialRaw, ""}};
         for (const auto& [raw, prefix] : variants)
             {
                 std::string variant = raw;
@@ -347,6 +347,32 @@ RWStructuredBuffer<float4> testResults : register(u0);
                 if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
                 ok(compiled);
             }
+        // Liquid layers: the glow injection and the warped, animated taps
+        // compile in the pixel pass (with the rain time and the final-colour
+        // line the injection needs) and in the derivative-free compute form.
+        {
+            TerrainPaint::Config lava = varied;
+            lava.liquid = {1.5f, 0, 0, 0}; lava.liquidFlow = {1.5f, 40, 4, 0.5f};
+            std::string liquidSource = triplanarRaw;
+            const std::string head = "in float3 vViewNormal : TEXCOORD2,", tail = "  return diffuseMap.Sample(";
+            liquidSource.replace(liquidSource.find(head), head.size(), "uniform float surfaceRainTime, " + head);
+            liquidSource.replace(liquidSource.find(tail), tail.size(),
+                "  float3 emissiveContribution = 0, aerialSurface = 1, surfaceTransmission = 1; float4 oColor = 0;\n"
+                "    oColor.xyz = aerialSurface * surfaceTransmission + emissiveContribution;\n" + tail);
+            const std::string slice = "float openShimTileSlice : TEXCOORD10";
+            liquidSource.replace(liquidSource.find(slice), slice.size(), slice + ", in float vDepth : TEXCOORD5, in float3 vViewPosition : TEXCOORD4");
+            check(TerrainPaint::Specialize(liquidSource, true, lava) &&
+                liquidSource.find("#define OPENSHIM_PAINT_LIQUID 1") != std::string::npos, "liquid PS specialization failed");
+            liquidSource = "#define IBL_ENABLED\n#define ENHANCED_MODE\n#define OSE_LINEAR_LIGHT_ACTIVE 1\n"
+                "float3 srgb_to_linear(float3 c) { return c * c; }\n" + frame + liquidSource;
+            compiled = D3DCompile(liquidSource.data(),liquidSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+            const std::string liquidCompute = noDerivatives + liquidSource;
+            compiled = D3DCompile(liquidCompute.data(),liquidCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+        }
         // Parallax: layer 0's height is a checker at mip 0 and flat 0.5 above,
         // so the fine-minus-coarse relief is the checker alone. Looking
         // straight down, beyond the fade or at a wall leaves the point; an
@@ -376,7 +402,7 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
 )";
             check(TerrainPaint::Specialize(pomSource, true, pom) &&
                 pomSource.find("#define OPENSHIM_PAINT_PARALLAX 1") != std::string::npos, "parallax PS specialization failed");
-            pomSource = "#define IBL_ENABLED\n#define ENHANCED_MODE\n" + pomSource;
+            pomSource = "#define IBL_ENABLED\n#define ENHANCED_MODE\nstatic float surfaceRainTime = 0;\n" + pomSource;
             compiled = D3DCompile(pomSource.data(),pomSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
             if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
             ok(compiled);

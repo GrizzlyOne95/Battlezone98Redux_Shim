@@ -127,6 +127,27 @@ int main(int argc, char** argv)
             bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
             check(rejected, "invalid eight-layer paint accepted");
         }
+        // Liquid layers: glow strength per layer plus a seamlessly looping flow.
+        TerrainPaint::Config lava = material;
+        lava.liquid = {0, 2, 0, 0}; lava.liquidFlow = {1.5f, 40, 4, 0.5f};
+        lava.Validate();
+        for (int bad = 0; bad < 11; ++bad)
+        {
+            TerrainPaint::Config broken = lava;
+            if (bad == 0) broken.liquidFlow[1] = 30;
+            if (bad == 1) broken.liquid[1] = 5;
+            if (bad == 2) broken.liquidFlow = {};
+            if (bad == 3) broken.liquid = {};
+            if (bad == 4) broken.liquid[5] = 1;
+            if (bad == 5) broken.liquidFlow[0] = 9;
+            if (bad == 6) broken.liquidFlow[2] = 0.2f;
+            if (bad == 7) broken.liquidFlow[3] = 2;
+            if (bad == 8) broken.liquid[1] = -1;
+            if (bad == 9) broken.liquidFlow[1] = 0.001f;
+            if (bad == 10) broken.liquidFlow[1] = NAN;
+            bool rejected = false; try { broken.Validate(); } catch (...) { rejected = true; }
+            check(rejected, "invalid liquid config accepted");
+        }
         const std::string pixelSource =
             "float4 d = diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice));\n"
             "float3x3 tbn = cotangent_frame(geometryNormal, vViewPosition.xyz, vTexCoord);\n"
@@ -145,6 +166,19 @@ int main(int argc, char** argv)
             full.find("vTexCoord * 8.0") != std::string::npos &&
             full.find("#define OPENSHIM_PAINT_MATERIAL 1") != std::string::npos &&
             full.find("#define OPENSHIM_PAINT_LAYERS 4") != std::string::npos, "material paint specialization incomplete");
+        // The glow is injected before the final colour line, only for liquid packs and only where it exists.
+        const std::string anchored = pixelSource + "    oColor.xyz = aerialSurface * surfaceTransmission + 1;\n";
+        std::string solid = anchored, wet = anchored, wetNoAnchor = pixelSource;
+        check(TerrainPaint::Specialize(solid, true, material) && TerrainPaint::Specialize(wet, true, lava),
+            "liquid PS specialization failed");
+        check(solid.find("#define OPENSHIM_PAINT_LIQUID 0") != std::string::npos &&
+            solid.find("openShimPaintGlowColour = srgb_to_linear") == std::string::npos, "solid pack got the glow block");
+        check(wet.find("#define OPENSHIM_PAINT_LIQUID 1") != std::string::npos &&
+            wet.find("#if OPENSHIM_PAINT_LIQUID\n#if OSE_LINEAR_LIGHT_ACTIVE\n    openShimPaintGlowColour = srgb_to_linear(openShimPaintGlowColour);\n#endif\n"
+                "    emissiveContribution += openShimPaintGlowColour * openShimPaintGlowAmount;\n#endif\n    oColor.xyz = aerialSurface * surfaceTransmission") != std::string::npos &&
+            wet.find("openShimPaintLiquid[4] = {0.000000000e+00,2.000000000e+00,0.000000000e+00,0.000000000e+00}") != std::string::npos,
+            "liquid pack missed the glow block");
+        check(!TerrainPaint::Specialize(wetNoAnchor, true, lava), "liquid paint accepted a pass without the glow anchor");
         std::string wide = pixelSource;
         check(TerrainPaint::Specialize(wide, true, eight) && wide.find("#define OPENSHIM_PAINT_LAYERS 8") != std::string::npos &&
             wide.find("openShimPaintRepeats[8]") != std::string::npos, "eight-layer specialization failed");

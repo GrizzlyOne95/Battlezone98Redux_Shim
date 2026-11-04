@@ -1230,6 +1230,9 @@ namespace BZROpenShim
                                 throw std::runtime_error("paint parallax needs three numbers");
                             std::copy(parallax.begin(), parallax.end(), binding.paint.parallax.begin());
                         }
+                        if (paint.contains("liquid")) layers("liquid", binding.paint.liquid);
+                        if (paint.contains("liquidFlow"))
+                            binding.paint.liquidFlow = paint.at("liquidFlow").get<std::array<float, 4>>();
                         if (paint.contains("maps"))
                         {
                             // Multi-map form: one entry per terrain shape sharing this
