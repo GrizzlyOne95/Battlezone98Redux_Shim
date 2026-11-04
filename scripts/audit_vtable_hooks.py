@@ -148,12 +148,22 @@ def main():
     cfg = json.loads(PATCHES.read_text(encoding="utf-8"))
     rows = {e["name"]: int(e["address"], 16) for e in cfg["engine_addresses"]}
     fallback = {p["name"]: int(p["fallback"], 16) for p in cfg["patches"] + cfg["resolves"] + cfg["globals"] if p.get("fallback")}
-    pe = Pe(exe)
-
     def slot_va(spec):
         if spec[0] == "patch":
             return fallback.get(spec[1])
         return rows[spec[1]] + 4 * spec[2] if spec[1] in rows else None
+
+    unresolved = [(label, s) for label, fn, specs, *_ in HOOKS for s in specs if slot_va(s) is None]
+    unresolved += [(label, fn) for label, fn, *_ in HOOKS
+                   if (fn[1] if isinstance(fn, tuple) else fn) not in rows]
+    for label, what in unresolved:
+        print(f"UNRESOLVED {label}: {what} is not in patches.json")
+    if unresolved:
+        return 1
+    if not Path(exe).is_file():
+        print(f"SKIP: no exe at {exe}; patches.json rows resolve, slot scan not run")
+        return 77
+    pe = Pe(exe)
 
     print(f"exe={exe} base=0x{pe.base:08X} hooks={len(HOOKS)}")
     total = 0
