@@ -54,7 +54,7 @@ static const char* const kShimCategoryPalette[] = {
     "Hull Healthy", "Hull Damaged", "Hull Critical", "Cockpit Ammo", "Unit Healthy", "Unit Damaged",
     "Unit Critical", "Unit Ammo", "Empty Bars" };
 static const char* const kShimCategoryControls[] = {
-    kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls",
+    kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls", "Per-Frame Mouse",
     "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse",
     "Run in Background" };
 static const char* const kShimCategoryGameplay[] = {
@@ -64,14 +64,16 @@ static const char* const kShimCategoryGameplay[] = {
     "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };
 static const char* const kShimCategoryFixes[] = {
     "AI Multi-Producer", "APC Allied Deploy", "Splinter Undead Fix", "Howitzer Deploy Fix",
-    "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard" };
+    "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard",
+    "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
+    "Effect Sort" };
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
     "MP Setup Screen" };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install Updates", "Career Stats", "Reset Career Stats", "Reset to Stock", "Troubleshooting Bundle",
-    "AutoSave", "AutoSave Interval", "AutoSave Backups" };
+    "AutoSave", "AutoSave Interval", "AutoSave Backups", "Fast Menu Transitions" };
 
 struct ShimSettingsCategory
 {

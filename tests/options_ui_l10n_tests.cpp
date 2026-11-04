@@ -205,10 +205,40 @@ static void CheckStockClassification()
     Check(stockKeys.size() + keepKeys.size() == rows, "every classified key is a registry row");
 }
 
+// Every registry row is on some category screen, and every category label is
+// a registry row or a pseudo row. The runtime only logs a miss, so a new row
+// without a category entry ships unreachable.
+static void CheckCategoryCoverage()
+{
+    const std::set<std::string> pseudoRows = {
+        Registry::kShimRowUpdateCheck, Registry::kShimRowKeyBindings, Registry::kShimRowReticle,
+        Registry::kShimRowPalette, Registry::kShimRowDamage, Registry::kShimRowFading,
+        Registry::kShimRowMeters, Registry::kShimRowRadar, Registry::kShimRowMenuTheme, Registry::kShimRowEffects,
+    };
+    std::set<std::string> registryLabels;
+    for (const auto& setting : Registry::g_ShimSettingsRegistry)
+        registryLabels.insert(setting.label);
+
+    std::set<std::string> listed;
+    for (const auto& category : Registry::kShimSettingsCategories)
+    {
+        for (size_t r = 0; r < category.rowCount; ++r)
+        {
+            const std::string row = category.rows[r];
+            Check(registryLabels.count(row) || pseudoRows.count(row),
+                  std::string(category.name) + " lists known row \"" + row + "\"");
+            listed.insert(row);
+        }
+    }
+    for (const std::string& label : registryLabels)
+        Check(listed.count(label) != 0, label + " is in a category");
+}
+
 int main()
 {
     CheckFallback();
     CheckShippedTable();
     CheckStockClassification();
+    CheckCategoryCoverage();
     return OpenShimTest::ExitCode();
 }
