@@ -140,6 +140,11 @@ extern "C" BOOL WINAPI OpenShimImpl_SetLegacyTankAiEnabled(BOOL enabled)
     return BZROpenShim::SetLegacyTankAiEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
 }
 
+extern "C" BOOL WINAPI OpenShimImpl_SetLegacyTankAiMode(int mode)
+{
+    return BZROpenShim::SetLegacyTankAiModeFromBridge(mode) ? TRUE : FALSE;
+}
+
 extern "C" BOOL WINAPI OpenShimImpl_SetHowitzerVolleyEnabled(BOOL enabled)
 {
     return BZROpenShim::SetHowitzerVolleyEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
@@ -826,6 +831,7 @@ namespace
         .OpenShimImpl_GetGeometryContactStats = OpenShimImpl_GetGeometryContactStats,
         .OpenShimImpl_GetNetworkTrafficSnapshot = OpenShimImpl_GetNetworkTrafficSnapshot,
         .OpenShimImpl_SetLegacyTankAiEnabled = OpenShimImpl_SetLegacyTankAiEnabled,
+        .OpenShimImpl_SetLegacyTankAiMode = OpenShimImpl_SetLegacyTankAiMode,
     };
 
     // Designated initializers enforce order but not completeness: a slot left

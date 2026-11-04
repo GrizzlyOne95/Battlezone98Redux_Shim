@@ -117,6 +117,7 @@ OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimGetNetworkTrafficSnapshot, Open
 
 // Mission-scoped OpenShim Legacy Tank AI (1.4/TRO attack AI) switch.
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetLegacyTankAiEnabled, OpenShimImpl_SetLegacyTankAiEnabled, (BOOL enabled), (enabled), FALSE)
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetLegacyTankAiMode, OpenShimImpl_SetLegacyTankAiMode, (int mode), (mode), FALSE)
 
 #ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_APPEND

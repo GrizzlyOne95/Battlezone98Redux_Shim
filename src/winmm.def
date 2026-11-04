@@ -297,3 +297,4 @@ EXPORTS
     OpenShimGetGeometryContactStats
     OpenShimGetNetworkTrafficSnapshot
     OpenShimSetLegacyTankAiEnabled
+    OpenShimSetLegacyTankAiMode

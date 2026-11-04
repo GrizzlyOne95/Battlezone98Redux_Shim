@@ -316,3 +316,4 @@ OpenShimClearGeometryContact@0
 OpenShimGetGeometryContactStats@28
 OpenShimGetNetworkTrafficSnapshot@8
 OpenShimSetLegacyTankAiEnabled@4
+OpenShimSetLegacyTankAiMode@4

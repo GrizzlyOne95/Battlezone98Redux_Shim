@@ -2747,6 +2747,9 @@ namespace BZROpenShim
                 return token ? 0 : 1;
             if (setting.values == kShimSettingsUnitVoValues && BZROpenShim::BoolToken::TryParse(normalized, token))
                 return token ? 0 : 2;
+            // LegacyTankAi was a bool: old true/false values read as All teams/Off.
+            if (setting.values == kShimSettingsLegacyTankAiValues && BZROpenShim::BoolToken::TryParse(normalized, token))
+                return token ? 1 : 0;
 
             return setting.defaultIndex;
         }

@@ -79,10 +79,23 @@ namespace BZROpenShim
     bool SetLegacyTankAiEnabledFromBridge(bool enabled)
     {
         RetryDeferredRuntimeHooks();
-        g_LegacyTankAiEnabled = enabled;
+        g_LegacyTankAiEnabled = enabled ? 1 : 0;
         RefreshLegacyTankAiState();
         Log(L"[MISSIONHOOK] legacy tank AI override %hs (active=%hs)\n",
             enabled ? "enabled" : "disabled",
+            BoolText(g_LegacyTankAiActive));
+        return true;
+    }
+
+    bool SetLegacyTankAiModeFromBridge(int mode)
+    {
+        if (mode < 0 || mode > 2)
+            return false;
+        RetryDeferredRuntimeHooks();
+        g_LegacyTankAiEnabled = mode;
+        RefreshLegacyTankAiState();
+        Log(L"[MISSIONHOOK] legacy tank AI override mode %d (active=%hs)\n",
+            mode,
             BoolText(g_LegacyTankAiActive));
         return true;
     }
