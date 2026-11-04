@@ -1285,6 +1285,12 @@ namespace BZROpenShim
             const auto exact = g_hdManifest.materials.find(material);
             if (exact != g_hdManifest.materials.end())
                 return &exact->second;
+            // Ogre material names are case-insensitive, like the atlas names (terrain_native_hd.inl).
+            for (const auto& entry : g_hdManifest.materials)
+            {
+                if (_stricmp(entry.first.c_str(), material.c_str()) == 0)
+                    return &entry.second;
+            }
             const auto fallback = g_hdManifest.materials.find("*");
             return fallback != g_hdManifest.materials.end()
                 ? &fallback->second : nullptr;

@@ -398,7 +398,8 @@ bool InstallNativeTerrainHd()
             void* pass = g_ogre.getPass(technique, 0);
             if (!g_ogre.getNumTextureUnitStates(pass)) throw std::runtime_error("native HD source diffuse unavailable");
             const auto* name = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, 0));
-            if (!name || *name != binding->diffuseResource)
+            // Ogre resource names are case-insensitive; TRNs spell the atlas in either case.
+            if (!name || _stricmp(name->c_str(), binding->diffuseResource.c_str()) != 0)
                 throw std::runtime_error("native HD source atlas does not match pack: expected=" +
                     binding->diffuseResource + " actual=" + (name ? *name : "<unavailable>"));
         }
@@ -517,7 +518,7 @@ bool InstallNativeTerrainHd()
             {
                 if (!g_ogre.getNumTextureUnitStates(pass)) continue;
                 const auto* name = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, 0));
-                if (!name || *name != binding->diffuseResource) continue;
+                if (!name || _stricmp(name->c_str(), binding->diffuseResource.c_str()) != 0) continue;
             }
             const std::string vs = generate(g_ogre.getVertexProgram(pass), false);
             if (vs.empty()) continue;
@@ -530,7 +531,7 @@ bool InstallNativeTerrainHd()
                 if (g_ogre.getNumTextureUnitStates(pass) <= c + 2)
                     throw std::runtime_error("HD material pass has no guarded channel");
                 const auto* resource = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, uint16_t(c + 2)));
-                if (!resource || *resource != binding->channels[c].sourceResource)
+                if (!resource || _stricmp(resource->c_str(), binding->channels[c].sourceResource.c_str()) != 0)
                     throw std::runtime_error("HD material source identity mismatch: slot=" + std::to_string(c + 2) +
                         " expected=" + binding->channels[c].sourceResource + " actual=" + (resource ? *resource : "<missing>"));
             }
