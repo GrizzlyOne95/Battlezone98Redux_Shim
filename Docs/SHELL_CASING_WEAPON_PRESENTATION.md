@@ -1,5 +1,26 @@
 # Shared firing observer and per-weapon casings
 
+## Fitted craft ports (2026-11-04)
+
+Optional paired CraftClass keys `casingOffset<N> = "right up forward"` and
+`casingDirection<N> = "right up forward"` select the port position relative to
+the accepted native firing matrix and the local emission direction, slots
+1..5. Offset components must be finite and within +/-20 m; direction uses the
+same finite bounds and must have nonzero length. Direction is normalized by
+the physics helper. Both missing retain the stock estimated breech; an
+incomplete, malformed or zero-direction pair suppresses that slot's casing
+rather than ejecting from an unintended fallback point.
+
+Craft data is copied at the existing qualified ODF scope seam. The shot bridge
+only looks up the live class/name and unambiguous native weapon slot; no
+per-shot file reads or retained entity pointers are introduced. The craft
+observer also runs when ShellCasings alone is enabled. These keys do not
+enable brass for a weapon marked casingType none. Model authors should place
+the port outside the receiver/hull and point paired guns outboard: opposite
+local side signs, with enough separation to allow the emitted case radius
+and jitter. Case-sensitive resources and existing build/filter/pool guards
+are unchanged. Live placement still requires qualification on the target model.
+
 2026-10-21 development checkpoint. Live game testing remains pending.
 
 The registry now owns the two existing Cannon/MachineGun factory call patches

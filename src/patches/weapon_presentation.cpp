@@ -23,7 +23,8 @@ namespace BZROpenShim::WeaponPresentation
         return !clip.empty() && clip.size() <= 63 &&
             std::all_of(clip.begin(), clip.end(), [](unsigned char c) { return c >= 0x21 && c <= 0x7e; }) &&
             std::isfinite(length) && length > 0 && length <= 60 &&
-            std::isfinite(playbackRate) && playbackRate > 0 && playbackRate <= 50;
+            std::isfinite(playbackRate) && playbackRate > 0 && playbackRate <= 50 &&
+            std::isfinite(hold) && hold > 0 && hold <= 2;
     }
 
     bool MuzzleRenderConfig::Valid() const noexcept
@@ -199,6 +200,7 @@ namespace BZROpenShim::WeaponPresentation
         {
             AnimationBinding config;
             float time = 0;
+            float remainingHold = 0;
             size_t references = 0;
             bool active = false;
             bool dirty = false;
@@ -378,6 +380,8 @@ namespace BZROpenShim::WeaponPresentation
                 if (it != impl_->animations.end() && (it->second.config.length != request.animation->length ||
                     it->second.config.playbackRate != request.animation->playbackRate ||
                     it->second.config.cockpit != request.animation->cockpit ||
+                    it->second.config.spin != request.animation->spin ||
+                    it->second.config.hold != request.animation->hold ||
                     (it->second.references == 0 && it->second.presented)))
                 { impl_->weapons.erase(inserted.first); return std::nullopt; }
                 // Copy the key before incrementing references (allocation can throw).
@@ -485,7 +489,8 @@ namespace BZROpenShim::WeaponPresentation
             auto it = impl_->animations.find(*weapon->animation);
             if (it != impl_->animations.end())
             {
-                it->second.time = 0;
+                if (!it->second.config.spin || !it->second.active) it->second.time = 0;
+                it->second.remainingHold = it->second.config.hold;
                 it->second.active = true;
                 it->second.dirty = true;
                 result.recoilReset = true;
@@ -560,8 +565,20 @@ namespace BZROpenShim::WeaponPresentation
         {
             auto& anim = entry.second;
             if (!anim.active) continue;
-            anim.time = std::min(anim.config.length, anim.time + dt * anim.config.playbackRate);
-            anim.active = anim.time < anim.config.length;
+            const double next = static_cast<double>(anim.time) + static_cast<double>(dt) * anim.config.playbackRate;
+            if (anim.config.spin)
+            {
+                anim.remainingHold = std::max(0.0f, anim.remainingHold - dt);
+                // Return to the identical rest angle at a complete revolution.
+                // A new shot renews the hold without snapping the angular phase.
+                anim.active = anim.remainingHold > 0 || next < anim.config.length;
+                anim.time = anim.active ? static_cast<float>(std::fmod(next, anim.config.length)) : 0;
+            }
+            else
+            {
+                anim.time = static_cast<float>(std::min<double>(anim.config.length, next));
+                anim.active = anim.time < anim.config.length;
+            }
             anim.dirty = true;
         }
         for (auto& entry : impl_->recoils)

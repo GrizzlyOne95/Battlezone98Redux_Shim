@@ -34,6 +34,7 @@
 #include "shell_casing_policy.h"
 #include "shell_casing_finish.h"
 #include "weapon_presentation_call_bridges.h"
+#include "weapon_presentation_native.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -222,6 +223,9 @@ namespace BZROpenShim
             // ---- Shot capture (engine thread, inside Weapon::Simulate) -------
             struct PendingShot
             {
+                bool authoredPort = false;
+                Vec3 portOffset = {};
+                Vec3 portDirection = {};
                 LegacyMat3 matrix;
                 Vec3 shooterVelocity; // sim space
                 int shooterHandle;
@@ -929,6 +933,9 @@ namespace BZROpenShim
                 params.barrelLength = defaults.barrelLength;
                 params.speed = defaults.speed;
                 params.portUp = 0.5f * length;
+                params.authoredPort = shot.authoredPort;
+                params.portOffset = shot.portOffset;
+                params.portDirection = shot.portDirection;
                 const SC::EjectState eject = SC::ComputeEject(frame, params, SC::SimToRenderDir(shot.shooterVelocity),
                                                               g_Random.Signed(), g_Random.Signed(), g_Random.Signed());
                 const Vec3 noise = {g_Random.Signed() * kTuning.legacyNoise, g_Random.Signed() * kTuning.legacyNoise,
@@ -1177,6 +1184,12 @@ namespace BZROpenShim
                 }
                 if (!CopyMatrixSeh(matrix, shot.matrix))
                     return;
+                WeaponConvergence::Vec3 portOffset{}, portDirection{};
+                const int port = ResolveCraftCasingPort(weapon, ownerObj76, portOffset, portDirection);
+                if (port < 0) { ++g_StatFiltered; return; }
+                shot.authoredPort = port == 1;
+                shot.portOffset = {portOffset.x, portOffset.y, portOffset.z};
+                shot.portDirection = {portDirection.x, portDirection.y, portDirection.z};
                 shot.shooterHandle = 0;
                 shot.shooterVelocity = {0, 0, 0};
                 void* shooter = nullptr;

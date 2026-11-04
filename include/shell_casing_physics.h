@@ -273,6 +273,9 @@ namespace BZROpenShim
             float upWeight = 0.7f;
             float backWeight = 0.25f;
             float jitter = 0.2f;         // +- fraction of speed per axis
+            bool authoredPort = false;
+            Vec3 portOffset = {};
+            Vec3 portDirection = {1, 0.7f, -0.25f};
         };
 
         struct EjectState
@@ -294,6 +297,11 @@ namespace BZROpenShim
             out.position = Add(Add(frame.position, Scale(front, -back)), Scale(up, p.portUp));
             out.direction =
                 Normalize(Add(Add(Scale(right, p.sideWeight), Scale(up, p.upWeight)), Scale(front, -p.backWeight)), right);
+            if (p.authoredPort)
+            {
+                out.position = Add(frame.position, Add(Add(Scale(right, p.portOffset.x), Scale(up, p.portOffset.y)), Scale(front, p.portOffset.z)));
+                out.direction = Normalize(Add(Add(Scale(right, p.portDirection.x), Scale(up, p.portDirection.y)), Scale(front, p.portDirection.z)), right);
+            }
             const float speed = std::max(0.0f, p.speed);
             const Vec3 jitter = {r0 * p.jitter * speed, r1 * p.jitter * speed, r2 * p.jitter * speed};
             out.velocity = Add(Add(Scale(out.direction, speed), jitter), shooterVelocity);
