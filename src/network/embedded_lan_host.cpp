@@ -311,7 +311,11 @@ bool Host::Start(const std::string& ip, unsigned short port)
         Bind(impl->listener,SOCK_STREAM,ip,port);
         if (listen(impl->listener.value,16)) throw std::runtime_error("LAN listen failed");
         Bind(impl->probe,SOCK_DGRAM,ip,uint16_t(port+1));
-        Bind(impl->discovery,SOCK_DGRAM,"0.0.0.0",LanDiscovery::kPort);
+        // A loopback host serves only this machine, whose clients also query
+        // 127.0.0.1 directly; binding discovery there too keeps it off the
+        // network (and out of Windows Firewall prompts for the test fixture).
+        const bool loopback = ip.rfind("127.",0) == 0;
+        Bind(impl->discovery,SOCK_DGRAM,loopback ? ip : "0.0.0.0",LanDiscovery::kPort);
         impl->running=true; impl->worker=std::thread([this]{impl->Run();}); return true;
     }
     catch (const std::exception& e)
