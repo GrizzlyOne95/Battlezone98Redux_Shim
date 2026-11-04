@@ -454,6 +454,11 @@ namespace BZROpenShim
             void*, const std::string&, bool);
         using FnSetVertexProgramParameters = void(__thiscall*)(
             void*, OgreSharedPtr);
+        using FnFindNamedConstant = const void* (__thiscall*)(
+            void*, const std::string&, bool);
+        using FnSetNamedAutoConstantReal = void(__thiscall*)(
+            void*, const std::string&, int, float);
+        using FnCopyMatchingNamedConstants = void(__thiscall*)(void*, const void*);
         using FnGetStringReference = const std::string* (__thiscall*)(void*);
         using FnGetStringParameter = std::string* (__thiscall*)(
             void*, std::string*, const std::string&);
@@ -592,6 +597,9 @@ namespace BZROpenShim
             FnGetGpuProgramParameters getFragmentProgramParameters = nullptr;
             FnSetVertexProgram setFragmentProgram = nullptr;
             FnSetVertexProgramParameters setFragmentProgramParameters = nullptr;
+            FnFindNamedConstant findNamedConstant = nullptr;
+            FnSetNamedAutoConstantReal setNamedAutoConstantReal = nullptr;
+            FnCopyMatchingNamedConstants copyMatchingNamedConstants = nullptr;
             FnGetSingleton getRoot = nullptr;
             FnGetAutoCreatedWindow getAutoCreatedWindow = nullptr;
             FnWriteContentsToFile writeContentsToFile = nullptr;
@@ -1546,6 +1554,12 @@ namespace BZROpenShim
                 "?setFragmentProgram@Pass@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
             g_ogre.setFragmentProgramParameters = Resolve<FnSetVertexProgramParameters>(module,
                 "?setFragmentProgramParameters@Pass@Ogre@@QAEXV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@@Z");
+            g_ogre.findNamedConstant = Resolve<FnFindNamedConstant>(module,
+                "?_findNamedConstantDefinition@GpuProgramParameters@Ogre@@QBEPBUGpuConstantDefinition@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@_N@Z");
+            g_ogre.setNamedAutoConstantReal = Resolve<FnSetNamedAutoConstantReal>(module,
+                "?setNamedAutoConstantReal@GpuProgramParameters@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@W4AutoConstantType@12@M@Z");
+            g_ogre.copyMatchingNamedConstants = Resolve<FnCopyMatchingNamedConstants>(module,
+                "?copyMatchingNamedConstantsFrom@GpuProgramParameters@Ogre@@QAEXABV12@@Z");
             g_ogre.getRoot = Resolve<FnGetSingleton>(module,
                 "?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
             g_ogre.getAutoCreatedWindow = Resolve<FnGetAutoCreatedWindow>(module,

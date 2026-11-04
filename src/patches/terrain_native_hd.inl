@@ -66,9 +66,13 @@ void ResolveNativeHdApi()
         !g_ogre.findElementBySemantic || !g_ogre.programSupported ||
         !g_ogre.getFragmentProgram || !g_ogre.setFragmentProgram ||
         !g_ogre.getFragmentProgramParameters || !g_ogre.setFragmentProgramParameters ||
+        !g_ogre.findNamedConstant || !g_ogre.setNamedAutoConstantReal || !g_ogre.copyMatchingNamedConstants ||
         !TerrainHdApiAvailable())
         throw std::runtime_error("native HD APIs/restoration unavailable");
 }
+
+// GpuProgramParameters::ACT_TIME_0_X (enum order in OgreGpuProgramParams.h).
+constexpr int kAutoTime0X = 90;
 
 void CopyHdPrograms(void* destination, void* source,
     const std::string& vertex, const std::string& fragment)
@@ -81,8 +85,32 @@ void CopyHdPrograms(void* destination, void* source,
         get(source, &parameters);
         if (!parameters.rep || !parameters.info) throw std::runtime_error("native HD parameters unavailable");
         setProgram(destination, name, false);
-        if (!AddSharedReference(parameters)) throw std::runtime_error("native HD parameter handoff failed");
-        setParameters(destination, parameters);
+        // setProgram rebuilt the destination's parameters for the new program.
+        // A liquid pass keeps them, since only they can hold its time uniform,
+        // and takes the source's matching constants and autos by name; other
+        // passes take the source's set as is.
+        bool timed = false;
+        if (pixel)
+        {
+            OgreSharedPtr rebuilt;
+            get(destination, &rebuilt);
+            try
+            {
+                if (rebuilt.rep && g_ogre.findNamedConstant(rebuilt.rep, TerrainPaint::kTimeUniform, false))
+                {
+                    g_ogre.copyMatchingNamedConstants(rebuilt.rep, parameters.rep);
+                    g_ogre.setNamedAutoConstantReal(rebuilt.rep, TerrainPaint::kTimeUniform, kAutoTime0X, 4000.0f);
+                    timed = true;
+                }
+            }
+            catch (...) { ReleaseCloneHandoff(rebuilt); throw; }
+            ReleaseCloneHandoff(rebuilt);
+        }
+        if (!timed)
+        {
+            if (!AddSharedReference(parameters)) throw std::runtime_error("native HD parameter handoff failed");
+            setParameters(destination, parameters);
+        }
         ReleaseCloneHandoff(parameters);
         const auto* bound = (pixel ? g_ogre.getFragmentProgram : g_ogre.getVertexProgram)(destination);
         if (!bound || !bound->rep || *g_ogre.getResourceName(bound->rep) != name)
