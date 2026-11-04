@@ -52,9 +52,17 @@ charge6.odf). Levels 1–3 reach about 300 m.
 
 The charge fires only when the trigger is released (`ChargeGun::Simulate` line 42 is the
 not-firing branch; line 161 builds the ordnance; lines 170–172 reset to the empty level).
-No other 1.5 function references `ChargeGun::IsChargeFull`, `IsChargeReady` or `IsFiring`
-(grep of `BZ1\1.5\functions`). So the AI has no charge-aware release (an absence claim
-from the 1.5 build, UNVERIFIED in the Redux exe).
+
+The AI does have a charge release, in UnitTask::UpdateWeapon (an earlier version of this
+note said no AI code calls IsChargeFull; that was wrong):
+
+| Claim | Source |
+|---|---|
+| 1.5: the CHRG branch triggers while the charge is empty, stops triggering (so the charge fires) at the full level, and otherwise keeps charging only while a later level has a better damage-rate estimate | `BZ1\1.5\functions\0046\0046c63e_UnitTask_UpdateWeapon.c` lines 250, 251, 254–316, 374 |
+| Redux `FUN_00604130` (UpdateWeapon, entry `55 8B EC 81 EC 84 02 00 00`) has the same branch: IsFiring `FUN_005fce20`, hold on `!fire` (vfunc +8), IsChargeReady `FUN_005fcd90`, IsChargeFull at 595 (Ghidra labels it `ShouldReceiveNotifications`; `005fcdc0` compares +0xE4 with +0xEC), level loop in 0x2C steps up to and including the full level, trigger only if a later level scores higher | `FUN_00604130` lines 575, 579–581, 585–589, 595, 667–747, 749–751 |
+| The estimate ignores reach: no ordnance speed or lifespan is read in the loop | `FUN_00604130` lines 667–747 |
+| A failed fire cone also holds the charge (vfunc +8) | `FUN_00604130` lines 899–903 |
+| Callers include TurretAttack::DoState `FUN_005f8880` (vtable `0x008895B0` slot 12) and TurretBlastAttack::DoState `FUN_005f7cf0` (vtable `0x008896D4` slot 12) | Ghidra xrefs 0x005f8f42, 0x005f8f67, 0x005f7def; vtable data refs 0x008895e0, 0x00889704 |
 
 ## Fix (OpenShim, `AiOdfGameplayTuning`, single player)
 
@@ -76,9 +84,27 @@ gets `gmaggun` in its empty GC2 hardpoint.
 | 170 m, tuning on | `range=155.00->299.00` at the GiveWeapon frame; targets the svturr from T+11 and holds it to the end |
 | 190 m / 195 m, tuning on | same targeting; range cycles 299 → 290 → 263 → 186.5 → 299 as the MAG charges and fires |
 
-Open: the svturr took no damage in any run. At 190/195 m the turret charges to full and
-fires the 187.5 m shot, which cannot reach. At 170 m it holds full charge and never
-releases, because only an out-of-range target makes it let go. The tests did not check
-line of sight between the two turrets (UNVERIFIED). Making turrets release on the
-highest charge level that still reaches would be new trigger logic, beyond this
-range-cache fix.
+None of these first runs damaged the svturr, which was out of sight: the overlay then placed the
+turrets along the player's heading without checking terrain. The overlay now picks the
+heading (every 15°) whose muzzle-to-muzzle line, 2.5 m above each turret and sampled every
+2 m with `GetTerrainHeightAndNormal`, clears the terrain by the most, and logs each health
+drop as a HIT.
+
+| Run (line-of-sight checked) | Result |
+|---|---|
+| `-EnemyGap 170` (170.0 m), tuning on | clearance 3.4 m; 7 hits from T+12.9, then the killing shot; svturr destroyed at T+18.1 |
+| `-EnemyGap 210` (216.8 m in 3D; beyond the 187.5 m full-charge reach), tuning on | clearance 4.0 m; 8 hits from T+13.9, then the killing shot; destroyed at T+19.3 |
+
+(These runs logged only the health drops before the kill; the overlay now also counts the killing shot.)
+
+## Early release at the reaching level: tried, not needed
+
+A test hook on `FUN_00604130` lowered the ChargeGun's full level (+0xEC), for one call
+from a TurretAttack/TurretBlastAttack, to the highest level that reached the target
+(range = ordnance +0x50 lifespan × +0x54 speed − 1, as `FUN_00466890` lines 165–167 and
+CalcRange). At 216.8 m it ran only on `fire = 0` calls (64 of 64 traced), where stock
+holds the charge anyway. A build with the hook off gave the same hits at the same times
+(first hit T+13.87 vs T+13.88, destroyed T+19.26 in both). With a clear line of sight the
+stock damage-rate estimate already lets the charge go at a level that reaches, so the
+hook was dropped. The earlier "charges to full and falls short" reading came from the
+runs without line of sight, where the fire-cone hold kept charging.

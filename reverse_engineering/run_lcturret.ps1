@@ -1,13 +1,15 @@
-# Live test for the AI turret range refresh: loads the lcbench world with the
-# turretrange.lua overlay, which builds a friendly avturr and an enemy svturr
-# 190 m away, then gives the avturr a MAG cannon. Debug only; it deploys
+# Live test for the AI turret range refresh and MAG charge release: loads the
+# lcbench world with the turretrange.lua overlay, which builds a friendly avturr
+# and an enemy svturr EnemyGap m apart on the heading with the clearest
+# terrain line of sight (logged as LOS), then gives the avturr a MAG cannon and
+# logs each hit on the svturr. Debug only; it deploys
 # addon/lcbench/lcbench.lua and restores the prior file when the game exits.
 # Requires the lcbench baseline in addon\lcbench and the build deployed with
 # scripts/Deploy-OpenShim.ps1.
 #
-#   pwsh -File reverse_engineering/run_lcturret.ps1 -RunSeconds 45             # fix on
-#   pwsh -File reverse_engineering/run_lcturret.ps1 -RunSeconds 45 -TuningOff  # A/B: AiOdfGameplayTuning = 0
-#   pwsh -File reverse_engineering/run_lcturret.ps1 -RunSeconds 45 -EnemyGap 225  # low-charge (300 m) shots only
+#   pwsh -File reverse_engineering/run_lcturret.ps1 -RunSeconds 75             # fix on
+#   pwsh -File reverse_engineering/run_lcturret.ps1 -RunSeconds 75 -TuningOff  # A/B: AiOdfGameplayTuning = 0
+#   pwsh -File reverse_engineering/run_lcturret.ps1 -RunSeconds 75 -EnemyGap 225  # low-charge (300 m) shots only
 #
 # -TuningOff sets AiOdfGameplayTuning = 0 for the run and puts
 # openshim.ini back afterwards. Windowed is forced (BZR_FORCE_WINDOWED=1);
@@ -65,7 +67,7 @@ try {
     if ($RunSeconds -gt 0) {
         if (-not $process.WaitForExit($RunSeconds * 1000)) { Stop-BZRGame -Id $process.Id }
     } else {
-        Write-Host "Game running; the avturr gets its MAG cannon at T+3 s and the test ends at T+33 s."
+        Write-Host "Game running; the avturr gets its MAG cannon at T+3 s and the test ends at T+63 s."
         $process.WaitForExit()
     }
 } finally {
@@ -84,4 +86,4 @@ $watchdog = Join-Path $env:TEMP "bzr_foreground_watchdog.log"
 if ((Test-Path -LiteralPath $watchdog) -and (Select-String -LiteralPath $watchdog -Pattern "FOREGROUND-STOLEN" -Quiet)) {
     Write-Warning "FOREGROUND-STOLEN in $watchdog - stop launching and report."
 }
-Write-Host "Logs: $OutputRoot (look for [LCTURR] in BZLogger.txt and [AIODF] Turret range in openshim.log)"
+Write-Host "Logs: $OutputRoot (look for [LCTURR] in BZLogger.txt and [AIODF] Turret in openshim.log)"
