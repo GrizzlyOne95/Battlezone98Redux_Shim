@@ -561,7 +561,8 @@ bool InstallNativeTerrainHd()
         LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] shared native material installed source=\"%s\" passes=%zu meshes=%zu size=%ux%u slices=%u packedUV=exact",
             g_HdSourceMaterial.c_str(), g_HdPasses.size(), g_HdStreams.size(), g_proxy.hdWidth, g_proxy.hdHeight, g_proxy.hdSliceCount);
         if (g_HdPaint.enabled) LogShimA(LogLevel::Info, "terrain-hd",
-            "[TERRAIN-PAINT] four-layer diffuse installed weights=slice4 coordinates=native-world-XZ alpha=opaque");
+            "[TERRAIN-PAINT] %u-layer diffuse installed weights=%s coordinates=native-world-XZ alpha=opaque",
+            g_HdPaint.Layers(), g_HdPaint.Layers() == 8 ? "slice4+slice13" : "slice4");
         ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup); ReleaseCloneHandoff(array);
         for (auto& channel : channelArrays) ReleaseCloneHandoff(channel);
         return true;
