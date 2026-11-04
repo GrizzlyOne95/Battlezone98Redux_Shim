@@ -43,6 +43,9 @@ If one of them is missing something, fix it in that repository, or report the ga
 - **For a behavior/argument question:** begin with a small Frida trace or existing subsystem probe; graduate to cdb/x32dbg only when a breakpoint or exception context is necessary.
 - **For executable-version drift:** first compare PE identity, then use ghidriff; confirm any candidate correlation with bytes and runtime behavior before reusing it.
 - **For a screenshot of a live run:** set `OPENSHIM_FRAME_CAPTURE=1500,4000,8000` before launch. OpenShim writes those rendered world frames as `openshim_frame_NNNNN.png` next to the exe and logs `[FRAME-CAPTURE]`. It reads the Ogre render window back, so it works headless (session locked or disconnected) where `PrintWindow`/`CopyFromScreen` return black. Requires the DX11 renderer with the terrain-proxy Ogre exports resolved.
+  - The window size under `BZR_FORCE_WINDOWED=1` is not fixed. A short landscape window lets cockpit overlays such as the radar map cover the ground, so look at a frame before scoring it, and rerun if the view you need is hidden.
+- **Runtime logs** (`openshim.log` and the other logs) are in `<game>\logs\`, not next to the exe.
+- **Terrain pack builds** (`scripts/terrain-packs/build-world-packs.sh`) need `TRO_DIR` set to the extracted TRO campaign maps (normally `%USERPROFILE%\Documents\TerrainPaintOut\zfsmaps\tro_cam`). Without it, the build fails with "<map> has no CR, stock or TRO_DIR". Python steps that use PIL must run without `-I`, which hides user site-packages.
 - **For loading/filesystem/environment issues:** use ProcMon. Do not use static disassembly to infer a load path when a filtered capture can answer it directly.
 - **For unattended cdb crash capture (repeated harness runs):**
   - The game is 32-bit: use the x86 cdb (`bzr-cdb32.cmd`), or dumps and stacks come out wrong.
