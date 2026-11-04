@@ -420,6 +420,17 @@ namespace BZROpenShim::BootstrapFileIo
 
         PatchCreateFileHooksForModule(mainModule);
 
+        // The game truncates BZLogger.txt on launch; keep the last run's copy
+        // beside openshim.prev.log so a crash run survives one restart and
+        // reaches the troubleshooting bundle. Only the game rotates, as there.
+        char exePath[MAX_PATH] = {};
+        GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+        const char* exeName = std::strrchr(exePath, '\\');
+        exeName = exeName ? exeName + 1 : exePath;
+        if (_stricmp(exeName, "battlezone98redux.exe") == 0)
+            MoveFileExA(GetGameLogPath("BZLogger.txt").c_str(), GetGameLogPath("BZLogger.prev.txt").c_str(),
+                        MOVEFILE_REPLACE_EXISTING);
+
         // These logger paths are passed as immediate string pointers inside
         // the executable and bypass the Win32 imports above through the
         // statically linked runtime. Redirect the operands before the entry
