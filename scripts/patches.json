@@ -3492,6 +3492,42 @@
       "identity": "RTTI .?AVWingman@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98)"
     },
     {
+      "name": "HoverCraftVtable",
+      "address": "0x0087ABE4",
+      "kind": "data",
+      "identity": "RTTI .?AVHoverCraft@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98), inherited HoverCraft::UpdateWeaponAim"
+    },
+    {
+      "name": "APCVtable",
+      "address": "0x00875828",
+      "kind": "data",
+      "identity": "RTTI .?AVAPC@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98), inherited HoverCraft::UpdateWeaponAim"
+    },
+    {
+      "name": "MinelayerVtable",
+      "address": "0x0087D790",
+      "kind": "data",
+      "identity": "RTTI .?AVMinelayer@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98), inherited HoverCraft::UpdateWeaponAim"
+    },
+    {
+      "name": "SAVVtable",
+      "address": "0x00886BFC",
+      "kind": "data",
+      "identity": "RTTI .?AVSAV@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98), inherited HoverCraft::UpdateWeaponAim"
+    },
+    {
+      "name": "ScavengerVtable",
+      "address": "0x00886FE8",
+      "kind": "data",
+      "identity": "RTTI .?AVScavenger@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98), inherited HoverCraft::UpdateWeaponAim"
+    },
+    {
+      "name": "ArmoryVtable",
+      "address": "0x00875CB0",
+      "kind": "data",
+      "identity": "RTTI .?AVArmory@@ primary vtable; UpdateWeaponAim is slot 38 (+0x98), inherited HoverCraft::UpdateWeaponAim"
+    },
+    {
       "name": "TurretCraftVtable",
       "address": "0x00889380",
       "kind": "data",
