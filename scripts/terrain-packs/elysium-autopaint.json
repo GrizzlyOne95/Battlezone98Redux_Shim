@@ -302,6 +302,7 @@
       "member": "Rocky_Steppe_ulgmbhwn_8K_BaseColor.jpg",
       "matchMean": "crhd_elysium_el00sa0_d.dds",
       "contrast": 1.8,
+      "saturation": 0.25,
       "heightMeters": 0.4,
       "proceduralDetail": 0.4
     },
@@ -391,6 +392,7 @@
       "member": "Rocky_Steppe_ulgmbhwn_8K_BaseColor.jpg",
       "matchMean": "crhd_elysium_el11sa0_d.dds",
       "contrast": 1.2,
+      "saturation": 0.25,
       "heightMeters": 0.6,
       "proceduralDetail": 0.5,
       "gain": [
