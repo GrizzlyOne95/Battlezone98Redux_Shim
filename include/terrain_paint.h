@@ -470,10 +470,9 @@ float OpenShimPaintDot(OpenShimPaintMix m, float v[OPENSHIM_PAINT_LAYERS])
 #define OPENSHIM_PAINT_GEO_BASE OpenShimPaintGeometryAt(openShimHdUV, 0.0, float3(0, 1, 0), OPENSHIM_PAINT_VIEW_DEPTH)
 #define OPENSHIM_PAINT_TBN(n) cotangent_frame(n, vViewPosition.xyz, openShimHdUV)
 #endif
-// Liquid animation time: surfaceRainTime exists only in this pass form.
-#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
-#define OPENSHIM_PAINT_TIME surfaceRainTime
-#else
+// Liquid animation time: Specialize declares its own uniform for liquid (most
+// terrain programs have no surfaceRainTime); the HD bind feeds it time_0_x.
+#ifndef OPENSHIM_PAINT_TIME
 #define OPENSHIM_PAINT_TIME 0.0
 #endif
 #define OPENSHIM_PAINT_GEO OpenShimPaintAtTime(OPENSHIM_PAINT_GEO_BASE, OPENSHIM_PAINT_TIME)
@@ -895,6 +894,8 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
 #endif
 )HLSL";
     }
+    // Liquid passes read this uniform; the HD bind gives it time_0_x 4000.
+    constexpr const char* kTimeUniform = "openShimPaintTime";
     inline bool Specialize(std::string& source, bool pixel, const Config& config)
     {
         config.Validate();
@@ -945,12 +946,13 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             const bool parallax = config.parallax[0] > 0 && source.find("in float3 vViewPosition") != std::string::npos &&
                 source.find("in float vDepth") != std::string::npos;
             constants << "#define OPENSHIM_PAINT_PARALLAX " << (parallax ? 1 : 0) << "\n";
-            // Glow rides the emissive sum just before final lighting, in the
-            // pass that also has surfaceRainTime; a pass without it declines.
+            // Glow rides the emissive sum just before final lighting; a pass
+            // without that line declines.
             const bool liquid = config.liquid != std::array<float, 8>{};
             const std::string anchor = "    oColor.xyz = aerialSurface * surfaceTransmission";
             if (liquid && source.find(anchor) == std::string::npos) return false;
             constants << "#define OPENSHIM_PAINT_LIQUID " << (liquid ? 1 : 0) << "\n";
+            if (liquid) constants << "uniform float " << kTimeUniform << ";\n#define OPENSHIM_PAINT_TIME " << kTimeUniform << "\n";
             const auto vector = [&](const char* name, const float* v, int n) {
                 constants << "static const float" << n << " " << name << " = float" << n << "(";
                 for (int i = 0; i < n; ++i) constants << (i ? "," : "") << v[i];
