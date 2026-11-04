@@ -1346,6 +1346,7 @@ namespace BZROpenShim
         extern InlineDetour32 g_AttackTaskDoStateDetour;
         extern bool g_AttackTaskDoStateHookInstalled;
         extern bool g_LegacyTankAiActive;
+        extern bool g_LegacyTankAiAiTeamsOnly;
         extern bool g_CalcRangeCraftHookInstalled;
         extern std::unordered_map<uintptr_t, CombatKiteState> g_CombatKiteStateByObject;
         extern volatile long g_CombatKiteTraceBudget;
@@ -1487,7 +1488,8 @@ namespace BZROpenShim
         inline constexpr bool kSplinterUndeadFixEnabledDefault = true;
         inline constexpr float kSmartReticleRangeDefault = 500.0f;
         inline constexpr bool kConstructorRemoteBuildFixEnabledDefault = true;
-        inline constexpr bool kLegacyTankAiEnabledDefault = false;
+        // 0 = off, 1 = all teams, 2 = AI teams only (not the local player's team).
+        inline constexpr int kLegacyTankAiEnabledDefault = 0;
         inline constexpr bool kHowitzerUndeployedRetaliationFixEnabledDefault = true;
         // Master switch for the ODF-authored AI tuning keys (engageRangeAI,
         // weaponRangeMinAI, retargetPeriodAI, scrapPathingAI and friends).
@@ -1506,8 +1508,8 @@ namespace BZROpenShim
         inline constexpr bool kAiMultiProducerMakersDefault = true;
         inline constexpr char kUserConfigFixesSection[] = "Fixes";
         extern bool g_AiOdfGameplayTuningEnabled;
-        extern bool g_LegacyTankAiBaselineEnabled;
-        extern bool g_LegacyTankAiEnabled;
+        extern int g_LegacyTankAiBaselineEnabled;
+        extern int g_LegacyTankAiEnabled;
         extern bool g_HowitzerUndeployedRetaliationFixEnabled;
         extern bool g_TurretAimPitchEnabled;
         void RefreshTurretAimPitchState();

@@ -27,6 +27,8 @@ static const char* const kShimSettingsActionValues[] = { "Reset", "Confirm?" };
 // index 1 shows while it is running.
 static const char* const kShimSettingsBuildValues[] = { "Build", "Building..." };
 static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
+static const char* const kShimSettingsLegacyTankAiValues[] = { "0", "1", "2" };
+static const char* const kShimSettingsLegacyTankAiLabels[] = { "Off", "All teams", "AI teams only" };
 static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
 static const char* const kShimSettingsAutoSaveIntervalLabels[] = { "1 min", "2 min", "3 min", "5 min", "10 min" };
 static const char* const kShimSettingsUnderAttackValues[] = { "Normal", "Minimal", "None" };
@@ -559,12 +561,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     // ini-only. Each default index is what an ABSENT key does, which
     // is not the same as what a preset happens to ship.
     { "Legacy Tank AI", "SinglePlayer", "LegacyTankAi", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      kShimSettingsLegacyTankAiValues, kShimSettingsLegacyTankAiLabels, 3, 0,
       ShimSettingApplyGroup::GlobalImprovement,
       "1.4/TRO attack AI: units strafe around their target, and a unit shot while holding "
       "position retreats. For older missions balanced around the less aggressive AI. "
-      "Rocket tanks and turrets are unchanged. An ODF can opt out with legacyAI = 0. "
-      "Single player only." },
+      "Choose all teams or only AI teams (not yours). Rocket tanks and turrets are unchanged. "
+      "An ODF can opt out with legacyAI = 0. Single player only." },
     { "AI Howitzer Volley", "SinglePlayer", "AiWeaponMaskArtillery", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,

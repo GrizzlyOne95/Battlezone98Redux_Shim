@@ -2420,7 +2420,11 @@ AiOdfGameplayTuning = 0
 ; opt out with legacyAI = 0 (this option on).
 ;
 ; Changes stock content, so it never runs in a network game.
-; Accepted: boolean. Default: OFF.
+; 0 = off, 1 = every team, 2 = AI teams only (units on your own team keep
+; the stock AI). The team filter does not apply to ODF or EXU overrides.
+; true/false still read as 1/0.
+;
+; Accepted: 0, 1, 2. Default: 0 (OFF).
 ; Trace: OPENSHIM_TRACE_LEGACY_AI=1 (logs [LEGACY] state transitions)
 LegacyTankAi = 0
 

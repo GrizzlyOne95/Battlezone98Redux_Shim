@@ -521,7 +521,22 @@ namespace BZROpenShim
                 return true;
             // The global option covers every AttackTask user, as 1.4 did.
             // odfCfg is filled even when parsed is false (opt-out only).
-            return g_LegacyTankAiActive && !odfCfg.legacyAiOptOut;
+            if (!g_LegacyTankAiActive || odfCfg.legacyAiOptOut)
+                return false;
+            if (!g_LegacyTankAiAiTeamsOnly)
+                return true;
+            // Mode 2 skips the local player's team; an unreadable craft team
+            // counts as not the player's.
+            int playerTeam = 1;
+            if (g_BzrFn_GetPlayerHandle && g_BzrFn_GetTeamNum)
+            {
+                const int playerHandle = g_BzrFn_GetPlayerHandle();
+                const int team = playerHandle > 0 ? g_BzrFn_GetTeamNum(playerHandle) : 0;
+                if (team > 0)
+                    playerTeam = team;
+            }
+            const int craftTeam = GetGameObjectActualTeam(craft);
+            return craftTeam == INT_MIN || craftTeam != playerTeam;
         }
 
         static bool TryGetTaskState(uint8_t* taskBytes, int& outState, int& outNextState, float& outStartTime)
