@@ -132,9 +132,10 @@ namespace BZROpenShim
             return nullptr;
         }
 
-        bool g_LegacyTankAiBaselineEnabled = kLegacyTankAiEnabledDefault;
-        bool g_LegacyTankAiEnabled = kLegacyTankAiEnabledDefault;
+        int g_LegacyTankAiBaselineEnabled = kLegacyTankAiEnabledDefault;
+        int g_LegacyTankAiEnabled = kLegacyTankAiEnabledDefault;
         bool g_LegacyTankAiActive = false;
+        bool g_LegacyTankAiAiTeamsOnly = false;
         bool g_HowitzerUndeployedRetaliationFixEnabled =
             kHowitzerUndeployedRetaliationFixEnabledDefault;
         bool g_AiOdfGameplayTuningEnabled = kAiOdfGameplayTuningEnabledDefault;
@@ -262,7 +263,8 @@ namespace BZROpenShim
         void RefreshLegacyTankAiState()
         {
             g_LegacyTankAiActive =
-                g_LegacyTankAiEnabled && IsSinglePlayerSession();
+                g_LegacyTankAiEnabled != 0 && IsSinglePlayerSession();
+            g_LegacyTankAiAiTeamsOnly = g_LegacyTankAiEnabled == 2;
         }
 
         static void RevertLegacyTankAiToBaseline()
@@ -525,8 +527,18 @@ namespace BZROpenShim
                 g_AiWeaponMaskMinelayerEnabled = value;
 
             g_LegacyTankAiBaselineEnabled = kLegacyTankAiEnabledDefault;
-            if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "LegacyTankAi", value))
-                g_LegacyTankAiBaselineEnabled = value;
+            std::string legacyAiText;
+            if (TryGetUserConfigString(kUserConfigSinglePlayerSection, "LegacyTankAi", legacyAiText))
+            {
+                // 0/1/2 mode; true/false still read as 1/0 for older ini files.
+                if (legacyAiText == "0" || legacyAiText == "1" || legacyAiText == "2")
+                    g_LegacyTankAiBaselineEnabled = legacyAiText[0] - '0';
+                else if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "LegacyTankAi", value))
+                    g_LegacyTankAiBaselineEnabled = value ? 1 : 0;
+                else
+                    Log(L"[LEGACY] Ignoring invalid LegacyTankAi=%hs (expected 0, 1 or 2)\n",
+                        legacyAiText.c_str());
+            }
             g_LegacyTankAiEnabled = g_LegacyTankAiBaselineEnabled;
             RefreshLegacyTankAiState();
 
