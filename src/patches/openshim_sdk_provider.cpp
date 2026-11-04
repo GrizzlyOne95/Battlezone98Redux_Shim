@@ -145,6 +145,21 @@ extern "C" BOOL WINAPI OpenShimImpl_SetLegacyTankAiMode(int mode)
     return BZROpenShim::SetLegacyTankAiModeFromBridge(mode) ? TRUE : FALSE;
 }
 
+extern "C" BOOL WINAPI OpenShimImpl_SetAiFollowEngageEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetAiFollowEngageEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" BOOL WINAPI OpenShimImpl_SetAiDefendRefreshEnabled(BOOL enabled)
+{
+    return BZROpenShim::SetAiDefendRefreshEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
+}
+
+extern "C" BOOL WINAPI OpenShimImpl_SetAiHold(int handle, BOOL hold)
+{
+    return BZROpenShim::SetAiHoldFromBridge(handle, hold != FALSE) ? TRUE : FALSE;
+}
+
 extern "C" BOOL WINAPI OpenShimImpl_SetHowitzerVolleyEnabled(BOOL enabled)
 {
     return BZROpenShim::SetHowitzerVolleyEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
@@ -832,6 +847,9 @@ namespace
         .OpenShimImpl_GetNetworkTrafficSnapshot = OpenShimImpl_GetNetworkTrafficSnapshot,
         .OpenShimImpl_SetLegacyTankAiEnabled = OpenShimImpl_SetLegacyTankAiEnabled,
         .OpenShimImpl_SetLegacyTankAiMode = OpenShimImpl_SetLegacyTankAiMode,
+        .OpenShimImpl_SetAiFollowEngageEnabled = OpenShimImpl_SetAiFollowEngageEnabled,
+        .OpenShimImpl_SetAiDefendRefreshEnabled = OpenShimImpl_SetAiDefendRefreshEnabled,
+        .OpenShimImpl_SetAiHold = OpenShimImpl_SetAiHold,
     };
 
     // Designated initializers enforce order but not completeness: a slot left

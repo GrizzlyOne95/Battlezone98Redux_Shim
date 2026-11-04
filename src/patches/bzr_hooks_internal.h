@@ -1363,6 +1363,16 @@ namespace BZROpenShim
         bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         void InstallAiTuningHooksIfPossible();
 
+        // --- Native hold / defend / follow orders (ai_native_orders.cpp) -------
+        void InstallAiNativeOrdersHooksIfPossible();
+        void RefreshAiNativeOrdersState();
+        bool SetAiFollowEngageEnabled(bool enabled);
+        bool SetAiDefendRefreshEnabled(bool enabled);
+        bool SetAiHold(int handle, bool hold);
+        bool IsAiHeldCraft(void* craft);
+        bool IsAiHeldProcess(void* process);
+        void ResetAiNativeOrders();
+
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
         extern bool g_ApcAlliedTargetDeployFixEnabled;
         extern bool g_ApcAlliedTargetDeployFixInstalled;

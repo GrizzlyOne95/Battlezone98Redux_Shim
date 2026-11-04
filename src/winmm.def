@@ -298,3 +298,6 @@ EXPORTS
     OpenShimGetNetworkTrafficSnapshot
     OpenShimSetLegacyTankAiEnabled
     OpenShimSetLegacyTankAiMode
+    OpenShimSetAiFollowEngageEnabled
+    OpenShimSetAiDefendRefreshEnabled
+    OpenShimSetAiHold

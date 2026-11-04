@@ -100,6 +100,30 @@ namespace BZROpenShim
         return true;
     }
 
+    bool SetAiFollowEngageEnabledFromBridge(bool enabled)
+    {
+        RetryDeferredRuntimeHooks();
+        const bool inPlace = SetAiFollowEngageEnabled(enabled);
+        Log(L"[MISSIONHOOK] AI follow-as-formation %hs (in place=%hs)\n",
+            enabled ? "enabled" : "disabled", BoolText(inPlace));
+        return inPlace;
+    }
+
+    bool SetAiDefendRefreshEnabledFromBridge(bool enabled)
+    {
+        RetryDeferredRuntimeHooks();
+        const bool inPlace = SetAiDefendRefreshEnabled(enabled);
+        Log(L"[MISSIONHOOK] AI defend refresh %hs (in place=%hs)\n",
+            enabled ? "enabled" : "disabled", BoolText(inPlace));
+        return inPlace;
+    }
+
+    bool SetAiHoldFromBridge(int handle, bool hold)
+    {
+        RetryDeferredRuntimeHooks();
+        return SetAiHold(handle, hold);
+    }
+
     bool SetBomberAiRangeEnabledFromBridge(bool enabled)
     {
         // Bomber range is now part of AI ODF gameplay tuning; the export
@@ -242,6 +266,7 @@ namespace BZROpenShim
         RetryDeferredRuntimeHooks();
         g_LegacyTankAiEnabled = g_LegacyTankAiBaselineEnabled;
         RefreshLegacyTankAiState();
+        ResetAiNativeOrders();
         // Content render-profile requests are mission/session scoped: the
         // authoritative lifecycle seam clears them so an EXU override from one
         // mission can never leak into the shell or unrelated content.

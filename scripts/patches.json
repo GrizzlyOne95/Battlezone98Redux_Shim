@@ -5481,6 +5481,96 @@
       "address": "0x008871B4",
       "kind": "data",
       "identity": "ScavengerEnemy primary vtable (.?AVScavengerEnemy@@, derives ScavengerProcess); RTTI-verified at patch time."
+    },
+    {
+      "name": "DefendTaskVtable",
+      "address": "0x008785F4",
+      "kind": "data",
+      "identity": "RTTI .?AVDefendTask@@ vtable; slot 12 is DefendTask::DoState 0x004B1250 (thiscall, no args, void). RTTI-verified at patch time."
+    },
+    {
+      "name": "DefendTaskDoState",
+      "address": "0x004B1250",
+      "expected": "55 8B EC 83 EC 24 89 4D FC 8B 45 FC 8B 48 14 51",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) DefendTask::DoState (vtable 0x008785F4 slot 12): refreshes target obj [t+0x18] via GetObj([t+0x14]), then runs the state switch (2 goto, 3, 6 wander); sets next [t+0xC]. OpenShim wraps it for the opt-in Defend refresh. See Docs/NATIVE_HOLD_DEFEND_FOLLOW.md."
+    },
+    {
+      "name": "SitTaskVtable",
+      "address": "0x00889F50",
+      "kind": "data",
+      "identity": "RTTI .?AVSitTask@@ vtable; slot 12 is SitTask::DoState 0x00608630. RTTI-verified at patch time."
+    },
+    {
+      "name": "SitTaskDoState",
+      "address": "0x00608630",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 E1 9D FF FF 8B",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SitTask::DoState (vtable 0x00889F50 slot 12): calls UnitTask::DoSit 0x00602420 only. OpenShim wraps it so a held craft also runs the FollowTask fire block. See Docs/NATIVE_HOLD_DEFEND_FOLLOW.md."
+    },
+    {
+      "name": "AiFollowRangeConstantSite",
+      "address": "0x005833CA",
+      "expected": "F3 0F 10 05 20 2E 8A 00 F3 0F 11 41 6C",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) movss xmm0,[0x008A2E20] at 0x005833CA in OffensiveProcess::ChangesState (0x005833A0), followed by movss [ecx+0x6C],xmm0; its 4-byte absolute operand at 0x005833CE loads [0x008A2E20] = 15625.0 (125^2) and stores it to followRange [process+0x6C] for CMD_FOLLOW. The opt-in Follow-as-Formation toggle repoints the operand at [0x008A2498] (0.0) and restores it."
+    },
+    {
+      "name": "FollowTaskDoState",
+      "address": "0x004D3B80",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) FollowTask::DoState; its fire block at 0x004D3E49..0x004D3FD4 is the code the Hold SitTask hook re-implements. Identity only, never hooked."
+    },
+    {
+      "name": "AiFireBlockHelperGetEnemyWithin",
+      "address": "0x00463240",
+      "expected": "55 8B EC 81 EC 00 01 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) cdecl closest-enemy search (craft, float* range) returning the enemy or null, called at 0x004D3EA7 in the FollowTask fire block (add esp,8)."
+    },
+    {
+      "name": "AiFireBlockHelperCanFire",
+      "address": "0x00603AD0",
+      "expected": "55 8B EC 81 EC 90 04 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) UnitTask thiscall(task) returning bool, called at 0x004D3ED1 in the FollowTask fire block."
+    },
+    {
+      "name": "AiFireBlockHelperAimPoint",
+      "address": "0x004462D0",
+      "expected": "55 8B EC 83 EC 1C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) cdecl(Vec3* out, float, Vec3 by value) returning out, called at 0x004D3F1B in the FollowTask fire block (add esp,0x14)."
+    },
+    {
+      "name": "AiFireBlockHelperLookAt",
+      "address": "0x00607110",
+      "expected": "55 8B EC 83 EC 60 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) UnitTask::LookAtLocalPos thiscall(task, Vec3* outState, Vec3* point), callee cleans 8 bytes; called at 0x004D3F45 in the FollowTask fire block."
+    },
+    {
+      "name": "AiFireBlockHelperIsAimed",
+      "address": "0x00608460",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 78 10 00 75 04",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) UnitTask thiscall(task) returning bool, called at 0x004D3F4D in the FollowTask fire block; selects UpdateWeapon (false) or the 0x00608490/0x006084C0 pair (true)."
+    },
+    {
+      "name": "AiFireBlockHelperSpecialReady",
+      "address": "0x00608490",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 78 10 00 75 04",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) UnitTask thiscall(task) returning bool, called at 0x004D3FBA in the FollowTask fire block. Meaning UNVERIFIED."
+    },
+    {
+      "name": "AiFireBlockHelperSpecialFire",
+      "address": "0x006084C0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 78 10 00 75 02",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) UnitTask thiscall(task), called at 0x004D3FC9 in the FollowTask fire block when 0x00608490 answers true. Meaning UNVERIFIED."
+    },
+    {
+      "name": "AiFireBlockHelperMayHitFriends",
+      "address": "0x00462B60",
+      "expected": "55 8B EC 83 EC 64 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) cdecl(craft, float range, float 0.3, float 1.0) returning bool (friendly fire risk), called at 0x004D3F8F in the FollowTask fire block (add esp,0x10)."
+    },
+    {
+      "name": "AiFireBlockHelperUpdateWeapon",
+      "address": "0x00604130",
+      "expected": "55 8B EC 81 EC 84 02 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) UnitTask::UpdateWeapon thiscall(task, DWORD fire), callee cleans 4 bytes; called at 0x004D3FB0 in the FollowTask fire block."
     }
   ],
   "module_addresses": [
