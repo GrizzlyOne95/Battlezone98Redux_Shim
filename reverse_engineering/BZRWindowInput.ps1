@@ -44,6 +44,9 @@ public static class Native {
     public static string Title(IntPtr h) { var sb = new StringBuilder(256); GetWindowText(h, sb, 256); return sb.ToString(); }
 
     // PW_RENDERFULLCONTENT (2) captures DirectX swap chains on Windows 8.1+.
+    // Returns black or stale frames while the session is disconnected or the
+    // window is in the background; for evidence use OPENSHIM_FRAME_CAPTURE
+    // (AGENT_TOOLING.md), which reads back the Ogre render window.
     public static void Capture(IntPtr h, string path) {
         RECT r; GetClientRect(h, out r);
         using (var bmp = new Bitmap(Math.Max(1, r.R - r.L), Math.Max(1, r.B - r.T), PixelFormat.Format32bppArgb))
