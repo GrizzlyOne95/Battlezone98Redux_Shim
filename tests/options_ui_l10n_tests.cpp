@@ -205,7 +205,7 @@ static void CheckStockClassification()
     Check(stockKeys.size() + keepKeys.size() == rows, "every classified key is a registry row");
 }
 
-// Every registry row is on some category screen, and every category label is
+// Every registry row is on exactly one category screen, and every category label is
 // a registry row or a pseudo row. The runtime only logs a miss, so a new row
 // without a category entry ships unreachable.
 static void CheckCategoryCoverage()
@@ -227,7 +227,7 @@ static void CheckCategoryCoverage()
             const std::string row = category.rows[r];
             Check(registryLabels.count(row) || pseudoRows.count(row),
                   std::string(category.name) + " lists known row \"" + row + "\"");
-            listed.insert(row);
+            Check(listed.insert(row).second, "\"" + row + "\" is on only one screen");
         }
     }
     for (const std::string& label : registryLabels)
