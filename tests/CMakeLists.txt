@@ -189,6 +189,7 @@ openshim_add_test(hud_feedback_policy_tests STD 17 SOURCES hud_feedback_policy_t
 openshim_add_test(damage_indicator_policy_tests STD 17 SOURCES damage_indicator_policy_tests.cpp)
 openshim_add_test(contextual_hud_policy_tests STD 17 SOURCES contextual_hud_policy_tests.cpp)
 openshim_add_test(hud_ownership_policy_tests STD 17 SOURCES hud_ownership_policy_tests.cpp)
+openshim_add_test(frame_capture_size_tests STD 17 SOURCES frame_capture_size_tests.cpp)
 openshim_add_test(hud_color_policy_tests STD 17 SOURCES hud_color_policy_tests.cpp)
 openshim_add_test(hud_palette_policy_tests STD 17 SOURCES hud_palette_policy_tests.cpp)
 openshim_add_test(engine_flame_color_tests STD 17 SOURCES engine_flame_color_tests.cpp)

@@ -40,7 +40,10 @@ settings resume without reinstalling or tearing down another module's patches.
 - Native GOG 2.2.301 `isdfms06` logged independent acquisition through mask 0x1F
   and release to zero on exit. Read-only native tracing confirmed hull, ammo
   and weapon CALLs enter this provider's adapters while mask 0x1F is active.
-- Engine readback PNGs were captured, but the disconnected desktop clamped
-  their width to 604 pixels despite larger requested Ogre modes. These are
-  runtime evidence, not full-resolution visual acceptance. Constructor placement,
-  mission transitions and the Steam/Proton/Wine matrix remain to be qualified.
+- A disconnected desktop initially clamped PNG widths to 604 pixels despite
+  larger requested modes. The opt-in `OPENSHIM_FRAME_CAPTURE_SIZE` fix now produces
+  verified 2560x1440 native PNGs without camera/controller changes. The source rim
+  border follows the blue perimeter and stock status draws are absent behind
+  the EXU status ring. Its bounded parser has a separate host test (174 total).
+- Constructor placement, mission transitions and the Steam/Proton/Wine matrix
+  remain to be qualified.
