@@ -743,10 +743,22 @@ namespace BZROpenShim
         // pinned above, and ExitProcess ends the driver's threads before any
         // DLL detach. The rest of ~Root and the game's exit tail still run.
         // OPENSHIM_KEEP_D3D11_EXIT_TEARDOWN=1 leaves the stock teardown.
+        //
+        // The renderer's own static destructors still run at DLL detach, after
+        // ~Root has nulled the Root singleton. One static holds the last bound
+        // texture; when that is a render target, releasing it calls
+        // Root::getSingleton().getRenderSystem() on null. Clear that static
+        // here so the texture is leaked to the OS with the render system.
         static bool g_D3D11ExitTeardownSkipDone = false;
+        static volatile uint32_t* g_D3D11LastTextureStatic = nullptr;
 
         static void __fastcall SkipD3D11PluginUninstall(void* /*plugin*/, void* /*edx*/)
         {
+            if (g_D3D11LastTextureStatic)
+            {
+                g_D3D11LastTextureStatic[0] = 0;
+                g_D3D11LastTextureStatic[1] = 0;
+            }
             Log(L"[D3D11] Skipped render system teardown at exit (driver worker race guard)\n");
         }
 
@@ -769,10 +781,11 @@ namespace BZROpenShim
             if (!renderer)
                 return;  // DX9 or not loaded: nothing to guard.
 
-            uint32_t thunk = 0, body = 0;
+            uint32_t thunk = 0, body = 0, lastTextureDtor = 0;
             const HookEngine::EngineRow rows[] = {
                 {"D3D11PluginUninstallThunk", &thunk},
                 {"D3D11PluginUninstall", &body},
+                {"D3D11LastTextureStaticDtor", &lastTextureDtor},
             };
             if (!HookEngine::BindModuleRows("D3D11 exit teardown skip", renderer, rows))
                 return;
@@ -793,6 +806,18 @@ namespace BZROpenShim
                 Log(L"[D3D11] Exit teardown skip: rows do not match the renderer exports; left stock\n");
                 return;
             }
+
+            // The destructor reads the static's object word at +0x6 and its
+            // counted rep, the next word, at +0xE.
+            uint32_t lastTextureObject = 0, lastTextureRep = 0;
+            std::memcpy(&lastTextureObject, reinterpret_cast<const void*>(lastTextureDtor + 0x6), sizeof(lastTextureObject));
+            std::memcpy(&lastTextureRep, reinterpret_cast<const void*>(lastTextureDtor + 0xE), sizeof(lastTextureRep));
+            if (lastTextureRep != lastTextureObject + sizeof(uint32_t))
+            {
+                Log(L"[D3D11] Exit teardown skip: last texture static is not the expected pair; left stock\n");
+                return;
+            }
+            g_D3D11LastTextureStatic = reinterpret_cast<volatile uint32_t*>(lastTextureObject);
 
             DWORD oldProtect = 0;
             if (!VirtualProtect(reinterpret_cast<void*>(slot), 4, PAGE_READWRITE, &oldProtect))
