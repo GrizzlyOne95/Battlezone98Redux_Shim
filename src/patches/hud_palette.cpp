@@ -148,6 +148,8 @@ namespace BZROpenShim::HudPalette
         template<bool UnitHealth>
         void __cdecl UnitGauge(void* v, float ratio, const int* rect, uint32_t foreground, uint32_t empty)
         {
+            if (ContextualHud::ExternallyOwned(ContextualHud::Group::Commands))
+            {reinterpret_cast<Gauge>(g_gauge)(v,ratio,rect,foreground,empty);return;}
             const Settings s = Read();
             if (std::isfinite(ratio) && ratio >= 0)
             {

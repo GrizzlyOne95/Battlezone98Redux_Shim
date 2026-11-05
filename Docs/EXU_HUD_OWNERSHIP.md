@@ -14,10 +14,15 @@ uint32_t __cdecl OpenShimGetExternalHudOwnership();
 ```
 
 The setter accepts a complete mask and returns the resulting mask. Bits are
-hull=1, ammo=2, weapons=4, scrap=8 and radar=16. Zero releases all areas. Unknown
+hull=1, ammo=2, weapons=4, scrap=8, radar=16 and commands=32. Zero releases all areas. Unknown
 bits, unsupported game builds or unavailable draw adapters retain the preceding
 mask. Calls that install adapters must run on the mission update/frame thread.
 This is a single-consumer EXU contract, not a general multi-plugin arbiter.
+
+Command ownership yields palette overrides and fading while retaining the native
+command renderer, input, labels and menu sounds. EXU owns the replacement drawing
+and animation. OpenShim contains no BZ2 command/target renderer. The command bit
+is additive; older consumers using masks through 31 keep their existing behavior.
 
 EXU probes both the root bridge and actual provider capability. Older providers
 retain EXU's expected-byte-checked fallback. The coordinated path uses OpenShim's
