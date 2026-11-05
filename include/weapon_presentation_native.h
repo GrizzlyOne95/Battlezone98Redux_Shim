@@ -1,4 +1,5 @@
 #pragma once
+#include "weapon_convergence.h"
 
 namespace BZROpenShim::Hooks
 {
@@ -11,4 +12,7 @@ namespace BZROpenShim::Hooks
     void WeaponPresentationNativeSceneBegin() noexcept;
     void WeaponPresentationNativeSceneComplete() noexcept;
     bool WeaponPresentationNativeThreadAllowed() noexcept;
+    // 0 absent, 1 fitted port, -1 malformed/ambiguous authored port (suppress).
+    int ResolveCraftCasingPort(void* weapon, void* ownerObj76,
+        WeaponConvergence::Vec3& offset, WeaponConvergence::Vec3& direction) noexcept;
 }

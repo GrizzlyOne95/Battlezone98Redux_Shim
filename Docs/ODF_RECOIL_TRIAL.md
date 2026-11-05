@@ -1,5 +1,23 @@
 # ODF recoil trial
 
+## Sustained barrel spin (2026-11-04)
+
+An authored EXU world/cockpit clip can be a complete rotation instead of a
+translation. Set `recoilAnimation<N>`, `recoilCockpit<N> = true`,
+`recoilSpin<N> = true`, and `recoilHold<N> = 0.15` in CraftClass. The hold is
+seconds of simulation time after the last accepted shot (greater than zero,
+at most two). Repeated shots renew the hold without resetting angular phase;
+after the hold the current revolution completes at its rest angle. Pause,
+session changes, scene/weapon lifetime and ownership use the existing recoil
+controller and EXU restoration path. Default non-spin clips still restart on
+each accepted shot. Author a cyclic 0..360-degree clip with quarter-turn keys
+and identical end/rest geometry; use independent clips for independent guns.
+This uses the existing `EXU_OdfRecoilAnimation` bridge, with no new Lua polling.
+Authored helpers must stay below their original aiming/deployment drivers.
+
+Build and host tests do not establish native visual acceptance, other weapon
+producer coverage, Steam/Proton/Wine, or multiplayer support.
+
 2026-10-21 inventory follow-up: CR `Docs/WEAPON_PRESENTATION_ROLLOUT.md` maps
 159 combat carriers plus 15 armory suppliers, 61 models and 330 weapon slots.
 Its generated CSV records exact hardpoints/parents, cockpit markers, clips,

@@ -88,6 +88,7 @@ namespace BZROpenShim::Hooks
         bool g_InstallAttempted = false;
         std::atomic<bool> g_ClassReady{ false };
         uint32_t g_WeaponScopeSite = 0;
+        uint32_t g_CraftScopeSite = 0;
         std::atomic<bool> g_ThreadMismatchLogged{ false };
         volatile LONG g_EngineThread = 0;
         size_t g_SceneDepth = 0;
@@ -174,6 +175,9 @@ namespace BZROpenShim::Hooks
             float distance = WP::kRecoilKick;
             float returnSpeed = WP::kRecoilReturnSpeed;
             std::optional<WeaponConvergence::Vec3> flashOffset; // craft override, valid only
+            std::optional<WeaponConvergence::Vec3> casingOffset;
+            std::optional<WeaponConvergence::Vec3> casingDirection;
+            bool casingPresent = false;
             std::optional<float> kick; // craft recoilKick<N> override, valid only
             bool cockpit = true; // recoilCockpit<N>; malformed = off
         };
@@ -368,7 +372,7 @@ namespace BZROpenShim::Hooks
 
         void __cdecl ObserveCraftClass(void* scope, void* objectClass) noexcept
         {
-            if (!g_Ready || !EngineThread() || !scope || !objectClass) return;
+            if (!(g_Ready || g_ClassReady) || !EngineThread() || !scope || !objectClass) return;
             g_CraftClasses.erase(objectClass);
             try
             {
@@ -443,7 +447,18 @@ namespace BZROpenShim::Hooks
                     slot.distance = readNumber("recoilDistance", WP::kRecoilKick);
                     slot.returnSpeed = readNumber("recoilReturn", WP::kRecoilReturnSpeed);
                     slot.animation.playbackRate = readNumber("recoilPlaybackRate", 1);
+                    slot.animation.hold = readNumber("recoilHold", 0.15f);
                     char value[kMaxValueBytes] = {};
+                    if (readKey("recoilSpin" + suffix, value) != ValueStatus::Missing)
+                    {
+                        const auto flag = Policy::CockpitFlag(Policy::Trim(value));
+                        if (!flag) slot.animation.playbackRate = 0;
+                        else slot.animation.spin = *flag;
+                    }
+                    if (readKey("casingOffset" + suffix, value) != ValueStatus::Missing)
+                    { slot.casingPresent = true; slot.casingOffset = Policy::Offset(value); }
+                    if (readKey("casingDirection" + suffix, value) != ValueStatus::Missing)
+                    { slot.casingPresent = true; slot.casingDirection = Policy::Offset(value); }
                     if (readKey("recoilName" + suffix, value) == ValueStatus::Present)
                     {
                         const auto name = Policy::Name(value);
@@ -1244,14 +1259,18 @@ namespace BZROpenShim::Hooks
         bool InstallCasingClassObserver()
         {
             const uint32_t site = HookEngine::ResolveNamedAddress("WeaponPresentation::WeaponClassPopCall");
+            const uint32_t craft = HookEngine::ResolveNamedAddress("WeaponPresentation::CraftClassPopCall");
             const uint32_t pop = HookEngine::ResolveNamedAddress("WeaponPresentation::PopScope");
             const uint32_t raw = HookEngine::ResolveNamedAddress("WeaponPresentation::RawGet");
-            if (!site || !pop || !raw || HookEngine::ResolveRelCallTarget(site) != reinterpret_cast<void*>(pop)) return false;
+            if (!site || !craft || !pop || !raw || HookEngine::ResolveRelCallTarget(site) != reinterpret_cast<void*>(pop) ||
+                HookEngine::ResolveRelCallTarget(craft) != reinterpret_cast<void*>(pop)) return false;
             g_RawGet = reinterpret_cast<RawGet>(raw);
-            Bridges::Configure(nullptr, reinterpret_cast<Bridges::PopScope>(pop), nullptr, ObserveWeaponClass, nullptr);
+            Bridges::Configure(nullptr, reinterpret_cast<Bridges::PopScope>(pop), nullptr, ObserveWeaponClass, ObserveCraftClass);
             // Configure must retain the already-qualified shared factory.
             if (!ReplaceCall(site, reinterpret_cast<void*>(Bridges::WeaponClassScopePopBridge), reinterpret_cast<void*>(pop))) return false;
             g_WeaponScopeSite = site;
+            if (!ReplaceCall(craft, reinterpret_cast<void*>(Bridges::CraftClassScopePopBridge), reinterpret_cast<void*>(pop))) return false;
+            g_CraftScopeSite = craft;
             g_ClassReady = true;
             return true;
         }
@@ -1269,7 +1288,7 @@ namespace BZROpenShim::Hooks
             const uint32_t machineFire = Bridges::ShotSite(true);
             const uint32_t weaponPop = g_WeaponScopeSite ? g_WeaponScopeSite :
                 HookEngine::ResolveNamedAddress("WeaponPresentation::WeaponClassPopCall");
-            const uint32_t craftPop = HookEngine::ResolveNamedAddress("WeaponPresentation::CraftClassPopCall");
+            const uint32_t craftPop = g_CraftScopeSite ? g_CraftScopeSite : HookEngine::ResolveNamedAddress("WeaponPresentation::CraftClassPopCall");
             const uint32_t factory = HookEngine::ResolveNamedAddress("WeaponPresentation::OrdnanceFactory");
             const uint32_t pop = HookEngine::ResolveNamedAddress("WeaponPresentation::PopScope");
             const uint32_t rawGet = HookEngine::ResolveNamedAddress("WeaponPresentation::RawGet");
@@ -1282,7 +1301,8 @@ namespace BZROpenShim::Hooks
                 HookEngine::ResolveRelCallTarget(machineFire) != GetShellCasingShotBridgeAddress() ||
                 HookEngine::ResolveRelCallTarget(weaponPop) != (g_ClassReady ?
                     reinterpret_cast<void*>(Bridges::WeaponClassScopePopBridge) : reinterpret_cast<void*>(pop)) ||
-                HookEngine::ResolveRelCallTarget(craftPop) != reinterpret_cast<void*>(pop)) return false;
+                HookEngine::ResolveRelCallTarget(craftPop) != (g_CraftScopeSite ?
+                    reinterpret_cast<void*>(Bridges::CraftClassScopePopBridge) : reinterpret_cast<void*>(pop))) return false;
             g_RawGet = reinterpret_cast<RawGet>(rawGet);
             g_RenderFind = reinterpret_cast<RenderFind>(find);
             g_RenderUpdate = reinterpret_cast<RenderUpdate>(update);
@@ -1310,7 +1330,8 @@ namespace BZROpenShim::Hooks
                     modelBytes, sizeof(modelBytes))) return false;
             g_ModelPose = reinterpret_cast<ModelPose>(g_ModelDetour.trampoline);
             if ((!g_ClassReady && !ReplaceCall(weaponPop, reinterpret_cast<void*>(Bridges::WeaponClassScopePopBridge), reinterpret_cast<void*>(pop))) ||
-                !ReplaceCall(craftPop, reinterpret_cast<void*>(Bridges::CraftClassScopePopBridge), reinterpret_cast<void*>(pop))) return false;
+                (!g_CraftScopeSite && !ReplaceCall(craftPop, reinterpret_cast<void*>(Bridges::CraftClassScopePopBridge), reinterpret_cast<void*>(pop)))) return false;
+            g_CraftScopeSite = craftPop;
             g_ClassReady = true;
             g_Ready = true;
             return true;
@@ -1423,5 +1444,30 @@ namespace BZROpenShim::Hooks
     bool WeaponPresentationNativeThreadAllowed() noexcept
     {
         return !g_Ready || EngineThread();
+    }
+
+    int ResolveCraftCasingPort(void* weapon, void* ownerObj76,
+        WeaponConvergence::Vec3& offset, WeaponConvergence::Vec3& direction) noexcept
+    {
+        if (!g_ClassReady || !EngineThread() || !weapon || !ownerObj76) return 0;
+        void* owner = nullptr; void* objectClass = nullptr; void* carrier = nullptr;
+        if (!TryGetGameObjectFromObj76(ownerObj76, owner) || !owner || !ReadObjectClass(owner, objectClass) ||
+            !Read(owner, kCarrier, carrier) || !carrier) return 0;
+        const auto config = g_CraftClasses.find(objectClass);
+        uint64_t name = 0;
+        if (config == g_CraftClasses.end() || !Read(objectClass, kObjectClassName, name) || name != config->second.name) return 0;
+        const RecoilSlot* selected = nullptr;
+        for (size_t i = 0; i < 5; ++i)
+        {
+            void* candidate = nullptr;
+            if (!Read(carrier, kCarrierSlots + i * sizeof(void*), candidate)) return -1;
+            if (candidate == weapon)
+            { if (selected) return -1; selected = &config->second.slots[i]; }
+        }
+        if (!selected || !selected->casingPresent) return 0;
+        if (!selected->casingOffset || !selected->casingDirection) return -1;
+        offset = *selected->casingOffset; direction = *selected->casingDirection;
+        const float norm = direction.x*direction.x + direction.y*direction.y + direction.z*direction.z;
+        return norm > 1e-6f && std::isfinite(norm) ? 1 : -1;
     }
 }

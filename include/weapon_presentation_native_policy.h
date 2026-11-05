@@ -289,8 +289,9 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
     }
 
     constexpr size_t kCraftSlots = 5;
-    constexpr std::array<std::string_view, 8> kCraftSlotKeys = {"recoilDistance", "recoilReturn",
-        "recoilPlaybackRate", "recoilName", "flashOffset", "recoilKick", "recoilAnimation", "recoilCockpit"};
+    constexpr std::array<std::string_view, 12> kCraftSlotKeys = {"recoilDistance", "recoilReturn",
+        "recoilPlaybackRate", "recoilName", "flashOffset", "recoilKick", "recoilAnimation", "recoilCockpit",
+        "recoilSpin", "recoilHold", "casingOffset", "casingDirection"};
 
     // Slots that inherit the base ODF's keys: the loading ODF has no
     // presentation key for the slot and both name the same weaponHardN.

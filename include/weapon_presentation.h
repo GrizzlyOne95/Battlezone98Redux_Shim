@@ -111,6 +111,8 @@ namespace BZROpenShim::WeaponPresentation
         float length = 0.0f;
         float playbackRate = 1.0f;
         bool cockpit = true;
+        bool spin = false; // maintain phase while accepted shots renew the hold
+        float hold = 0.15f;
         bool Valid() const noexcept;
     };
 
