@@ -5654,6 +5654,15 @@
       "rva": "0x000472A0",
       "expected": "56 8B F1 8B 4E 04 85 C9 74 06 8B 01 6A 01 FF 10 C7 46 04 00 00 00 00 5E C3",
       "identity": "D3D11Plugin::uninstall body: if (mRenderSystem) delete mRenderSystem (scalar deleting dtor, vtable slot 0, arg 1); mRenderSystem = 0. The deleted D3D11RenderSystem's shutdown releases the device while the NVIDIA driver worker thread can still use it (exit crash in nvwgf2um)."
+    },
+    {
+      "name": "D3D11LastTextureStaticDtor",
+      "module": "RenderSystem_Direct3D11.dll",
+      "time_date_stamp": "0x586F03D3",
+      "size_of_image": "0x000F3000",
+      "rva": "0x0009E9E0",
+      "expected": "55 8B EC 51 83 3D ?? ?? ?? ?? 00 74 31 A1 ?? ?? ?? ?? 83 C9 FF 83 C0 14 F0 0F C1 08 49 75 1F",
+      "identity": "atexit destructor of the function-local static shared pointer in the function at RVA 0x58EF0 (this, stage, enabled, texture), which registers it at RVA 0x58F30 and stores the last bound texture in it at RVA 0x58F92. Its object and counted-rep words are the abs32 operands at +0x6 and +0xE. Every logged exit crash at OgreMain+0x3883C0 runs through this destructor at DLL detach."
     }
   ],
   "globals": [
