@@ -1,3 +1,4 @@
+#include "ogre_shader_cache.h"
 #include "terrain_proxy.h"
 #include "hook_engine.h"
 #include "engine_globals.h"
@@ -6044,6 +6045,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
         catch (...)
         {
+            LogShimA(LogLevel::Warn, "terrain-proxy",
+                "[FRAME-CAPTURE] frame=%u write failed; capture off", renderFrames);
             state = 2;
         }
     }
