@@ -359,17 +359,21 @@ RWStructuredBuffer<float4> testResults : register(u0);
             const std::string tail = "  return diffuseMap.Sample(";
             liquidSource.replace(liquidSource.find(tail), tail.size(),
                 "  float3 emissiveContribution = 0, aerialSurface = 1, surfaceTransmission = 1; float4 oColor = 0;\n"
-                "    oColor.xyz = aerialSurface * surfaceTransmission + emissiveContribution;\n" + tail);
+                "    oColor.xyz = aerialSurface * surfaceTransmission + emissiveContribution;\n  oTarget = diffuseMap.Sample(");
+            const std::string signature = "float4 PixelMain(";
+            liquidSource.replace(liquidSource.find(signature), signature.size(), "void terrain_fragment(out float4 oTarget : SV_TARGET, ");
+            const std::string target = ") : SV_TARGET";
+            liquidSource.replace(liquidSource.find(target), target.size(), ")");
             const std::string slice = "float openShimTileSlice : TEXCOORD10";
             liquidSource.replace(liquidSource.find(slice), slice.size(), slice + ", in float vDepth : TEXCOORD5, in float3 vViewPosition : TEXCOORD4");
             check(TerrainPaint::Specialize(liquidSource, true, lava) &&
                 liquidSource.find("#define OPENSHIM_PAINT_LIQUID 1") != std::string::npos, "liquid PS specialization failed");
-            check(liquidSource.find(std::string("uniform float ") + TerrainPaint::kTimeUniform + ";") != std::string::npos &&
+            check(liquidSource.find(std::string("terrain_fragment(uniform float ") + TerrainPaint::kTimeUniform + ", ") != std::string::npos &&
                 liquidSource.find(std::string("#define OPENSHIM_PAINT_TIME ") + TerrainPaint::kTimeUniform) != std::string::npos,
-                "liquid PS lacks its time uniform");
+                "liquid PS lacks its time parameter");
             liquidSource = "#define IBL_ENABLED\n#define OSE_LINEAR_LIGHT_ACTIVE 1\n"
                 "float3 srgb_to_linear(float3 c) { return c * c; }\n" + frame + liquidSource;
-            compiled = D3DCompile(liquidSource.data(),liquidSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors);
+            compiled = D3DCompile(liquidSource.data(),liquidSource.size(),nullptr,nullptr,nullptr,"terrain_fragment","ps_4_0",0,0,&code,&errors);
             if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
             ok(compiled);
             Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
@@ -379,6 +383,10 @@ RWStructuredBuffer<float4> testResults : register(u0);
             auto* timeVariable = reflection->GetVariableByName(TerrainPaint::kTimeUniform);
             check(timeVariable && SUCCEEDED(timeVariable->GetDesc(&timeDesc)) && (timeDesc.uFlags & D3D_SVF_USED),
                 "liquid PS does not read its time uniform");
+            // A second buffer leaves the entry point's own uniforms at zero in game.
+            D3D11_SHADER_DESC liquidDesc{};
+            ok(reflection->GetDesc(&liquidDesc));
+            check(liquidDesc.ConstantBuffers == 1, "liquid PS time uniform opened a second constant buffer");
             const std::string liquidCompute = noDerivatives + liquidSource;
             compiled = D3DCompile(liquidCompute.data(),liquidCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
             if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());

@@ -533,7 +533,13 @@ bool InstallNativeTerrainHd()
                     channels[c] = g_HdChannelEnabled[c] && TerrainHdMaterial::HasDefine(defines, flags[c]);
                 programChannels.emplace(name, channels);
             }
-            ReleaseCloneHandoff(program); cache.emplace(key, name); return name;
+            ReleaseCloneHandoff(program); cache.emplace(key, name);
+            // This compile blocks the main thread for up to seconds, dozens of times on a
+            // cold cache: keep the window responsive and the finished work on disk, so
+            // a load the player gives up on doesn't start over.
+            { MSG pending; PeekMessageW(&pending, nullptr, 0, 0, PM_NOREMOVE); }
+            OgreShaderCacheTick();
+            return name;
         };
         for (uint16_t t = 0; t < g_ogre.getNumTechniques(backup.rep); ++t)
         for (uint16_t p = 0; p < g_ogre.getNumPasses(g_ogre.getTechnique(backup.rep, t)); ++p)
