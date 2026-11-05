@@ -5,7 +5,7 @@ using namespace BZROpenShim::HudOwnership;
 using OpenShimTest::Check;
 int main()
 {
-    // Wire ABI: independently releasable areas, no command/pilot-input ownership.
+    // Wire ABI: independently releasable presentation; native input stays owned.
     static_assert(Hull==1 && Ammo==2 && Weapons==4 && Scrap==8 && Radar==16 && Commands==32);
     for (uint32_t mask=0;mask<=All;++mask)
     {
@@ -20,6 +20,6 @@ int main()
         }
     }
     Check(!Valid(64) && !Valid(~0u),"unknown ownership bits are rejected");
-    Check(!Claimed(All,0),"commands and pilots have no external bit");
+    Check(!Claimed(All,0),"zero is not a presentation area");
     return OpenShimTest::ExitCode();
 }
