@@ -196,6 +196,21 @@ namespace
 
 int main()
 {
+    {
+        MuzzleFrame frame; EjectParams port; port.authoredPort = true; port.jitter = 0.2f;
+        for (float sign : {-1.0f, 1.0f})
+        {
+            port.portOffset = {sign * 0.4f, 0.1f, -0.2f};
+            port.portDirection = {sign, 0.35f, -0.1f};
+            for (float random : {-1.0f, 0.0f, 1.0f})
+            {
+                auto e = ComputeEject(frame, port, {}, random, -random, random);
+                Check(e.position.x * sign > 0.39f, "scout port must be outboard of its muzzle");
+                Check(e.velocity.x * sign > 0, "left/right scout casings must leave away from the hull, including jitter");
+                Check(Near(e.position.z, -0.2f), "authored port must replace estimated breech");
+            }
+        }
+    }
     TestEject();
     TestGroundNormal();
     TestBounce();

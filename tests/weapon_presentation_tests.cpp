@@ -1040,6 +1040,25 @@ namespace
 
 int main()
 {
+    {
+        FakeBackend backend; WP::Runtime runtime; Start(runtime, false, true);
+        auto request = Request();
+        request.animation = WP::AnimationBinding{"spin", 0.1f, 1.0f, true, true, 0.15f};
+        const auto token = Bind(runtime, request);
+        runtime.Fire(token, 1, WC::Identity());
+        runtime.BeginSimulationStep(1, 0.035f); runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0.035, "spin phase did not advance");
+        runtime.Fire(token, 2, WC::Identity()); runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0.035, "accepted shot reset minigun phase");
+        runtime.BeginSimulationStep(2, 0); runtime.SynchronizeVisuals(backend);
+        Near(backend.animationCalls.back().time, 0.035, "paused spin advanced");
+        runtime.BeginSimulationStep(3, 0.08f); runtime.SynchronizeVisuals(backend);
+        Require(backend.animationCalls.back().active, "sustained spin stopped too early");
+        Near(backend.animationCalls.back().time, 0.015, "spin did not wrap its revolution");
+        runtime.BeginSimulationStep(4, 0.2f); runtime.SynchronizeVisuals(backend);
+        Require(!backend.animationCalls.back().active, "idle minigun spin did not restore");
+        Near(backend.animationCalls.back().time, 0, "spin stopped at a non-rest phase");
+    }
     TestMeshFlashPolicyAndRuntime();
     TestMuzzleRenderAlongsideMesh();
     TestCraftFlashOffsetOverride();
