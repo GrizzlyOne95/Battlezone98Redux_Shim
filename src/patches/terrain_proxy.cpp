@@ -2,6 +2,7 @@
 #include "terrain_proxy.h"
 #include "hook_engine.h"
 #include "engine_globals.h"
+#include "frame_capture_size.h"
 
 #include "terrain_semantic.h"
 #include "terrain_proxy_backend_gate.h"
@@ -6051,6 +6052,50 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
     }
 
+    // Opt-in capture sizing runs inside the client, before rendering. Ogre's
+    // initial mode can still be clamped by a disconnected desktop's max-track
+    // limits even when OPENSHIM_UNCLAMP_WINDOW expands the work area.
+    static void MaybeResizeTestCaptureWindow()
+    {
+        static bool done=false;
+        if (done) return;
+        done=true;
+        std::string text;
+        if (!ReadEnvString("OPENSHIM_FRAME_CAPTURE_SIZE",text)) return;
+        const auto size=FrameCapture::ParseSize(text);
+        if (!size.width)
+        {
+            LogShimA(LogLevel::Warn,"terrain-proxy","[FRAME-CAPTURE] invalid client size; expected 320..7680x200..4320");
+            return;
+        }
+        const auto ogre=GetModuleHandleW(L"OgreMain.dll");
+        const auto dx11=GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
+        using Attribute=void(__thiscall*)(void*,const std::string&,void*);
+        const auto rootFn=ogre?Resolve<FnGetSingleton>(ogre,"?getSingletonPtr@Root@Ogre@@SAPAV12@XZ"):nullptr;
+        const auto windowFn=ogre?Resolve<FnGetAutoCreatedWindow>(ogre,"?getAutoCreatedWindow@Root@Ogre@@QAEPAVRenderWindow@2@XZ"):nullptr;
+        const auto attribute=dx11?Resolve<Attribute>(dx11,"?getCustomAttribute@D3D11RenderWindowHwnd@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@PAX@Z"):nullptr;
+        if (!rootFn || !windowFn || !attribute) return;
+        try
+        {
+            void* root=rootFn();
+            void* window=root?windowFn(root):nullptr;
+            HWND hwnd=nullptr;
+            if (window) attribute(window,std::string("WINDOW"),&hwnd);
+            DWORD process=0;
+            if (!hwnd || !GetWindowThreadProcessId(hwnd,&process) || process!=GetCurrentProcessId()) return;
+            RECT client{},outer{};
+            if (!GetClientRect(hwnd,&client) || !GetWindowRect(hwnd,&outer) || (GetWindowLongW(hwnd,GWL_STYLE)&WS_POPUP)) return;
+            const int width=size.width+(outer.right-outer.left)-(client.right-client.left);
+            const int height=size.height+(outer.bottom-outer.top)-(client.bottom-client.top);
+            const BOOL ok=SetWindowPos(hwnd,nullptr,0,0,width,height,
+                SWP_NOMOVE|SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOSENDCHANGING);
+            GetClientRect(hwnd,&client);
+            LogShimA(LogLevel::Info,"terrain-proxy","[FRAME-CAPTURE] client-size requested=%dx%d actual=%ldx%ld ok=%d",
+                size.width,size.height,client.right-client.left,client.bottom-client.top,ok?1:0);
+        }
+        catch (...) {LogShimA(LogLevel::Warn,"terrain-proxy","[FRAME-CAPTURE] client-size adjustment failed");}
+    }
+
     // Ogre::FrameListener, laid out to its vtable: frameStarted,
     // frameRenderingQueued, frameEnded, virtual destructor. Root fires
     // frameRenderingQueued once per frame after every target has rendered and
@@ -6058,7 +6103,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
     class FrameCaptureListener
     {
     public:
-        virtual bool frameStarted(const void*) { return true; }
+        virtual bool frameStarted(const void*) { MaybeResizeTestCaptureWindow(); return true; }
         virtual bool frameRenderingQueued(const void*)
         {
             MaybeCaptureTestFrame();

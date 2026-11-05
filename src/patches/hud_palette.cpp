@@ -49,12 +49,13 @@ namespace BZROpenShim::HudPalette
         uint32_t __cdecl HullColor(float ratio)
         {
             const uint32_t stock = reinterpret_cast<Hull>(g_hull)(ratio);
+            if (ContextualHud::ExternallyOwned(ContextualHud::Group::Hull)) return stock;
             return Health(Read(), ratio, stock);
         }
 
         void __cdecl GridDraw(void* viewport, void* grid)
         {
-            const auto color = Read()[Role::RadarGrid];
+            const auto color = ContextualHud::ExternallyOwned(ContextualHud::Group::Radar) ? std::optional<uint32_t>{} : Read()[Role::RadarGrid];
             uint32_t* slot = nullptr;
             uint32_t saved = 0;
             bool changed = false;
@@ -87,6 +88,7 @@ namespace BZROpenShim::HudPalette
 
         void __cdecl AmmoSprite(void* v, void* m, int id, int x, int y, int w, int h, uint32_t f, float z)
         {
+            if (ContextualHud::ExternallyOwned(ContextualHud::Group::Ammo)) return;
             const float previous = ContextualHud::BeginDraw(ContextualHud::Group::Ammo);
             __try { TintedSprite(v, m, id, x, y, w, h, f, z, Read()[Role::Ammo]); }
             __finally { ContextualHud::EndDraw(previous); }
@@ -94,6 +96,7 @@ namespace BZROpenShim::HudPalette
 
         void __cdecl BackgroundSprite(void* v, void* m, int id, int x, int y, int w, int h, uint32_t f, float z)
         {
+            if (ContextualHud::ExternallyOwned(ContextualHud::Group::Radar)) return;
             const int opacity = Read().radarBackgroundOpacity;
             std::optional<uint32_t> color;
             __try
@@ -115,6 +118,7 @@ namespace BZROpenShim::HudPalette
         uint32_t __fastcall ContactColor(void* object, void*)
         {
             const uint32_t stock = reinterpret_cast<Contact>(g_contact)(object);
+            if (ContextualHud::ExternallyOwned(ContextualHud::Group::Radar)) return stock;
             const Settings s = Read();
             if (!s[Role::RadarFriendly] && !s[Role::RadarEnemy] && !s[Role::RadarNeutral]) return stock;
             uint32_t result = stock;

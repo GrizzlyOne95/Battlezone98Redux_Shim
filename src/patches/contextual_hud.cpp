@@ -1,4 +1,5 @@
 #include "contextual_hud.h"
+#include "hud_ownership_policy.h"
 #include "hud_palette.h"
 #include "BZROpenShim.h"
 #include "bzr_hooks.h"
@@ -41,6 +42,7 @@ namespace BZROpenShim::ContextualHud
         bool g_read = false;
         std::atomic<bool> g_ready{false}, g_resources{false}, g_commandsReady{false}, g_metersReady{false}, g_radarReady{false};
         std::atomic<bool> g_keepCompass{false};
+        std::atomic<uint32_t> g_externalOwner{0};
         std::atomic<float> g_opacity[kGroups] = {1,1,1,1,1,1,1};
         thread_local float g_drawOpacity = 1;
         uint64_t g_retry = 0;
@@ -436,24 +438,28 @@ namespace BZROpenShim::ContextualHud
         void __cdecl TextDraw(void* v, int x, int y, float* w, float* h, const char* text,
             void* font, uint32_t color, int background, int mode, int alignX, int alignY)
         {
+            if (ExternallyOwned(Role)) return;
             const float previous = BeginDraw(Role);
             __try { reinterpret_cast<Text>(g_text)(v,x,y,w,h,text,font,color,background,mode,alignX,alignY); }
             __finally { EndDraw(previous); }
         }
         void __cdecl WeaponText(void* font, void* v, int x, int y, const char* text)
         {
+            if (ExternallyOwned(Group::Weapons)) return;
             const float previous = BeginDraw(Group::Weapons);
             __try { reinterpret_cast<Font>(g_font)(font,v,x,y,text); }
             __finally { EndDraw(previous); }
         }
         void __cdecl WeaponIcon(void* v, int id, int x, int y, uint32_t flags, float scale)
         {
+            if (ExternallyOwned(Group::Weapons)) return;
             const float previous = BeginDraw(Group::Weapons);
             __try { reinterpret_cast<Sprite>(g_sprite)(v,id,x,y,flags,scale); }
             __finally { EndDraw(previous); }
         }
         void __cdecl WeaponPlate(void* v, void* material, int id, int x, int y, int w, int h, uint32_t flags, float z)
         {
+            if (ExternallyOwned(Group::Weapons)) return;
             const float previous = BeginDraw(Group::Weapons);
             __try { reinterpret_cast<SizedSprite>(g_sizedSprite)(v,material,id,x,y,w,h,flags,z); }
             __finally { EndDraw(previous); }
@@ -461,18 +467,21 @@ namespace BZROpenShim::ContextualHud
 
         void __cdecl HullSprite(void* v, void* material, int id, int x, int y, int w, int h, uint32_t flags, float z)
         {
+            if (ExternallyOwned(Group::Hull)) return;
             const float previous = BeginDraw(Group::Hull);
             __try { reinterpret_cast<SizedSprite>(g_sizedSprite)(v,material,id,x,y,w,h,flags,z); }
             __finally { EndDraw(previous); }
         }
         void __cdecl AmmoText(void* font, void* v, int x, int y, const char* text)
         {
+            if (ExternallyOwned(Group::Ammo)) return;
             const float previous = BeginDraw(Group::Ammo);
             __try { reinterpret_cast<Font>(g_font)(font,v,x,y,text); }
             __finally { EndDraw(previous); }
         }
         void __cdecl AmmoMark(void* v, int x1, int y1, int x2, int y2, uint32_t color, uint32_t mode)
         {
+            if (ExternallyOwned(Group::Ammo)) return;
             const float previous = BeginDraw(Group::Ammo);
             __try { reinterpret_cast<Fill>(g_fill)(v,x1,y1,x2,y2,color,mode); }
             __finally { EndDraw(previous); }
@@ -615,10 +624,35 @@ namespace BZROpenShim::ContextualHud
     }
 
     bool ResourceDrawAdaptersNeeded() noexcept { return g_ready.load(std::memory_order_acquire) && g_resources.load(std::memory_order_relaxed); }
-    float RadarDrawOpacity() noexcept { return g_inRadar && g_radarFrame.active ? g_drawOpacity : 1; }
+    uint32_t ExternalOwnership() noexcept {return g_externalOwner.load(std::memory_order_acquire);}
+    bool ExternallyOwned(Group group) noexcept
+    {
+        using namespace HudOwnership;
+        const uint32_t bit=group==Group::Hull?Hull:group==Group::Ammo?Ammo:
+            group==Group::Weapons?Weapons:group==Group::Scrap?Scrap:group==Group::Radar?Radar:0;
+        return Claimed(ExternalOwnership(),bit);
+    }
+    uint32_t SetExternalOwnership(uint32_t mask)
+    {
+        const auto old=ExternalOwnership();
+        if (!HudOwnership::Valid(mask) || (mask && !IsCompatibleGameVersion())) return old;
+        if (mask==old) return old;
+        // Lua update/render thread only, like the existing HUD preference bridge.
+        HookEngine::FrameThreadSitesScope frameSites;
+        if (mask&(HudOwnership::Hull|HudOwnership::Ammo|HudOwnership::Weapons|HudOwnership::Scrap))
+        {
+            if (!Install()) return old;
+            if ((mask&(HudOwnership::Hull|HudOwnership::Ammo)) && !InstallMeters()) return old;
+        }
+        g_externalOwner.store(mask,std::memory_order_release);
+        Log(L"[HUD-OWNER] EXU presentation mask=0x%02X; OpenShim yields claimed draws, palette and fading\n",mask);
+        return mask;
+    }
+    float RadarDrawOpacity() noexcept { return !ExternallyOwned(Group::Radar) && g_inRadar && g_radarFrame.active ? g_drawOpacity : 1; }
     float BeginDraw(Group group) noexcept
     {
         const float previous = g_drawOpacity;
+        if (ExternallyOwned(group)) return previous;
         const bool meter = group == Group::Hull || group == Group::Ammo;
         if (g_ready.load(std::memory_order_acquire) && (!meter || g_metersReady.load(std::memory_order_acquire)) &&
             (group != Group::Radar || g_radarReady.load(std::memory_order_acquire)) && static_cast<size_t>(group) < kGroups)
@@ -666,6 +700,9 @@ namespace BZROpenShim::ContextualHud
     }
     void Tick()
     {
+        // A DLL disappearing without its normal Lua-close callback must not
+        // leave stock HUD areas suppressed in later missions.
+        if (ExternalOwnership() && !GetModuleHandleW(L"exu.dll")) SetExternalOwnership(0);
         // The HUD sites run on the frame thread only.
         HookEngine::FrameThreadSitesScope frameSites;
         if (!g_read) { ReloadConfig(); return; }
@@ -710,3 +747,19 @@ namespace BZROpenShim::ContextualHud
         ReleaseSRWLockExclusive(&g_lock);
     }
 }
+
+// Optional EXU-to-provider bridge. Exported by the actual plugin rather than
+// changing the stable loader SDK table. EXU probes this capability explicitly.
+extern "C" __declspec(dllexport) uint32_t __cdecl OpenShimSetExternalHudOwnership(uint32_t mask)
+{
+    try {return BZROpenShim::ContextualHud::SetExternalOwnership(mask);}
+    catch (...) {return BZROpenShim::ContextualHud::ExternalOwnership();}
+}
+extern "C" __declspec(dllexport) uint32_t __cdecl OpenShimGetExternalHudOwnership()
+{
+    return BZROpenShim::ContextualHud::ExternalOwnership();
+}
+#if defined(_M_IX86)
+#pragma comment(linker,"/EXPORT:OpenShimSetExternalHudOwnership=_OpenShimSetExternalHudOwnership")
+#pragma comment(linker,"/EXPORT:OpenShimGetExternalHudOwnership=_OpenShimGetExternalHudOwnership")
+#endif
