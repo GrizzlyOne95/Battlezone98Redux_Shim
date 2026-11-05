@@ -629,7 +629,7 @@ namespace BZROpenShim::ContextualHud
     {
         using namespace HudOwnership;
         const uint32_t bit=group==Group::Hull?Hull:group==Group::Ammo?Ammo:
-            group==Group::Weapons?Weapons:group==Group::Scrap?Scrap:group==Group::Radar?Radar:0;
+            group==Group::Weapons?Weapons:group==Group::Scrap?Scrap:group==Group::Radar?Radar:group==Group::Commands?Commands:0;
         return Claimed(ExternalOwnership(),bit);
     }
     uint32_t SetExternalOwnership(uint32_t mask)
@@ -639,6 +639,7 @@ namespace BZROpenShim::ContextualHud
         if (mask==old) return old;
         // Lua update/render thread only, like the existing HUD preference bridge.
         HookEngine::FrameThreadSitesScope frameSites;
+        if ((mask&HudOwnership::Commands) && (!Install() || !InstallCommand())) return old;
         if (mask&(HudOwnership::Hull|HudOwnership::Ammo|HudOwnership::Weapons|HudOwnership::Scrap))
         {
             if (!Install()) return old;
