@@ -167,12 +167,18 @@ int main(int argc, char** argv)
             full.find("#define OPENSHIM_PAINT_MATERIAL 1") != std::string::npos &&
             full.find("#define OPENSHIM_PAINT_LAYERS 4") != std::string::npos, "material paint specialization incomplete");
         // The glow is injected before the final colour line, only for liquid packs and only where it exists.
-        const std::string anchored = pixelSource + "    oColor.xyz = aerialSurface * surfaceTransmission + 1;\n";
-        std::string solid = anchored, wet = anchored, wetNoAnchor = pixelSource;
+        const std::string anchor = "    oColor.xyz = aerialSurface * surfaceTransmission + 1;\n";
+        const std::string entry = "void terrain_fragment(out float4 oTarget : SV_TARGET)\n{\n";
+        const std::string anchored = pixelSource + entry + anchor;
+        std::string solid = anchored, wet = anchored, wetNoAnchor = pixelSource + entry, wetNoEntry = pixelSource + anchor;
         check(TerrainPaint::Specialize(solid, true, material) && TerrainPaint::Specialize(wet, true, lava),
             "liquid PS specialization failed");
         check(solid.find("#define OPENSHIM_PAINT_LIQUID 0") != std::string::npos &&
-            solid.find("openShimPaintGlowColour = srgb_to_linear") == std::string::npos, "solid pack got the glow block");
+            solid.find("openShimPaintGlowColour = srgb_to_linear") == std::string::npos &&
+            solid.find("openShimPaintTime") == std::string::npos, "solid pack got the glow block or the time parameter");
+        check(!TerrainPaint::Specialize(wetNoEntry, true, lava), "liquid paint accepted a pass without the entry point");
+        check(wet.find("void terrain_fragment(uniform float openShimPaintTime, out float4 oTarget") != std::string::npos,
+            "liquid time is not an entry-point parameter");
         check(wet.find("#define OPENSHIM_PAINT_LIQUID 1") != std::string::npos &&
             wet.find("#if OPENSHIM_PAINT_LIQUID\n#if OSE_LINEAR_LIGHT_ACTIVE\n    openShimPaintGlowColour = srgb_to_linear(openShimPaintGlowColour);\n#endif\n"
                 "    emissiveContribution += openShimPaintGlowColour * openShimPaintGlowAmount;\n#endif\n    oColor.xyz = aerialSurface * surfaceTransmission") != std::string::npos &&
