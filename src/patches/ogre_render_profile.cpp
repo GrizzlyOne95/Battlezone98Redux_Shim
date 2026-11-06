@@ -3322,9 +3322,17 @@ namespace BZROpenShim::RenderProfiles
                 break;
             }
 
-            const Dx11Compat::VertexInputs inputs = ReadRenderableInputs(renderable);
-            void* const generated = RunDx11LegacyCompatLadder(
-                schemeName, material, lodIndex, config, techApi, inputs);
+            std::string missedMaterialName;
+            const bool skinningClone =
+                GuardedCopyResourceName(material, &missedMaterialName) &&
+                Dx11Compat::IsGpuSkinningClone(missedMaterialName);
+            void* generated = nullptr;
+            if (!skinningClone)
+            {
+                const Dx11Compat::VertexInputs inputs = ReadRenderableInputs(renderable);
+                generated = RunDx11LegacyCompatLadder(
+                    schemeName, material, lodIndex, config, techApi, inputs);
+            }
             if (generated == nullptr)
             {
                 DeclinedMiss entry;

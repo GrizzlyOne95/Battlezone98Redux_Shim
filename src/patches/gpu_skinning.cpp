@@ -22,8 +22,13 @@
 // An entity is switched only when every sub-entity converts and Ogre then
 // reports hardware animation enabled; otherwise its stock materials return.
 // A clone material rendered with CPU-blended vertices would transform them
-// twice, so converted entities are re-verified at the start of every frame,
-// before anything renders. Any fault latches the feature off for the process.
+// twice, so converted entities have their material names re-verified at the
+// start of every frame, before anything renders. Ogre's hardware answer is not
+// re-read there: it is cached per material scheme and the scheme active at that
+// moment can be one (glow) that is legitimately false. The render profile keeps
+// it true by never generating an unskinned technique on a clone
+// (Dx11Compat::IsGpuSkinningClone). Any fault latches the feature off for the
+// process.
 #include "gpu_skinning.h"
 
 #include "bzr_hooks_internal.h"
@@ -54,7 +59,7 @@ namespace BZROpenShim
         using Hooks::ResolveOgreProc;
 
         constexpr const char* kComponent = "gpu-skinning";
-        constexpr const char* kCloneRoot = "OpenShim/GpuSkin/";
+        constexpr const char* kCloneRoot = kGpuSkinCloneRoot;
         constexpr const char* kProgramRoot = "OpenShim/GpuSkinVP/";
         // SceneManager::setShadowTextureCasterMaterial target used by the exe.
         constexpr const char* kCasterMaterialName = "Ogre/DepthShadowmap/Caster/Float";

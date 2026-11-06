@@ -4,6 +4,9 @@
 
 namespace BZROpenShim
 {
+    // Name prefix of every material clone this feature creates.
+    constexpr const char* kGpuSkinCloneRoot = "OpenShim/GpuSkin/";
+
     // Hardware skinning for skeletal craft on Direct3D 11.
     //
     // On unless [Experimental] GpuSkinning = 0 (or OPENSHIM_GPU_SKINNING=0).

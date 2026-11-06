@@ -1247,6 +1247,12 @@ void TestOpenShimOwnedMaterials()
     const CompatConfig mod = EffectiveCompatConfigForMaterial(off, "xrain");
     Check(!mod.compatEnabled, "third-party material still honours compat off");
 
+    Check(IsGpuSkinningClone("OpenShim/GpuSkin/1/w1/__bz_material_default"),
+          "skinned clone is recognised");
+    Check(!IsGpuSkinningClone("OpenShim/GpuSkin/"), "bare clone root is not a material");
+    Check(!IsGpuSkinningClone("OpenShim/GpuInst/1/x"), "instancing twin is not a clone");
+    Check(!IsGpuSkinningClone("OpenShimFlag_97b629693a595be2"), "flag is not a clone");
+
     // End to end through the policy: the flag pass is plain fixed function,
     // which compat-off declines (shaderless) but the effective config converts.
     Check(DecideCompatPath(LegacyPassKind::TrueFixedFunction, FixedFuncDesc(1),
