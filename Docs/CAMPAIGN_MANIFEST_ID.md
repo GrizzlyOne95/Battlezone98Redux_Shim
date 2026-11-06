@@ -44,7 +44,16 @@ Qualification: Release Win32 build and 155 CTests pass. Windows/GOG Redux
 addon. Native menu launches select `bz64port/n64bd01p.bzn` for Pilot and
 `bz64port/n64bd01.bzn` for Commander, including a same-process mode change.
 Native Pilot startup confirms Follow orders targeting the player on both tanks
-and the bomber, with all three moving. The hook is currently restricted to GOG;
+and the bomber, with all three moving.
+
+Campaign Reimagined, Windows/GOG Redux 2.2.301, 2026-11-05: the old build opened
+Hidden Enemy from all four CR rows. With `campaignID` on three of the four INIs,
+one addon's rows open their own missions: crbd Hidden Enemy, crch New Kids on the
+Block, crcca The Golem Ambush, crcampgn Red Arrival. crch's row launched into its
+mission with no Lua error logged. The ISDFC rows carry no ID, so they still share
+one list as on stock.
+
+The hook is currently restricted to GOG;
 Windows/Steam, Proton and Wine
 remain unverified and require separate qualification before release. Campaigns
 using this field need a compatible OpenShim build; stock Redux ignores it.
