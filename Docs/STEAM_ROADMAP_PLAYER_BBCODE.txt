@@ -43,6 +43,7 @@ These are known problems we are still tracking down. Detailed reports and log fi
 [*] AI that gets stuck, or stops building in very long games.
 [*] Walker cockpit jitter, and a rare sniper-scope misalignment after ejecting.
 [*] Finishing the last campaign missions.
+[*] An optional kill ticker: a short [i]-Tank[/i] or [i]-Scout[/i] above your weapons when your shot destroys a unit. In development; not yet tested in game.
 [/list]
 
 [h2]Experiments[/h2]

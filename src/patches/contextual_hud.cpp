@@ -457,8 +457,13 @@ namespace BZROpenShim::ContextualHud
             __try { reinterpret_cast<Sprite>(g_sprite)(v,id,x,y,flags,scale); }
             __finally { EndDraw(previous); }
         }
+        // Last stock weapon-list backdrop rectangle, for overlays that sit
+        // next to it (kill ticker). Frame thread writes, frame thread reads.
+        struct PlateRect { int x = 0, y = 0, w = 0, h = 0; uint64_t tick = 0; };
+        PlateRect g_plateRect;
         void __cdecl WeaponPlate(void* v, void* material, int id, int x, int y, int w, int h, uint32_t flags, float z)
         {
+            g_plateRect = {x, y, w, h, GetTickCount64()};
             if (ExternallyOwned(Group::Weapons)) return;
             const float previous = BeginDraw(Group::Weapons);
             __try { reinterpret_cast<SizedSprite>(g_sizedSprite)(v,material,id,x,y,w,h,flags,z); }
@@ -501,9 +506,8 @@ namespace BZROpenShim::ContextualHud
             return ok;
         }
 
-        bool Install()
+        bool BindRows()
         {
-            if (g_ready.load(std::memory_order_acquire)) return true;
             static int bound = 0;
             if (!bound)
             {
@@ -522,7 +526,13 @@ namespace BZROpenShim::ContextualHud
                 };
                 bound = HookEngine::BindEngineRows("Contextual HUD", rows) ? 1 : -1;
             }
-            if (bound < 0) return false;
+            return bound > 0;
+        }
+
+        bool Install()
+        {
+            if (g_ready.load(std::memory_order_acquire)) return true;
+            if (!BindRows()) return false;
             ResolveLocalPlayerLookupForVerifiedGogBuild();
             if (!g_GameObjectGetHandleAddr || !g_BzrFn_GetPlayerHandle) return false;
             // Both native mode-to-ARGB helpers start with ten whole, relocatable
@@ -623,6 +633,24 @@ namespace BZROpenShim::ContextualHud
         }
     }
 
+    bool InstallWeaponListAnchor()
+    {
+        static bool installed = false;
+        if (installed) return true;
+        if (!IsCompatibleGameVersion() || !BindRows()) return false;
+        HookEngine::FrameThreadSitesScope frameSites;
+        installed = RedirectCallTarget(g_sites[4],g_sizedSprite,reinterpret_cast<uintptr_t>(WeaponPlate));
+        if (installed) Log(L"[HUDFADE] Weapon-list backdrop anchor observer installed\n");
+        return installed;
+    }
+    bool WeaponListRect(uint64_t maxAgeMs, int& x, int& y, int& w, int& h) noexcept
+    {
+        const PlateRect rect = g_plateRect;
+        const uint64_t now = GetTickCount64();
+        if (!rect.tick || now < rect.tick || now - rect.tick > maxAgeMs) return false;
+        x = rect.x; y = rect.y; w = rect.w; h = rect.h;
+        return true;
+    }
     bool ResourceDrawAdaptersNeeded() noexcept { return g_ready.load(std::memory_order_acquire) && g_resources.load(std::memory_order_relaxed); }
     uint32_t ExternalOwnership() noexcept {return g_externalOwner.load(std::memory_order_acquire);}
     bool ExternallyOwned(Group group) noexcept
