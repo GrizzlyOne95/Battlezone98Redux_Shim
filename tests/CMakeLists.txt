@@ -364,6 +364,21 @@ if(WIN32 AND MSVC)
         target_link_libraries(hook_engine_thread_snapshot_tests PRIVATE psapi)
         target_compile_definitions(hook_engine_thread_snapshot_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
         set_tests_properties(hook_engine_thread_snapshot_tests PROPERTIES TIMEOUT 15)
+
+        # Execute the same production detour installer with optimized x86
+        # callbacks (dirty EAX / AL bool, rel32 relocation, stdcall registers,
+        # stack and x87). The Release Win32 CI lane uses /O2 and NDEBUG.
+        openshim_add_test(inline_detour_abi_win32_tests STD 20 SOURCES
+            inline_detour_abi_win32_tests.cpp
+            ../src/engine/hook_engine.cpp
+            ../src/engine/build_overlay.cpp
+            ../src/engine/resolve_table.cpp
+            ../src/patches/hook_patch_helpers.cpp
+            ../src/engine/x86_length.cpp
+        )
+        target_link_libraries(inline_detour_abi_win32_tests PRIVATE psapi)
+        target_compile_definitions(inline_detour_abi_win32_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        set_tests_properties(inline_detour_abi_win32_tests PROPERTIES TIMEOUT 15)
     endif()
     # file_io_hooks.cpp (included directly by the test) is the runtime half of
     # the file-I/O seam, so the bootstrap half has to be linked with it. Note
