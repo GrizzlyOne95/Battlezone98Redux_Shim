@@ -68,6 +68,8 @@ openshim_opt:DamageIndicatorOpacity:label~Damage Opacity~~~~~~
 openshim_opt:DamageIndicatorOpacity:desc~Maximum incoming-damage arc opacity. Smaller hits are softer; larger hits are brighter and thicker.~~~~~~
 openshim_opt:DamageIndicatorDuration:label~Damage Duration~~~~~~
 openshim_opt:DamageIndicatorDuration:desc~Hold then fade over 300, 600 or 1000 milliseconds. Arcs rotate with your view and disappear when changing units.~~~~~~
+openshim_opt:KillTicker:label~Kill Ticker~~~~~~
+openshim_opt:KillTicker:desc~Shows a short line such as -Tank or -Scout above your weapons when your hit is the one that destroys a non-allied unit or building. Visual only; all content and multiplayer. Applies live.~~~~~~
 openshim_opt:ReticleStyle:label~Reticle Style~~~~~~
 openshim_opt:ReticleStyle:desc~Stock artwork, cross, dot, or cross plus dot at the stock aim point. Applies live. GOG 2.2.301.~~~~~~
 openshim_opt:ReticleColor:label~Reticle Color~~~~~~
@@ -454,7 +456,7 @@ openshim_cat:Audio:title~AUDIO~~~~~~
 openshim_cat:Audio:blurb~Sound channels, background music, unit voices and alerts.~~~~~~
 openshim_cat:HUD:name~HUD~~~~~~
 openshim_cat:HUD:title~HUD~~~~~~
-openshim_cat:HUD:blurb~Scrap and pilot readout, radar size, target popup and vehicle flags.~~~~~~
+openshim_cat:HUD:blurb~Scrap and pilot readout, radar size, target popup, vehicle flags and the kill ticker.~~~~~~
 openshim_cat:Controls:name~Controls~~~~~~
 openshim_cat:Controls:title~CONTROLS~~~~~~
 openshim_cat:Controls:blurb~Key bindings, raw mouse input, control smoothing and the satellite view.~~~~~~

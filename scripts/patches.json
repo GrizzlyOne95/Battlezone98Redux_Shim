@@ -2888,7 +2888,7 @@
       "name": "AutoSaveNoticeHudGauge",
       "address": "0x005C6F70",
       "expected": "55 8B EC 83 EC 74 A1 00 70 8E 00",
-      "identity": "Scrap/pilot gauge draw FUN_005c6f70, void(ECX unused), run once per gameplay HUD frame from the HUD draw (its callers sit inside the HUD pass, which is why 0x02BF041C/0x02BF0420 hold the HUD scale there). The autosave notice detours its first six bytes (push ebp; mov ebp,esp; sub esp,0x74) and draws after the original returns."
+      "identity": "Scrap/pilot gauge draw FUN_005c6f70, void(ECX unused), run once per gameplay HUD frame from the HUD draw (its callers sit inside the HUD pass, which is why 0x02BF041C/0x02BF0420 hold the HUD scale there). The shared HUD gauge overlay (hud_gauge_overlay.cpp) detours its first six bytes (push ebp; mov ebp,esp; sub esp,0x74) and runs the autosave notice and kill ticker painters after the original returns."
     },
     {
       "name": "HudSpriteZ",

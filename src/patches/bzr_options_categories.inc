@@ -31,7 +31,7 @@ static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
 static const char* const kShimCategoryHud[] = {
     "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
-    "MP Vehicle Flags", "Show Own MP Flag", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
+    "MP Vehicle Flags", "Show Own MP Flag", "Kill Ticker", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
 static const char* const kShimCategoryRadar[] = {
     "Radar Fade", "Radar Idle", "Radar Delay", "Radar Speed", "Keep Compass" };
 static const char* const kShimCategoryMeters[] = {
@@ -95,7 +95,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     BZR_SHIM_CATEGORY("Audio", "AUDIO",
         "Sound channels, background music, unit voices and alerts.", kShimCategoryAudio),
     BZR_SHIM_CATEGORY("HUD", "HUD",
-        "Scrap and pilot readout, radar size, target popup and vehicle flags.", kShimCategoryHud),
+        "Scrap and pilot readout, radar size, target popup, vehicle flags and the kill ticker.", kShimCategoryHud),
     BZR_SHIM_CATEGORY("Controls", "CONTROLS",
         "Key bindings, raw mouse input, control smoothing and the satellite view.",
         kShimCategoryControls),

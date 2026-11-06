@@ -17,4 +17,13 @@ namespace BZROpenShim::ContextualHud
     uint32_t ExternalOwnership() noexcept;
     bool ExternallyOwned(Group group) noexcept;
     uint32_t SetExternalOwnership(uint32_t mask);
+
+    // Passive observer on the stock weapon-list backdrop submit
+    // (HudFadeWeaponPlate). It shares the WeaponPlate adapter the fade uses,
+    // so installing it here and from Install() is idempotent, and with fading
+    // off the adapter forwards the stock call unchanged. Frame thread only.
+    bool InstallWeaponListAnchor();
+    // The backdrop's last submitted screen rectangle (x, y, width, height)
+    // when it was drawn within maxAgeMs; false otherwise.
+    bool WeaponListRect(uint64_t maxAgeMs, int& x, int& y, int& w, int& h) noexcept;
 }

@@ -9,8 +9,8 @@
 namespace BZROpenShim::AutoSaveNotice
 {
     // Starts the notice (about three seconds) after a successful autosave.
-    // Game thread only. On first use it binds the engine rows and detours the
-    // scrap/pilot gauge draw; if any row is missing or mismatched it logs once
+    // Game thread only. On first use it installs the shared gauge-draw overlay
+    // (hud_gauge_overlay.h); if any row is missing or mismatched it logs once
     // and every later call does nothing. It never affects the save.
     void Show() noexcept;
 

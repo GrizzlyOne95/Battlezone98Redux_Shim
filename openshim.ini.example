@@ -1220,6 +1220,10 @@ DamageIndicatorColor = Red
 DamageIndicatorSize = 100
 DamageIndicatorOpacity = 75
 DamageIndicatorDuration = 600
+; Kill ticker: a short "-Tank" / "-Scout" line above the weapon list when YOUR
+; hit is the one that destroys a non-allied unit or building. Visual only;
+; runs in all content and in network games. Applies live.
+KillTicker = 0
 ; Default follows the selected ScrapPilotHud layout: stock palette or the
 ; original legacy scrap-blue/pilot-green split. Layout/backplates are unchanged.
 ; Choices: Default, White, Blue, Green, Cyan, Amber, Magenta, Red, Yellow.
