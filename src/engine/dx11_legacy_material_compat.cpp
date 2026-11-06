@@ -3,6 +3,7 @@
 
 #include "dx11_legacy_material_compat.h"
 #include "bool_token.h"
+#include "gpu_skinning.h"
 
 #include <cctype>
 #include <cstdio>
@@ -291,6 +292,13 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             effective.compatEnabled = true;
         }
         return effective;
+    }
+
+    bool IsGpuSkinningClone(std::string_view materialName) noexcept
+    {
+        const std::string_view root = kGpuSkinCloneRoot;
+        return materialName.size() > root.size() &&
+               materialName.compare(0, root.size(), root) == 0;
     }
 
     bool ParseCompatFlag(std::string_view raw, bool defaultValue) noexcept

@@ -39,13 +39,35 @@ Any other shaderless draw in a mod has the same effect, which is why fault 1 is 
 
 ## Fix
 
-* **`UI Render Exception Fail-Soft`** (`scripts/patches.json` globals, `include/patches.h`): the `JNE` at `0x007C734C`
-  becomes `JMP`, so the exhausted-ladder branch is unreachable. A render exception under a UI view is logged and the
-  frame is dropped, exactly as in gameplay. Pattern-checked (`require_unique`) with the original byte `75` verified, so
-  it stands down on any other build.
+* **`UI Render Exception Fail-Soft`** (`scripts/patches.json` globals, `include/patches.h`): the funclet entry at
+  `0x007C7340` becomes `JMP 0x007C737B`, its log-and-continue branch, so the ladder is never called from here. A render
+  exception under a UI view is logged and the frame is dropped, exactly as in gameplay. Pattern-checked
+  (`require_unique`) with the original bytes `6A 01` verified, so it stands down on any other build. See the 2026-11-05
+  section for why the original `JNE`->`JMP` at `0x007C734C` was not enough.
 * **OpenShim-owned materials always convert** (`Dx11Compat::EffectiveCompatConfigForMaterial`): materials whose name
   starts with `OpenShim` take the fixed-function conversion even when the user set `DX11LegacyMaterialCompat = 0`.
   That setting gates third-party content; it was never meant to leave OpenShim's own materials shaderless.
+
+## 2026-11-05: crash in the ladder itself, from a GPU skinning clone
+
+Dump `battlezone98redux.exe.26912.dmp`: access violation reading `0x3C` at `0x007C3B6F`, opening the pause menu.
+
+* **Stock fault.** Stack is catch `0x007C7340` -> ladder `0x007AE480` -> `0x007AE5B0` -> `0x007C3AC0`. The ladder
+  repopulates the options dropdowns when `DAT_009455A4` is non-null (`FUN_007ae480-007ae480.c`, lines ~21 and ~39);
+  `FUN_007af4a0-007af4a0.c:205` is that global's only writer and it is never cleared, so it dangles once options has been
+  closed. The first fix kept this call. The funclet now skips it. This also ends stock's automatic quality drop on a UI
+  exception (it forced low-noshadow); the other two render catches (`0x0068326E`, `0x00684D9B`) never called the ladder.
+* **Exception source, OpenShim.** About 1,587 `Unable to set D3D11 vertex declaration ... getILayoutByShader` exceptions
+  in the six seconds before the pause menu. A mission started under `en-high-noshadow`, then the scheme became
+  `en-high-pssm`. The miss on the GPU skinning clone `OpenShim/GpuSkin/1/w1/__bz_material_default` reached the DX11 compat
+  ladder, which added a technique with the unskinned `OSE_Compat_Untextured_vertex`. Ogre then cached hardware animation
+  false for that scheme (entity cache in the dump: 14 true, 15 false) and bound blend-stripped vertices, while the shadow
+  caster stayed the skinned twin that needs BLENDINDICES/BLENDWEIGHT. That the caster program was inherited by copying the
+  technique is inferred; the bound program and declaration are observed.
+* **Fix.** `ProbeDx11LegacyCompat` declines a miss on a clone (`Dx11Compat::IsGpuSkinningClone`), so Ogre falls back to
+  the clone's skinned Default technique.
+* **Known limit.** The decline skips the ladder's vertex-input fit. A clone whose Default program needs an input the mesh
+  lacks (stock Untextured requires COLOR0) still throws after a scheme switch. It no longer kills the game.
 
 ## Verification
 
