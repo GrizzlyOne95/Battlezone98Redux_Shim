@@ -176,6 +176,13 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     CompatConfig EffectiveCompatConfigForMaterial(const CompatConfig& config,
                                                   std::string_view materialName) noexcept;
 
+    // True for GPU skinning's material clones. The ladder must never add a
+    // technique to one: its programs are unskinned, so Ogre would report
+    // hardware animation off for that scheme and bind blend-stripped vertices
+    // to the clone's skinned shadow caster, which D3D11 rejects every frame.
+    // A scheme miss on a clone falls back to its skinned Default technique.
+    bool IsGpuSkinningClone(std::string_view materialName) noexcept;
+
     // Accepts the same boolean tokens as the rest of openshim.ini
     // (1/true/on/yes/enabled vs 0/false/off/no/disabled, case-insensitive,
     // ASCII-trimmed). Unknown text returns defaultValue.

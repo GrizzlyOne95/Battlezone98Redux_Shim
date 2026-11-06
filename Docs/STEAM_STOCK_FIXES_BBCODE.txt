@@ -81,5 +81,6 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed editor object placement doing nothing in the Shift+F10 overhead view. Redux swapped two draw-order priorities from 1.5, so the placement code read a position cleared earlier that frame.
 [*] Fixed .trn files growing an extra line-ending byte on every save. Stock saves in text mode over data that already has carriage returns, so each save adds another.
 [*] Fixed comma-valued command-line options such as -shellmap:W,H losing their second value (inherited from 1.5). Stock's command-line parser also splits on commas, which cut the value short.
+[*] Fixed a crash when a render error occurred on a menu screen after the options screen had been opened. Stock's error handler refills the options dropdowns through a pointer it never clears.
 [*] Fixed a short hitch at every music track change. Stock decodes the first three seconds of each track twice and throws the first away.
 [/list]
