@@ -162,6 +162,8 @@
     <ClCompile Include="src\patches\ai_weapon_mask.cpp" />
     <ClCompile Include="src\patches\alert_reticle_modes.cpp" />
     <ClCompile Include="src\patches\autosave_notice.cpp" />
+    <ClCompile Include="src\patches\hud_gauge_overlay.cpp" />
+    <ClCompile Include="src\patches\kill_ticker.cpp" />
     <ClCompile Include="src\patches\autosave_restart.cpp" />
     <ClCompile Include="src\patches\bzrnet_settings.cpp" />
     <ClCompile Include="src\patches\community_key_auth.cpp" />
@@ -386,6 +388,9 @@
     <ClInclude Include="include\autosave_gate.h" />
     <ClInclude Include="include\autosave_notice.h" />
     <ClInclude Include="include\autosave_notice_layout.h" />
+    <ClInclude Include="include\hud_gauge_overlay.h" />
+    <ClInclude Include="include\kill_ticker.h" />
+    <ClInclude Include="include\kill_ticker_policy.h" />
     <ClInclude Include="include\bzr_hooks.h" />
     <ClInclude Include="include\unit_damage.h" />
     <ClInclude Include="include\unit_damage_policy.h" />

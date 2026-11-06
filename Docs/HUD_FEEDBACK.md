@@ -78,7 +78,8 @@ count once. The geometry stays within the shared 96-quad budget.
 It requires verified health loss from the local player's weapon against
 another live object. Immune/zero damage, healing, collision/environmental
 damage, self damage, AI damage and stale object identities do not qualify.
-There is no separate kill marker, hit sound or damage number.
+There is no hit sound or damage number. Destroying a unit is reported separately by the
+kill ticker (`Docs/KILL_TICKER.md`), which shares these damage wrappers.
 
 Hit color, size and opacity are independent of reticle color, size and opacity.
 Line thickness and outline still follow the corresponding reticle controls.
@@ -141,7 +142,9 @@ need not be enabled. All four entry guards must bind before installation;
 partial detour installation forwards stock calls without publishing hits.
 
 The incoming-damage extension in `Docs/DAMAGE_INDICATORS.md` also uses these
-four wrappers when enabled. It stores copied directional pulses independently
+four wrappers when enabled. So does the kill ticker (`Docs/KILL_TICKER.md`),
+which, unlike hits and arcs, also runs in network sessions; the wrappers pass
+the real session type through, so hit and arc confirmation stay single player. It stores copied directional pulses independently
 of outgoing hit markers; `SimDamageApplied` retains its outgoing-only meaning.
 
 ## Qualification, 2026-10-19

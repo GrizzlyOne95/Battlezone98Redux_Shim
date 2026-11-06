@@ -682,6 +682,10 @@ openshim_add_test(autosave_notice_layout_tests STD 20 SOURCES
     autosave_notice_layout_tests.cpp
 )
 
+openshim_add_test(kill_ticker_policy_tests STD 17 SOURCES
+    kill_ticker_policy_tests.cpp
+)
+
 openshim_add_test(native_save_flag_tests STD 20 SOURCES
     native_save_flag_tests.cpp
 )

@@ -7,6 +7,7 @@
 #include "bzr_options_ui.h"
 #include "game_state.h"
 #include "hook_engine.h"
+#include "kill_ticker.h"
 #include "openshim_events.h"
 #include "patcher.h"
 #include "shim_log.h"
@@ -42,6 +43,7 @@ namespace BZROpenShim::HudFeedback
         uint64_t g_nextInstall = 0;
         std::atomic<bool> g_hitsEnabled{false};
         std::atomic<bool> g_incomingEnabled{false};
+        std::atomic<bool> g_killsEnabled{false};
         std::atomic<bool> g_needsDraw{false};
         std::atomic<bool> g_damageReady{false};
         uint32_t g_sprite = 0, g_fill = 0, g_scale = 0, g_drawCall = 0, g_reticle = 0;
@@ -60,7 +62,8 @@ namespace BZROpenShim::HudFeedback
 
         bool NeedsDamage(const Settings& settings)
         {
-            return settings.hits || g_incomingEnabled.load(std::memory_order_relaxed);
+            return settings.hits || g_incomingEnabled.load(std::memory_order_relaxed) ||
+                g_killsEnabled.load(std::memory_order_relaxed);
         }
 
         bool InstallCamera()
@@ -307,16 +310,50 @@ namespace BZROpenShim::HudFeedback
             bool localVictim = false;
             bool hasDirection = false;
             Direction direction;
+            // Kill ticker: runs in every session, network games included.
+            bool kills = false;
+            bool alliedVictim = false;
+            KillTicker::DamageKind kind = KillTicker::DamageKind::Craft;
+            char odf[KillTicker::kOdfChars + 1] = {};
         };
 
-        DamageContext BeforeDamage(void* receiver, void* damage) noexcept
+        // True when the victim is on the local player's team or an allied
+        // team. The player object is the attacker here. Unreadable or
+        // out-of-range teams count as allied, so doubt never adds a line.
+        bool IsAlliedVictim(void* player, const void* victim) noexcept
+        {
+            __try
+            {
+                const int victimTeam = *reinterpret_cast<const int*>(
+                    static_cast<const uint8_t*>(victim) + ObjectLayout::kGameObjectActualTeam);
+                const int playerTeam = *reinterpret_cast<const int*>(
+                    static_cast<const uint8_t*>(player) + ObjectLayout::kGameObjectActualTeam);
+                if (victimTeam < 0 || victimTeam >= 16) return true;
+                if (victimTeam == 0) return false; // neutral
+                if (victimTeam == playerTeam) return true;
+                return g_relationReady && reinterpret_cast<TeamRelation>(g_friendTeam)(player, victimTeam);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return true; }
+        }
+
+        DamageContext BeforeDamage(void* receiver, void* damage, KillTicker::DamageKind kind) noexcept
         {
             DamageContext context;
+            // Hit markers and incoming arcs stay single player: online, a
+            // local health drop may not be a hit the host counted. The kill
+            // ticker runs everywhere under its own stricter rules.
+            const bool singlePlayer = IsSinglePlayerSession();
+            const bool wantHits = g_hitsEnabled.load(std::memory_order_relaxed) && singlePlayer;
+            const bool wantIncoming = g_incomingEnabled.load(std::memory_order_relaxed) && singlePlayer;
+            const bool wantKills = g_killsEnabled.load(std::memory_order_relaxed);
             if (!g_damageReady.load(std::memory_order_acquire) ||
-                (!g_hitsEnabled.load(std::memory_order_relaxed) && !g_incomingEnabled.load(std::memory_order_relaxed)) || !IsSinglePlayerSession() ||
+                (!wantHits && !wantIncoming && !wantKills) ||
                 !receiver || !damage || !g_GameObjectGetHandleAddr ||
                 !g_BzrFn_GetPlayerHandle || !g_BzrFn_ResolveObj76GameObject)
                 return context;
+            // In a network game the kill ticker must also see other
+            // attackers' hits, to know whose hit was last.
+            const bool observeAll = wantKills && !singlePlayer;
             __try
             {
                 // All four qualified DamageAlloc entries receive the
@@ -332,10 +369,10 @@ namespace BZROpenShim::HudFeedback
                 context.sample.localAttacker = context.sample.attacker == player;
                 context.sample.victim = get(context.object);
                 context.localVictim = player != 0 && context.sample.victim == player;
-                if (!context.sample.attacker || (!context.sample.localAttacker && !context.localVictim) ||
+                if (!context.sample.attacker || (!context.sample.localAttacker && !context.localVictim && !observeAll) ||
                     GameObjectFromHandleGog(context.sample.attacker) != attacker ||
                     GameObjectFromHandleGog(context.sample.victim) != context.object) return {};
-                if (context.localVictim && g_incomingEnabled.load(std::memory_order_relaxed))
+                if (context.localVictim && wantIncoming)
                 {
                     float source[3]{}, victim[3]{};
                     if (TryGetGameObjectWorldPosition(attacker, source) && TryGetGameObjectWorldPosition(context.object, victim))
@@ -346,7 +383,14 @@ namespace BZROpenShim::HudFeedback
                 }
                 context.sample.before = *reinterpret_cast<const float*>(static_cast<const uint8_t*>(context.object) + 0x200);
                 context.sample.weaponSource = true;
-                context.sample.singlePlayer = true;
+                context.sample.singlePlayer = singlePlayer;
+                context.kills = wantKills;
+                context.kind = kind;
+                if (wantKills && context.sample.localAttacker)
+                {
+                    context.alliedVictim = IsAlliedVictim(attacker, context.object);
+                    TryGetCraftOdfName(context.object, context.odf, sizeof(context.odf));
+                }
             }
             __except (EXCEPTION_EXECUTE_HANDLER) { return {}; }
             return context;
@@ -354,7 +398,7 @@ namespace BZROpenShim::HudFeedback
 
         void AfterDamage(DamageContext context) noexcept
         {
-            if ((!context.sample.localAttacker && !context.localVictim) || !context.object) return;
+            if ((!context.sample.localAttacker && !context.localVictim && !context.kills) || !context.object) return;
             __try
             {
                 context.sample.sameLifetime = GameObjectFromHandleGog(context.sample.victim) == context.object;
@@ -364,6 +408,19 @@ namespace BZROpenShim::HudFeedback
                     context.sample.victim == g_BzrFn_GetPlayerHandle();
             }
             __except (EXCEPTION_EXECUTE_HANDLER) { return; }
+            if (context.kills)
+            {
+                KillTicker::KillSample kill;
+                kill.victim = context.sample.victim;
+                kill.attacker = context.sample.attacker;
+                kill.before = context.sample.before;
+                kill.after = context.sample.after;
+                kill.sameLifetime = context.sample.sameLifetime;
+                kill.localAttacker = context.sample.localAttacker;
+                kill.alliedVictim = context.alliedVictim;
+                kill.kind = context.kind;
+                KillTicker::NoteDamage(kill, context.odf, context.sample.singlePlayer);
+            }
             if (g_hitsEnabled.load(std::memory_order_relaxed) && ConfirmsHit(context.sample))
                 PublishSimEvent(OpenShimEventType::SimDamageApplied, context.sample.victim, context.sample.attacker, 0, 1);
             if (g_incomingEnabled.load(std::memory_order_relaxed) && context.hasDirection &&
@@ -385,7 +442,7 @@ namespace BZROpenShim::HudFeedback
             auto address = g_originalDamage[Index].load(std::memory_order_acquire);
             while (!address) { YieldProcessor(); address = g_originalDamage[Index].load(std::memory_order_acquire); }
             const auto original = reinterpret_cast<Damage>(address);
-            const DamageContext context = BeforeDamage(receiver, damage);
+            const DamageContext context = BeforeDamage(receiver, damage, static_cast<KillTicker::DamageKind>(Index));
             const uint32_t result = original(receiver, damage, argument);
             AfterDamage(context);
             return result;
@@ -401,6 +458,15 @@ namespace BZROpenShim::HudFeedback
             };
             if (!g_GameObjectGetHandleAddr || !g_BzrFn_GetPlayerHandle || !g_BzrFn_ResolveObj76GameObject ||
                 !HookEngine::BindEngineRows("HUD damage confirmation", rows)) return false;
+            if (!g_relationReady)
+            {
+                // Optional: the kill ticker's allied-victim filter falls back
+                // to same-team only if these rows fail.
+                const HookEngine::EngineRow relationRows[] = {
+                    {"HudPaletteFriendTeam", &g_friendTeam}, {"HudPaletteEnemyTeam", &g_enemyTeam},
+                };
+                g_relationReady = HookEngine::BindEngineRows("Kill ticker team filter", relationRows);
+            }
             void* const hooks[] = {reinterpret_cast<void*>(DamageHook<0>), reinterpret_cast<void*>(DamageHook<1>),
                 reinterpret_cast<void*>(DamageHook<2>), reinterpret_cast<void*>(DamageHook<3>)};
             static const uint8_t expected[4][9] = {
@@ -413,7 +479,7 @@ namespace BZROpenShim::HudFeedback
                 g_originalDamage[i].store(reinterpret_cast<uintptr_t>(g_damageDetours[i].trampoline), std::memory_order_release);
             }
             g_damageReady.store(true, std::memory_order_release);
-            Log(L"[HUDFEEDBACK] Post-damage confirmation adapters installed (single player only)\n");
+            Log(L"[HUDFEEDBACK] Post-damage confirmation adapters installed (hits/arcs single player; kill ticker all sessions)\n");
             return true;
         }
 
@@ -473,6 +539,8 @@ namespace BZROpenShim::HudFeedback
         incoming.sizePercent = ReadInteger("DamageIndicatorSize", 100, 50, 200);
         incoming.opacity = ReadInteger("DamageIndicatorOpacity", 75, 25, 100);
         incoming.durationMs = ReadInteger("DamageIndicatorDuration", 600, 150, 2000);
+        bool kills = false;
+        TryGetUserConfigBool("Display", "KillTicker", kills);
         AcquireSRWLockExclusive(&g_stateLock);
         g_settings = settings;
         g_pulse.Reset();
@@ -484,12 +552,19 @@ namespace BZROpenShim::HudFeedback
         g_needsDraw.store(settings.NeedsDraw() || incoming.enabled, std::memory_order_relaxed);
         g_configRead = true;
         InterlockedExchange(&g_drawLog, 1);
+        // The kill ticker is published before the damage adapters can see
+        // it, so the first qualified kill already has somewhere to go.
+        const bool compatible = IsCompatibleGameVersion();
+        const bool killsReady = KillTicker::Configure(kills && compatible);
+        g_killsEnabled.store(kills && killsReady, std::memory_order_relaxed);
         if (NeedsDamage(settings) && !g_subscribed) g_subscribed = SubscribeEvents(EventSink, nullptr);
         if (!NeedsDamage(settings) && g_subscribed) { UnsubscribeEvents(EventSink, nullptr); g_subscribed = false; }
-        if (!settings.NeedsDraw() && !incoming.enabled) return true;
-        if (!IsCompatibleGameVersion()) return false;
-        return (!incoming.enabled || InstallCamera()) && InstallDraw() &&
-            (!NeedsDamage(settings) || (g_subscribed && InstallDamage()));
+        const bool needsReticle = settings.NeedsDraw() || incoming.enabled;
+        if (!needsReticle && !kills) return true;
+        if (!compatible) return false;
+        bool ok = !needsReticle || ((!incoming.enabled || InstallCamera()) && InstallDraw());
+        ok = ok && (!NeedsDamage(settings) || (g_subscribed && InstallDamage()));
+        return ok && (!kills || killsReady);
     }
 
     const char* UnavailableReason()
@@ -503,7 +578,10 @@ namespace BZROpenShim::HudFeedback
         // The HUD and damage sites run on the frame thread only.
         HookEngine::FrameThreadSitesScope frameSites;
         if (!g_configRead) { ReloadConfig(); return; }
-        if (!g_needsDraw.load(std::memory_order_relaxed)) return;
+        const bool kills = g_killsEnabled.load(std::memory_order_relaxed);
+        if (kills) KillTicker::Tick();
+        const bool needsReticle = g_needsDraw.load(std::memory_order_relaxed);
+        if (!needsReticle && !kills) return;
         const Settings settings = ReadSettings();
         if (!IsCompatibleGameVersion()) return;
         if (g_incomingEnabled.load(std::memory_order_relaxed))
@@ -519,18 +597,23 @@ namespace BZROpenShim::HudFeedback
                 g_indicatorPlayer = player;
             }
         }
-        if (g_drawReady && (!g_incomingEnabled.load(std::memory_order_relaxed) || g_cameraReady) &&
+        if ((!needsReticle || (g_drawReady && (!g_incomingEnabled.load(std::memory_order_relaxed) || g_cameraReady))) &&
             (!NeedsDamage(settings) || g_damageReady.load(std::memory_order_acquire))) return;
         const uint64_t now = GetTickCount64();
         if (now < g_nextInstall) return;
         g_nextInstall = now + 1000;
-        if (g_incomingEnabled.load(std::memory_order_relaxed) && !InstallCamera()) return;
-        if (InstallDraw() && NeedsDamage(settings) && g_subscribed) InstallDamage();
+        if (needsReticle)
+        {
+            if (g_incomingEnabled.load(std::memory_order_relaxed) && !InstallCamera()) return;
+            if (!InstallDraw()) return;
+        }
+        if (NeedsDamage(settings) && g_subscribed) InstallDamage();
     }
 
     void ResetMission() noexcept
     {
         StockReticleFx::Invalidate();
+        KillTicker::ResetMission();
         AcquireSRWLockExclusive(&g_stateLock);
         g_pulse.Reset();
         g_incoming.Reset();
