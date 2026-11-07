@@ -1,4 +1,5 @@
 #include "native_hud_runtime.h"
+#include "menu_theme.h"
 #include "hud_feedback.h"
 #include "contextual_hud.h"
 #include "hud_palette.h"
@@ -1614,6 +1615,7 @@ namespace BZROpenShim
             {"InstallStockLogThrottleIfPossible", &InstallStockLogThrottleIfPossible},
             {"InstallAttackTaskLazyNearestIfRequested", &InstallAttackTaskLazyNearestIfRequested},
             {"InstallMapFilterExtrasIfEnabled", &InstallMapFilterExtrasIfEnabled},
+            {"InstallMenuThemeTextRecolor", &MenuTheme::InstallTextRecolor},
             {"EnsureInputBindingPopulateHookScaffold", &EnsureInputBindingPopulateHookScaffold},
             {"EnsureOptionsParentCtorHookScaffold", &EnsureOptionsParentCtorHookScaffold},
             {"EnsureNativeUiMainMenuDiagnosticScaffold", &EnsureNativeUiMainMenuDiagnosticScaffold},

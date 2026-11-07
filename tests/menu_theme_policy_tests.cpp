@@ -25,5 +25,17 @@ int main()
     Check(IsMenuImage("mainCenterPanel.png")&&IsMenuImage("topcorner.png")&&IsMenuImage("osh_menu_theme_center.png"),"stock and shim menu chrome qualify");
     for(const auto name:{"bzone.ogv","arial.png","radar.png","map_preview.png","aflagon.png","unknown_mod.png","../mainCenterPanel.png","MAINCenterPanel.png"})
         Check(!IsMenuImage(name),"fonts, movies, flags, HUD, unknown and ambiguous paths remain excluded");
+    {
+        Settings t;t.enabled=true;t.rgb={255,0,0};
+        Check(RecolorLabelArgb(0xFF00FF00u,t)==0xFFFF0000u,"label: pure green becomes the target");
+        Check(RecolorLabelArgb(0x8000FF00u,t)==0x80FF0000u,"label: alpha is preserved");
+        Check(RecolorLabelArgb(0xFF008000u,t)==0xFF800000u,"label: darker green scales the target");
+        for(const uint32_t c:{0xFFFFFFFFu,0xFF000000u,0xFFFF0000u,0xFF0000FFu,0x80808080u})
+            Check(RecolorLabelArgb(c,t)==c,"label: white, black, red, blue and grey are untouched");
+        Settings off=t;off.enabled=false;
+        Check(RecolorLabelArgb(0xFF00FF00u,off)==0xFF00FF00u,"label: theme off leaves colour untouched");
+        Settings stock=t;stock.rgb={0,255,0};
+        Check(RecolorLabelArgb(0xFF20FF20u,stock)==0xFF20FF20u,"label: green selected leaves colour untouched");
+    }
     return ExitCode();
 }
