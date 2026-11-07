@@ -20,6 +20,13 @@
 // then stores the result. If the worker hits any exception, the compile is
 // redone inline so C++ exceptions reach Ogre as on the stock path.
 //
+// The worker compiles the PREPROCESSED text (no defines, no include handler).
+// Ogre's include handler opens resources under the ResourceGroupManager lock,
+// which the calling thread already holds when it compiles during resource
+// group initialisation (OpenShim's EnsureEnhancedResourceGroup); calling it
+// from the worker deadlocked the game at startup on any cache miss. Compiling
+// the preprocessed text also makes the stored blob match its cache key.
+//
 // Fail closed: any unresolved export or failed preprocess leaves the stock
 // compile path. OPENSHIM_DISABLE_DXBC_CACHE (or the existing
 // OPENSHIM_DISABLE_SHADER_CACHE / BZR_DISABLE_SHADER_CACHE) leaves the
@@ -283,7 +290,6 @@ namespace BZROpenShim
             const size_t preSize = pre->GetBufferSize();
             const uint64_t key = DxbcCachePolicy::ComputeKey(
                 pre->GetBufferPointer(), preSize, pEntrypoint, pTarget, Flags1, Flags2);
-            pre->Release();
 
             std::vector<uint8_t> blob;
             if (ReadEntry(key, preSize, blob))
@@ -295,6 +301,7 @@ namespace BZROpenShim
                     *ppCode = out;
                     if (ppErrorMsgs)
                         *ppErrorMsgs = nullptr;
+                    pre->Release();
                     ++g_Hits;
                     LogSummaryIfDue();
                     return S_OK;
@@ -302,10 +309,14 @@ namespace BZROpenShim
             }
 
             ++g_Misses;
-            CompileJob job{ pSrcData, SrcDataSize, pSourceName, pDefines, pInclude,
+            // Preprocessed text: the worker must never call the caller's include
+            // handler (see the header comment), and defines are already expanded.
+            CompileJob job{ pre->GetBufferPointer(), preSize, pSourceName, nullptr, nullptr,
                             pEntrypoint, pTarget, Flags1, Flags2 };
             const ULONGLONG t0 = GetTickCount64();
-            if (!CompileWhilePumping(job))
+            const bool workerOk = CompileWhilePumping(job);
+            pre->Release();
+            if (!workerOk)
             {
                 // Unguarded, like the stock path: exceptions reach Ogre.
                 return g_RealD3DCompile(pSrcData, SrcDataSize, pSourceName, pDefines, pInclude,
