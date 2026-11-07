@@ -212,6 +212,13 @@ int main(int argc, char** argv)
         check(TerrainPaint::Specialize(shipping, true, material), "shipping terrain PS rejected the material form");
         check(shipping.find("#define OPENSHIM_PAINT_TRIPLANAR_SOURCE 1") != std::string::npos,
             "shipping terrain PS lost the view normal or inverse view triplanar needs");
+        check(shipping.find("#define OPENSHIM_PAINT_ONE_GEO 1") != std::string::npos,
+            "shipping terrain PS kept the geometry-keyed paint caches");
+        check(!TerrainPaint::OneGeometry("OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, OPENSHIM_PAINT_GEO); "
+                                         "OpenShimSampleTerrainPaintNormal(diffuseMap, diffuseSam, otherGeo);") &&
+              TerrainPaint::OneGeometry("OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, OPENSHIM_PAINT_GEO); "
+                                        "OpenShimSampleTerrainPaintSpecular(diffuseMap, diffuseSam, OPENSHIM_PAINT_GEO);"),
+            "paint reads with another geometry dropped the cache key");
         if (argc == 2) { std::ofstream out(argv[1]); out << shipping; check(bool(out), "specialized PS export failed"); }
         std::cout << "PASS: material form, triplanar inputs, map contracts, multi-map selection, native cluster seam and preserved auxiliary UVs\n";
         return 0;

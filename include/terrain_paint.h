@@ -315,8 +315,8 @@ OpenShimCrater OpenShimCraterField(float2 p, float4 params, float foot)
         float2 q = p / cell + 7.31 * o;
         float2 id = floor(q);
         [branch] if (fade > 0)
-        [unroll] for (int j = -1; j <= 1; ++j)
-        [unroll] for (int i = -1; i <= 1; ++i)
+        [loop] for (int j = -1; j <= 1; ++j)
+        [loop] for (int i = -1; i <= 1; ++i)
         {
             float2 k = id + float2(i, j);
             float2 key = k + 57.0 * o;
@@ -593,7 +593,7 @@ OpenShimPaintMix OpenShimPaintWeightsAt(Texture2DArray tex, SamplerState sam, Op
     // Heights stay at the near scale, as in the domain shader, so
     // displacement agrees.
     float heights[OPENSHIM_PAINT_LAYERS];
-    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+    [loop] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
     {
         heights[i] = 0;
         openShimPaintNearValid[i] = OpenShimPaintPresent(m, i);
@@ -613,17 +613,29 @@ OpenShimPaintMix OpenShimPaintWeightsAt(Texture2DArray tex, SamplerState sam, Op
 // The diffuse, normal and specular reads each start from the same geometry,
 // so the weights (control tap plus a height tap per present layer) and the
 // diffuse sum, whose alpha is specular, are worked out once per pixel. Keyed
-// on the geometry, so a caller passing another one still gets its own.
+// on the geometry, so a caller passing another one still gets its own --
+// unless Specialize found every read passing OPENSHIM_PAINT_GEO (the terrain
+// programs). Then the key is dropped: a float compare cannot be folded, so the
+// compiler kept a second full copy of each read behind it (2-3x the shader,
+// up to 10 s per cold compile).
+#ifndef OPENSHIM_PAINT_ONE_GEO
+#define OPENSHIM_PAINT_ONE_GEO 0
+#endif
+#if OPENSHIM_PAINT_ONE_GEO
+#define OPENSHIM_PAINT_CACHED(ready, key, g) (ready)
+#else
 bool OpenShimPaintSameGeo(OpenShimPaintGeo a, OpenShimPaintGeo b)
 {
     return all(a.pos == b.pos) && all(a.n == b.n) && all(a.dpdx == b.dpdx) && all(a.dpdy == b.dpdy) && a.farMix == b.farMix;
 }
+#define OPENSHIM_PAINT_CACHED(ready, key, g) ((ready) && OpenShimPaintSameGeo(g, key))
+#endif
 static bool openShimPaintWeightsReady = false;
 static OpenShimPaintGeo openShimPaintWeightsGeo;
 static OpenShimPaintMix openShimPaintWeightsCache;
 OpenShimPaintMix OpenShimPaintWeights(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
-    [branch] if (!(openShimPaintWeightsReady && OpenShimPaintSameGeo(g, openShimPaintWeightsGeo)))
+    [branch] if (!OPENSHIM_PAINT_CACHED(openShimPaintWeightsReady, openShimPaintWeightsGeo, g))
     {
         openShimPaintWeightsCache = OpenShimPaintWeightsAt(tex, sam, g);
         openShimPaintWeightsGeo = g;
@@ -711,11 +723,12 @@ OpenShimPaintGeo OpenShimPaintLayerGeo(OpenShimPaintGeo g, int i)
 #endif
     return g;
 }
-// Layers the blend left out cost nothing.
+// Layers the blend left out cost nothing. Per-layer loops here stay [loop]:
+// unrolled, each layer copies the whole near/far triplanar tap chain.
 float4 OpenShimPaintLayers(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g, OpenShimPaintMix m, int part)
 {
     float4 sum = 0;
-    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+    [loop] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
         [branch] if (m.w[i] > 0)
             sum += OpenShimPaintTap(tex, sam, OpenShimPaintLayerGeo(g, i), openShimPaintRepeats[i],
                 OpenShimPaintSlice(i, part), openShimPaintDetile[i] > 0) * m.w[i];
@@ -726,7 +739,7 @@ static OpenShimPaintGeo openShimPaintDiffuseGeo;
 static float4 openShimPaintDiffuseCache;
 float4 OpenShimPaintDiffuse(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g)
 {
-    [branch] if (!(openShimPaintDiffuseReady && OpenShimPaintSameGeo(g, openShimPaintDiffuseGeo)))
+    [branch] if (!OPENSHIM_PAINT_CACHED(openShimPaintDiffuseReady, openShimPaintDiffuseGeo, g))
     {
         openShimPaintDiffuseCache = OpenShimPaintLayers(tex, sam, g, OpenShimPaintWeights(tex, sam, g), 0);
         openShimPaintDiffuseGeo = g;
@@ -867,14 +880,14 @@ float4 OpenShimSampleTerrainPaintNormal(Texture2DArray tex, SamplerState sam, Op
 #endif
 #if OPENSHIM_PAINT_TRIPLANAR
     float3 world = 0;
-    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+    [loop] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
         [branch] if (weights.w[i] > 0)
             world += OpenShimPaintWorldNormal(OpenShimPaintNormalTaps(tex, sam, g, i), g) * weights.w[i];
     world.xz -= world.y * slope;
     return float4(mul(OpenShimPaintWorldFrame(g.n), normalize(world)) * 0.5 + 0.5, 1);
 #else
     float4 sum = 0;
-    [unroll] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
+    [loop] for (int i = 0; i < OPENSHIM_PAINT_LAYERS; ++i)
         [branch] if (weights.w[i] > 0)
         {
             OpenShimPaintTaps t = OpenShimPaintNormalTaps(tex, sam, g, i);
@@ -898,6 +911,21 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
     }
     // Liquid passes read this uniform; the HD bind gives it time_0_x 4000.
     constexpr const char* kTimeUniform = "openShimPaintTime";
+    // True when every paint read in the source takes OPENSHIM_PAINT_GEO, as the
+    // swaps below write them; then the per-pixel caches need no geometry key.
+    inline bool OneGeometry(const std::string& source)
+    {
+        size_t reads = 0, shared = 0;
+        for (size_t at = source.find("OpenShimSampleTerrainPaint"); at != std::string::npos;
+             at = source.find("OpenShimSampleTerrainPaint", at + 1))
+        {
+            ++reads;
+            const size_t open = source.find('(', at), close = source.find(')', open);
+            if (open != std::string::npos && close != std::string::npos &&
+                source.compare(open, close - open + 1, "(diffuseMap, diffuseSam, OPENSHIM_PAINT_GEO)") == 0) ++shared;
+        }
+        return reads > 0 && reads == shared;
+    }
     inline bool Specialize(std::string& source, bool pixel, const Config& config)
     {
         config.Validate();
@@ -948,6 +976,7 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             const bool parallax = config.parallax[0] > 0 && source.find("in float3 vViewPosition") != std::string::npos &&
                 source.find("in float vDepth") != std::string::npos;
             constants << "#define OPENSHIM_PAINT_PARALLAX " << (parallax ? 1 : 0) << "\n";
+            constants << "#define OPENSHIM_PAINT_ONE_GEO " << (OneGeometry(source) ? 1 : 0) << "\n";
             // Glow rides the emissive sum just before final lighting; a pass
             // without that line declines.
             const bool liquid = config.liquid != std::array<float, 8>{};
