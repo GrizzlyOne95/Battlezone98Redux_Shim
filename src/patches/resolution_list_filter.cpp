@@ -103,7 +103,10 @@ namespace BZROpenShim
                 DEVMODEA mode = {};
                 mode.dmSize = sizeof(mode);
                 g_DesktopW = g_DesktopH = 0;
-                if (EnumDisplaySettingsA(nullptr, ENUM_CURRENT_SETTINGS, &mode))
+                // The registry mode is the desktop's own; the current mode is the
+                // game's when it already runs fullscreen at another aspect.
+                if (EnumDisplaySettingsA(nullptr, ENUM_REGISTRY_SETTINGS, &mode) ||
+                    EnumDisplaySettingsA(nullptr, ENUM_CURRENT_SETTINGS, &mode))
                 {
                     g_DesktopW = static_cast<int>(mode.dmPelsWidth);
                     g_DesktopH = static_cast<int>(mode.dmPelsHeight);
