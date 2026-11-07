@@ -258,6 +258,7 @@
     <ClCompile Include="src\patches\dx11_colorspace_diagnostic.cpp" />
     <ClCompile Include="src\patches\d3d11_buffer_restore.cpp" />
     <ClCompile Include="src\patches\d3d11_constant_lookup_cache.cpp" />
+    <ClCompile Include="src\patches\d3d_compile_cache.cpp" />
     <ClCompile Include="src\patches\d3d11_device_loss_recovery.cpp" />
     <ClCompile Include="src\patches\dxgi_flip_model.cpp" />
     <ClCompile Include="src\patches\dx11_enhanced_fxaa.cpp" />
@@ -426,6 +427,8 @@
     <ClInclude Include="include\d3d11_buffer_mirror_policy.h" />
     <ClInclude Include="include\d3d11_buffer_restore.h" />
     <ClInclude Include="include\d3d11_constant_lookup_cache.h" />
+    <ClInclude Include="include\d3d_compile_cache.h" />
+    <ClInclude Include="include\dxbc_cache_policy.h" />
     <ClInclude Include="include\d3d11_device_loss_recovery.h" />
     <ClInclude Include="include\dxgi_flip_model.h" />
     <ClInclude Include="include\dx11_scene_depth.h" />
