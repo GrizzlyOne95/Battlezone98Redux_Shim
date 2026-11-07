@@ -28,6 +28,7 @@
 #include "BZROpenShim.h"
 #include "bzr_options_ui.h"
 #include "render_profile.h"
+#include "script_scheme_prune.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -1014,6 +1015,9 @@ namespace BZROpenShim::RenderProfiles
             return std::string_view(LastModernBaseStorage());
         }
 
+        std::atomic<uint32_t> s_seenTierMask{ 0 };
+        std::atomic<uint32_t> s_seenFamilyMask{ 0 };   // SchemePrune::kFamily* drawn
+
         void RememberModernBase(std::string_view modern)
         {
             char (&storage)[32] = LastModernBaseStorage();
@@ -1120,6 +1124,98 @@ namespace BZROpenShim::RenderProfiles
             return api;
         }
 
+        // The same scheme from another family (plain, en-, og-): the import
+        // scheme prune keeps only the families drawn so far, so a material
+        // parsed before a profile switch may lack the new family entirely.
+        // Only reached when the scheme and its plain base both missed.
+        void* ResolveOtherFamilyTechnique(const OgreTechniqueApi& api,
+                                          std::string_view name,
+                                          void* material,
+                                          unsigned short lodIndex)
+        {
+            const std::string_view base = SchemePrune::StripFamily(name);
+            void* schemeMatch = nullptr;
+            const unsigned short count = api.getNumTechniques(material);
+            for (unsigned short i = 0; i < count; ++i)
+            {
+                void* technique = api.getTechnique(material, i);
+                if (technique == nullptr || !api.isSupported(technique))
+                {
+                    continue;
+                }
+                const std::string_view other(api.getSchemeName(technique));
+                if (other == name || SchemePrune::StripFamily(other) != base)
+                {
+                    continue;
+                }
+                if (api.getLodIndex(technique) == lodIndex)
+                {
+                    return technique;
+                }
+                if (schemeMatch == nullptr)
+                {
+                    schemeMatch = technique;
+                }
+            }
+            return schemeMatch;
+        }
+
+        // The same shadow mode from another tier, same family first: a
+        // material parsed before the player changed quality kept only the old
+        // tier. Only used once two tiers have been seen this session.
+        void* ResolveOtherTierTechnique(const OgreTechniqueApi& api,
+                                        std::string_view name,
+                                        void* material,
+                                        unsigned short lodIndex)
+        {
+            const auto suffix = [](std::string_view s) {
+                s = SchemePrune::StripFamily(s);
+                const size_t dash = s.find('-');
+                return dash == std::string_view::npos ? std::string_view{} : s.substr(dash);
+            };
+            const std::string_view want = suffix(name);
+            const uint32_t family = SchemePrune::FamilyBit(name);
+            void* best = nullptr;
+            int bestScore = -1;
+            const unsigned short count = api.getNumTechniques(material);
+            for (unsigned short i = 0; i < count; ++i)
+            {
+                void* technique = api.getTechnique(material, i);
+                if (technique == nullptr || !api.isSupported(technique))
+                {
+                    continue;
+                }
+                const std::string_view other(api.getSchemeName(technique));
+                if (SchemePrune::TierBit(other) == 0 || suffix(other) != want ||
+                    SchemePrune::StripFamily(other) == SchemePrune::kSecondaryViewportScheme)
+                {
+                    continue;
+                }
+                const int score = (SchemePrune::FamilyBit(other) == family ? 2 : 0) +
+                                  (api.getLodIndex(technique) == lodIndex ? 1 : 0);
+                if (score > bestScore)
+                {
+                    best = technique;
+                    bestScore = score;
+                }
+            }
+            return best;
+        }
+
+        void* ResolvePrunedTechnique(const OgreTechniqueApi& api,
+                                     std::string_view name,
+                                     void* material,
+                                     unsigned short lodIndex)
+        {
+            if (void* technique = ResolveOtherFamilyTechnique(api, name, material, lodIndex))
+            {
+                return technique;
+            }
+            const uint32_t tiers = s_seenTierMask.load(std::memory_order_acquire);
+            return (tiers & (tiers - 1)) != 0 ? ResolveOtherTierTechnique(api, name, material, lodIndex)
+                                              : nullptr;
+        }
+
         void* ResolveBaseSchemeTechnique(const std::string& schemeName,
                                          void* material,
                                          unsigned short lodIndex)
@@ -1133,8 +1229,19 @@ namespace BZROpenShim::RenderProfiles
             if (!name.starts_with("en-") && !name.starts_with("og-"))
             {
                 // Not a scheme this layer invents. Anything else is the
-                // engine's or a mod's business, so leave Ogre's answer alone.
-                return nullptr;
+                // engine's or a mod's business, so leave Ogre's answer alone,
+                // unless the prune dropped this engine scheme's plain family.
+                // Same for a tier the prune dropped before the player changed quality.
+                const uint32_t families = s_seenFamilyMask.load(std::memory_order_acquire);
+                const uint32_t tiers = s_seenTierMask.load(std::memory_order_acquire);
+                const bool familyPruned = families != 0 && (families & SchemePrune::kFamilyPlain) == 0;
+                const bool tierChanged = (tiers & (tiers - 1)) != 0;
+                if ((!familyPruned && !tierChanged) || !IsModernMaterialScheme(name))
+                {
+                    return nullptr;
+                }
+                const OgreTechniqueApi& api = TechniqueApi();
+                return api.Valid() ? ResolvePrunedTechnique(api, name, material, lodIndex) : nullptr;
             }
             const std::string_view base = name.substr(3);
             if (base.empty())
@@ -1215,7 +1322,9 @@ namespace BZROpenShim::RenderProfiles
             }
             // Prefer the exact LOD; otherwise any supported technique in the
             // base scheme still beats technique 0 from a foreign scheme.
-            return schemeMatch;
+            return schemeMatch != nullptr
+                       ? schemeMatch
+                       : ResolvePrunedTechnique(api, name, material, lodIndex);
         }
 
         // ---- DX11 legacy material compatibility probe ----------------------
@@ -3493,6 +3602,8 @@ namespace BZROpenShim::RenderProfiles
             if (IsModernMaterialScheme(incoming))
             {
                 RememberModernBase(incoming);
+                s_seenTierMask.fetch_or(SchemePrune::TierBitFromEngineScheme(incoming),
+                                        std::memory_order_acq_rel);
             }
 
             const Profile effective = static_cast<Profile>(
@@ -3523,6 +3634,14 @@ namespace BZROpenShim::RenderProfiles
                         finalScheme.assign(buffer);
                         rewritten = (finalScheme != incoming);
                     }
+                }
+            }
+
+            {
+                const std::string_view drawn = rewritten ? std::string_view(finalScheme) : incoming;
+                if (IsModernMaterialScheme(SchemePrune::StripFamily(drawn)))
+                {
+                    s_seenFamilyMask.fetch_or(SchemePrune::FamilyBit(drawn), std::memory_order_acq_rel);
                 }
             }
 
@@ -3981,6 +4100,16 @@ namespace BZROpenShim::RenderProfiles
         return EnhancedResourcesAvailable();
     }
 
+    uint32_t SeenQualityTierMask()
+    {
+        return s_seenTierMask.load(std::memory_order_acquire);
+    }
+
+    uint32_t SeenSchemeFamilyMask()
+    {
+        return s_seenFamilyMask.load(std::memory_order_acquire);
+    }
+
     // Applies the effective profile immediately when called on the engine's
     // render thread. The pending flag stays set: the next scheme-hook drain
     // reapplies idempotently, so an off-thread publish racing this one is
@@ -4042,6 +4171,9 @@ namespace BZROpenShim::RenderProfiles
             else if (decision.rewriteScheme)
             {
                 WriteViewportScheme(viewports[i], std::string(decision.scheme));
+                // Bypasses the setMaterialScheme hook, so record the family
+                // here: the import prune keeps only families seen drawing.
+                s_seenFamilyMask.fetch_or(SchemePrune::FamilyBit(decision.scheme), std::memory_order_acq_rel);
                 changedAny = true;
             }
             if (glowAction == GlowAction::Disable)

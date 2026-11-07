@@ -176,6 +176,14 @@ namespace BZROpenShim::RenderProfiles
     // open untouched.
     bool IsModernMaterialScheme(std::string_view scheme);
 
+    // Quality tiers (SchemePrune::kTier* bits) the engine has set on a
+    // viewport this session; 0 until the first one.
+    uint32_t SeenQualityTierMask();
+
+    // Scheme families (SchemePrune::kFamily*: plain, en-, og-) the engine's
+    // viewports have drawn with this session; 0 until the first one.
+    uint32_t SeenSchemeFamilyMask();
+
     // Strips a recognized en-/og- prefix and validates the remainder against
     // the known modern families; empty/unknown input yields lastModern when
     // provided (mirrors the engine habit of reasserting the previous quality),

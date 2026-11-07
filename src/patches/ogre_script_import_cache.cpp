@@ -50,10 +50,20 @@
 // name, and imported objects only feed inheritance, so the redefined
 // BZBase/BZTerrainBase never reach the material manager. The two features
 // switch off independently.
+//
+// The parse detour also prunes imported techniques the player never draws
+// (script_scheme_prune.h): before the import's own parse, the tokens of each
+// whole `technique { ... }` statement whose scheme names an unused quality
+// tier are retagged as newline tokens, which the parser skips. Nothing is
+// freed or moved; the lexer's tokens are only relabelled. Every token is
+// layout-checked first ({ is type 0, } type 1, a newline lexeme type 6), and a
+// mismatch disables the prune for the session.
 
 #include "ogre_script_import_cache.h"
 #include "bzr_options_ui.h"
+#include "render_profile.h"
 #include "render_profile_runtime.h"
+#include "script_scheme_prune.h"
 #include "shim_log.h"
 #include "stock_enhanced_base_redirect.h"
 
@@ -64,6 +74,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -80,6 +91,33 @@ namespace BZROpenShim
             void* info = nullptr;
         };
         static_assert(sizeof(OgreSharedPtrPod) == 8, "Ogre 1.10 SharedPtr is two pointers");
+
+        // VC12 std::string / ScriptToken / std::vector, read raw so our own STL
+        // settings cannot change the layout.
+        struct OgreStringPod
+        {
+            union
+            {
+                char buf[16];
+                char* ptr;
+            };
+            uint32_t size;
+            uint32_t cap;
+        };
+        struct ScriptTokenPod
+        {
+            OgreStringPod lexeme;
+            OgreStringPod file;
+            uint32_t type;
+            uint32_t line;
+        };
+        struct TokenVectorPod
+        {
+            OgreSharedPtrPod* first;
+            OgreSharedPtrPod* last;
+            OgreSharedPtrPod* end;
+        };
+        static_assert(sizeof(OgreStringPod) == 24 && sizeof(ScriptTokenPod) == 56, "VC12 x86 layout");
 
         using FnLoadImportPath = OgreSharedPtrPod*(__thiscall*)(void*, OgreSharedPtrPod*, const std::string&);
         using FnParse = OgreSharedPtrPod*(__thiscall*)(void*, OgreSharedPtrPod*, const OgreSharedPtrPod&);
@@ -136,6 +174,9 @@ namespace BZROpenShim
         bool g_CacheEnabled = false;
         bool g_RedirectEnabled = false;
         bool g_TerrainDisabled = false;
+        bool g_PruneEnabled = false;
+        volatile LONG g_PruneRejected = 0;
+        volatile LONG g_PruneLogged = 0;
         bool g_FailureLogged = false;
         bool g_DisabledLogged = false;
         // Set once at runtime if the layout check fails; hooks then pass through.
@@ -148,6 +189,7 @@ namespace BZROpenShim
         uint32_t g_WaveMisses = 0;
         uint32_t g_WaveRedirects = 0;
         uint32_t g_Waves = 0;
+        volatile LONG g_WavePruned = 0;
         volatile LONG g_RedirectLogged = 0;
 
         thread_local OgreSharedPtrPod* t_CaptureSlot = nullptr;
@@ -184,8 +226,9 @@ namespace BZROpenShim
             {
                 LogShimA(LogLevel::Info, kComponent,
                          "[SCRIPTIMPORT] wave %u done: %u hits, %u parsed imports cached, "
-                         "%u stock base imports redirected to Enhanced",
-                         g_Waves, g_WaveHits, g_WaveMisses, g_WaveRedirects);
+                         "%u stock base imports redirected to Enhanced, %ld unused-tier techniques pruned",
+                         g_Waves, g_WaveHits, g_WaveMisses, g_WaveRedirects,
+                         static_cast<long>(InterlockedExchange(&g_WavePruned, 0)));
                 for (auto& entry : g_Cache)
                     Release(entry.second);
                 g_Cache.clear();
@@ -201,13 +244,92 @@ namespace BZROpenShim
             std::string key = g_GetResourceGroup(compiler);
             key.push_back('\x1f');
             key += name;
+            key.push_back('\x1f');
+            key += std::to_string(RenderProfiles::SeenQualityTierMask());
+            key.push_back('');
+            key += std::to_string(RenderProfiles::SeenSchemeFamilyMask());
             return key;
+        }
+
+        std::string_view View(const OgreStringPod& s)
+        {
+            if (s.cap >= 16 && !s.ptr)
+                return {};
+            return { s.cap >= 16 ? s.ptr : s.buf, s.size };
+        }
+
+        void RejectPrune(const char* why, size_t index)
+        {
+            if (InterlockedExchange(&g_PruneRejected, 1) == 0)
+                LogShimA(LogLevel::Error, kComponent,
+                         "[SCRIPTIMPORT] token layout check failed (%s at token %u); scheme prune disabled, "
+                         "Ogre unchanged",
+                         why, static_cast<unsigned>(index));
+        }
+
+        // Retags the tokens of imported techniques on unused tiers as newlines.
+        void PruneImportTokens(const OgreSharedPtrPod& tokens)
+        {
+            namespace Prune = SchemePrune;
+            const uint32_t tiers = RenderProfiles::SeenQualityTierMask();
+            const uint32_t families = RenderProfiles::SeenSchemeFamilyMask();
+            if (!g_PruneEnabled || g_PruneRejected || tiers == 0 || !tokens.rep)
+                return;
+            // Masks only grow, so one read here racing the cache key's read can
+            // only keep more than the key says: safe.
+            const auto* vec = static_cast<const TokenVectorPod*>(tokens.rep);
+            if (vec->first == vec->last)
+                return;   // empty script (null/null included): nothing to prune
+            if (!vec->first || vec->last < vec->first || vec->end < vec->last)
+                return RejectPrune("vector bounds", 0);
+            const size_t count = static_cast<size_t>(vec->last - vec->first);
+
+            std::vector<Prune::Token> view;
+            view.reserve(count);
+            bool sawNewline = false;
+            for (size_t i = 0; i < count; ++i)
+            {
+                const auto* t = static_cast<const ScriptTokenPod*>(vec->first[i].rep);
+                if (!t || t->type > Prune::kTidEnd || t->lexeme.cap < 15 || t->lexeme.size > t->lexeme.cap)
+                    return RejectPrune("token header", i);
+                const std::string_view lexeme = View(t->lexeme);
+                if ((t->type == Prune::kTidLBracket && lexeme != "{") ||
+                    (t->type == Prune::kTidRBracket && lexeme != "}"))
+                    return RejectPrune("bracket id", i);
+                if (lexeme.size() == 1 && (lexeme[0] == '\n' || lexeme[0] == '\r'))
+                {
+                    if (t->type != Prune::kTidNewline)
+                        return RejectPrune("newline id", i);
+                    sawNewline = true;
+                }
+                view.push_back({ t->type, lexeme });
+            }
+            if (!sawNewline)
+                return;   // cannot confirm the newline id from this file
+
+            LONG pruned = 0;
+            for (const Prune::Range& r : Prune::PrunableTechniques(view.data(), view.size(), tiers, families))
+            {
+                for (size_t i = r.first; i <= r.last; ++i)
+                    static_cast<ScriptTokenPod*>(vec->first[i].rep)->type = Prune::kTidNewline;
+                ++pruned;
+            }
+            if (pruned == 0)
+                return;
+            InterlockedAdd(&g_WavePruned, pruned);
+            if (InterlockedExchange(&g_PruneLogged, 1) == 0)
+                LogShimA(LogLevel::Info, kComponent,
+                         "[SCRIPTIMPORT] scheme prune active: tiers=0x%X families=0x%X (low-noshadow, glow and "
+                         "untiered schemes always kept); first import lost %ld techniques",
+                         tiers, families, static_cast<long>(pruned));
         }
 
         OgreSharedPtrPod* __fastcall ParseHook(void* parser, void* /*edx*/,
                                                OgreSharedPtrPod* ret,
                                                const OgreSharedPtrPod& tokens)
         {
+            if (t_CaptureSlot && !t_CaptureSlot->rep && !g_LayoutRejected)
+                PruneImportTokens(tokens);
             OgreSharedPtrPod* result = g_ParseOriginal(parser, ret, tokens);
             OgreSharedPtrPod* slot = t_CaptureSlot;
             if (slot && !slot->rep && result && result->rep && result->info)
@@ -443,14 +565,15 @@ namespace BZROpenShim
         g_CacheEnabled = cacheEnabled;
         g_RedirectEnabled = redirectEnabled && redirectResolved;
         g_TerrainDisabled = DisabledByEnvironment(StockEnhancedBase::kTerrainDisableSwitch);
+        g_PruneEnabled = cacheEnabled && !DisabledByEnvironment(SchemePrune::kDisableSwitch);
         g_Installed = true;
         LogShimA(LogLevel::Info, kComponent,
                  "[SCRIPTIMPORT] installed loadImportPath=0x%08X parse=0x%08X (wave gap %u ms) cache=%s "
-                 "enhanced-stock-base=%s terrain=%s",
+                 "enhanced-stock-base=%s terrain=%s scheme-prune=%s",
                  static_cast<uint32_t>(reinterpret_cast<uintptr_t>(loadImportPath)),
                  static_cast<uint32_t>(reinterpret_cast<uintptr_t>(parse)),
                  static_cast<unsigned>(kWaveGapMs), g_CacheEnabled ? "on" : "off",
                  g_RedirectEnabled ? "on" : "off",
-                 g_RedirectEnabled && !g_TerrainDisabled ? "on" : "off");
+                 g_RedirectEnabled && !g_TerrainDisabled ? "on" : "off", g_PruneEnabled ? "on" : "off");
     }
 }
