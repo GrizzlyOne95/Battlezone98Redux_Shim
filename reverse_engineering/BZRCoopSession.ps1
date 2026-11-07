@@ -46,7 +46,8 @@ param(
     [string]$Matchmaking = 'local',
     [switch]$AllowOfficialServer,
     # Launch while a Battlezone outside the BZRCoop root is running (the user's
-    # own game). Only games under the BZRCoop root still block the first client.
+    # own game). Run-BZRCoopMission still refuses games under the BZRCoop root;
+    # this script alone does not check that.
     [switch]$AllowOtherGames,
     [string]$LocalServerHealthUrl = 'http://127.0.0.1:8080/health',
     [string]$RunName = '',

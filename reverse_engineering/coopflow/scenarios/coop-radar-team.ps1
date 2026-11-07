@@ -12,7 +12,7 @@ $cdb = 'C:\Users\iestu\AppData\Local\Python\bin\cdb.cmd'
 function Read-RadarGlobals([int]$c) {
     $client = @((Get-CRFlowSession).clients) | Where-Object { $_.index -eq $c } | Select-Object -First 1
     if (-not $client.pid) { throw "no pid for c$c" }
-    $cmds = 'dd 0x917b00 L1; dd 0x917a70 L1; dd 0x917afc L1; dd poi(0x917afc)+0x174 L1; dd 0x9175b0 L1; dd 0x917578 L1; q'
+    $cmds = 'dd 0x917b00 L1; dd 0x917a70 L1; dd 0x917afc L1; dd dwo(0x917afc)+0x174 L1; dd 0x9175b0 L1; dd 0x917578 L1; qd'
     $out = & $cmd /c "`"$cdb`" -pv -p $($client.pid) -c `"$cmds`"" 2>&1 | Out-String
     $vals = @([regex]::Matches($out, '(?m)^([0-9a-f]{8})\s+([0-9a-f]{8})\s*$') | ForEach-Object { $_.Groups[2].Value })
     [pscustomobject]@{ client = $c; pid = $client.pid; ownTeam = $vals[0]; allyGate = $vals[1]; userObj = $vals[2]; userObjTeam = $vals[3]; ownColor = $vals[4]; allyColor = $vals[5]; raw = if ($vals.Count -lt 6) { $out } else { $null } }
@@ -55,13 +55,14 @@ Invoke-CRFlowStep 'cdb: building colour cache on every client' {
         $list = Invoke-CRFlow $c 'local t = {} for h in AllObjects() do if IsBuilding(h) or IsCraft(h) then t[#t+1] = { id = tostring(h), team = GetTeamNum(h), odf = GetOdf(h), bld = IsBuilding(h) } end end return t'
         $client = @((Get-CRFlowSession).clients) | Where-Object { $_.index -eq $c } | Select-Object -First 1
         $rows = @($list) | Select-Object -First 24
+        if ($rows.Count -eq 0) { throw "c$c returned no objects from AllObjects()" }
         $cmds = 'dd 0x917b00 L1; '
         foreach ($r in $rows) {
             $h = [Convert]::ToUInt32(($r.id -replace '^.*?([0-9A-Fa-f]{8})$', '$1'), 16)
             $addr = 0x0260db20 + ([uint32]($h -shr 20)) * 0x400
             $cmds += ('dd 0x{0:x}+0x16c L3; dd dwo(0x{0:x}+0xf4)+0x14 L1; ' -f $addr)
         }
-        $cmds += 'q'
+        $cmds += 'qd'
         $out = & $cmd /c "`"$cdb`" -pv -p $($client.pid) -c `"$cmds`"" 2>&1 | Out-String
         $lines = @([regex]::Matches($out, '(?m)^(?:[0-9a-f]{8}`)?[0-9a-f]{8}\s+([0-9a-f]{8}(?:\s+[0-9a-f]{8})*)\s*$') | ForEach-Object { $_.Groups[1].Value })
         if ($lines.Count -lt 2) { Write-Host $out }
