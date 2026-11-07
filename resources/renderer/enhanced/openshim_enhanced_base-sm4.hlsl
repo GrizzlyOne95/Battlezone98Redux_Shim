@@ -470,6 +470,47 @@ static const float OSE_IBL_MAX_SPECULAR_MIP = 7.0;
 // ACT_MAP_ENABLED (set by a mod's own program wrapper, e.g. Campaign
 // Reimagined) binds one more texture after brdfLut: baked AO/curvature/
 // thickness. 1 = full baked AO on indirect light, 0 = ignore it.
+// TEAM_PAINT_ENABLED (mod wrapper, needs ACT_MAP_ENABLED) binds one more
+// texture right after actMap: RGB = camo pattern (sRGB), A = paint weight.
+// teamPaint is a plain float4 uniform the mod wrapper declares (default 0) and
+// sets per material clone. It is off unless a > 1.5:
+//   rgb > 0 : solid paint in that colour, shaded by the albedo luminance
+//   rgb = 0 : camo from teamMap.rgb, brightness (a - 2)
+#if defined(TEAM_PAINT_ENABLED)
+// Mid-grey hull luminance the camo is normalised to: 0.30 sRGB.
+#if OSE_LINEAR_LIGHT_ACTIVE
+static const float OSE_TEAM_CAMO_REF = 0.0732;
+#else
+static const float OSE_TEAM_CAMO_REF = 0.30;
+#endif
+float3 ose_team_paint(float3 albedo, float4 mask, float4 tint)
+{
+    if (tint.a < 1.5)
+        return albedo;
+    const float3 lumW = float3(0.2126, 0.7152, 0.0722);
+    float lum = dot(albedo, lumW);
+    float3 paint;
+    if (max(tint.r, max(tint.g, tint.b)) < 0.004)
+    {
+        // Camo RGB (sRGB) scaled by the brightness in alpha, as authored.
+        float3 teamCamo = mask.rgb * saturate(tint.a - 2.0);
+#if OSE_LINEAR_LIGHT_ACTIVE
+        teamCamo = srgb_to_linear(teamCamo);
+#endif
+        paint = saturate(teamCamo * lum / OSE_TEAM_CAMO_REF);
+    }
+    else
+    {
+        float3 teamTint = tint.rgb;
+#if OSE_LINEAR_LIGHT_ACTIVE
+        teamTint = srgb_to_linear(teamTint);
+#endif
+        paint = saturate(teamTint * lum / max(dot(teamTint, lumW), 1e-4));
+    }
+    return lerp(albedo, paint, saturate(mask.a));
+}
+#endif
+
 #ifndef OSE_ACT_AO_STRENGTH
 #define OSE_ACT_AO_STRENGTH 1.0
 #endif
@@ -1057,6 +1098,10 @@ void base_fragment(
 #if defined(ACT_MAP_ENABLED)
     uniform Texture2D actMap : register(t10),
     uniform SamplerState actSam : register(s10),
+#if defined(TEAM_PAINT_ENABLED)
+    uniform Texture2D teamMap : register(t11),
+    uniform SamplerState teamSam : register(s11),
+#endif
 #endif
 #elif defined(SHADOWRECEIVER)
     uniform TextureCube irradianceMap : register(t5),
@@ -1068,6 +1113,10 @@ void base_fragment(
 #if defined(ACT_MAP_ENABLED)
     uniform Texture2D actMap : register(t8),
     uniform SamplerState actSam : register(s8),
+#if defined(TEAM_PAINT_ENABLED)
+    uniform Texture2D teamMap : register(t9),
+    uniform SamplerState teamSam : register(s9),
+#endif
 #endif
 #else
     uniform TextureCube irradianceMap : register(t4),
@@ -1079,6 +1128,10 @@ void base_fragment(
 #if defined(ACT_MAP_ENABLED)
     uniform Texture2D actMap : register(t7),
     uniform SamplerState actSam : register(s7),
+#if defined(TEAM_PAINT_ENABLED)
+    uniform Texture2D teamMap : register(t8),
+    uniform SamplerState teamSam : register(s8),
+#endif
 #endif
 #endif
     uniform float4x4 inverseViewMatrix,
@@ -1089,6 +1142,9 @@ void base_fragment(
 
     uniform float4 sceneAmbient,
     uniform float4 diffuseColor,
+#if defined(TEAM_PAINT_ENABLED)
+    uniform float4 teamPaint,
+#endif
 
 #if !defined(VERTEX_LIGHTING)
 #if defined(SPECULAR_ENABLED) || defined(SPECULARMAP_ENABLED)
@@ -1596,6 +1652,9 @@ void base_fragment(
     // Object diffuse/albedo (t0) is artist-authored COLOR. Decode RGB only;
     // diffuseTex.a is coverage and stays in its numerical space.
     diffuseTex.rgb = srgb_to_linear(diffuseTex.rgb);
+#endif
+#if defined(TEAM_PAINT_ENABLED)
+    diffuseTex.rgb = ose_team_paint(diffuseTex.rgb, teamMap.Sample(teamSam, vTexCoord), teamPaint);
 #endif
 #if defined(ENHANCED_MODE)
     float3 snowAlbedo = ose_snow_albedo(surfaceSnow);
