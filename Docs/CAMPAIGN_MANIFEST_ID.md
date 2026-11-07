@@ -53,7 +53,9 @@ Block, crcca The Golem Ambush, crcampgn Red Arrival. crch's row launched into it
 mission with no Lua error logged. The ISDFC rows carry no ID, so they still share
 one list as on stock.
 
-The hook is currently restricted to GOG;
-Windows/Steam, Proton and Wine
-remain unverified and require separate qualification before release. Campaigns
+The hook runs on every distribution. It was live-tested on Windows/GOG only.
+Windows/Steam runs the same code once SteamStub unpacks it, so it was not tested
+separately. Proton and Wine are untested. On a build whose bytes differ, the
+unique scan and the thunk's surrounding-byte and call-target checks fail closed
+and the parser keeps its stock behaviour. Campaigns
 using this field need a compatible OpenShim build; stock Redux ignores it.
