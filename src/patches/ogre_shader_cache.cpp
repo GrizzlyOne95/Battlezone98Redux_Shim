@@ -34,6 +34,7 @@
 //    parsed from the getter body at runtime (fallback 0xEC) and the write is
 //    verified through the exported getter afterwards.
 
+#include "d3d_compile_cache.h"
 #include "ogre_shader_cache.h"
 #include "shader_source_fingerprint.h"
 #include "shim_log.h"
@@ -648,6 +649,8 @@ namespace BZROpenShim
 
     void OgreShaderCacheOnProgramScriptOpen()
     {
+        // Before g_Mutex: the install does file work and logging of its own.
+        InstallD3DCompileCacheIfPossible();
         std::lock_guard<std::mutex> lock(g_Mutex);
         if (g_Disabled)
             return;

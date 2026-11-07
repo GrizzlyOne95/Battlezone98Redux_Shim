@@ -199,6 +199,7 @@ openshim_add_test(hud_palette_policy_tests STD 17 SOURCES hud_palette_policy_tes
 openshim_add_test(engine_flame_color_tests STD 17 SOURCES engine_flame_color_tests.cpp)
 openshim_add_test(ui_screen_fit_tests STD 17 SOURCES ui_screen_fit_tests.cpp)
 openshim_add_test(shader_source_fingerprint_tests STD 17 SOURCES shader_source_fingerprint_tests.cpp)
+openshim_add_test(dxbc_cache_policy_tests STD 17 SOURCES dxbc_cache_policy_tests.cpp)
 
 add_executable(startup_sha256_tests startup_sha256_tests.cpp)
 target_include_directories(startup_sha256_tests PRIVATE ../include)
