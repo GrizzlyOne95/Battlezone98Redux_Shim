@@ -60,6 +60,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Restored legacy ODF section headers that 1.5 accepted, such as a bare [GameObject] that otherwise quits mission load. Redux reads only exact section names, while 1.5 accepted several legacy spellings.
 [*] Fixed a crash from a ChargeGun with a negative ordnanceCount or a Launcher with a negative targetCount in its ODF. Stock does not range-check these counts, and a negative value crashes the game.
 [*] Fixed a crash when a UI widget is rebuilt while Ogre still holds an old "Top Screen" object. Stock then creates a second object with the same name, and the uncaught error closes the game.
+[*] Fixed the game terminating when a map with a description of 2,400 bytes or more is selected. Stock's description loader copies up to 2,400 bytes into a 2,400-byte array, then rejects that length as an invalid index for the terminating zero.
 [/list]
 
 [h2]Rendering, audio and UI[/h2]
