@@ -44,6 +44,14 @@
 // Off by default: [General] MapFilterExtras = 1, or
 // OPENSHIM_MAP_FILTER_EXTRAS=1. Every address comes from engine_addresses
 // with its guard bytes; a mismatch leaves the stock list untouched.
+//
+//   6. Letter jump. Ctrl+A..Ctrl+Z select the next map in the displayed list
+//      whose title starts with that letter. It needs only the screen capture
+//      (4) and the re-filter (5), not the filters or the search box, so it
+//      installs on its own: on by default, [General] MapListLetterJump = 0 or
+//      OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP=1 turns it off. A jump re-runs
+//      the current filter unchanged with the target as the reselect name, so
+//      the list never becomes empty and the preview follows the selection.
 
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
@@ -51,6 +59,7 @@
 #include "bzr_string.h"
 #include "hook_engine.h"
 #include "map_filter_extras.h"
+#include "map_letter_jump_policy.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -101,6 +110,11 @@ namespace BZROpenShim
             // Map component (constructed by 0x007A3160; `this` at [ebp-0x1C4]).
             constexpr uint32_t kComponentKeys = 0x00;
             constexpr uint32_t kComponentLabels = 0x0C;
+            // The displayed (filtered) deque is reached through a pointer
+            // here, and the selected row index sits at +0x38 (-1 for none);
+            // both from 0x007A4220 (selected entry).
+            constexpr uint32_t kComponentFilteredDeque = 0x18;
+            constexpr uint32_t kComponentSelectedIndex = 0x38;
             constexpr uint32_t kEngineStringSize = 0x18;
             // cUI_Multiplayer_Create (0x1D8 bytes, rebuilt on every visit).
             constexpr uint32_t kScreenWidgetParent = 0x150; // Middle_Overlay
@@ -142,6 +156,12 @@ namespace BZROpenShim
             uint32_t g_MapManagerSlot = 0;
             uint32_t g_CreateScreenSlot = 0;
             bool g_MapFilterExtrasInstalled = false;
+            // The screen ctor redirect is installed, and what it should do:
+            // build the search box and top up the dropdown (MapFilterExtras)
+            // and/or capture the screen for letter jump.
+            bool g_ExtrasScreenActive = false;
+            bool g_LetterJumpActive = false;
+            uint8_t* g_JumpScreen = nullptr;
             bool g_MapFilterExtrasInstallLogged = false;
 
             // Set only while the predicate runs. Everything here lives on the
@@ -159,6 +179,15 @@ namespace BZROpenShim
             char g_SearchText[kSearchInputLimit + 1] = {};
 
             constexpr const char* kComponent = "mapfilter";
+
+            // Default ON: only an explicit off (env or ini) disables it.
+            bool ShouldEnableLetterJump()
+            {
+                if (EnvFlagEnabled("OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP"))
+                    return false;
+                bool enabled = true;
+                return !TryGetUserConfigBool("General", "MapListLetterJump", enabled) || enabled;
+            }
 
             bool ShouldEnableMapFilterExtras()
             {
@@ -244,17 +273,16 @@ namespace BZROpenShim
                 return MapFilterExtras::MatchesSearch(title, fileName, g_SearchText);
             }
 
-            // Collects up to `capacity` entry pointers from the full map list.
+            // Collects up to `capacity` entry pointers from a deque<MapEntry>.
             // POD-only: called from inside __try.
-            bool TryCollectMapEntries(const void** out, unsigned capacity, unsigned& outCount)
+            bool CollectDequeEntries(const uint8_t* deque, const void** out, unsigned capacity,
+                                     unsigned& outCount)
             {
                 outCount = 0;
                 __try
                 {
-                    const uint8_t* manager = *reinterpret_cast<const uint8_t* const*>(g_MapManagerSlot);
-                    if (!manager)
+                    if (!deque)
                         return false;
-                    const uint8_t* deque = manager + kMapManagerDeque;
                     const void* const* blocks = *reinterpret_cast<const void* const* const*>(deque + 0x4);
                     const uint32_t mapSize = *reinterpret_cast<const uint32_t*>(deque + 0x8);
                     const uint32_t first = *reinterpret_cast<const uint32_t*>(deque + 0xC);
@@ -268,6 +296,24 @@ namespace BZROpenShim
                             out[outCount++] = entry;
                     }
                     return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    outCount = 0;
+                    return false;
+                }
+            }
+
+            // The full map list.
+            bool TryCollectMapEntries(const void** out, unsigned capacity, unsigned& outCount)
+            {
+                outCount = 0;
+                __try
+                {
+                    const uint8_t* manager = *reinterpret_cast<const uint8_t* const*>(g_MapManagerSlot);
+                    if (!manager)
+                        return false;
+                    return CollectDequeEntries(manager + kMapManagerDeque, out, capacity, outCount);
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER)
                 {
@@ -548,13 +594,13 @@ namespace BZROpenShim
             // dropdown label (checked against the labels vector, since an
             // unknown label reads past the keys vector) and the selected
             // map's file name (copied now: the predicate frees every entry).
-            bool TryPrepareRefresh(uint8_t*& component, char* label, size_t labelSize,
+            bool TryPrepareRefresh(uint8_t* screen, uint8_t*& component, char* label, size_t labelSize,
                                    char* reselect, size_t reselectSize)
             {
                 __try
                 {
-                    component = *reinterpret_cast<uint8_t**>(g_SearchScreen + kScreenMapComponent);
-                    uint8_t* list = *reinterpret_cast<uint8_t**>(g_SearchScreen + kScreenFilterList);
+                    component = *reinterpret_cast<uint8_t**>(screen + kScreenMapComponent);
+                    uint8_t* list = *reinterpret_cast<uint8_t**>(screen + kScreenFilterList);
                     if (!component || !list)
                         return false;
                     const char* selected = g_SelectlistSelectedText(list);
@@ -614,7 +660,7 @@ namespace BZROpenShim
                 uint8_t* component = nullptr;
                 char label[256] = {};
                 char reselect[260] = {};
-                if (!TryPrepareRefresh(component, label, sizeof(label), reselect, sizeof(reselect)))
+                if (!TryPrepareRefresh(g_SearchScreen, component, label, sizeof(label), reselect, sizeof(reselect)))
                 {
                     LogShimA(LogLevel::Info, kComponent, "[MAPFILTER] search refresh skipped: no current filter");
                     return;
@@ -638,6 +684,102 @@ namespace BZROpenShim
                     return;
                 g_SearchEditing = true;
                 ShowSearchText();
+            }
+
+            // ---- Letter jump ----
+
+            constexpr unsigned kJumpMaxMaps = 4096;
+            constexpr size_t kJumpTitleBytes = 16; // only the first letter is compared
+
+            // Reads the displayed list's titles and its selected row.
+            // POD-only: SEH inside.
+            bool TryReadDisplayedTitles(const uint8_t* component, char (*titles)[kJumpTitleBytes],
+                                        unsigned& count, int& selected)
+            {
+                static const void* entries[kJumpMaxMaps];
+                count = 0;
+                selected = -1;
+                __try
+                {
+                    const uint8_t* deque = *reinterpret_cast<const uint8_t* const*>(component + kComponentFilteredDeque);
+                    selected = *reinterpret_cast<const int*>(component + kComponentSelectedIndex);
+                    unsigned found = 0;
+                    if (!CollectDequeEntries(deque, entries, kJumpMaxMaps, found))
+                        return false;
+                    for (unsigned i = 0; i < found; ++i)
+                        CopyEngineString(static_cast<const uint8_t*>(entries[i]) + kMapEntryTitle,
+                                         titles[i], kJumpTitleBytes);
+                    count = found;
+                    return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    count = 0;
+                    return false;
+                }
+            }
+
+            // The file name of displayed row `index`, read from the live deque.
+            bool TryReadDisplayedFileName(const uint8_t* component, unsigned index, char* out, size_t outSize)
+            {
+                static const void* entries[kJumpMaxMaps];
+                out[0] = '\0';
+                __try
+                {
+                    const uint8_t* deque = *reinterpret_cast<const uint8_t* const*>(component + kComponentFilteredDeque);
+                    unsigned found = 0;
+                    if (!CollectDequeEntries(deque, entries, kJumpMaxMaps, found) || index >= found)
+                        return false;
+                    CopyEngineString(static_cast<const uint8_t*>(entries[index]) + kMapEntryFileName, out, outSize);
+                    return out[0] != '\0';
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    out[0] = '\0';
+                    return false;
+                }
+            }
+
+            bool LetterJumpScreenLive()
+            {
+                return g_LetterJumpActive && g_JumpScreen && g_CreateScreenSlot &&
+                       CurrentCreateScreen() == g_JumpScreen;
+            }
+
+            void JumpToLetter(char letter)
+            {
+                static char titles[kJumpMaxMaps][kJumpTitleBytes];
+                static const char* titlePointers[kJumpMaxMaps];
+
+                uint8_t* component = nullptr;
+                char label[256] = {};
+                char reselect[260] = {};
+                if (!TryPrepareRefresh(g_JumpScreen, component, label, sizeof(label), reselect, sizeof(reselect)))
+                    return;
+
+                unsigned count = 0;
+                int selected = -1;
+                // An empty displayed list must not reach the refresh: hosting
+                // selects row 0 there unchecked.
+                if (!TryReadDisplayedTitles(component, titles, count, selected) || count == 0)
+                    return;
+                for (unsigned i = 0; i < count; ++i)
+                    titlePointers[i] = titles[i];
+
+                const int target = MapLetterJump::FindNextByLetter(titlePointers, count, selected, letter);
+                if (target < 0 || target == selected)
+                    return;
+
+                char targetFile[260] = {};
+                if (!TryReadDisplayedFileName(component, static_cast<unsigned>(target), targetFile, sizeof(targetFile)))
+                    return;
+                if (!TryRunRefresh(component, label, targetFile))
+                {
+                    LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] letter jump refresh faulted");
+                    return;
+                }
+                LogShimA(LogLevel::Info, kComponent, "[MAPFILTER] letter jump '%c': row %d -> %d (%s)",
+                         letter, selected, target, targetFile);
             }
 
             bool CreateSearchBox(uint8_t* screen)
@@ -717,13 +859,18 @@ namespace BZROpenShim
                 // first filter pass, and a new screen can reuse the old one's
                 // address.
                 ForgetSearchBox();
+                g_JumpScreen = nullptr;
                 void* const screen = g_CreateScreenCtor(self, arg);
                 if (screen)
                 {
-                    TopUpFilterList(static_cast<uint8_t*>(screen));
-                    const bool built = CreateSearchBox(static_cast<uint8_t*>(screen));
-                    LogShimA(built ? LogLevel::Info : LogLevel::Warn, kComponent,
-                             "[MAPFILTER] search box %s", built ? "built" : "not built");
+                    if (g_ExtrasScreenActive)
+                    {
+                        TopUpFilterList(static_cast<uint8_t*>(screen));
+                        const bool built = CreateSearchBox(static_cast<uint8_t*>(screen));
+                        LogShimA(built ? LogLevel::Info : LogLevel::Warn, kComponent,
+                                 "[MAPFILTER] search box %s", built ? "built" : "not built");
+                    }
+                    g_JumpScreen = static_cast<uint8_t*>(screen);
                 }
                 return screen;
             }
@@ -775,101 +922,153 @@ namespace BZROpenShim
             return true;
         }
 
+        bool TryRouteMapListLetterJump(uint8_t character, uint8_t& result)
+        {
+            const char letter = MapLetterJump::LetterFromControlCode(character);
+            // Backspace, Tab, Ctrl+Enter and Enter share these codes; only a
+            // held Ctrl (synchronous with the WM_CHAR being dispatched) makes
+            // one a jump. Cheapest tests first: this runs for every character.
+            if (letter == 0 || !g_LetterJumpActive || GetKeyState(VK_CONTROL) >= 0)
+                return false;
+            if (!LetterJumpScreenLive())
+                return false;
+            result = 1; // swallowed: stock would append the control code to chat
+            JumpToLetter(letter);
+            return true;
+        }
+
+        namespace
+        {
+            enum class FiltersInstall
+            {
+                Retry,  // an address did not resolve yet; try again later
+                Failed, // stood down for good; no extra key is offered
+                Done,
+            };
+
+            FiltersInstall InstallExtraFilters()
+            {
+                uint32_t predicate = 0;
+                uint32_t appendCall = 0;
+                uint32_t pushBack = 0;
+                uint32_t keysBuilt = 0;
+                uint32_t vectorPush = 0;
+                const bool resolved =
+                    ResolveCode("MapFilterPredicate", predicate) &&
+                    ResolveCode("MapFilterAppendCall", appendCall) &&
+                    ResolveCode("MapDequePushBack", pushBack) &&
+                    ResolveCode("MapFilterKeysBuilt", keysBuilt) &&
+                    ResolveCode("VectorStringPushBack", vectorPush) &&
+                    ResolveData("MapManagerSlot", g_MapManagerSlot);
+                if (!resolved || !g_BzrFn_BzrStringCtorFromCStr || !g_BzrFn_BzrStringDtor)
+                {
+                    if (!g_MapFilterExtrasInstallLogged)
+                    {
+                        LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] extra filters stand down: an engine address did not verify");
+                        g_MapFilterExtrasInstallLogged = true;
+                    }
+                    return FiltersInstall::Retry;
+                }
+                g_MapDequePushBack = reinterpret_cast<FnMapDequePushBack>(pushBack);
+                g_VectorStringPushBack = reinterpret_cast<FnVectorStringPushBack>(vectorPush);
+
+                // Filtering first, then the list entries: an entry is only
+                // offered once selecting it can actually narrow the list.
+                if (!InstallInlineDetour32(g_PredicateDetour, predicate,
+                                           reinterpret_cast<void*>(&MapFilterPredicateHook),
+                                           sizeof(kPredicatePrologue), kPredicatePrologue,
+                                           sizeof(kPredicatePrologue)))
+                {
+                    LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] extra filters stand down: predicate detour refused");
+                    return FiltersInstall::Failed;
+                }
+                if (!RedirectCallTarget(appendCall, pushBack, reinterpret_cast<uintptr_t>(&MapFilterAppendHook)))
+                {
+                    // The predicate detour stays, but with no append hook an extra
+                    // key would show every map; since no extra key is offered
+                    // below and no search box is built, the detour only ever sees
+                    // stock keys and forwards them.
+                    LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] extra filters stand down: append call site did not match");
+                    return FiltersInstall::Failed;
+                }
+                if (!InstallInlineDetour32(g_KeysBuiltDetour, keysBuilt,
+                                           reinterpret_cast<void*>(&MapFilterKeysBuiltStub),
+                                           sizeof(kKeysBuiltBytes), kKeysBuiltBytes,
+                                           sizeof(kKeysBuiltBytes)))
+                {
+                    LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] extra filters stand down: filter-list detour refused");
+                    return FiltersInstall::Failed;
+                }
+                // The detour publishes its trampoline only after the jump is
+                // written. That is safe here because this runs in late init, long
+                // before the Create Game screen can exist to reach the stub.
+                g_KeysBuiltTrampoline = g_KeysBuiltDetour.trampoline;
+                LogShimA(LogLevel::Info, kComponent, "[MAPFILTER] extra filters installed (5+ Players, Stock Maps)");
+                return FiltersInstall::Done;
+            }
+
+            // The screen hook (dropdown top-up, search box and letter jump) is
+            // separate: the filters above work without it, and letter jump
+            // works without the filters.
+            void InstallScreenHook(bool extras, bool letterJump)
+            {
+                uint32_t factoryCall = 0;
+                uint32_t screenCtor = 0;
+                uint32_t refresh = 0;
+                uint32_t selectedText = 0;
+                uint32_t selectedEntry = 0;
+                const bool screenResolved =
+                    ResolveCode("MultiCreateFactoryCall", factoryCall) &&
+                    ResolveCode("MultiCreateScreenCtor", screenCtor) &&
+                    ResolveCode("MapFilterRefresh", refresh) &&
+                    ResolveCode("SelectlistSelectedText", selectedText) &&
+                    ResolveCode("MapComponentSelectedEntry", selectedEntry) &&
+                    ResolveData("MultiCreateScreenSlot", g_CreateScreenSlot);
+                if (!screenResolved)
+                {
+                    LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] create screen hook stands down: an engine address did not verify");
+                    return;
+                }
+                g_CreateScreenCtor = reinterpret_cast<FnCreateScreenCtor>(screenCtor);
+                g_MapFilterRefresh = reinterpret_cast<FnMapFilterRefresh>(refresh);
+                g_SelectlistSelectedText = reinterpret_cast<FnSelectlistSelectedText>(selectedText);
+                g_ComponentSelectedEntry = reinterpret_cast<FnComponentSelectedEntry>(selectedEntry);
+                if (!RedirectCallTarget(factoryCall, screenCtor, reinterpret_cast<uintptr_t>(&CreateScreenBuiltHook)))
+                {
+                    LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] create screen hook stands down: screen factory call did not match");
+                    return;
+                }
+                g_ExtrasScreenActive = extras;
+                g_LetterJumpActive = letterJump;
+                LogShimA(LogLevel::Info, kComponent, "[MAPFILTER] create screen hook installed (search box and top-up %s, letter jump %s)",
+                         extras ? "on" : "off", letterJump ? "on" : "off");
+            }
+        }
+
         void InstallMapFilterExtrasIfEnabled()
         {
-            if (g_MapFilterExtrasInstalled || !ShouldEnableMapFilterExtras())
+            if (g_MapFilterExtrasInstalled)
+                return;
+            const bool extras = ShouldEnableMapFilterExtras();
+            const bool letterJump = ShouldEnableLetterJump();
+            if (!extras && !letterJump)
                 return;
 
-            uint32_t predicate = 0;
-            uint32_t appendCall = 0;
-            uint32_t pushBack = 0;
-            uint32_t keysBuilt = 0;
-            uint32_t vectorPush = 0;
-            const bool resolved =
-                ResolveCode("MapFilterPredicate", predicate) &&
-                ResolveCode("MapFilterAppendCall", appendCall) &&
-                ResolveCode("MapDequePushBack", pushBack) &&
-                ResolveCode("MapFilterKeysBuilt", keysBuilt) &&
-                ResolveCode("VectorStringPushBack", vectorPush) &&
-                ResolveData("MapManagerSlot", g_MapManagerSlot);
-            if (!resolved || !g_BzrFn_BzrStringCtorFromCStr || !g_BzrFn_BzrStringDtor)
+            bool filtersDone = false;
+            if (extras)
             {
-                if (!g_MapFilterExtrasInstallLogged)
-                {
-                    LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] extra filters stand down: an engine address did not verify");
-                    g_MapFilterExtrasInstallLogged = true;
-                }
-                return;
+                const FiltersInstall filters = InstallExtraFilters();
+                if (filters == FiltersInstall::Retry)
+                    return;
+                filtersDone = filters == FiltersInstall::Done;
             }
-            g_MapDequePushBack = reinterpret_cast<FnMapDequePushBack>(pushBack);
-            g_VectorStringPushBack = reinterpret_cast<FnVectorStringPushBack>(vectorPush);
-
-            // Filtering first, then the list entries: an entry is only
-            // offered once selecting it can actually narrow the list.
-            if (!InstallInlineDetour32(g_PredicateDetour, predicate,
-                                       reinterpret_cast<void*>(&MapFilterPredicateHook),
-                                       sizeof(kPredicatePrologue), kPredicatePrologue,
-                                       sizeof(kPredicatePrologue)))
-            {
-                LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] extra filters stand down: predicate detour refused");
-                g_MapFilterExtrasInstalled = true;
-                return;
-            }
-            if (!RedirectCallTarget(appendCall, pushBack, reinterpret_cast<uintptr_t>(&MapFilterAppendHook)))
-            {
-                // The predicate detour stays, but with no append hook an extra
-                // key would show every map; since no extra key is offered
-                // below and no search box is built, the detour only ever sees
-                // stock keys and forwards them.
-                LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] extra filters stand down: append call site did not match");
-                g_MapFilterExtrasInstalled = true;
-                return;
-            }
-            if (!InstallInlineDetour32(g_KeysBuiltDetour, keysBuilt,
-                                       reinterpret_cast<void*>(&MapFilterKeysBuiltStub),
-                                       sizeof(kKeysBuiltBytes), kKeysBuiltBytes,
-                                       sizeof(kKeysBuiltBytes)))
-            {
-                LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] extra filters stand down: filter-list detour refused");
-                g_MapFilterExtrasInstalled = true;
-                return;
-            }
-            // The detour publishes its trampoline only after the jump is
-            // written. That is safe here because this runs in late init, long
-            // before the Create Game screen can exist to reach the stub.
-            g_KeysBuiltTrampoline = g_KeysBuiltDetour.trampoline;
             g_MapFilterExtrasInstalled = true;
-            LogShimA(LogLevel::Info, kComponent, "[MAPFILTER] extra filters installed (5+ Players, Stock Maps)");
 
-            // The screen hook (dropdown top-up and search box) is separate:
-            // the filters above work without it.
-            uint32_t factoryCall = 0;
-            uint32_t screenCtor = 0;
-            uint32_t refresh = 0;
-            uint32_t selectedText = 0;
-            uint32_t selectedEntry = 0;
-            const bool screenResolved =
-                ResolveCode("MultiCreateFactoryCall", factoryCall) &&
-                ResolveCode("MultiCreateScreenCtor", screenCtor) &&
-                ResolveCode("MapFilterRefresh", refresh) &&
-                ResolveCode("SelectlistSelectedText", selectedText) &&
-                ResolveCode("MapComponentSelectedEntry", selectedEntry) &&
-                ResolveData("MultiCreateScreenSlot", g_CreateScreenSlot);
-            if (!screenResolved)
-            {
-                LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] search box stands down: an engine address did not verify");
-                return;
-            }
-            g_CreateScreenCtor = reinterpret_cast<FnCreateScreenCtor>(screenCtor);
-            g_MapFilterRefresh = reinterpret_cast<FnMapFilterRefresh>(refresh);
-            g_SelectlistSelectedText = reinterpret_cast<FnSelectlistSelectedText>(selectedText);
-            g_ComponentSelectedEntry = reinterpret_cast<FnComponentSelectedEntry>(selectedEntry);
-            if (!RedirectCallTarget(factoryCall, screenCtor, reinterpret_cast<uintptr_t>(&CreateScreenBuiltHook)))
-            {
-                LogShimA(LogLevel::Warn, kComponent, "[MAPFILTER] search box stands down: screen factory call did not match");
-                return;
-            }
-            LogShimA(LogLevel::Info, kComponent, "[MAPFILTER] search box and filter-list top-up installed");
+            // The search box and top-up are offered only with the filters in
+            // place; letter jump needs neither.
+            const bool extrasScreen = extras && filtersDone;
+            if (extrasScreen || letterJump)
+                InstallScreenHook(extrasScreen, letterJump);
         }
     }
 }

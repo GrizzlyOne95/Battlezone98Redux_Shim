@@ -187,6 +187,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
     "General/MapRefreshFixes",
+    # Client-side UI only: Ctrl+A..Z in the Create Game map list jump to the
+    # next map starting with that letter. Never touches the filter or the
+    # network.
+    "General/MapListLetterJump",
     "General/MusicGlobalFocus",
     "General/OgreMaterialCollisionGuard",
     "General/EditorOverheadPlacementOrder",
@@ -452,6 +456,7 @@ $shippingPolicyChecks = @{
     "General/CustomBindsUi" = "1"
     "General/SettingsUi" = "1"
     "General/MapRefreshFixes" = "1"
+    "General/MapListLetterJump" = "1"
     "General/MusicGlobalFocus" = "1"
     "General/OgreMaterialCollisionGuard" = "1"
     "General/EditorOverheadPlacementOrder" = "1"
