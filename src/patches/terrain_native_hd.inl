@@ -370,6 +370,9 @@ void RefreshNativeTerrainHd(void* zone, bool dirty)
 
 bool InstallNativeTerrainHd()
 {
+    // Cleared before every early return: a stale deferral would keep
+    // tessellation waiting for a paint retry that never comes.
+    g_HdPaintDeferredZones = 0;
     if (!g_config.hdEnabled || g_HdDeclined) return false;
     if (!HdProfileAllowed())
     {
@@ -382,7 +385,6 @@ bool InstallNativeTerrainHd()
     if (g_HdActive) return true;
     OgreSharedPtr source, backup, array, program;
     std::array<OgreSharedPtr, 3> channelArrays{};
-    g_HdPaintDeferredZones = 0;
     try
     {
         ResolveNativeHdApi();

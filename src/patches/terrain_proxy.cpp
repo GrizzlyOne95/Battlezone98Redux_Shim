@@ -5298,7 +5298,13 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 // Paint waited on a partial terrain; this zone may complete it.
                 if (g_proxy.selected && g_config.hdEnabled && g_HdPaintDeferredZones &&
                     g_zoneOrdinals.size() > g_HdPaintDeferredZones)
+                {
                     InstallNativeTerrainHd();
+                    // Tessellation waited for the paint retries (each failed retry
+                    // removes every semantic program); bind it once paint resolves.
+                    if (g_config.tessellationTest && !g_HdPaintDeferredZones)
+                        InstallNativeTerrainTessellationTest();
+                }
             }
             if (g_proxy.selected) return true;
 
@@ -5443,7 +5449,12 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     if (!g_config.surfaceManifest.empty()) InstallNativeTerrainSurface();
                     if (g_config.hdEnabled) InstallNativeTerrainHd();
                     if (g_config.tessellationTest)
-                        InstallNativeTerrainTessellationTest();
+                    {
+                        // A deferred paint map retries per new zone, and a failed retry
+                        // drops all semantic programs: bound hull/domain stages would be
+                        // left dangling (flat grey terrain). Install after paint resolves.
+                        if (!g_HdPaintDeferredZones) InstallNativeTerrainTessellationTest();
+                    }
                     else if (!g_config.hdEnabled && g_config.hdExportPath.empty() && g_config.surfaceManifest.empty() && g_config.geometryExport.empty())
                         CreateProxy();
                     CaptureSemantics(true);
