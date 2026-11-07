@@ -149,6 +149,10 @@ namespace BZROpenShim
         constexpr uint32_t kFlagObjectExcludedStateMask = 0x600;
 
         constexpr float kMultiplayerFlagRange = 100.0f;
+        // A 2x1 m billboard on an object a few metres away fills the view:
+        // a pilot standing by an empty craft or an ally on foot. Nearby
+        // objects are identifiable without a flag, so skip them.
+        constexpr float kMultiplayerFlagMinRange = 8.0f;
 
         constexpr float kMultiplayerFlagWidth = 2.0f;
 
@@ -1000,8 +1004,10 @@ namespace BZROpenShim
                 const float dx = position[0] - userPosition[0];
                 const float dy = position[1] - userPosition[1];
                 const float dz = position[2] - userPosition[2];
-                if ((dx * dx + dy * dy + dz * dz) >
-                    (kMultiplayerFlagRange * kMultiplayerFlagRange))
+                const float distanceSq = dx * dx + dy * dy + dz * dz;
+                if (distanceSq > (kMultiplayerFlagRange * kMultiplayerFlagRange) ||
+                    (!isOwnCraft &&
+                     distanceSq < (kMultiplayerFlagMinRange * kMultiplayerFlagMinRange)))
                 {
                     continue;
                 }
