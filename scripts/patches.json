@@ -5609,6 +5609,30 @@
       "address": "0x00604130",
       "expected": "55 8B EC 81 EC 84 02 00 00 A1 00 70 8E 00 33 C5",
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) UnitTask::UpdateWeapon thiscall(task, DWORD fire), callee cleans 4 bytes; called at 0x004D3FB0 in the FollowTask fire block."
+    },
+    {
+      "name": "ResListAddCall",
+      "address": "0x007B01A8",
+      "expected": "E8 13 39 01 00 8B 8D 44 FE FF FF",
+      "identity": "Released GOG 2.2.301 options screen ctor 0x007AF4A0, mode loop: call to the checklist add (thiscall(str, ogreIndex), ret 8) at 0x007C3AC0, followed by mov ecx,[ebp-0x1BC]. Disassembled; the string is c_str of the Ogre Video Mode possibleValues element."
+    },
+    {
+      "name": "ResListAddTarget",
+      "address": "0x007C3AC0",
+      "expected": "55 8B EC 6A FF 68 2C 76 84 00 64 A1 00 00 00 00",
+      "identity": "Released GOG 2.2.301 checklist add, the target of the call at 0x007B01A8 (ResListAddCall)."
+    },
+    {
+      "name": "ResListCurrentValueLoad",
+      "address": "0x007B01BF",
+      "expected": "50 8B 8D E8 FC FF FF E8",
+      "identity": "Released GOG 2.2.301 mov ecx,[ebp-0x318]; call 0x0041F8C0 (BzrString::compare, size at +0x10, capacity at +0x14) right after the add: compares the item with the config currentValue BzrString*; on equal the ctor calls 0x007C3C10 to select it."
+    },
+    {
+      "name": "ResListCurrentValueStore",
+      "address": "0x007B0007",
+      "expected": "83 C0 18 89 85 E8 FC FF FF",
+      "identity": "Released GOG 2.2.301 the only store to [ebp-0x318] in the options ctor: map lookup result (0x004B2F10) + 0x18 = the currentValue BzrString* for the Video Mode option."
     }
   ],
   "module_addresses": [

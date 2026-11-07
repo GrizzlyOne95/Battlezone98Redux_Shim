@@ -864,6 +864,13 @@ RenderProfile = Enhanced
 ;   Kill switch: OPENSHIM_DISABLE_D3D11_DEVICE_LOSS_RECOVERY=1.
 D3D11DeviceLossRecovery = 1
 
+; Shorter resolution list in the options screen. Accepted: boolean. Default: 1.
+;   Keeps the current setting, the desktop size, and common sizes whose aspect
+;   ratio is within 0.02 of the desktop's, one entry per size. Anything the
+;   filter cannot parse is kept. Logged under [ResList].
+;   Kill switch: OPENSHIM_DISABLE_RESOLUTION_LIST_FILTER=1.
+ResolutionListFilter = 1
+
 ; DXGI flip-model presentation (DX11 only). Accepted: boolean. Default: 0.
 ;   Creates Ogre's D3D11 swap chain as DXGI_SWAP_EFFECT_FLIP_DISCARD with a
 ;   frame-latency waitable object instead of the stock blt model, so frames
