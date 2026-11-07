@@ -42,6 +42,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
@@ -313,6 +314,11 @@ namespace BZROpenShim
             // handler (see the header comment), and defines are already expanded.
             CompileJob job{ pre->GetBufferPointer(), preSize, pSourceName, nullptr, nullptr,
                             pEntrypoint, pTarget, Flags1, Flags2 };
+            // OPENSHIM_DXBC_DUMP_SLOW=1: keep the source of slow compiles for offline timing.
+            static const bool dumpSlow = EnvFlagSet("OPENSHIM_DXBC_DUMP_SLOW");
+            std::string dumpText;
+            if (dumpSlow)
+                dumpText.assign(static_cast<const char*>(pre->GetBufferPointer()), preSize);
             const ULONGLONG t0 = GetTickCount64();
             const bool workerOk = CompileWhilePumping(job);
             pre->Release();
@@ -346,6 +352,22 @@ namespace BZROpenShim
                     "[UIPERF][SHADER] dxbc_compile elapsed=%.2fms entry=%s target=%s hr=0x%08lx",
                     static_cast<double>(ms), pEntrypoint ? pEntrypoint : "", pTarget ? pTarget : "",
                     static_cast<unsigned long>(hr));
+                if (dumpSlow)
+                {
+                    char hex[17];
+                    DxbcCachePolicy::HexName(key, hex);
+                    std::error_code ec;
+                    const std::filesystem::path dir = std::filesystem::path(g_CacheDir).parent_path() / L"slow";
+                    std::filesystem::create_directories(dir, ec);
+                    char name[128];
+                    sprintf_s(name, "%06llu_%s_%s_f%08x.hlsl", ms, pEntrypoint ? pEntrypoint : "", hex, Flags1);
+                    FILE* f = nullptr;
+                    if (_wfopen_s(&f, (dir / name).c_str(), L"wb") == 0 && f)
+                    {
+                        fwrite(dumpText.data(), 1, dumpText.size(), f);
+                        fclose(f);
+                    }
+                }
             }
             LogSummaryIfDue();
 
