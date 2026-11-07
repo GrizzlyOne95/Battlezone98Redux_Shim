@@ -583,6 +583,26 @@
       "identity": "Mouse giddi_read_channels 0x00623B20 on GOG Redux 2.2.301 (int __cdecl(MOUSE_DATA*, long* analog, ulong* discrete); reached only through the mouse driver table entry 0x008EC6FC; BZ 1.5 giddi_read_channels 0x004BDDB7 is the same code). `call TimeStep; fstp [ebp-0xC]; addss xmm0,[accum 0x02A17470]; movss [accum],xmm0; movss xmm0,[0x008A24F4]=0.016666f; comiss xmm0,[accum]; jbe apply; xor eax,eax; jmp exit; mov eax,[0x0094672C]; mov ecx,[eax+0x38]` (the profile sensitivity index). Pattern is a unique whole-image match on 2026-10-20. Target of that call: the float TimeStep getter 0x00822D60 (float __cdecl(void), fld [0x00946790]; about 80 callers). MouseEveryFrame calls it from its wrapper."
     },
     {
+      "name": "ArmoryRepairPick::CurHealthCall",
+      "pattern": "8B 4D 08 E8 ?? ?? ?? ?? D9 5D E4 F3 0F 10 45 E4 8B 4D 08 F3 0F 11 45 DC E8 ?? ?? ?? ?? D9 5D E0 F3 0F 10 45 E0 F3 0F 10 4D DC 0F 2F C1 76 0C B8 0A 00 00 00",
+      "offset": 3,
+      "mode": "address",
+      "fallback": "0x004730F3",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "FUN_00472da0 armory target validator, RKIT branch: cur(FUN_0046fbd0 +0x204) < max(FUN_004624f0 +0x208) returns 10; GetCurHealth Lua (FUN_005ccf10) reads the same field; GetHealth reads +0x200 (FUN_0046d040 on obj+0x18). Pattern is a unique match on GOG Redux 2.2.301 starting at 0x004730F0: `mov ecx,[ebp+8]; call FUN_0046fbd0; fstp [ebp-0x1C]; ... call FUN_004624F0; comiss; jbe; mov eax,0xA`. This is the E8 call to the current-health getter at 0x004730F3; ArmoryRepairPick redirects it to a shim function that also honours the synced ratio +0x200 so a guest can pick a damaged allied building."
+    },
+    {
+      "name": "ArmoryRepairPick::CurHealth",
+      "pattern": "8B 4D 08 E8 ?? ?? ?? ?? D9 5D E4 F3 0F 10 45 E4 8B 4D 08 F3 0F 11 45 DC E8 ?? ?? ?? ?? D9 5D E0 F3 0F 10 45 E0 F3 0F 10 4D DC 0F 2F C1 76 0C B8 0A 00 00 00",
+      "offset": 3,
+      "mode": "rel32_target",
+      "fallback": "0x0046FBD0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "FUN_00472da0 armory target validator, RKIT branch: cur(FUN_0046fbd0 +0x204) < max(FUN_004624f0 +0x208) returns 10; GetCurHealth Lua (FUN_005ccf10) reads the same field; GetHealth reads +0x200 (FUN_0046d040 on obj+0x18). Pattern is a unique match on GOG Redux 2.2.301 starting at 0x004730F0: `mov ecx,[ebp+8]; call FUN_0046fbd0; fstp [ebp-0x1C]; ... call FUN_004624F0; comiss; jbe; mov eax,0xA`. Target of that call: float __fastcall-compatible getter FUN_0046FBD0 (ecx = object, returns *(float*)(obj+0x204)); RedirectCallTarget verifies the call still targets it."
+    },
+    {
       "name": "StreamingOggSound::CtorFillCall",
       "pattern": "6A 00 BA 04 00 00 00 6B C2 00 8B 4D F0 8B 51 04 8B 04 02 50 8B 4D F0 E8 ?? ?? ?? ?? C7 45 FC FF FF FF FF",
       "offset": 23,

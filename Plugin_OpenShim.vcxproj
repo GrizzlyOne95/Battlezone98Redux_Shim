@@ -289,6 +289,7 @@
     <ClCompile Include="src\patches\perf_telemetry.cpp" />
     <ClCompile Include="src\patches\music_single_fill.cpp" />
     <ClCompile Include="src\patches\precise_timestep.cpp" />
+    <ClCompile Include="src\patches\armory_repair_pick.cpp" />
     <ClCompile Include="src\patches\mouse_every_frame.cpp" />
     <ClCompile Include="src\patches\thread_scheduling.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
@@ -470,6 +471,8 @@
     <ClInclude Include="include\perf_telemetry.h" />
     <ClInclude Include="include\music_single_fill.h" />
     <ClInclude Include="include\precise_timestep.h" />
+    <ClInclude Include="include\armory_repair_pick.h" />
+    <ClInclude Include="include\armory_repair_pick_policy.h" />
     <ClInclude Include="include\mouse_every_frame.h" />
     <ClInclude Include="include\thread_scheduling.h" />
     <ClInclude Include="include\net_optimizer.h" />

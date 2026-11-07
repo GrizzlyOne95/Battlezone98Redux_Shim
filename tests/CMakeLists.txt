@@ -528,6 +528,10 @@ openshim_add_test(deferred_modable_policy_tests STD 17 SOURCES
     deferred_modable_policy_tests.cpp
 )
 
+openshim_add_test(armory_repair_pick_tests STD 17 SOURCES
+    armory_repair_pick_tests.cpp
+)
+
 openshim_add_test(bool_token_tests STD 20 SOURCES
     bool_token_tests.cpp
 )
