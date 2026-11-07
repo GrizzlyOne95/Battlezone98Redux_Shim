@@ -34,6 +34,7 @@
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
 #include "d3d11_device_loss_recovery.h"
+#include "d3d11_primary_monitor.h"
 #include "dxgi_flip_model.h"
 #include "dx11_enhanced_fxaa.h"
 #include "dx11_scene_depth.h"
@@ -129,6 +130,7 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializeOgreAnimationProfiler());
     PATCH_STAGE(BZROpenShim::InitializeDx11ColorSpaceDiagnostic());
     PATCH_STAGE(BZROpenShim::InitializeD3D11DeviceLossRecovery());
+    PATCH_STAGE(BZROpenShim::InitializeD3D11PrimaryMonitor());
     // Opt-in; hooks the shared DXGI factory vtable before Ogre makes its
     // render window, so it must arm here rather than wait for the renderer.
     PATCH_STAGE(BZROpenShim::InitializeDxgiFlipModel());
