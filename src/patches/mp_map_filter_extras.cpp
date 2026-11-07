@@ -930,7 +930,9 @@ namespace BZROpenShim
             // one a jump. Cheapest tests first: this runs for every character.
             if (letter == 0 || !g_LetterJumpActive || GetKeyState(VK_CONTROL) >= 0)
                 return false;
-            if (!LetterJumpScreenLive())
+            // While the search box is being edited, Ctrl+H/Ctrl+Enter keep
+            // their stock editing meaning.
+            if (g_SearchEditing || !LetterJumpScreenLive())
                 return false;
             result = 1; // swallowed: stock would append the control code to chat
             JumpToLetter(letter);
