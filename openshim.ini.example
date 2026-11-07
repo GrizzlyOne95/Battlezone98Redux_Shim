@@ -1840,6 +1840,13 @@ TracePlayerKills = 0
 ; Requires an explicit LAN selection and numeric private IPv4. Development opt-in.
 NoAuthLan = 0
 
+; Set to 1 to give every player 99 lives when you host a multiplayer game,
+; instead of the lobby lives value. Host only: guests receive the host's value,
+; so setting it on a guest has no effect. Restart required.
+; Patches the host launch fill at 0x0079A456 (GOG 2.2.301); fails closed on a
+; byte mismatch. The lives decrement is untouched.
+InfiniteLives = 0
+
 ; OpenShim's socket layer as a whole. Off installs none of it: no winsock
 ; hooks, no bandwidth governor, no auto-kick relaxation, no packet
 ; reorder/duplicate mitigation, no DSCP marking.
