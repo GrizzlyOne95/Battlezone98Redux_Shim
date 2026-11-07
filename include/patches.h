@@ -212,6 +212,9 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild MP Gate", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild List Store", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild List Gate", false, {} },
+            // Campaign enter (optional pair, dropped by OPENSHIM_DISABLE_DEFER_CAMPAIGN_MOUNT).
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild Campaign Store", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Deferred Modable Rebuild Campaign Gate", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Deferred Modable Rebuild Mission Mount Call", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Deferred Modable Rebuild MP Room Mount Call", false, {} },
             // LensFlare::~LensFlare at 0x004F9250 runs from an atexit thunk

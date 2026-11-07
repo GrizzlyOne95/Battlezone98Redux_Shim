@@ -411,6 +411,24 @@
       "identity": "`push \"Modable\"` (literal 0x00892AE8) at 0x0076ADBF opening the clear+initialise block of the list mount setter 0x0076AB20 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): call [0x0086990C] OgreMain ResourceGroupManager::clearResourceGroup at +0x1D, call [0x00869910] initialiseResourceGroup at +0x52, skip target call 0x00434440 at +0x67; SEH state 0 at both ends. The detour verifies both IAT slots by import name and the literal at patch time. The pattern carries the setter's tail because without it the identical block of the campaign mount setter 0x0076B350 (0x0076B6E4) also matches. Single match (scan 2026-10-20)."
     },
     {
+      "name": "Deferred Modable Rebuild Campaign Store",
+      "pattern": "0F B6 C0 85 C0 74 05 E9 ?? ?? ?? ?? 8B 8D E4 FE FF FF C7 81 8C 00 00 00 00 00 00 00 8B 55 08 83 C2 7C 52",
+      "offset": 18,
+      "expected_size": 10,
+      "fallback": "0x0076AEDC",
+      "require_unique": true,
+      "identity": "Mode store `mov dword [ecx+8Ch],0` at 0x0076AEDC in the campaign mount setter B 0x0076AE60 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), after its same-mode-and-same-path guard (mode compare, then call 0x00427310 on [this+0x90] and the new path); ECX is `this` (loaded from [ebp-11Ch] just before). B has two callers: the screen factory 0x007C7AD0 case 0x25 (campaign Launch -> briefing screen, call 0x007C7FF6) and the mission mount 0x0076E6C0 (call 0x0076E9E3). The detour records the mode being replaced and replays the store. Single match (exe scan 2026-11-07)."
+    },
+    {
+      "name": "Deferred Modable Rebuild Campaign Gate",
+      "pattern": "68 ?? ?? ?? ?? 8D 8D 48 FF FF FF E8 ?? ?? ?? ?? C6 45 FC 0B 8D 95 48 FF FF FF 52 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C6 45 FC 07 8D 8D 48 FF FF FF E8 ?? ?? ?? ?? 68 ?? ?? ?? ?? 8D 8D 60 FF FF FF E8 ?? ?? ?? ?? C6 45 FC 0C 8D 85 60 FF FF FF 50 FF 15 ?? ?? ?? ?? 8B C8 FF 15 ?? ?? ?? ?? C6 45 FC 07 8D 8D 60 FF FF FF E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? C6 45 FC",
+      "offset": 0,
+      "expected_size": 5,
+      "fallback": "0x0076B29A",
+      "require_unique": true,
+      "identity": "`push \"Modable\"` (literal 0x00892AE8) at 0x0076B29A opening the clear+initialise block of the campaign mount setter B 0x0076AE60 on GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): call [0x0086990C] OgreMain ResourceGroupManager::clearResourceGroup at +0x23, call [0x00869910] initialiseResourceGroup at +0x5B, skip target call 0x00434440 (post-rebuild reload) at +0x70; string ctor call at +0x0B, getSingleton at +0x1B, string dtor call at +0x33; SEH state byte [ebp-4] is 7 at both ends and the two string temporaries are built and destroyed inside, so the jump is stack-neutral. The pattern carries the tail past the post call (C6 45 FC) because the identical block of setter A 0x0076A600 (0x0076AA53) otherwise also matches. Single match (exe scan 2026-11-07)."
+    },
+    {
       "name": "Deferred Modable Rebuild Mission Mount Call",
       "pattern": "E8 ?? ?? ?? ?? 83 3D ?? ?? ?? ?? 00 74 13 8B 45 0C 50 8B 4D 08 51 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 5D C3",
       "offset": 29,
