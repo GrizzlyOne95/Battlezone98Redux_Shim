@@ -10,16 +10,13 @@
   "patches": [
     {
       "name": "Campaign Manifest ID",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "8D 95 98 E9 FF FF 52 8D 8D 98 E6 FF FF E8 ?? ?? ?? ?? 8D 85 B0 E9 FF FF 50 8D 8D B0 E6 FF FF",
       "offset": 14,
       "expected_size": 4,
       "fallback": "0x0076D194",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "GOG 2.2.301 custom campaign parser (missionBZN string xref). The guarded assignment copies the directory identity into campaign metadata +0x34 before using that string as the mission registry key. EBP-0x410 contains the terminated current INI path. Full surrounding frame operands are pinned; absent campaignID calls the original assignment. Other distributions remain unqualified."
+      "identity": "GOG 2.2.301 custom campaign parser (missionBZN string xref). The guarded assignment copies the directory identity into campaign metadata +0x34 before using that string as the mission registry key. EBP-0x410 contains the terminated current INI path. Full surrounding frame operands are pinned; absent campaignID calls the original assignment. Steam shares the GOG code once SteamStub unpacks; the scan, require_unique and the thunk's byte checks fail closed on any other layout. Live-tested on GOG only."
     },
     {
       "name": "Map Description Bounds Guard",
