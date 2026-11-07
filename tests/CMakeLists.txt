@@ -831,6 +831,12 @@ openshim_add_test(enhanced_resource_bootstrap_tests STD 20 SOURCES
     ../src/engine/enhanced_resource_bootstrap.cpp
 )
 
+openshim_add_test(script_scheme_prune_tests STD 17 SOURCES
+    script_scheme_prune_tests.cpp
+)
+target_compile_definitions(script_scheme_prune_tests PRIVATE
+    OPENSHIM_ENHANCED_PAYLOAD_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced")
+
 openshim_add_test(stock_enhanced_base_redirect_tests STD 17 SOURCES
     stock_enhanced_base_redirect_tests.cpp
 )
