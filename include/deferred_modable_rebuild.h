@@ -18,13 +18,22 @@
 // back from mission content (mount mode 0), an unreadable mode, or a group
 // that already holds something other than the base set.
 //
-// Ten sites in scripts/patches.json, all-or-nothing:
+// Campaign enter: Custom Campaigns -> Launch (screen factory case 0x25, mode-0
+// setter 0x0076AE60) also skips its rebuild; the mission mount forces the
+// catch-up when the mission really mounts, and backing out to the campaign list
+// skips the second rebuild. See the .cpp header for the rules.
+//
+// Ten core sites in scripts/patches.json, all-or-nothing:
 //   Deferred Modable Rebuild {Main,IA,MP,List} Store   mov [ecx+8Ch],N (JMP5)
 //   Deferred Modable Rebuild {Main,IA,MP,List} Gate    clear+initialise block (JMP5)
 //   Deferred Modable Rebuild Mission Mount Call         call 0x0076E6C0 (REL32)
 //   Deferred Modable Rebuild MP Room Mount Call         call 0x0076A240 (REL32)
+// plus an optional pair that stands down on its own (setter 0x0076AE60):
+//   Deferred Modable Rebuild Campaign Store             mov [ecx+8Ch],0 (JMP5)
+//   Deferred Modable Rebuild Campaign Gate              clear+initialise block (JMP5)
 // Disabled by [General] FastMenuTransitions = 0
-// (OPENSHIM_DISABLE_FAST_MENU_TRANSITIONS).
+// (OPENSHIM_DISABLE_FAST_MENU_TRANSITIONS); the campaign pair alone by
+// OPENSHIM_DISABLE_DEFER_CAMPAIGN_MOUNT.
 
 #pragma once
 #include <cstddef>
@@ -37,7 +46,12 @@ namespace BZROpenShim
     {
         constexpr int kSiteCount = 10;
 
+        // The ten core sites.
         bool IsPatchName(const char* name);
+
+        // The optional campaign-enter pair (kCampaignSiteCount sites).
+        constexpr int kCampaignSiteCount = 2;
+        bool IsCampaignPatchName(const char* name);
 
         // Validates one site and returns the address its payload targets:
         // for JMP5 sites the detour (stolenLen = bytes it replaces), for REL32
@@ -48,5 +62,9 @@ namespace BZROpenShim
         // its store's setter, the MP room call reaches the MP setter, the
         // rebuild helpers resolve). False stands the whole module down.
         bool FinalizeSites();
+
+        // After FinalizeSites succeeded: the campaign pair's own checks. False
+        // stands down only that pair.
+        bool FinalizeCampaignSites();
     }
 }
