@@ -32,6 +32,10 @@ int main()
         Check(RecolorLabelArgb(0xFF008000u,t)==0xFF800000u,"label: darker green scales the target");
         for(const uint32_t c:{0xFFFFFFFFu,0xFF000000u,0xFFFF0000u,0xFF0000FFu,0x80808080u})
             Check(RecolorLabelArgb(c,t)==c,"label: white, black, red, blue and grey are untouched");
+        {
+            Settings dim=t; dim.whiteLevel=0;
+            Check(RecolorLabelArgb(0xFFFFFFFFu,dim)==0xFFFFFFFFu,"label: white text stays white at the lowest white level");
+        }
         Settings off=t;off.enabled=false;
         Check(RecolorLabelArgb(0xFF00FF00u,off)==0xFF00FF00u,"label: theme off leaves colour untouched");
         Settings stock=t;stock.rgb={0,255,0};

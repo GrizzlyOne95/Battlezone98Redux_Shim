@@ -65,6 +65,10 @@ namespace BZROpenShim::MenuTheme
     inline uint32_t RecolorLabelArgb(uint32_t argb, const Settings& s)
     {
         if (!s.enabled||IsStockLook(s)) return argb;
+        // Only green text follows the theme. White, grey and red labels keep
+        // their colour; the white level would otherwise darken them too.
+        const uint32_t r=(argb>>16)&0xFF,g=(argb>>8)&0xFF,b=argb&0xFF;
+        if (g<=std::max(r,b)+1) return argb;
         const std::array<float,4> in{((argb>>16)&0xFF)/255.0f,((argb>>8)&0xFF)/255.0f,(argb&0xFF)/255.0f,0};
         const auto out=Colorize(in,s);
         const auto byte=[](float v){return static_cast<uint32_t>(std::clamp(v,0.0f,1.0f)*255.0f+.5f);};
