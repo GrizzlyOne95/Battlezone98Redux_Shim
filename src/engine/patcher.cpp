@@ -463,6 +463,14 @@ namespace BZROpenShim
         return s_cached != 0;
     }
 
+    // Campaign-enter pair of FastMenuTransitions; drops only its two sites.
+    static bool ShouldEnableDeferCampaignMount() {
+        static int s_cached = -1;
+        if (s_cached < 0)
+            s_cached = EnvFlagEnabledByName("OPENSHIM_DISABLE_DEFER_CAMPAIGN_MOUNT") ? 0 : 1;
+        return s_cached != 0;
+    }
+
     static bool IsLobbyBzrnetIntegrationPatchName(const char* name) {
         if (!name) return false;
         return strcmp(name, "Lobby BZRNET Integration HOST") == 0 || strcmp(name, "Lobby BZRNET Integration CLIENT") == 0;
@@ -584,7 +592,9 @@ namespace BZROpenShim
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsPathBlockFacesPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnableFastMenuTransitions()) {
-            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return DeferredModableRebuild::IsPatchName(p.name.c_str()); }), patches.end());
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return DeferredModableRebuild::IsPatchName(p.name.c_str()) || DeferredModableRebuild::IsCampaignPatchName(p.name.c_str()); }), patches.end());
+        } else if (!ShouldEnableDeferCampaignMount()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return DeferredModableRebuild::IsCampaignPatchName(p.name.c_str()); }), patches.end());
         }
     }
 
@@ -1061,10 +1071,12 @@ namespace BZROpenShim
             std::vector<HookEngine::PatchDef*> sites;
             for (auto& p : patches)
                 if (DeferredModableRebuild::IsPatchName(p.name.c_str())) sites.push_back(&p);
-            if (!sites.empty()) {
-                bool ok = sites.size() == static_cast<size_t>(DeferredModableRebuild::kSiteCount);
+            // Resolves the detours for `group` and writes the payloads, or marks
+            // every site unverified. `expected` is the exact site count.
+            auto armSites = [](std::vector<HookEngine::PatchDef*>& group, size_t expected, bool ok, bool core) {
                 std::vector<std::pair<void*, size_t>> detours;
-                for (auto* p : sites) {
+                ok = ok && group.size() == expected;
+                for (auto* p : group) {
                     size_t len = 0;
                     const bool typed = p->type == HookEngine::PatchType::JMP5 || p->type == HookEngine::PatchType::REL32;
                     void* detour = (ok && typed && p->verified)
@@ -1072,23 +1084,37 @@ namespace BZROpenShim
                     if (!detour) ok = false;
                     detours.emplace_back(detour, len);
                 }
-                if (ok) ok = DeferredModableRebuild::FinalizeSites();
-                for (size_t i = 0; i < sites.size(); ++i) {
+                if (ok) ok = core ? DeferredModableRebuild::FinalizeSites() : DeferredModableRebuild::FinalizeCampaignSites();
+                for (size_t i = 0; i < group.size(); ++i) {
                     if (!ok) {
-                        sites[i]->verified = false;
+                        group[i]->verified = false;
                         continue;
                     }
                     const uint32_t target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(detours[i].first));
-                    if (sites[i]->type == HookEngine::PatchType::REL32) {
-                        const int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(sites[i]->address + 4);
-                        sites[i]->payload.resize(4);
-                        memcpy(sites[i]->payload.data(), &rel, 4);
+                    if (group[i]->type == HookEngine::PatchType::REL32) {
+                        const int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(group[i]->address + 4);
+                        group[i]->payload.resize(4);
+                        memcpy(group[i]->payload.data(), &rel, 4);
                     } else {
-                        sites[i]->payload = HookEngine::MakeJmp5Payload(sites[i]->address, target, detours[i].second);
+                        group[i]->payload = HookEngine::MakeJmp5Payload(group[i]->address, target, detours[i].second);
                     }
                 }
-                if (!ok)
+                return ok;
+            };
+            std::vector<HookEngine::PatchDef*> campaign;
+            for (auto& p : patches)
+                if (DeferredModableRebuild::IsCampaignPatchName(p.name.c_str())) campaign.push_back(&p);
+            bool coreOk = true;
+            if (!sites.empty()) {
+                coreOk = armSites(sites, static_cast<size_t>(DeferredModableRebuild::kSiteCount), true, true);
+                if (!coreOk)
                     Log(L"[FastMenuTransitions] not all ten sites verified; menus keep the stock Modable rebuild\n");
+            }
+            // The campaign pair needs the core helpers and stands down alone.
+            if (!campaign.empty()) {
+                const bool campOk = armSites(campaign, static_cast<size_t>(DeferredModableRebuild::kCampaignSiteCount), coreOk && !sites.empty(), false);
+                if (!campOk)
+                    Log(L"[FastMenuTransitions] campaign enter sites not verified; entering a campaign keeps the stock Modable rebuild\n");
             }
         }
         for (auto& p : patches) {

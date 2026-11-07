@@ -23,21 +23,42 @@
 //   0x0076A430  1     0x0076A47D  0x0076A564  +0x20 / +0x55 / +0x6A
 //   0x0076A240  2     0x0076A28D  0x0076A392  +0x20 / +0x55 / +0x6A
 //   0x0076AB20  3     0x0076AB79  0x0076ADBF  +0x1D / +0x52 / +0x67
+//   0x0076AE60  0     0x0076AEDC  0x0076B29A  +0x23 / +0x5B / +0x70  (campaign, optional)
 //
 // The two std::string temporaries are built and destroyed between Gate and the
 // skip target, so the stack and the SEH state byte are the same at both ends:
 // jumping over the block is stack-neutral and leaves nothing half built.
 //
-// Which content Ogre holds is tracked in s_held. Mode 0 (a mission or campaign
-// mount, setters 0x0076A600/0x0076AE60/0x0076B350) is never deferred: those
-// setters are not hooked and always rebuild, so a mount that was in mode 0
-// means the group holds mission content and the next shell setter rebuilds as
-// stock. A shell setter skips only when the mode it replaces is a shell mode
-// (1-4) and the group holds the base set (4). Going back to the main menu then
-// costs nothing; going to IA/MP/list leaves a pending catch-up, flushed by the
-// two call-site wrappers before anything renders mod content.
+// Which content Ogre holds is tracked in s_state.held. Mode 0 (a mission or
+// campaign mount, setters A 0x0076A600, B 0x0076AE60, C 0x0076B350) is never
+// deferred inside the mission mount: A and C are not hooked and always rebuild,
+// so a mount that was in mode 0 means the group holds mission content and the
+// next shell setter rebuilds as stock. A shell setter skips only when the mode
+// it replaces is a shell mode (1-4) and the group holds the base set (4).
+// Going back to the main menu then costs nothing; going to IA/MP/list leaves a
+// pending catch-up, flushed by the two call-site wrappers before anything
+// renders mod content. The decisions live in include/deferred_modable_policy.h.
+//
+// Campaign enter (setter B, 0x0076AE60). Its two callers are the screen factory
+// 0x007C7AD0 case 0x25 (campaign Launch -> briefing, return 0x007C7FFB) and
+// the mission mount 0x0076E6C0 (0x0076E9E3). B's guard is same mode AND same
+// path. The Mission Mount Call wrapper sets inMissionMount, so:
+//   - factory call (flag clear): the Gate is skipped, the group keeps what it
+//     held, pendingMission is set ("campaign enter: Modable rebuild deferred");
+//   - mission mount: the Mission Mount Call wrapper sees pendingMission and
+//     runs pre/clear/init/post BEFORE calling the mount ("mission mount:
+//     forced deferred Modable rebuild"), i.e. at the point stock had already
+//     rebuilt on enter. The mount then runs exactly as stock: B with the same
+//     mode+path returns at its guard; a different path rebuilds again, as
+//     stock would;
+//   - back-out to a shell screen with pendingMission set: the enter rebuild
+//     never ran, so the shell rule applies as if coming from a shell mode
+//     ("campaign back: rebuild skipped (enter was deferred)").
+// B's two sites are optional: OPENSHIM_DISABLE_DEFER_CAMPAIGN_MOUNT drops only
+// them, and a byte mismatch stands only them down (B stays stock).
 
 #include "deferred_modable_rebuild.h"
+#include "deferred_modable_policy.h"
 
 #include <windows.h>
 
@@ -61,15 +82,12 @@ namespace BZROpenShim
             constexpr const char* kMpGate    = "Deferred Modable Rebuild MP Gate";
             constexpr const char* kListStore = "Deferred Modable Rebuild List Store";
             constexpr const char* kListGate  = "Deferred Modable Rebuild List Gate";
+            constexpr const char* kCampStore = "Deferred Modable Rebuild Campaign Store";
+            constexpr const char* kCampGate  = "Deferred Modable Rebuild Campaign Gate";
             constexpr const char* kMissionCall = "Deferred Modable Rebuild Mission Mount Call";
             constexpr const char* kMpRoomCall  = "Deferred Modable Rebuild MP Room Mount Call";
 
-            constexpr int kModeMission = 0;
-            constexpr int kModeIa = 1;
-            constexpr int kModeMp = 2;
-            constexpr int kModeList = 3;
-            constexpr int kModeMain = 4;
-            constexpr int kHeldUnknown = -1;
+            using namespace DeferredModablePolicy;
             constexpr uint32_t kModeOffset = 0x8C;
 
             constexpr const char* kClearImport =
@@ -86,11 +104,16 @@ namespace BZROpenShim
             };
             constexpr GateLayout kWideGateLayout = {0x20, 0x55, 0x6A};  // main, IA, MP
             constexpr GateLayout kListGateLayout = {0x1D, 0x52, 0x67};
+            constexpr GateLayout kCampGateLayout = {0x23, 0x5B, 0x70};
             // Inside the main gate block: the string ctor call, getSingleton
             // and the string dtor call that follows clearResourceGroup.
             constexpr uint32_t kGateCtorCall = 0x08;
             constexpr uint32_t kGateSingletonCall = 0x18;
             constexpr uint32_t kGateDtorCall = 0x30;
+            // The campaign gate block is shifted: string ctor, getSingleton, dtor.
+            constexpr uint32_t kCampCtorCall = 0x0B;
+            constexpr uint32_t kCampSingletonCall = 0x1B;
+            constexpr uint32_t kCampDtorCall = 0x33;
 
             struct StoreSite
             {
@@ -106,8 +129,8 @@ namespace BZROpenShim
             };
 
             // Written once at patch time, before any detour exists.
-            StoreSite s_mainStore, s_iaStore, s_mpStore, s_listStore;
-            GateSite s_mainGate, s_iaGate, s_mpGate, s_listGate;
+            StoreSite s_mainStore, s_iaStore, s_mpStore, s_listStore, s_campStore;
+            GateSite s_mainGate, s_iaGate, s_mpGate, s_listGate, s_campGate;
             uint32_t s_missionCallSite = 0;
             uint32_t s_mpRoomCallSite = 0;
 
@@ -131,10 +154,7 @@ namespace BZROpenShim
             const char* s_literal = nullptr;
 
             // UI thread only: the shell and the mission mount run on it.
-            int s_held = kHeldUnknown;  // mount mode whose content the group holds
-            bool s_pending = false;     // mounts moved past s_held without a rebuild
-            int s_storeTarget = -1;     // mode the last hooked store wrote
-            int s_storeBefore = -1;     // mode it replaced (-1 unreadable)
+            State s_state;              // held / pending / pendingMission, see the policy header
             int s_gateDecision = 0;     // scratch between the call and popad
 
             const char* ModeName(int mode)
@@ -167,29 +187,44 @@ namespace BZROpenShim
             {
                 int before = -1;
                 if (!ReadMode(self, before)) before = -1;
-                s_storeTarget = target;
-                s_storeBefore = before;
+                s_state.storeTarget = target;
+                s_state.storeBefore = before;
             }
 
             // Returns 1 to jump over the clear+initialise block.
             int __cdecl DecideGate(int target)
             {
-                const bool paired = s_storeTarget == target;
-                const int before = paired ? s_storeBefore : -1;
-                s_storeTarget = -1;
-                const bool fromShell = before >= kModeIa && before <= kModeMain;
-                if (fromShell && s_held == kModeMain)
+                const GateResult r = DecideShellGate(s_state, target);
+                switch (r.reason)
                 {
-                    s_pending = target != kModeMain;
+                case GateReason::CampaignBack:
+                    LogShimA(LogLevel::Info, kComponent, "campaign back: rebuild skipped (enter was deferred) -> %s%s",
+                             ModeName(target), s_state.pending ? ", catch-up pending" : "");
+                    break;
+                case GateReason::ShellSkipped:
+                case GateReason::ShellDeferred:
                     LogShimA(LogLevel::Info, kComponent, "%s -> %s: Modable rebuild %s (group holds the main set)",
-                             ModeName(before), ModeName(target), s_pending ? "deferred" : "skipped");
-                    return 1;
+                             ModeName(r.before), ModeName(target), s_state.pending ? "deferred" : "skipped");
+                    break;
+                default:
+                    LogShimA(LogLevel::Info, kComponent, "%s -> %s: Modable rebuild kept (group held %s)",
+                             ModeName(r.before), ModeName(target), ModeName(r.held));
+                    break;
                 }
-                LogShimA(LogLevel::Info, kComponent, "%s -> %s: Modable rebuild kept (group held %s)",
-                         ModeName(before), ModeName(target), ModeName(s_held));
-                s_held = target;
-                s_pending = false;
-                return 0;
+                return r.skip ? 1 : 0;
+            }
+
+            // Campaign setter B (mode 0). Returns 1 to jump over the block.
+            int __cdecl DecideCampaignGateCall()
+            {
+                const GateResult r = DecideCampaignGate(s_state);
+                if (r.skip)
+                    LogShimA(LogLevel::Info, kComponent, "campaign enter: Modable rebuild deferred (group holds %s)",
+                             ModeName(r.held));
+                else
+                    LogShimA(LogLevel::Info, kComponent, "mission mount: campaign setter rebuilds Modable (group held %s)",
+                             ModeName(r.held));
+                return r.skip ? 1 : 0;
             }
 
             void RunGroupCall(uint32_t slot)
@@ -201,39 +236,52 @@ namespace BZROpenShim
                 s_strDtor(name);
             }
 
+            void RebuildNow()
+            {
+                s_preRebuild();
+                RunGroupCall(s_clearSlot);
+                RunGroupCall(s_initSlot);
+                s_postRebuild();
+            }
+
             // Same order as the setters: pre, clear, initialise, post.
             void Flush(void* self, const char* where)
             {
-                if (!s_pending) return;
-                s_pending = false;
+                if (!s_state.pending) return;
+                s_state.pending = false;
                 int mode = -1;
                 if (!ReadMode(self, mode))
                 {
-                    s_held = kHeldUnknown;
+                    s_state.held = kHeldUnknown;
                     return;
                 }
                 if (mode == kModeMission)
                 {
                     // A mission setter ran its own (stock) rebuild.
-                    s_held = kModeMission;
+                    s_state.held = kModeMission;
                     LogShimA(LogLevel::Info, kComponent, "%s: mission mount rebuilt the group itself", where);
                     return;
                 }
-                if (mode == s_held) return;
+                if (mode == s_state.held) return;
                 const ULONGLONG start = GetTickCount64();
-                s_preRebuild();
-                RunGroupCall(s_clearSlot);
-                RunGroupCall(s_initSlot);
-                s_postRebuild();
+                RebuildNow();
                 LogShimA(LogLevel::Info, kComponent, "%s: deferred Modable rebuild for %s (held %s) took %llu ms",
-                         where, ModeName(mode), ModeName(s_held), GetTickCount64() - start);
-                s_held = mode;
+                         where, ModeName(mode), ModeName(s_state.held), GetTickCount64() - start);
+                s_state.held = mode;
             }
 
             // Replaces `call 0x0076E6C0` (thiscall, 2 args, ret 8) in 0x007647C0.
             int __fastcall MissionMountHook(void* self, void* /*edx*/, int a, int b)
             {
+                if (BeginMissionMount(s_state))
+                {
+                    const ULONGLONG start = GetTickCount64();
+                    RebuildNow();
+                    LogShimA(LogLevel::Info, kComponent, "mission mount: forced deferred Modable rebuild took %llu ms",
+                             GetTickCount64() - start);
+                }
                 const int result = s_missionMount(self, a, b);
+                FinishMissionMount(s_state);
                 Flush(self, "mission mount");
                 return result;
             }
@@ -267,6 +315,7 @@ namespace BZROpenShim
             DMR_STORE_STUB(IaStoreStub, 1, s_iaStore)
             DMR_STORE_STUB(MpStoreStub, 2, s_mpStore)
             DMR_STORE_STUB(ListStoreStub, 3, s_listStore)
+            DMR_STORE_STUB(CampStoreStub, 0, s_campStore)
 #undef DMR_STORE_STUB
 
             // Flags are dead at both destinations: site+5 is `lea ecx; call`
@@ -352,6 +401,25 @@ namespace BZROpenShim
                     jmp  dword ptr [s_listGate.resume]
                 skip_block:
                     jmp  dword ptr [s_listGate.skip]
+                }
+            }
+
+            void __declspec(naked) CampGateStub()
+            {
+                __asm
+                {
+                    pushfd
+                    pushad
+                    call DecideCampaignGateCall
+                    mov  dword ptr [s_gateDecision], eax
+                    popad
+                    popfd
+                    cmp  dword ptr [s_gateDecision], 0
+                    jne  skip_block
+                    push dword ptr [s_campGate.pushImm]
+                    jmp  dword ptr [s_campGate.resume]
+                skip_block:
+                    jmp  dword ptr [s_campGate.skip]
                 }
             }
 
@@ -485,6 +553,11 @@ namespace BZROpenShim
             }
         }
 
+        bool IsCampaignPatchName(const char* name)
+        {
+            return name && (strcmp(name, kCampStore) == 0 || strcmp(name, kCampGate) == 0);
+        }
+
         bool IsPatchName(const char* name)
         {
             if (!name) return false;
@@ -505,9 +578,32 @@ namespace BZROpenShim
             if (name == kIaGate) return PrepareGate(name, address, kWideGateLayout, s_iaGate, (void*)IaGateStub, stolenLen);
             if (name == kMpGate) return PrepareGate(name, address, kWideGateLayout, s_mpGate, (void*)MpGateStub, stolenLen);
             if (name == kListGate) return PrepareGate(name, address, kListGateLayout, s_listGate, (void*)ListGateStub, stolenLen);
+            if (name == kCampStore) return PrepareStore(name, address, kModeMission, s_campStore, (void*)CampStoreStub, stolenLen);
+            if (name == kCampGate) return PrepareGate(name, address, kCampGateLayout, s_campGate, (void*)CampGateStub, stolenLen);
             if (name == kMissionCall) return PrepareCall(name, address, s_missionCallSite, (void*)MissionMountHook, stolenLen);
             if (name == kMpRoomCall) return PrepareCall(name, address, s_mpRoomCallSite, (void*)MpRoomMountHook, stolenLen);
             return nullptr;
+        }
+
+        bool FinalizeCampaignSites()
+        {
+            const char* why = nullptr;
+            if (!s_campStore.address || !s_campGate.address || s_campGate.address <= s_campStore.address ||
+                s_campGate.address - s_campStore.address > 0x500)
+                why = "the campaign gate is not inside its store's setter";
+            else if (CallTarget(s_campGate.skip) != reinterpret_cast<uintptr_t>(s_postRebuild))
+                why = "the campaign gate skips to a different post-rebuild helper";
+            else if (CallTarget(s_campGate.address + kCampCtorCall) != reinterpret_cast<uintptr_t>(s_strCtor) ||
+                     CallTarget(s_campGate.address + kCampDtorCall) != reinterpret_cast<uintptr_t>(s_strDtor))
+                why = "the campaign gate uses different string helpers";
+            else if (!CheckIndirectCall(s_campGate.address + kCampSingletonCall, s_singletonSlot))
+                why = "the campaign gate does not call ResourceGroupManager::getSingleton";
+            if (why)
+            {
+                LogShimA(LogLevel::Warn, kComponent, "%s; campaign enter keeps the stock rebuild", why);
+                return false;
+            }
+            return true;
         }
 
         bool FinalizeSites()

@@ -363,6 +363,7 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />
+    <ClInclude Include="include\deferred_modable_policy.h" />
     <ClInclude Include="include\background_run_policy.h" />
     <ClInclude Include="include\never_activate_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />

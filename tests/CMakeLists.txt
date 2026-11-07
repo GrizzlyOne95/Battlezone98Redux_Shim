@@ -524,6 +524,10 @@ openshim_add_test(dynamic_geometry_batching_tests STD 17 SOURCES
     dynamic_geometry_batching_tests.cpp
 )
 
+openshim_add_test(deferred_modable_policy_tests STD 17 SOURCES
+    deferred_modable_policy_tests.cpp
+)
+
 openshim_add_test(bool_token_tests STD 20 SOURCES
     bool_token_tests.cpp
 )
