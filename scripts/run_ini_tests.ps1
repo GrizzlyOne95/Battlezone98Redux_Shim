@@ -318,6 +318,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Only trims the options screen's resolution list; the current setting is
     # always kept and unparsable entries fail open.
     "Graphics/ResolutionListFilter",
+    # Replaces the resolution row's click-to-cycle with a list; the selection
+    # path is the control's own, and any guard mismatch leaves it stock.
+    "Graphics/ResolutionDropdown",
     # Enhanced became the default render profile on 2026-10-22 at the user's
     # request; it only takes effect on DX11 with a verified resource set. The
     # marker records that the one-time Redux -> Enhanced move already ran.
@@ -501,6 +504,7 @@ $shippingPolicyChecks = @{
     "Network/LuaMapObjectHandles" = "1"
     "Graphics/D3D11DeviceLossRecovery" = "1"
     "Graphics/ResolutionListFilter" = "1"
+    "Graphics/ResolutionDropdown" = "1"
     "Graphics/RenderProfile" = "Enhanced"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
