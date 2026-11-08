@@ -3560,6 +3560,12 @@
       "identity": "CNetGameLobby::OnLobbyListReceived on exact GOG Redux 2.2.301 (logs \"CNetGameLobby::OnLobbyListReceived, matching lobbies: \"), __thiscall(this, int count), ret 4 at 0x00741678; creates each list entry with FindLobby and fills it from lobby data (FUN_00740e70 lines 139-170). mp_invite_password.cpp detours the first 10 bytes (SEH prologue; absolute operand only) to send a held invite join once the list exists. Bytes read from the shipped image 2026-11-08."
     },
     {
+      "name": "LobbyEnterLounge",
+      "address": "0x006C6320",
+      "expected": "55 8B EC 6A FF 68 41 23 85 00 64 A1 00 00 00 00",
+      "identity": "BZRNet WebSocket client EnterLounge on exact GOG Redux 2.2.301, __thiscall(ws), plain ret at 0x006C65A8; sets byte ws+0xC34 (0x006C636D) and sends the \"DoEnterLounge\" message (0x006C65B0 clears it). Join-by-id 0x0074B7C0 calls it first (0x0074B7EB-0x0074B814: ws = *(this+0xC8), skipped when ws+0xC34 is set); the server sends no lobby list before it. mp_invite_password.cpp calls it, unpatched, when it holds an invite join for the lobby list. Bytes read from the shipped image 2026-11-08."
+    },
+    {
       "name": "LobbyOnRichPresenceJoinRequested",
       "address": "0x00757E00",
       "expected": "55 8B EC 6A FF 68 83 C6 85 00",

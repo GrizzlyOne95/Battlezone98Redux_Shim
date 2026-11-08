@@ -44,7 +44,11 @@
 //      and the first GetLobbyList answer lands ~3.5 s after RunCallbacks has
 //      called join-by-id (live 2026-11-08, PC 2: join 07:16:44.465, "Added
 //      lobby" 07:16:47.936). On a list miss from RunCallbacks (password ==
-//      this+0xA4) the join is held. An OnLobbyListReceived 0x00740E70 detour
+//      this+0xA4) the join is held. Holding skips join-by-id's first step,
+//      EnterLounge 0x006C6320 on ws = *(this+0xC8) when byte ws+0xC34 is 0
+//      (disassembly 0x0074B7EB-0x0074B814); without it the server sends no
+//      list (live 2026-11-08: a held join waited forever), so the hold runs
+//      that step itself. An OnLobbyListReceived 0x00740E70 detour
 //      (__thiscall(this, count), ret 4 at 0x00741678; it creates and fills
 //      each entry, FUN_00740e70 lines 139-170) sends it after the original
 //      returns: with the entry's password when the lobby is listed and
@@ -90,6 +94,13 @@ namespace BZROpenShim
             using FnJoinById = void(__fastcall*)(void* self, void* edx, const void* lobbyId, void* password);
             using FnFindLobby = void*(__fastcall*)(void* self, void* edx, const void* lobbyId, uint32_t create);
             using FnListReceived = void(__fastcall*)(void* self, void* edx, int count);
+            using FnEnterLounge = void(__fastcall*)(void* ws, void* edx);
+            // Join-by-id's first step (0x0074B7EB-0x0074B814): ws = *(this+0xC8)
+            // (std::shared_ptr get 0x00416400); if byte ws+0xC34 (in lounge) is 0,
+            // EnterLounge(ws) 0x006C6320 sends DoEnterLounge. The server sends no
+            // lobby list until then, so a held join must do this step itself.
+            constexpr uintptr_t kLobbyWsClientOffset = 0xC8;
+            constexpr uintptr_t kWsInLoungeOffset = 0xC34;
 
             // push ebp / mov ebp,esp / push -1 / push imm32 (absolute SEH handler).
             constexpr uint8_t kJoinRequestedStolen[10] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x3B, 0x0B, 0x85, 0x00 };
@@ -106,6 +117,7 @@ namespace BZROpenShim
             InlineDetour32 g_ListReceivedDetour = {};
             void* volatile g_ListReceivedOriginal = nullptr;
             FnFindLobby g_FindLobby = nullptr;
+            FnEnterLounge g_EnterLounge = nullptr;
 
             // Game thread only.
             bool g_HavePending = false;
@@ -151,6 +163,31 @@ namespace BZROpenShim
                 __except (EXCEPTION_EXECUTE_HANDLER)
                 {
                     return nullptr;
+                }
+            }
+
+            // Stock join-by-id's lounge step. 1 entered (or already in), 0 failed.
+            bool SafeEnterLounge(void* self, bool& wasInLounge)
+            {
+                wasInLounge = false;
+                uintptr_t ws = 0;
+                uint8_t inLounge = 0;
+                if (!SafeCopy(&ws, reinterpret_cast<uintptr_t>(self) + kLobbyWsClientOffset, sizeof(ws)) || !ws ||
+                    !SafeCopy(&inLounge, ws + kWsInLoungeOffset, 1))
+                    return false;
+                if (inLounge)
+                {
+                    wasInLounge = true;
+                    return true;
+                }
+                __try
+                {
+                    g_EnterLounge(reinterpret_cast<void*>(ws), nullptr);
+                    return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
                 }
             }
 
@@ -228,14 +265,17 @@ namespace BZROpenShim
                 uint8_t hasPassword = 0;
                 if (!entry)
                 {
-                    if (password == reinterpret_cast<uint8_t*>(self) + kLobbyInvitePasswordOffset)
+                    bool wasInLounge = false;
+                    if (password == reinterpret_cast<uint8_t*>(self) + kLobbyInvitePasswordOffset &&
+                        SafeEnterLounge(self, wasInLounge))
                     {
                         g_Held = true;
                         g_HeldSelf = self;
                         g_HeldAt = GetTickCount64();
                         std::memcpy(g_HeldId, id, kLobbyIdBytes);
                         LogShimA(LogLevel::Info, kComponent,
-                                 "invited lobby is not listed yet; holding the join for the lobby list");
+                                 "invited lobby is not listed yet; holding the join for the lobby list (%s)",
+                                 wasInLounge ? "already in the lounge" : "entered the lounge");
                         return;
                     }
                     LogShimA(LogLevel::Info, kComponent, "invited lobby is not in the lobby list; joining without a password");
@@ -296,7 +336,7 @@ namespace BZROpenShim
 
             bool DoInstall()
             {
-                uint32_t requestedAddr = 0, joinAddr = 0, findAddr = 0, listAddr = 0;
+                uint32_t requestedAddr = 0, joinAddr = 0, findAddr = 0, listAddr = 0, loungeAddr = 0;
                 // Literal names so patch_registration_tests can check them
                 // against scripts/patches.json.
                 const HookEngine::EngineRow rows[] = {
@@ -304,6 +344,7 @@ namespace BZROpenShim
                     { "LobbyJoinById", &joinAddr },
                     { "LobbyFindLobby", &findAddr },
                     { "LobbyOnListReceived", &listAddr },
+                    { "LobbyEnterLounge", &loungeAddr },
                 };
                 if (!HookEngine::BindEngineRows("InvitePassword", rows))
                 {
@@ -311,6 +352,7 @@ namespace BZROpenShim
                     return false;
                 }
                 g_FindLobby = reinterpret_cast<FnFindLobby>(static_cast<uintptr_t>(findAddr));
+                g_EnterLounge = reinterpret_cast<FnEnterLounge>(static_cast<uintptr_t>(loungeAddr));
                 if (!InstallInlineDetour32(g_JoinRequestedDetour, requestedAddr,
                                            reinterpret_cast<void*>(JoinRequestedHook), sizeof(kJoinRequestedStolen),
                                            kJoinRequestedStolen, sizeof(kJoinRequestedStolen),
