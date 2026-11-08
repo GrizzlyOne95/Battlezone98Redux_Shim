@@ -352,7 +352,7 @@ namespace BZROpenShim
             { "Terrain", "TerrainHdEnabled", "0", "1" },
         };
 
-        // Revision 7 -> 8. Terrain Micro Detail became the default the same
+        // Revision 7 -> 8. Micro Relief became the default the same
         // day: the paint packs' rock, crack and crater height is displaced by
         // its tessellation, so without it painted ground looks flat. DX11
         // only; other renderers keep native terrain. Only the shipped 0 moves.
@@ -360,7 +360,7 @@ namespace BZROpenShim
             { "Terrain", "TerrainMicroRelief", "0", "1" },
         };
 
-        // Revision 8 -> 9. Terrain Micro Detail went back to opt-in the same
+        // Revision 8 -> 9. Micro Relief went back to opt-in the same
         // day: measured at ~10 ms/frame at 3840x2160 on an RTX 5080 (165-195
         // fps off vs 60-80 fps on), which halves the frame rate. Only the
         // shipped 1 moves, so an explicit 0 (or any other value) is untouched.

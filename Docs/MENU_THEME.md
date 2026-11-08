@@ -36,7 +36,7 @@ constructor/call-site analysis and live prologue checks preceded their addition.
 The page uses native sliders, including their arrow-step behavior.
 
 The accompanying options navigation repair guards null-key action rows (the
-System page's Reset Career Stats action) before color-key comparisons and
+System page's Reset Career action) before color-key comparisons and
 creates category navigation before formatting the page contents. Menu Colors
 Back is a child of its full-screen panel, matching the working category-page
 input hierarchy; a sibling button could draw while the panel intercepted input.
