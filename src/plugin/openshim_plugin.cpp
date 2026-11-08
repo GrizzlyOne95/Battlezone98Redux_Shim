@@ -42,6 +42,7 @@
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
 #include "music_single_fill.h"
+#include "p2p_reliable_send_fix.h"
 #include "precise_timestep.h"
 #include "mouse_every_frame.h"
 #include "thread_scheduling.h"
@@ -143,6 +144,8 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the optimizer's existing IAT targets without changing network behavior.
     PATCH_STAGE(BZROpenShim::InitializeBzrNetInstrumentation());
     PATCH_STAGE(BZROpenShim::RunPatcher(SHIM_VERSION));
+    // Ping-adaptive reliable retry waits; needs the patches.json resolves, so after RunPatcher.
+    PATCH_STAGE(BZROpenShim::Hooks::InitializeP2PAdaptiveRetry());
 
     // Multiplayer starting-vehicle list faction policy. Installs after the
     // patcher so scripts/patches.json resolves are loaded; the hook itself is

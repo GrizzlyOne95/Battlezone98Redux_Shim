@@ -1884,6 +1884,12 @@ ReliableSendBacklogFix = 1
 ReliableFirstRetryMs = 300
 ReliableRetryIntervalMs = 800
 
+; Raise both waits above to 1.5x the worst peer round trip when that is larger,
+; so a high-ping link only resends real losses (at 350 ms ping a fixed 300 ms
+; first retry fires before the ACK can arrive). Low ping is unchanged. Sender
+; side, same wire format. 0 keeps the fixed waits. Restart required.
+ReliableRetryAdaptToPing = 1
+
 ; BZRNet P2P early unreliable receive. Stock Redux accepts a packet only when
 ; its stamp is the next reliable stamp it expects, and unreliable updates carry
 ; the sender's next reliable stamp. So after one lost reliable fragment every

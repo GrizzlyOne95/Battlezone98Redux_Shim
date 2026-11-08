@@ -298,6 +298,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Sender-side native netcode fix: same wire format, so no mixed-client
     # divergence; stock peers just receive reliable messages on time.
     "Network/ReliableSendBacklogFix",
+    # Sender-side: waits max(configured, 1.5 x peer rtt) before a reliable
+    # resend. Same wire format; low-ping behaviour is unchanged.
+    "Network/ReliableRetryAdaptToPing",
     # Receiver-side native netcode fix: same wire format, so no mixed-client
     # divergence; future-stamped position updates are applied instead of
     # dropped behind a lost reliable fragment. Live-qualified 2026-10-10.
@@ -495,6 +498,7 @@ $shippingPolicyChecks = @{
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
     "Network/ReliableSendBacklogFix" = "1"
+    "Network/ReliableRetryAdaptToPing" = "1"
     "Network/LuaMapObjectHandles" = "1"
     "Graphics/D3D11DeviceLossRecovery" = "1"
     "Graphics/RenderProfile" = "Enhanced"

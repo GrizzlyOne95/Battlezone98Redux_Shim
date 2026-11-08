@@ -533,6 +533,66 @@
   ],
   "resolves": [
     {
+      "name": "P2PAdaptiveRetry::FirstRetryCall",
+      "pattern": "6A 00 68 ?? ?? ?? ?? 8D 8D FC FE FF FF E8 ?? ?? ?? ??",
+      "offset": 13,
+      "mode": "address",
+      "fallback": "0x0075C9B1",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 P2P send FUN_0075BEB0 first-retry arm: `push 0; push 1000 (imm32 wildcarded: [Network] ReliableFirstRetryMs may rewrite it); lea ecx,[ebp-0x104]; call 0x0075FE50` at 0x0075C9A4, unique whole-image match. This is the E8 call at 0x0075C9B1; the adaptive-retry wrapper replaces it."
+    },
+    {
+      "name": "P2PAdaptiveRetry::FirstRetryHelper",
+      "pattern": "6A 00 68 ?? ?? ?? ?? 8D 8D FC FE FF FF E8 ?? ?? ?? ??",
+      "offset": 13,
+      "mode": "rel32_target",
+      "fallback": "0x0075FE50",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 P2P send FUN_0075BEB0 first-retry arm: `push 0; push 1000 (imm32 wildcarded: [Network] ReliableFirstRetryMs may rewrite it); lea ecx,[ebp-0x104]; call 0x0075FE50` at 0x0075C9A4, unique whole-image match. Deadline helper FUN_0075FE50 (__thiscall ecx=deadline obj, uint32 lo_ms, uint32 hi_ms; disassembled `ret 8` at 0x0075FEBD; returns ecx in eax). RedirectCallTarget verifies the call still targets it."
+    },
+    {
+      "name": "P2PAdaptiveRetry::IntervalCall",
+      "pattern": "C6 40 19 00 6A 00 68 ?? ?? ?? ?? 8D 8D 1C FD FF FF E8 ?? ?? ?? ??",
+      "offset": 17,
+      "mode": "address",
+      "fallback": "0x0075BD24",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 P2P retry pump FUN_0075AAF0 re-arm: `mov byte [eax+0x19],0; push 0; push 2500 (imm32 wildcarded: [Network] ReliableRetryIntervalMs may rewrite it); lea ecx,[ebp-0x2E4]; call 0x0075FE50` at 0x0075BD13, unique whole-image match. This is the E8 call at 0x0075BD24; the adaptive-retry wrapper replaces it."
+    },
+    {
+      "name": "P2PAdaptiveRetry::IntervalHelper",
+      "pattern": "C6 40 19 00 6A 00 68 ?? ?? ?? ?? 8D 8D 1C FD FF FF E8 ?? ?? ?? ??",
+      "offset": 17,
+      "mode": "rel32_target",
+      "fallback": "0x0075FE50",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 P2P retry pump FUN_0075AAF0 re-arm: `mov byte [eax+0x19],0; push 0; push 2500 (imm32 wildcarded: [Network] ReliableRetryIntervalMs may rewrite it); lea ecx,[ebp-0x2E4]; call 0x0075FE50` at 0x0075BD13, unique whole-image match. Deadline helper FUN_0075FE50 (__thiscall ecx=deadline obj, uint32 lo_ms, uint32 hi_ms; disassembled `ret 8` at 0x0075FEBD; returns ecx in eax). RedirectCallTarget verifies the call still targets it."
+    },
+    {
+      "name": "P2PAdaptiveRetry::NextPlayer",
+      "pattern": "55 8B EC 83 EC 10 8D 4D FC E8 ?? ?? ?? ?? 83 7D 08 00 75 15 8D 45 F8 50 B9 B8 8F 9C 00 E8 ?? ?? ?? ?? 8B 08 89 4D FC EB 1A 8B 55 08 83 C2 28 52",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00577B50",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 FUN_00577B50(int prevPlayer): __cdecl (disassembled plain `ret` at 0x00577BC3; callers add esp,4), returns the next Player* from the player map at 0x009C8FB8 (0 = end); prevPlayer 0 gives the first. Prologue plus both map calls (rel32 wildcarded) is a unique whole-image match."
+    },
+    {
+      "name": "P2PAdaptiveRetry::PlayerPing",
+      "pattern": "55 8B EC 83 EC 0C 89 4D F4 C7 45 FC 00 00 00 00 8B 45 F4 83 B8 94 00 00 00 00 7E 47 C7 45 F8 00 00 00 00 EB 09 8B 4D F8 83 C1 01 89 4D F8 8B 55",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00575F80",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 FUN_00575F80 (__thiscall, ecx = Player*, no stack args, plain `ret` at 0x00575FE9): sums the RTT samples at player+0x9C + i*0x1C over the count at +0x94 and returns sum / count (0 when the count is 0, as for the local player). Whole-function-prefix match is unique in the image."
+    },
+    {
       "name": "Campaign Manifest ID String Assignment",
       "pattern": "8D 95 98 E9 FF FF 52 8D 8D 98 E6 FF FF E8 ?? ?? ?? ?? 8D 85 B0 E9 FF FF 50 8D 8D B0 E6 FF FF",
       "offset": 13,

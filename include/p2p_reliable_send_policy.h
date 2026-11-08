@@ -29,5 +29,17 @@ inline bool ParseRetryMs(const std::string& text, uint32_t& out) {
     out = value;
     return true;
 }
+
+// Effective wait before a reliable resend: the configured value, raised to
+// 1.5x the worst peer round trip so a slow link only resends real losses.
+// rttMs == 0 means "no sample"; the configured value is kept. Capped at
+// kRetryMaxMs, and the 1.5x term cannot overflow.
+inline uint32_t AdaptiveRetryMs(uint32_t configuredMs, uint32_t rttMs) {
+    if (rttMs == 0) return configuredMs;
+    const uint64_t scaled = static_cast<uint64_t>(rttMs) + rttMs / 2;
+    uint64_t ms = configuredMs > scaled ? configuredMs : scaled;
+    if (ms > kRetryMaxMs) ms = kRetryMaxMs;
+    return static_cast<uint32_t>(ms);
+}
 } // namespace P2PReliable
 } // namespace BZROpenShim

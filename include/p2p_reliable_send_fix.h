@@ -10,6 +10,9 @@ void ConfigureP2PReliablePatches(std::vector<HookEngine::PatchDef>& patches);
 // Opt-in receive tolerance for unreliable updates stamped past a missing
 // reliable fragment ([Network] EarlyUnreliableAccept).
 void ConfigureP2PEarlyUnreliablePatches(std::vector<HookEngine::PatchDef>& patches);
+// Raises the reliable retry waits to 1.5x peer round trip ([Network]
+// ReliableRetryAdaptToPing). Call after RunPatcher so named resolves exist.
+void InitializeP2PAdaptiveRetry();
 // New hosted lobbies start with Sync Join on ([Fixes] SyncJoinDefaultOn).
 void ConfigureSyncJoinDefaultPatch(std::vector<HookEngine::PatchDef>& patches);
 }
