@@ -226,7 +226,7 @@ namespace BZROpenShim::LanSession
         const auto executable = root / L"tools" / L"lan" / L"BZRServer.exe";
         const DWORD attributes = GetFileAttributesW(executable.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
-        { s.snapshot.hostMessage = "LAN helper missing: install tools/lan/BZRServer.exe."; return false; }
+        { s.snapshot.hostMessage = "LAN helper missing; set [Network] NoAuthLan=1 to host in-game."; return false; }
         const auto runtime = root / L"openshim" / L"lan";
         std::error_code error;
         std::filesystem::create_directories(runtime, error);
@@ -417,7 +417,7 @@ namespace BZROpenShim::LanSession
         {
             StopScan();
             s.snapshot.scanMessage = s.snapshot.hosts.empty() ?
-                "No hosts found. Refresh, or join by address below." : "Select a host below.";
+                "No hosts found" : "Select a host below";
         }
         else if (now - s.lastQuery >= 750) SendQuery();
     }

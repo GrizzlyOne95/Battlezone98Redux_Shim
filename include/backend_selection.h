@@ -99,6 +99,16 @@ namespace BZROpenShim::BackendSelection
     bool ApplyTransportToConfigImage(std::string& cfgText,
                                      std::string_view subsystemName);
 
+    // Ogre keeps "Video Mode" and "Full Screen" per render-system section, so
+    // switching the Render System line alone brings back the target
+    // section's stale values (a never-used DX11 section boots 1024x768).
+    // Copies those two values from [fromSection] onto keys that already exist
+    // in [toSection]. Only between Direct3D sections, whose mode strings share
+    // one format; OpenGL's differ. Returns true when any byte changed.
+    bool CarryDisplayModeAcrossSections(std::string& cfgText,
+                                        std::string_view fromSection,
+                                        std::string_view toSection);
+
     // Minimal Ogre.cfg image used when the file does not exist yet: a single
     // keyed line in stock's own CRLF style. Stock's restore/default-seeding
     // path completes every remaining section on this boot (the game recreates

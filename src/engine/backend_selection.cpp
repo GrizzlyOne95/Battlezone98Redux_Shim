@@ -310,6 +310,95 @@ namespace BZROpenShim::BackendSelection
         return true;
     }
 
+    bool CarryDisplayModeAcrossSections(std::string& cfgText,
+                                        std::string_view fromSection,
+                                        std::string_view toSection)
+    {
+        constexpr std::string_view kD3D = "Direct3D";
+        if (fromSection.substr(0, kD3D.size()) != kD3D ||
+            toSection.substr(0, kD3D.size()) != kD3D ||
+            EqualsNoCaseAscii(fromSection, toSection))
+        {
+            return false;
+        }
+        constexpr std::string_view kKeys[] = {"Video Mode", "Full Screen"};
+        struct Value { size_t start = 0, end = 0; bool found = false; };
+        Value from[2], to[2];
+
+        // One pass: note the value span of each carried key in both sections.
+        std::string_view section;
+        size_t pos = 0;
+        while (pos < cfgText.size())
+        {
+            size_t eol = cfgText.find('\n', pos);
+            if (eol == std::string::npos)
+            {
+                eol = cfgText.size();
+            }
+            size_t end = eol;
+            if (end > pos && cfgText[end - 1] == '\r')
+            {
+                --end;
+            }
+            size_t start = pos;
+            while (start < end && (cfgText[start] == ' ' || cfgText[start] == '\t'))
+            {
+                ++start;
+            }
+            const std::string_view line(cfgText.data() + start, end - start);
+            if (!line.empty() && line.front() == '[')
+            {
+                const size_t close = line.find(']');
+                section = close == std::string_view::npos ? std::string_view{}
+                                                          : line.substr(1, close - 1);
+            }
+            else if (const size_t eq = line.find('='); eq != std::string_view::npos)
+            {
+                Value* slots = EqualsNoCaseAscii(section, fromSection) ? from
+                             : EqualsNoCaseAscii(section, toSection)   ? to
+                                                                       : nullptr;
+                for (size_t k = 0; slots && k < 2; ++k)
+                {
+                    if (!slots[k].found && EqualsNoCaseAscii(line.substr(0, eq), kKeys[k]))
+                    {
+                        slots[k] = {start + eq + 1, end, true};
+                    }
+                }
+            }
+            pos = eol + 1;
+        }
+
+        // Copy the source values before any edit can shift their offsets, then
+        // replace the later target span first so the earlier one stays valid.
+        std::string values[2];
+        for (size_t k = 0; k < 2; ++k)
+        {
+            if (from[k].found)
+            {
+                values[k] = cfgText.substr(from[k].start, from[k].end - from[k].start);
+            }
+        }
+        const size_t order[2] = {to[0].start > to[1].start ? 0u : 1u,
+                                 to[0].start > to[1].start ? 1u : 0u};
+        bool changed = false;
+        for (const size_t k : order)
+        {
+            if (!to[k].found)
+            {
+                continue;
+            }
+            const std::string& value = values[k];
+            if (value.empty() ||
+                cfgText.compare(to[k].start, to[k].end - to[k].start, value) == 0)
+            {
+                continue;
+            }
+            cfgText.replace(to[k].start, to[k].end - to[k].start, value);
+            changed = true;
+        }
+        return changed;
+    }
+
     std::string BuildMinimalConfigImage(std::string_view subsystemName)
     {
         if (subsystemName.empty())

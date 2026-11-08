@@ -337,6 +337,17 @@ namespace BZROpenShim::RenderProfiles
                              text.size());
                     return false;
                 }
+                // Only on an actual switch: the target section's display
+                // values are stale (or never set), the outgoing ones are what
+                // the player last ran.
+                if (BackendSelection::CarryDisplayModeAcrossSections(
+                        updated, outPreviousValue, subsystemName))
+                {
+                    LogShimA(LogLevel::Info, kLogTag,
+                             "transport: carried Video Mode/Full Screen from '%.*s'",
+                             static_cast<int>(outPreviousValue.size()),
+                             outPreviousValue.c_str());
+                }
             }
             else
             {

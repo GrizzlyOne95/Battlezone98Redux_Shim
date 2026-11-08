@@ -269,11 +269,16 @@ namespace BZROpenShim::MenuTheme
             Shell::AddButton(panel,nullptr,"MenuTheme_Back",{0,0,342,77},"Back",Shell::kSkinTopCorner,1,28,Back);
             Shell::AddLabel(panel,panel,"MenuTheme_Title",{470,132,500,56},"MENU COLORS",Shell::kTitleLabelFlags);
             Shell::AddLabel(panel,panel,"MenuTheme_Help",{280,240,880,46},"Adjust RGB, saturation and white level to preview.");
-            const bool supported=IsCompatibleGameVersion()&&
-                RenderProfiles::IdentifyActiveRenderSystem()==1&&BindApi()&&Shell::SlidersAvailable();
-            if(!supported)
+            // Name the first failed requirement; the themed shader is HLSL4, so
+            // a DX9 game (the stock Ogre.cfg default) is the common case.
+            const char* unsupported=
+                !IsCompatibleGameVersion()?"Menu recoloring needs game version 2.2.301.":
+                RenderProfiles::IdentifyActiveRenderSystem()!=1?"Menu recoloring requires DirectX 11 (not active).":
+                !BindApi()?"Menu recoloring could not hook the menu shaders.":
+                !Shell::SlidersAvailable()?"Menu recoloring sliders are unavailable on this build.":nullptr;
+            if(unsupported)
             {
-                g_page.message="Menu recoloring is unavailable on this build or renderer.";
+                g_page.message=unsupported;
                 g_page.status=Shell::AddLabel(panel,panel,"MenuTheme_Status",{280,800,880,56},g_page.message.c_str());
                 return true;
             }

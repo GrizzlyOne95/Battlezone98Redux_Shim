@@ -74,9 +74,30 @@ namespace BZROpenShim
         constexpr uint32_t kListItemSize = 0x1C;
         constexpr uint32_t kListSetActiveSlot = 9;      // +0x24, void(__thiscall)(this, byte)
 
+        constexpr uint32_t kListTextScale = 0x174;      // float, applied to every row label
+
         constexpr int kMaxItems = 64;
+        constexpr int kMaxVisibleRows = 8;
         constexpr float kListWidth = 260.0f;
-        constexpr float kListHeight = 240.0f;
+        // The ctor spaces rows by the font height times its scale argument, which
+        // leaves no gap between lines at 1.0. Building at 1.5 and then setting
+        // the text scale back to 1.0 keeps the wider spacing: row refresh and
+        // SetItem re-apply +0x174 to the labels, the row positions stay.
+        constexpr float kRowPitchScale = 1.5f;
+        constexpr float kRowPitch = 27.0f;              // design units at kRowPitchScale
+        constexpr float kBackdropPad = 8.0f;
+        constexpr float kArrowGutter = 40.0f;           // page arrows sit at x - 35
+        // Stock value captions ("8", "No") draw on a higher layer than any
+        // injected widget, so nothing can cover them. The list opens in the
+        // empty column right of the short values instead of over them.
+        constexpr float kListOffsetX = 230.0f;
+        constexpr uint32_t kButtonEnabled = 0x148;      // byte; 0 = skipped by the hit walk, still drawn
+        // The ctor gives every row label filton.png (bright green) as its
+        // selection texture; the colour argument is only a text-colour enum
+        // (FUN_007cca20: anything but 0/1/2/4 is green). Green text on that
+        // bar was unreadable, so the rows are retextured with the darker
+        // OpenShim button fill.
+        constexpr const char* kRowHighlightTexture = "uibtn.png";
         constexpr float kDesignW = 1440.0f;
         constexpr float kDesignH = 1080.0f;
 
@@ -107,6 +128,8 @@ namespace BZROpenShim
         void* g_Parent = nullptr;
         void* g_Checklist = nullptr;
         void* g_List = nullptr;
+        void* g_Backdrop = nullptr;  // blackui.png panel drawn under the list
+        void* g_Catcher = nullptr;   // invisible full-screen button: a click outside closes
         bool g_Open = false;
 
         uint8_t* Bytes(void* p) { return static_cast<uint8_t*>(p); }
@@ -161,6 +184,26 @@ namespace BZROpenShim
         {
             const uint32_t* const vtable = reinterpret_cast<const uint32_t*>(VPtr(g_List));
             reinterpret_cast<FnSetActiveVirtual>(vtable[kListSetActiveSlot])(g_List, active ? 1 : 0);
+            if (g_BzrFn_UiSetActive)
+            {
+                if (g_Backdrop)
+                    g_BzrFn_UiSetActive(g_Backdrop, active ? 1 : 0);
+                if (g_Catcher)
+                    g_BzrFn_UiSetActive(g_Catcher, active ? 1 : 0);
+            }
+        }
+
+        // "3840 x 2160 @ 32-bit colour" -> "3840 x 2160": every row has the same
+        // depth, and the suffix only overflowed the row.
+        void ShortLabel(const char* text, char (&out)[kItemTextSize])
+        {
+            size_t n = 0;
+            while (n + 1 < sizeof(out) && text[n] && !(text[n] == ' ' && text[n + 1] == '@'))
+            {
+                out[n] = text[n];
+                ++n;
+            }
+            out[n] = 0;
         }
 
         // True while the globals still describe the live screen: the checklist
@@ -308,8 +351,28 @@ namespace BZROpenShim
             }
         }
 
+        // While the list is open, a click anywhere outside it lands here.
+        void __cdecl OnCatcherClick()
+        {
+            __try
+            {
+                if (g_Open && StateIsLive())
+                    CloseList();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                g_Faulted = true;
+            }
+        }
+
+        // The engine calls a button's hover slot unconditionally; null crashes.
+        void __cdecl OnCatcherHover(void* /*param*/) {}
+
         void LogStandDown(const char* reason)
         {
+            // A stand-down after the backdrop was built must not leave it drawn.
+            if (g_Backdrop && g_BzrFn_UiSetActive)
+                g_BzrFn_UiSetActive(g_Backdrop, 0);
             if (g_StandDownLogged)
                 return;
             g_StandDownLogged = true;
@@ -377,9 +440,48 @@ namespace BZROpenShim
                 LogStandDown("resolution row rect out of the design space");
                 return false;
             }
+            float listX = rowX + kListOffsetX;
+            if (listX + kListWidth + kBackdropPad > kDesignW)
+                listX = kDesignW - kListWidth - kBackdropPad;
+            const int visibleRows = itemCount < kMaxVisibleRows ? itemCount : kMaxVisibleRows;
+            const bool scrollable = itemCount > visibleRows;
+            const float listH = visibleRows * kRowPitch + 4.0f;
             float listY = rowY + rowH;
-            if (listY + kListHeight > kDesignH)
-                listY = kDesignH - kListHeight;
+            if (listY + listH + kBackdropPad > kDesignH)
+                listY = kDesignH - listH - kBackdropPad;
+
+            // Backdrop before the list so it draws under it. A small overlay view
+            // rasterizes nothing on this screen; a button-backed plate does
+            // (same construction as the options rows). Its enabled byte is
+            // cleared so the hit walk skips it and the rows above get the click.
+            if (g_BzrFn_ButtonCtor && g_BzrFn_SetTextureOff && g_BzrFn_SetOnHover)
+            {
+                void* const backdropMem = ::operator new(kUiButtonSize, std::nothrow);
+                if (backdropMem)
+                {
+                    std::memset(backdropMem, 0, kUiButtonSize);
+                    const float gutter = scrollable ? kArrowGutter : 0.0f;
+                    void* const backdrop = g_BzrFn_ButtonCtor(
+                        backdropMem, "OpenShimResDropdownBg", listX - kBackdropPad - gutter, listY - kBackdropPad,
+                        kListWidth + kBackdropPad * 2.0f + gutter, listH + kBackdropPad * 2.0f, 0x20, parent, 0, 0);
+                    if (backdrop)
+                    {
+                        g_BzrFn_SetTextureOff(backdrop, "uiplate.png");
+                        if (g_BzrFn_SetTextureOver)
+                            g_BzrFn_SetTextureOver(backdrop, "uiplate.png");
+                        if (g_BzrFn_SetTextureOn)
+                            g_BzrFn_SetTextureOn(backdrop, "uiplate.png");
+                        g_BzrFn_SetOnHover(backdrop, reinterpret_cast<void*>(OnCatcherHover));
+                        if (g_BzrFn_SetButtonLabel)
+                            g_BzrFn_SetButtonLabel(backdrop, "");
+                        g_BzrFn_AddChild(parent, backdrop, 0);
+                        SetField<uint8_t>(backdrop, kButtonEnabled, 0);
+                        if (g_BzrFn_UiSetActive)
+                            g_BzrFn_UiSetActive(backdrop, 0);
+                        g_Backdrop = backdrop;
+                    }
+                }
+            }
 
             void* const mem = ::operator new(kUiSelectlistSize, std::nothrow);
             if (!mem)
@@ -391,10 +493,10 @@ namespace BZROpenShim
             // Colour and row scale are the values the lobby probe takes from
             // the stock lists. The arrows' callbacks are void(void), so they
             // reach this list through the global.
-            void* const list = g_BzrFn_SelectlistCtor(mem, "OpenShimResDropdown", rowX, listY, kListWidth,
-                                                      kListHeight, reinterpret_cast<void*>(OnListPageUp),
+            void* const list = g_BzrFn_SelectlistCtor(mem, "OpenShimResDropdown", listX, listY, kListWidth,
+                                                      listH, reinterpret_cast<void*>(OnListPageUp),
                                                       reinterpret_cast<void*>(OnListPageDown), 0, parent,
-                                                      0xFF00FF00, 1.0f);
+                                                      0xFF00FF00, kRowPitchScale);
             if (!list || !Hooks::VtableTypeNameMatches(VPtr(list), ".?AVcUI_Selectlist@@"))
             {
                 // A half-built engine object is leaked, not freed.
@@ -408,19 +510,63 @@ namespace BZROpenShim
             const int childCount = PtrVectorCount(Bytes(parent) + kViewChildren);
             void* const anchor = childCount > 0 ? PtrVectorAt(Bytes(parent) + kViewChildren, 0) : nullptr;
             g_BzrFn_AddChild(parent, list, reinterpret_cast<int>(anchor));
+            SetField<float>(list, kListTextScale, 1.0f);
+            if (g_BzrFn_SetTextureOff)
+            {
+                const int rows = PtrVectorCount(Bytes(list) + kListRows);
+                for (int i = 0; i < rows && i < kMaxItems; ++i)
+                {
+                    if (void* const row = PtrVectorAt(Bytes(list) + kListRows, i))
+                        g_BzrFn_SetTextureOff(row, kRowHighlightTexture);
+                }
+            }
 
             for (int i = 0; i < itemCount; ++i)
             {
                 const char* text = nullptr;
                 int value = 0;
                 ChecklistItemAt(checklist, i, text, value);
-                g_BzrFn_SelectlistSetItem(list, text, i, value);
+                char label[kItemTextSize];
+                ShortLabel(text, label);
+                g_BzrFn_SelectlistSetItem(list, label, i, value);
+            }
+
+            // Catcher second in the child order: the open list sees a click first,
+            // the catcher takes every other click on the screen.
+            if (g_BzrFn_ButtonCtor && g_BzrFn_SetOnClick && g_BzrFn_SetOnHover && g_BzrFn_UiSetActive)
+            {
+                void* const catcherMem = ::operator new(kUiButtonSize, std::nothrow);
+                if (catcherMem)
+                {
+                    std::memset(catcherMem, 0, kUiButtonSize);
+                    void* const catcher = g_BzrFn_ButtonCtor(catcherMem, "OpenShimResDropdownCatcher", 0.0f, 0.0f,
+                                                             kDesignW, kDesignH, 0x20, parent, 0, 0);
+                    if (catcher)
+                    {
+                        g_BzrFn_SetOnHover(catcher, reinterpret_cast<void*>(OnCatcherHover));
+                        g_BzrFn_SetOnClick(catcher, reinterpret_cast<void*>(OnCatcherClick));
+                        // Inactive from the start: if a later engine call faults, a live
+                        // full-screen catcher would swallow every click on the screen.
+                        g_BzrFn_UiSetActive(catcher, 0);
+                        const int count = PtrVectorCount(Bytes(parent) + kViewChildren);
+                        void* const next = count > 1 ? PtrVectorAt(Bytes(parent) + kViewChildren, 1) : nullptr;
+                        g_BzrFn_AddChild(parent, catcher, reinterpret_cast<int>(next));
+                        g_Catcher = catcher;
+                    }
+                }
             }
             g_BzrFn_SelectlistSetOnSelect(list, reinterpret_cast<void*>(OnListSelect));
 
             // Hidden until the row is clicked.
             const uint32_t* const listVtable = reinterpret_cast<const uint32_t*>(VPtr(list));
             reinterpret_cast<FnSetActiveVirtual>(listVtable[kListSetActiveSlot])(list, 0);
+            if (g_BzrFn_UiSetActive)
+            {
+                if (g_Backdrop)
+                    g_BzrFn_UiSetActive(g_Backdrop, 0);
+                if (g_Catcher)
+                    g_BzrFn_UiSetActive(g_Catcher, 0);
+            }
 
             // Last: take over this instance's click slot.
             std::memcpy(g_Vtable, reinterpret_cast<const void*>(checklistVtable - sizeof(uint32_t)),
@@ -439,7 +585,7 @@ namespace BZROpenShim
         void InjectGuarded(void* screen)
         {
             // A rebuilt screen replaces the previous one's state.
-            g_Screen = g_Parent = g_Checklist = g_List = nullptr;
+            g_Screen = g_Parent = g_Checklist = g_List = g_Backdrop = g_Catcher = nullptr;
             g_Open = false;
             __try
             {
@@ -448,7 +594,7 @@ namespace BZROpenShim
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
-                g_Screen = g_Parent = g_Checklist = g_List = nullptr;
+                g_Screen = g_Parent = g_Checklist = g_List = g_Backdrop = g_Catcher = nullptr;
                 LogShimA(LogLevel::Warn, kComponent,
                          "[ResDrop] injection faulted (0x%08X); options screen left stock",
                          static_cast<uint32_t>(GetExceptionCode()));

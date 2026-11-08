@@ -647,7 +647,7 @@ namespace BZROpenShim
                     ServerCaption(ServerChoice::Local), slotSkin, 1.0f, 0.0f, &OnLocalClicked);
                 Shell::AddButton(panel, panel, "OpenShimPreLobby_LocalTools", ServerSlot(1, 1),
                                  LanNoAuth::Enabled() ? "LAN (no sign-in)" : "Local host tools",
-                                 slotSkin, 0.85f, 0.0f, &OnLocalToolsClicked);
+                                 slotSkin, 0.72f, 0.0f, &OnLocalToolsClicked);
                 g_ServerNoteLabel = Shell::AddLabel(panel, panel, "OpenShimPreLobby_ServerNote", kNoteRect, "");
             }
             Shell::AddLabel(panel, panel, "OpenShimPreLobby_Hint", kHintRect,

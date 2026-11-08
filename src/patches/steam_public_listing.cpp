@@ -29,6 +29,7 @@
 
 namespace BZROpenShim
 {
+    extern bool g_IsSteamExe; // bzr_hooks.cpp
     namespace SteamPublicListing
     {
         namespace
@@ -520,7 +521,8 @@ namespace BZROpenShim
 
         bool Available()
         {
-            return !KillSwitched() && !g_ExportsMissing && GetModuleHandleW(L"steam_api.dll") != nullptr;
+            // GOG also ships a steam_api.dll, so the module alone does not mean Steam.
+            return g_IsSteamExe && !KillSwitched() && !g_ExportsMissing && GetModuleHandleW(L"steam_api.dll") != nullptr;
         }
 
         uint64_t LocalSteamId()
@@ -575,7 +577,7 @@ namespace BZROpenShim
 
         void Tick()
         {
-            if (!Resolve())
+            if (!g_IsSteamExe || !Resolve())
                 return;
             TickHost(GetTickCount64());
             TickBrowse(GetTickCount64());
