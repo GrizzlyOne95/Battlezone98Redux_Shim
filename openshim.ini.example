@@ -864,6 +864,14 @@ RenderProfile = Enhanced
 ;   Kill switch: OPENSHIM_DISABLE_D3D11_DEVICE_LOSS_RECOVERY=1.
 D3D11DeviceLossRecovery = 1
 
+; DX11 window on the primary monitor. Accepted: boolean. Default: 1.
+;   With no saved position, Ogre's DX11 window opens on the monitor furthest
+;   right and down, which on a multi-monitor desk is a side monitor (DX9 uses
+;   the monitor picked in the launcher). With this on, that window opens on
+;   the Windows primary monitor instead. DX9 is untouched. Logged under
+;   [DX11 Monitor]. Kill switch: OPENSHIM_DISABLE_D3D11_PRIMARY_MONITOR=1.
+D3D11PrimaryMonitor = 1
+
 ; DXGI flip-model presentation (DX11 only). Accepted: boolean. Default: 0.
 ;   Creates Ogre's D3D11 swap chain as DXGI_SWAP_EFFECT_FLIP_DISCARD with a
 ;   frame-latency waitable object instead of the stock blt model, so frames
