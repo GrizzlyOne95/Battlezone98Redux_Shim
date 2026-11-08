@@ -47,6 +47,9 @@ namespace BZROpenShim
         bool g_JoinHostedWhenReady = false;
         std::string g_Note;
         constexpr const char* kFirewallHint = "Hosting opens LAN listeners; Windows may ask for firewall access.";
+        // Matches the bridge docs: kept apart from the agent's 127.0.0.1 ports.
+        constexpr const char* kSteamHostAddress = "127.0.0.2";
+        std::string SwitchNote() { return "Stop and start the host to switch between LAN and Steam hosting."; }
         // LAN hosts first, then public Steam listings.
         size_t GameCount(const LanSession::Snapshot& status)
         {
@@ -86,7 +89,20 @@ namespace BZROpenShim
         void __cdecl Start()
         {
             g_Note.clear();
-            g_JoinHostedWhenReady = LanSession::StartHost(GameRoot(),LanNoAuth::Enabled());
+            // With the Steam list on, host on loopback so the in-game Steam
+            // bridge (SteamTunnelBridge=auto) serves it and the listing follows.
+            // The bridge gives each Steam peer its own loopback source address.
+            const bool forSteam = SteamPublicListing::Available() && SteamPublicListing::HostListingOn();
+            const auto before = LanSession::Status();
+            if ((before.state == LanSession::HostState::Starting || before.state == LanSession::HostState::Running) &&
+                (before.hostAddress == kSteamHostAddress) != forSteam)
+            { g_Note = SwitchNote(); return; } // never join a host in the other mode
+            // A Steam join moved the tunnel; the bridge never runs while it is moved.
+            std::string note;
+            if (forSteam && !SteamTunnelJoin::RestoreStartup(note))
+            { g_Note = "Cannot host for Steam: " + note + "."; return; }
+            g_JoinHostedWhenReady = LanSession::StartHost(GameRoot(), LanNoAuth::Enabled(),
+                forSteam ? std::string(kSteamHostAddress) : std::string());
             const auto status = LanSession::Status();
             Log(L"[LAN-HOST] start %hs: %hs\n", g_JoinHostedWhenReady ? "ok" : "failed", status.hostMessage.c_str());
         }
@@ -106,6 +122,11 @@ namespace BZROpenShim
         {
             g_Note.clear();
             SteamPublicListing::SetHostListing(!SteamPublicListing::HostListingOn());
+            const auto status = LanSession::Status();
+            const bool forSteam = SteamPublicListing::HostListingOn();
+            if ((status.state == LanSession::HostState::Starting || status.state == LanSession::HostState::Running) &&
+                (status.hostAddress == kSteamHostAddress) != forSteam)
+                g_Note = SwitchNote(); // toggling back to the running mode clears it
         }
         void __cdecl ManualJoin()
         {

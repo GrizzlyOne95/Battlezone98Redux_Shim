@@ -17,7 +17,11 @@ namespace BZROpenShim::LanSession
 
     // UI-thread only. No socket/process work at DLL load, no worker thread,
     // no shell/PATH execution. The optional helper lives at tools/lan/BZRServer.exe.
-    bool StartHost(const std::wstring& gameRoot, bool inProcess = false);
+    // bindAddress empty: the routed private LAN IPv4. Otherwise it must be a
+    // numeric 127.x.y.z address: a host reachable only through the in-game
+    // Steam bridge (SteamTunnelBridge=auto), not by other LAN PCs.
+    bool StartHost(const std::wstring& gameRoot, bool inProcess = false,
+        const std::string& bindAddress = {});
     void StopHost();
     bool StartScan();
     void StopScan();
