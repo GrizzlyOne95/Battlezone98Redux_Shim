@@ -529,6 +529,30 @@
       "fallback": "0x0073F140",
       "require_unique": true,
       "identity": "Player-left call (E8 at 0x0073F13F, cdecl(member NetId*, kicked||banned), add esp 8) in CNetGameLobby::OnLobbyChatUpdate 0x0073EEB0 for a member-left lobby update on GOG Redux 2.2.301. Stock target Net::PlayerLeft 0x00578640 drops that player from the running game. Redirected only by [Network] LobbyDropKeepsMatch after the call target matches the resolve; signature unique in the shipped image."
+    },
+    {
+      "name": "TRO Banner Mode Refresh 1/2",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "E8 92 01 00 00 5D C3 55 8B EC 8B 0D E0 55 94 00 E8 A2 01 00 00 5D C3",
+      "offset": 17,
+      "expected_size": 4,
+      "fallback": "0x007BEE2A",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: FUN_007bee20 (decomp line 5) loads the SP view singleton 0x009455E0 into ECX and calls the SP mode refresh FUN_007befd0. The rel32 is retargeted at the TRO banner wrapper only when it still reaches TroMenuMovie::SpModeRefresh. Static match 2026-11-08; not run live."
+    },
+    {
+      "name": "TRO Banner Mode Refresh 2/2",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "85 D2 74 0D 8B 8D EC FB FF FF E8 ?? ?? ?? ?? EB 17 6A 00 6A 1D 6A 00",
+      "offset": 11,
+      "expected_size": 4,
+      "fallback": "0x007C1209",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the SP view build FUN_007bf440 (decomp line 352) calls the SP mode refresh FUN_007befd0 with ECX = view at 0x007C1208. Same retarget and identity check as 1/2. Static match 2026-11-08; not run live."
     }
   ],
   "resolves": [
@@ -2054,6 +2078,76 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Game-ended flag getter 0x00572A80 (byte [0x00917F4C]) called after Net Execute in DoNextFrame 0x00618130 (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "TroMenuMovie::SpModeRefresh",
+      "pattern": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 18 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 89 4D EC 8B 45 EC 8B 88 5C 01 00 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: SP view mode refresh FUN_007befd0 (__fastcall, ECX = SP view). Reads the 98/TRO toggle via FUN_007d3360 and is the only writer of the TRO flag (decomp line 32: DAT_009455dc = FUN_007d3360()). Unique whole-.text match 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::SetMovie",
+      "pattern": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 81 EC 2C 01 00 00 A1 ?? ?? ?? ?? 33 C5 89 45 F0 50 8D 45 F4 64 A3 00 00 00 00 89 8D 5C FF FF",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00000000",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: cUI_View set-movie FUN_007d3850, thiscall(view, const char* name, int language), RET 8. Releases any clip already at +0x140, then createClip(name) and binds its texture to the view material. Stock banner call: push 0; push \"bzone.ogv\"; call. Unique whole-.text match 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::TroFlag",
+      "pattern": "8B 8A 60 01 00 00 E8 ?? ?? ?? ?? A2 ?? ?? ?? ?? 0F B6 05",
+      "offset": 12,
+      "mode": "abs32_operand",
+      "fallback": "0x009455DC",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the m32 of `mov [m32],al` at 0x007BF142 in FUN_007befd0 (decomp line 32): byte DAT_009455DC, 0 = 98 mode, non-zero = TRO. Read by FUN_007bf440 and FUN_007c12a0. Stock does not persist it; OpenShim seeds it at startup from [General] LastSinglePlayerMode. Unique match 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::ShellMusicTrack",
+      "pattern": "C7 45 E8 0C 00 00 00 8B 4D E8 89 0D ?? ?? ?? ??",
+      "offset": 12,
+      "mode": "abs32_operand",
+      "fallback": "0x008E772C",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the m32 of `mov [m32],ecx` at 0x007BF165 in FUN_007befd0 (decomp lines 33-39): int DAT_008E772C, shell music track, 0x0C in 98 mode and 0x1B in TRO (static .data initial value 0x0C). FUN_004341c0 line 24 starts the shell music from it. Unique match 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::DlcManager",
+      "pattern": "8B 8D E8 FB FF FF E8 ?? ?? ?? ?? 6A 01 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ??",
+      "offset": 13,
+      "mode": "rel32_target",
+      "fallback": "0x007647A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: SP view build FUN_007bf440 creates the 98/TRO toggle only when FUN_007537a0(FUN_007647a0(1), 1) is true (decomp lines 173-175), i.e. the TRO DLC is owned. This resolves FUN_007647a0 (cdecl, returns the DLC manager DAT_00945474). Unique whole-.text match at 0x007C04FC 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::DlcOwned",
+      "pattern": "8B 8D E8 FB FF FF E8 ?? ?? ?? ?? 6A 01 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ??",
+      "offset": 20,
+      "mode": "rel32_target",
+      "fallback": "0x007537A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: SP view build FUN_007bf440 creates the 98/TRO toggle only when FUN_007537a0(FUN_007647a0(1), 1) is true (decomp lines 173-175), i.e. the TRO DLC is owned. This resolves FUN_007537a0 (__thiscall, one int DLC id, ret 4; returns the owned flag). Unique whole-.text match at 0x007C04FC 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::MainScreen",
+      "pattern": "8B 55 F0 89 15 ?? ?? ?? ?? 0F B6 05",
+      "offset": 5,
+      "mode": "abs32_operand",
+      "fallback": "0x0094551C",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the m32 of `mov [m32],edx` at 0x0078E759 in the cUI_MainScreen ctor FUN_0078e670 (decomp line 31: DAT_0094551c = this). The dtor FUN_0078eca0 clears it (line 21), and FUN_0078df10 nulls the banner at +0x15C when it destroys it. Unique match 2026-11-08."
     }
   ],
   "engine_addresses": [
@@ -6271,6 +6365,19 @@
       "name": "Artillery Volley Trigger Hook 4/4",
       "fallback": "0x00476F74",
       "expected_original": "8B 42 08 FF D0"
+    },
+    {
+      "name": "TRO Banner Movie Name",
+      "platforms": [
+        "gog"
+      ],
+      "pattern": "89 91 5C 01 00 00 6A 00 68 ?? ?? ?? ?? 8B 45 F0 8B 88 5C 01 00 00 E8",
+      "offset": 9,
+      "expected_size": 4,
+      "fallback": "0x0078DEBD",
+      "expected_original": "CC DF 89 00",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: cUI_MainScreen banner builder FUN_0078dde0 stores the new \"movie\" widget at +0x15C (decomp line 26) then pushes the literal \"bzone.ogv\" (0x0089DFCC, its only xref) for the set-movie call 0x007D3850. The imm32 is pointed at the shim's banner-name buffer, which holds bzone.ogv or odyssey.ogv. Callers: 0x0078CDC7 (end of intro) and 0x0078DDAE (menu build)."
     }
   ],
   "static_pointers": [

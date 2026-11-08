@@ -222,9 +222,9 @@ nothing else listening" collapses to a single interlocked read on the damage
 path — and a future subscriber gets the events without being wired into a
 career-specific predicate.
 
-### 5.1 Reset Career Stats
+### 5.1 Reset Career
 
-A second Settings row, **Reset Career Stats**, clears the record. It is the
+A second Settings row, **Reset Career**, clears the record. It is the
 first *action row* on that page: `ShimSettingApplyGroup::CareerStatsReset` with
 a null section and key, so nothing in the ini read or lossless-write path
 treats it as a setting, and clicking runs something instead of cycling a value.
@@ -282,7 +282,7 @@ as already empty — that is what a previous reset leaves behind.
    no `[CAREER]` writes, and that `career_stats.cfg` stops changing.
 8. Confirm a companion DLL polling the v2 queue still receives the lifecycle
    events, and now also receives `SimSessionStarted` / `SimKill`.
-9. Click **Reset Career Stats** once and confirm the cell reads `Confirm?` and
+9. Click **Reset Career** once and confirm the cell reads `Confirm?` and
    nothing is written; click a different row and confirm it disarms. Then click
    it twice: `career_stats.cfg` should hold only `meta.version`, a
    `career_stats.cfg.openshim.bak` should appear beside it, and the **Career

@@ -2,6 +2,7 @@
 // BZR Open Shim - runtime patcher implementation
 #include "patcher.h"
 #include "planet_video.h"
+#include "tro_menu_movie.h"
 #include "campaign_manifest_id.h"
 #include "hook_engine.h"
 #include "patch_config_parse.h"
@@ -1169,6 +1170,10 @@ namespace BZROpenShim
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
                     CampaignManifestId::PrepareThunk(p.address - 1)));
             }
+            else if (p.name.rfind("TRO Banner Mode Refresh ", 0) == 0) {
+                target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                    PrepareTroModeRefreshHook(p.address - 1)));
+            }
             else if (p.name == "Custom Planet Video Playback") {
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
                     PrepareCustomPlanetVideoHook(p.address - 1)));
@@ -1506,6 +1511,7 @@ namespace BZROpenShim
             else if (p.name == "Chunk Effect Simulate VTable Hook") val = chunkE;
             else if (p.name == "Legacy World Update RenderQueue VTable Hook") val = legacyRQ;
             else if (p.name == "HUD 2D Depth Floor Margin") val = depthFloorScale;
+            else if (p.name == "TRO Banner Movie Name") val = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(GetTroBannerMovieName()));
             else if (IsProducerBuildMenuPatchName(p.name.c_str())) val = ProducerBuildMenuPatchTarget(p.name.c_str());
             if (val) { p.payload.resize(4); memcpy(p.payload.data(), &val, 4); }
         }
@@ -1707,6 +1713,8 @@ namespace BZROpenShim
                     WeaponPresentation::NativeBridges::RecordShotSite(
                         p.name == "Shell Casings MachineGun Shot Call", p.address - 1);
                 if (p.name == "Sun Screen Flash Contribution Hook") SunFlash::SetPatchInstalled(true);
+                if (p.name == "TRO Banner Mode Refresh 1/2") NoteTroModeRefreshHookInstalled(0);
+                if (p.name == "TRO Banner Mode Refresh 2/2") NoteTroModeRefreshHookInstalled(1);
                 if (ScreenFlash::CallSiteIndex(p.name.c_str()) >= 0)
                     ScreenFlash::SetPatchInstalled(static_cast<unsigned long>(ScreenFlash::CallSiteIndex(p.name.c_str())));
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
@@ -1719,6 +1727,7 @@ namespace BZROpenShim
         // installer validates/adopts them; it never competes for these calls.
         Hooks::InstallWeaponPresentationNativeIfRequested();
         Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
+        RestoreSavedTroMode();
         // A patch this build knows about that still sits at address 0 either had
         // no scripts/patches.json entry (a deploy where winmm.dll moved and the
         // json did not) or had one whose signature never matched (require_unique

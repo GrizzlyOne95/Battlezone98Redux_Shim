@@ -238,6 +238,7 @@
     <ClCompile Include="src\patches\team_filter_mines.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
     <ClCompile Include="src\patches\planet_video.cpp" />
+    <ClCompile Include="src\patches\tro_menu_movie.cpp" />
     <ClCompile Include="src\patches\never_activate.cpp" />
     <ClCompile Include="src\patches\window_unclamp.cpp" />
     <ClCompile Include="src\patches\unfocused_mouse_release.cpp" />

@@ -18,17 +18,17 @@ constexpr const char* kShimRowEffects = "Visual Effects";
 
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
-    "Shadow Distance", "HD Terrain Tiles", "Terrain Micro Detail", "GPU Skinning",
-    "Primary Monitor", "Resolution Filter", "Resolution Dropdown",
+    "Shadow Distance", "HD Terrain Tiles", "Micro Relief", "GPU Skinning",
+    "Primary Monitor", "Resolution Filter", "Resolution List",
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
-    "Jet Flames", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
+    "Jet Flames", "Emissive Pulse", "Star Twinkle", "Mesh Chunks",
     "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Skinned Gibs",
-    "Fracture One-Piece" };
+    "Fracture Debris" };
 static const char* const kShimCategoryLighting[] = {
-    "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
+    "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
-    "Explosion Flash", "Sun Flashbang", "Empty Craft Lights" };
+    "Explosion Flash", "Sun Flashbang", "Empty Craft Glow" };
 static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
 static const char* const kShimCategoryHud[] = {
@@ -56,17 +56,17 @@ static const char* const kShimCategoryPalette[] = {
     "Hull Healthy", "Hull Damaged", "Hull Critical", "Cockpit Ammo", "Unit Healthy", "Unit Damaged",
     "Unit Critical", "Unit Ammo", "Empty Bars" };
 static const char* const kShimCategoryControls[] = {
-    kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Unsmoothed Controls", "Per-Frame Mouse",
-    "Satellite Zoom Out", "Satellite Pan Speed", "Editor Placement", "Background Mouse",
+    kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "No Smoothing", "Per-Frame Mouse",
+    "Satellite Zoom", "Satellite Pan", "Editor Placement", "Background Mouse",
     "Run in Background" };
 static const char* const kShimCategoryGameplay[] = {
-    "Weapon Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
-    "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog Of War", "Attack Neutrals",
-    "Smart Scavengers", "Turret AA Pitch", "Legacy Tank AI", "AI Howitzer Volley",
+    "Aim Convergence", "Reticle Converge", "Reticle Range", "Ordnance Velocity",
+    "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog", "Attack Neutrals",
+    "Smart Scavengers", "Turret AA Pitch", "Legacy Tank AI", "Howitzer Volley",
     "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };
 static const char* const kShimCategoryFixes[] = {
-    "AI Multi-Producer", "APC Allied Deploy", "Splinter Undead Fix", "Howitzer Deploy Fix",
-    "Tug Cargo Deploy", "Recycle Release Fix", "Constructor Cleanup", "Material Guard",
+    "AI Multi-Producer", "APC Allied Deploy", "Splinter Fix", "Howitzer Fix",
+    "Tug Cargo Deploy", "Recycle Fix", "Builder Cleanup", "Material Guard",
     "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
     "Effect Sort" };
 static const char* const kShimCategoryNetwork[] = {
@@ -74,8 +74,8 @@ static const char* const kShimCategoryNetwork[] = {
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
     "MP Setup Screen", "Map Letter Jump" };
 static const char* const kShimCategorySystem[] = {
-    kShimRowUpdateCheck, "Auto-Install Updates", "Career Stats", "Reset Career Stats", "Reset to Stock", "Troubleshooting Bundle",
-    "AutoSave", "AutoSave Interval", "AutoSave Backups", "Fast Menu Transitions" };
+    kShimRowUpdateCheck, "Auto-Install", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
+    "AutoSave", "AutoSave Interval", "AutoSave Backups", "Menu Caching" };
 
 struct ShimSettingsCategory
 {
