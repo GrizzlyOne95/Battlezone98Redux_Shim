@@ -163,6 +163,43 @@ in front of it. The host plays on the same PC with `Server = Custom` and
 `CustomServer = 127.0.0.2`. The bridge admits any Steam peer; the server does
 the auth (bans, passwords).
 
+In-game bridge (no `socket_tunnel.exe`, Steam build only): run
+`./tools/socket_tunnel/start_host.ps1 -InGameBridge` (server only) and play
+with `Server = Custom`, `CustomServer = 127.0.0.2` (or `Server = Local`).
+Nothing else to set: net.ini ships
+
+```ini
+[OpenShimSocket]
+; auto is also the value when the key is absent
+SteamTunnelBridge=auto
+```
+
+With `auto`, OpenShim checks every 2 s whether the game's server selection
+is a numeric loopback address (no port) with a TCP listener on 1337 (it reads
+the TCP table; the server sees no probe connections). While both hold it runs
+the bridge on a worker thread inside the host's game (log tag
+`[SteamBridge]`); two misses in a row stop it, and a bridge that fails retries
+after 60 s. A fixed value (`SteamTunnelBridge=127.0.0.2`) runs it always;
+empty turns it off. On GOG (no loaded `steam_api.dll`) `auto` stays off.
+Any loopback server counts, 127.0.0.1 included: a Steam friend can reach a
+dev or test server the host has running under `Server = Local`, and that
+server's own password or bans are the only gate. Only IPv4 listeners are
+seen; a server bound to `[::]` alone does not start the bridge.
+
+It borrows the game's Steam session, so Steam sees no second "game" process
+and BZR starts from Steam normally. Friends can join only while the host's
+game runs; an always-on server keeps the standalone bridge. The peer map is
+`steam_tunnel_peers.txt` beside the game exe. The bridge never runs with
+either agent key set or while Join Game has switched this game onto another
+host's tunnel (one Steam tunnel transport per process); while the bridge is
+running, Join Game toward another host is refused. The host uses 127.0.0.2
+rather than 127.0.0.1 so the server's address stays apart from the agent's
+fixed 127.0.0.1 ports. Verified live 2026-11-08 (two accounts, two PCs):
+the friend's Join Game request reached the host's in-game bridge over Steam
+relay and the server authorized the friend. The join was triggered with
+`steam://rungame/301650/<host SteamID>/...`, which raises the same callback
+as the friends-list button; the button's visibility itself is UNVERIFIED.
+
 How the pieces meet (`src/patches/steam_tunnel_join.cpp`, component
 TUNNELJOIN):
 
@@ -210,6 +247,110 @@ UNVERIFIED until the two-account live test:
 - whether the game rewrites `connect` and makes Join Game flap;
 - a cold launch from Join Game (the token arrives on the command line);
 - joining from inside a mission (skipped today).
+
+## Steam ban gate (in-game bridge)
+
+The in-game bridge refuses a Steam peer whose Steam-authenticated SteamID64
+is listed in `bans.cfg` beside the game exe, before the connection reaches
+the game or server. It reads the same file as the in-game `/ban` command and
+the Ban button, so those keep working; only `S<steamid64>` lines count (`G`
+GOG ids are ignored). The bridge rereads the file when its size or write time
+changes: on each new connection that passes the bridge's identity and
+capacity checks, and every 2 s otherwise. A ban added while
+the peer is connected closes that peer's Steam connection within 2 s (log
+`closing banned Steam peer=...`); a refused join logs `refused banned Steam
+peer=...`, and the peer sees close reason 1002 "BZR: banned by host". A
+missing file means no bans; an unreadable or empty (mid-write) one keeps
+the last list.
+
+Limits: `/ban` records the id the client reports, so a Steam player is held
+out by the bridge only when that id is their real SteamID64. The standalone
+`socket_tunnel.exe bridge` has no ban gate (the server's own bans apply).
+Verified live 2026-11-08 (two accounts, two PCs, one-click Steam host):
+banning the connected friend logged `closing banned Steam peer` about 1 s
+later and the friend saw reason 1002; its retries logged `refused banned
+Steam peer`; deleting bans.cfg let it rejoin and the server authorized it.
+
+## Public Steam listing
+
+`src/patches/steam_public_listing.cpp` (component STEAMLIST). Lets strangers
+find a server that runs a Steam bridge, with no VPS and no friend invite.
+
+- One-click hosting: with **Steam list: On**, the LAN screen's **Start host**
+  binds the host to `127.0.0.2:1337` instead of the LAN adapter, then joins
+  it. That is a loopback server with a listener, so `SteamTunnelBridge=auto`
+  starts the bridge and the listing follows; no INI edit or second program is
+  needed. The Steam host always runs inside this game (`EmbeddedLan::Host`);
+  it never needs `tools/lan/BZRServer.exe`, which releases do not ship.
+  Identity is tied to the bridge: a bridged peer connects from its durable
+  `127.0.1.<slot>` source and may log in only as the Steam id the bridge
+  authenticated for that slot (authtype `steam`; its ticket is ignored and
+  never stored), so in-game `S<steamid64>` ids, bans included, match the
+  bridge's. An unknown `127.0.1.x` source is refused; any other loopback
+  source is this PC (the host's own game). Other LAN PCs cannot reach a loopback host:
+  turn the Steam list off and restart the host for LAN play. Toggling, or
+  pressing Start host, while a host of the other mode runs only shows "Stop
+  and start the host to switch". Steam hosting first points the tunnel back to
+  its startup host if a Steam join moved it. The bridge still obeys its own
+  rules: with `SteamTunnelBridge` set to something other than auto, an agent
+  key set, or no `steam_api.dll`, the loopback host is reachable by nobody.
+  The gate is the game's own lobby password; the LAN screen offers no ban
+  control. Verified live 2026-11-08: a Steam friend found the
+  `[Steam]` row, joined, and the loopback LAN host's server authorized it.
+  UNVERIFIED: both players in the same game room. Without in-game LAN
+  NoAuth, Start host needs `tools/lan/BZRServer.exe` (a build that accepts
+  `--lan-discovery --lan-managed`) beside the game.
+
+- Host: opt in with **Steam list: On** on the LAN screen (saved as
+  `openshim.ini [Network] SteamPublicListing=1`; default off). While a bridge
+  is announced on this PC, the game owns a public Steam lobby (appid 301650,
+  250 slots so searches never treat it as full) whose data is
+  `bridge=<SteamID>`, `name=<persona name>`, then `openshim=tunnel1`. The
+  lobby is left when the toggle goes off, the bridge stops, or its SteamID
+  changes. A failed create, or one with no result after 15 s, retries after
+  60 s (a late result is left at once). Every 2 s the host checks
+  that the advert still carries its tag; if Steam dropped it, a new one is
+  made.
+- Game guard: creating a lobby also enters it, and the game's own Steam
+  LobbyEnter_t callback (`SteamLobbyEnterRun`, 0x00750F90, calling
+  `CNetGameLobby::OnLobbyEntered` 0x0073E240) would leave the game's current
+  lobby and adopt the advert as its game room. The shim detours that
+  callback and drops enters for its own advert lobbies. An enter owned by
+  this account that arrives while a create is in flight (two at most) is held
+  until the create result names the advert, and replayed to the game if it was
+  not the advert; a failed or timed-out create replays every held enter.
+  Without the guard (row unbound or bytes differ) the host side never
+  creates a lobby and the LAN screen says so.
+- Joiner: **Refresh** on the LAN screen also runs a worldwide lobby search
+  for `openshim=tunnel1` (up to 50 results, own adverts dropped). An advert
+  is shown only when its lobby owner is the bridge it names (the in-game
+  bridge is the host's own account), so nobody can list another player's
+  bridge (if Steam reports no owner for an unjoined lobby, the check is
+  skipped); one row per bridge. Each row keeps the game it showed, so a list
+  that changes before the click never joins another game. A search with no
+  result after 15 s shows "timed out" and Refresh works again. Steam
+  servers follow the LAN hosts in the games list as `<name>  [Steam]`.
+  Choosing one calls `SteamTunnelJoin::JoinBridge`, which runs the same
+  switch checks as a friend join (no UDP bridge, not our own bridge, not in a
+  mission, BZRNet lookup hook installed), then reconnects BZRNet. A refusal
+  shows its reason on the status line. Choosing a LAN row afterwards first
+  points the tunnel back to its startup host.
+- Nobody joins the Steam lobby: it is an advert only. The server's own
+  password and bans remain the only gate.
+- Steam build only (the LAN screen hides the toggle without `steam_api.dll`).
+  Kill switch: `OPENSHIM_DISABLE_STEAM_PUBLIC_LISTING=1`.
+- Only an in-game bridge is listed. A standalone `socket_tunnel.exe bridge`
+  (for example a headless server) does not create its own lobby.
+
+UNVERIFIED until the live two-PC test: that `GetAPICallResult` returns
+results for handles never registered with a call-result object; that the
+worldwide search returns a lobby whose owner sits in no other lobby; that
+`GetLobbyOwner` reads the owner of an unjoined search result; that the game's
+own lobby browser does not show the adverts; that the
+Steam runtime bytes at 0x00750F90 match GOG once SteamStub settles; that
+Steam dispatches LobbyEnter_t on the game thread; and that the game's
+LobbyDataUpdate_t handler (0x00741B20, which only acts on lobbies in its own
+list) ignores the advert's data updates.
 
 ## Trusted LAN setup
 

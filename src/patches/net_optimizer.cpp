@@ -396,6 +396,7 @@ namespace
     // Applied to lookups of the launch-server host only, and never while a
     // test redirect is set.
     SRWLOCK g_ServerOverrideLock = SRWLOCK_INIT;
+    bool CopyServerOverrideHost(std::string& out);
     std::string g_ServerOverrideHost;
     std::atomic<bool> g_OverrideAllowOfficialFallback{true};
 
@@ -693,6 +694,17 @@ namespace
 
         char buf[256] = {};
         GetPrivateProfileStringA(section, key, "", buf, static_cast<DWORD>(sizeof(buf)), g_NetIniPath.c_str());
+        return TrimString(buf);
+    }
+
+    // An absent key reads as fallback; a present, empty key reads as "".
+    std::string ReadIniStringOr(const char* section, const char* key, const char* fallback)
+    {
+        if (g_NetIniPath.empty())
+            return fallback;
+
+        char buf[256] = {};
+        GetPrivateProfileStringA(section, key, fallback, buf, static_cast<DWORD>(sizeof(buf)), g_NetIniPath.c_str());
         return TrimString(buf);
     }
 
@@ -1046,7 +1058,9 @@ namespace
         }
 
         SocketTunnel::Configure(ReadIniString("OpenShimSocket", "SteamTunnelHost"),
-                                ReadIniString("OpenShimSocket", "TunnelUdpBridge"));
+                                ReadIniString("OpenShimSocket", "TunnelUdpBridge"),
+                                ReadIniStringOr("OpenShimSocket", "SteamTunnelBridge", "auto"),
+                                &CopyServerOverrideHost);
         if (SocketTunnel::Requested())
             g_Config.matchmakingRedirectAddress = "127.0.0.1";
 

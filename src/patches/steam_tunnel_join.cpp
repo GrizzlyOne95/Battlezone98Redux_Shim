@@ -178,15 +178,73 @@ namespace BZROpenShim
                 return SocketTunnel::IndividualSteamId(id) ? id : 0;
             }
 
+            void CaptureStartup()
+            {
+                if (g_StartupCaptured)
+                    return;
+                // First join request precedes any switch of ours.
+                g_StartupCaptured = true;
+                g_StartupHost = SocketTunnel::SteamHost();
+                g_StartupUdp = SocketTunnel::UdpBridgeConfigured();
+            }
+
+            // Game thread, Steam resolved. note gets a short player-facing reason.
+            bool ApplySwitch(uint64_t target, std::string& note)
+            {
+                if (target == SocketTunnel::SteamHost())
+                {
+                    // Same host: nothing to do unless its worker died (e.g. a
+                    // local server held 1337); then this join restarts it.
+                    if (!target || !SocketTunnel::Failed())
+                    {
+                        note = "already connected through that server";
+                        return true;
+                    }
+                    LogShimA(LogLevel::Info, kComponent, "tunnel to this host had stopped; restarting it");
+                }
+                if (g_StartupUdp)
+                {
+                    note = "TunnelUdpBridge is set in net.ini; Steam joins are off";
+                    LogShimA(LogLevel::Warn, kComponent, "TunnelUdpBridge is configured; not switching to Steam");
+                    return false;
+                }
+                if (target == g_Self)
+                {
+                    note = "that server is this account's own";
+                    LogShimA(LogLevel::Info, kComponent, "the bridge is this account's own; not switching");
+                    return false;
+                }
+                if (IsMissionSimulationActiveFromBridge())
+                {
+                    note = "leave the mission first";
+                    LogShimA(LogLevel::Warn, kComponent, "in a mission: tunnel not switched; join from the menus");
+                    return false;
+                }
+                if (!BzrNetLookupHookInstalled())
+                {
+                    note = "[OpenShimSocket] is off; Steam joins need it";
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "BZRNet lookup hook not installed ([OpenShimSocket] off); cannot switch the tunnel live");
+                    return false;
+                }
+                if (!SocketTunnel::SwitchSteamHost(target))
+                {
+                    note = "the Steam tunnel refused the switch";
+                    LogShimA(LogLevel::Warn, kComponent, "tunnel switch refused");
+                    return false;
+                }
+                if (!target)
+                    Hooks::InitializeBzrNetConfig();  // put the route flag back to the user's preference
+                const bool recycled = RecycleBzrNetWebSocket();
+                LogShimA(LogLevel::Info, kComponent, "tunnel now %llu; BZRNet reconnect %s",
+                         static_cast<unsigned long long>(target), recycled ? "started" : "not needed (no socket open)");
+                note = "connecting through Steam";
+                return true;
+            }
+
             void SwitchTunnel(uint64_t inviter, const char* connect, bool lounge)
             {
-                if (!g_StartupCaptured)
-                {
-                    // First join request precedes any switch of ours.
-                    g_StartupCaptured = true;
-                    g_StartupHost = SocketTunnel::SteamHost();
-                    g_StartupUdp = SocketTunnel::UdpBridgeConfigured();
-                }
+                CaptureStartup();
                 uint64_t bridge = 0;
                 const std::string announced = Presence(inviter, kPresenceKey);
                 if (!SocketTunnel::ParseSteamId(announced, bridge) && lounge)
@@ -195,45 +253,8 @@ namespace BZROpenShim
                 LogShimA(LogLevel::Info, kComponent, "join request from %llu (%s): tunnel presence %s, target %llu",
                          static_cast<unsigned long long>(inviter), lounge ? "lounge" : (connect[0] ? "lobby" : "empty"),
                          announced.empty() ? "none" : announced.c_str(), static_cast<unsigned long long>(target));
-                if (target == SocketTunnel::SteamHost())
-                {
-                    // Same host: nothing to do unless its worker died (e.g. a
-                    // local server held 1337); then this join restarts it.
-                    if (!target || !SocketTunnel::Failed())
-                        return;
-                    LogShimA(LogLevel::Info, kComponent, "tunnel to this host had stopped; restarting it");
-                }
-                if (g_StartupUdp)
-                {
-                    LogShimA(LogLevel::Warn, kComponent, "TunnelUdpBridge is configured; not switching to Steam");
-                    return;
-                }
-                if (target == g_Self)
-                {
-                    LogShimA(LogLevel::Info, kComponent, "the bridge is this account's own; not switching");
-                    return;
-                }
-                if (IsMissionSimulationActiveFromBridge())
-                {
-                    LogShimA(LogLevel::Warn, kComponent, "in a mission: tunnel not switched; join from the menus");
-                    return;
-                }
-                if (!BzrNetLookupHookInstalled())
-                {
-                    LogShimA(LogLevel::Warn, kComponent,
-                             "BZRNet lookup hook not installed ([OpenShimSocket] off); cannot switch the tunnel live");
-                    return;
-                }
-                if (!SocketTunnel::SwitchSteamHost(target))
-                {
-                    LogShimA(LogLevel::Warn, kComponent, "tunnel switch refused");
-                    return;
-                }
-                if (!target)
-                    Hooks::InitializeBzrNetConfig();  // put the route flag back to the user's preference
-                const bool recycled = RecycleBzrNetWebSocket();
-                LogShimA(LogLevel::Info, kComponent, "tunnel now %llu; BZRNet reconnect %s",
-                         static_cast<unsigned long long>(target), recycled ? "started" : "not needed (no socket open)");
+                std::string note;
+                ApplySwitch(target, note);
             }
 
             void __fastcall JoinRequestedHook(void* self, void* edx, const void* callback)
@@ -294,6 +315,44 @@ namespace BZROpenShim
             // The host half needs no hook; it runs from Tick().
             g_Enabled = true;
             DoInstall();
+        }
+
+        uint64_t AnnouncedBridge()
+        {
+            return ReadAnnouncedBridge();
+        }
+
+        bool JoinBridge(uint64_t bridge, std::string& note)
+        {
+            if (!g_Enabled)
+            {
+                note = "Steam tunnel join is disabled";
+                return false;
+            }
+            if (!SocketTunnel::IndividualSteamId(bridge))
+            {
+                note = "not a valid Steam server";
+                return false;
+            }
+            if (!ResolveSteam())
+            {
+                note = "Steam is not ready";
+                return false;
+            }
+            g_GameThread = GetCurrentThreadId();
+            CaptureStartup();
+            LogShimA(LogLevel::Info, kComponent, "public listing join: target %llu",
+                     static_cast<unsigned long long>(bridge));
+            return ApplySwitch(bridge, note);
+        }
+
+        bool RestoreStartup(std::string& note)
+        {
+            if (!g_StartupCaptured || SocketTunnel::SteamHost() == g_StartupHost)
+                return true; // never moved
+            LogShimA(LogLevel::Info, kComponent, "LAN join: tunnel back to %llu",
+                     static_cast<unsigned long long>(g_StartupHost));
+            return ApplySwitch(g_StartupHost, note);
         }
 
         void Tick()

@@ -79,6 +79,14 @@ int wmain(int argc, wchar_t** argv)
     wchar_t self[32768]{}; REQUIRE(GetModuleFileNameW(nullptr, self, DWORD(std::size(self))) != 0);
     const auto helper = root / "tools" / "lan" / "BZRServer.exe";
     fs::copy_file(self, helper);
+    // Steam hosting binds a loopback address and needs no LAN adapter.
+    CHECK(!LAN::StartHost(root.wstring(), false, "192.168.1.5"));
+    CHECK(LAN::Status().hostMessage.find("127.x.y.z") != std::string::npos);
+    CHECK(!LAN::StartHost(root.wstring(), false, "127.0.0"));
+    CHECK(LAN::StartHost(root.wstring(), false, "127.0.0.2"));
+    CHECK(Wait(LAN::HostState::Running));
+    CHECK(LAN::Status().hostAddress == "127.0.0.2");
+    LAN::StopHost(); CHECK(Wait(LAN::HostState::Stopped));
     if (!LAN::StartHost(root.wstring()) && LAN::Status().hostAddress.empty())
     {
         std::puts("SKIP: no active private IPv4 adapter for LAN host lifecycle test");

@@ -13,6 +13,7 @@ namespace BZROpenShim::SocketTunnel
         bool steam = false;
         bool ownSteam = false; // standalone only: init/pump/shutdown our own Steam session
         std::string identityMap; // bridge: durable SteamID -> loopback source mapping
+        std::string banList; // bridge: bans.cfg; refuse/close S<steamid64> peers (empty = no gate)
         // All addresses are numeric IPv4. Defaults never expose a LAN listener.
         std::string listen = "127.0.0.1";
         uint16_t port = 27030;
@@ -26,8 +27,21 @@ namespace BZROpenShim::SocketTunnel
     int Run(const Config&, std::atomic<bool>& stop, std::atomic<int>& ready, Logger);
     bool ParseEndpoint(const std::string&, std::string& ip, uint16_t& port);
     bool IsLoopback(const std::string&);
+    // Thread-safe. True when ip is a 127.0.1.<slot> source that a Steam bridge
+    // in this process assigned to a Steam-authenticated peer; fills its SteamID64.
+    bool BridgedSteamId(const std::string& ip, uint64_t& steamId);
     // OpenShim lifecycle wrapper; configured once before Winsock hooks install.
-    void Configure(const std::string& steamHost, const std::string& udpBridge);
+    // steamBridge hosts the Steam bridge inside this game process on the
+    // game's own Steam session, so friends join without socket_tunnel.exe:
+    //   ""            off
+    //   "auto"        only while localServer() names a numeric loopback IPv4
+    //                 (no port) with a TCP listener on 1337, i.e. this game
+    //                 points at a dedicated server running on this PC
+    //   "127.0.0.x"   always, toward that server
+    // Exclusive with the agent keys: one Steam tunnel transport per process.
+    using LocalServerSource = bool (*)(std::string& host);
+    void Configure(const std::string& steamHost, const std::string& udpBridge,
+                   const std::string& steamBridge = {}, LocalServerSource localServer = nullptr);
     bool Requested();
     bool Ready();
     // Logical server identity for community-key derivation. Never resolve this

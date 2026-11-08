@@ -191,26 +191,35 @@ namespace BZROpenShim::LanSession
         }
     }
 
-    bool StartHost(const std::wstring& gameRoot, bool inProcess)
+    bool StartHost(const std::wstring& gameRoot, bool inProcess, const std::string& bindAddress,
+        EmbeddedLan::AdmissionPolicy policy)
     {
         auto& s = Data();
         Tick();
         if (s.nativeHost) return s.nativeHost->Running();
         if (s.process) return s.snapshot.state == HostState::Running || s.snapshot.state == HostState::Starting;
         s.snapshot.state = HostState::Failed;
-        s.snapshot.hostAddress = HostAddress();
+        if (!bindAddress.empty())
+        {
+            IN_ADDR parsed{};
+            if (InetPtonA(AF_INET, bindAddress.c_str(), &parsed) != 1 || (ntohl(parsed.s_addr) >> 24) != 127)
+            { s.snapshot.hostAddress.clear(); s.snapshot.hostMessage = "Steam host address must be 127.x.y.z."; return false; }
+        }
+        s.snapshot.hostAddress = bindAddress.empty() ? HostAddress() : bindAddress;
         if (s.snapshot.hostAddress.empty())
         { s.snapshot.hostMessage = "No active LAN IPv4 address found."; return false; }
-        if (inProcess)
+        if (inProcess || !bindAddress.empty())
         {
             s.nativeHost = std::make_unique<EmbeddedLan::Host>();
-            if (!s.nativeHost->Start(s.snapshot.hostAddress))
+            if (!s.nativeHost->Start(s.snapshot.hostAddress, 1337, policy))
             {
                 s.snapshot.hostMessage = s.nativeHost->Error();
                 s.nativeHost.reset(); return false;
             }
             s.snapshot.state = HostState::Running;
-            s.snapshot.hostMessage = "Hosting LAN in this game on " + s.snapshot.hostAddress;
+            s.snapshot.hostMessage = (bindAddress.empty() ? "Hosting LAN in this game on "
+                : "Hosting in this game on ") + s.snapshot.hostAddress +
+                (bindAddress.empty() ? "" : " (Steam players only, via the Steam bridge)");
             return true;
         }
         const auto root = std::filesystem::path(gameRoot);

@@ -71,7 +71,7 @@ if(WIN32)
     target_include_directories(socket_tunnel_config_tests PRIVATE ../include ../third_party/steam-networking)
     target_compile_features(socket_tunnel_config_tests PRIVATE cxx_std_17)
     target_link_libraries(socket_tunnel_config_tests PRIVATE ws2_32)
-    foreach(mode disabled steam invalid steam_invalid borrowed startup)
+    foreach(mode disabled steam invalid steam_invalid borrowed startup bridge_exclusive bridge_invalid bridge_borrowed bridge_auto_gog bridge_auto_guest)
         add_test(NAME socket_tunnel_config_${mode} COMMAND socket_tunnel_config_tests ${mode})
         set_tests_properties(socket_tunnel_config_${mode} PROPERTIES TIMEOUT 5)
     endforeach()
@@ -581,6 +581,10 @@ endif()
 
 openshim_add_test(stable_id_list_tests STD 20 SOURCES
     stable_id_list_tests.cpp
+)
+
+openshim_add_test(steam_ban_list_tests STD 20 SOURCES
+    steam_ban_list_tests.cpp
 )
 
 openshim_add_test(terrain_tile_blend_tests STD 20 SOURCES
