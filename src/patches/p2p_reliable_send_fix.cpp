@@ -120,6 +120,265 @@ namespace BZROpenShim
         }
 
         // -----------------------------------------------------------------
+        // Ping-adaptive reliable retry wait
+        // -----------------------------------------------------------------
+        //
+        // Both retry timers are armed through the deadline helper 0x0075FE50
+        // (__thiscall, ecx = deadline object, uint32 lo_ms, uint32 hi_ms,
+        // `ret 8`). At 350 ms round trip the 300 ms first retry fires before
+        // the ACK can arrive and nearly every reliable packet is resent. The
+        // two call sites are redirected to naked stubs that hand the transport
+        // peer record to a wrapper in edx (pump: eax from the iterator deref;
+        // send: [ebp-0x78]). The wrapper raises the low word to 1.5x THAT
+        // peer's round trip (P2PReliable::AdaptiveRetryMs) and calls the
+        // original helper, so the configured imm32 patches keep working
+        // untouched. A peer is matched to a Player by the remote address
+        // (peer+0x08 vs Player+0x30, dwords 0, 2, 3 like the engine's own
+        // comparator); no match falls back to the worst peer round trip.
+        // Pings come from the game's own player list: 0x00577B50 (__cdecl,
+        // next Player*) and 0x00575F80 (__thiscall, average RTT over the
+        // player's pong ring). Everything runs on the game thread, the same
+        // thread as the retry pump.
+        namespace
+        {
+            using DeadlineFn = void*(__fastcall*)(void* self, void* peer, uint32_t lo, uint32_t hi);
+            using NextPlayerFn = int(__cdecl*)(int prev);
+            using PlayerPingFn = uint32_t(__fastcall*)(void* player, void* edx);
+
+            DeadlineFn g_firstRetryOriginal = nullptr;
+            DeadlineFn g_intervalOriginal = nullptr;
+            NextPlayerFn g_nextPlayer = nullptr;
+            PlayerPingFn g_playerPing = nullptr;
+
+            constexpr ULONGLONG kRttRefreshMs = 500;
+            constexpr ULONGLONG kRttFaultBackoffMs = 10000;
+            constexpr ULONGLONG kLogMinGapMs = 10000;
+            constexpr int kMaxPlayers = 64;
+            constexpr uintptr_t kPlayerAddrOffset = 0x30;
+            constexpr uintptr_t kPeerAddrOffset = 0x08;
+
+            ULONGLONG g_nextRttRefresh = 0;
+            P2PReliable::PeerRttEntry g_peerTable[kMaxPlayers] = {};
+            size_t g_peerCount = 0;
+            uint32_t g_maxRttMs = 0;
+            uint32_t g_lastFirstMs = 0;
+            uint32_t g_lastIntervalMs = 0;
+            uint32_t g_loggedFirstMs = 0;
+            uint32_t g_matchedCount = 0;
+            uint32_t g_fallbackCount = 0;
+            ULONGLONG g_lastLogTick = 0;
+
+            // No C++ objects with destructors: __try cannot share a frame with them.
+            bool ReadPeerTable()
+            {
+                size_t count = 0;
+                uint32_t maxRtt = 0;
+                __try
+                {
+                    int player = g_nextPlayer(0);
+                    for (int i = 0; player != 0 && i < kMaxPlayers; ++i)
+                    {
+                        const uint32_t rtt = g_playerPing(
+                            reinterpret_cast<void*>(static_cast<uintptr_t>(player)), nullptr);
+                        if (rtt > maxRtt) maxRtt = rtt;
+                        const uint32_t* addr = reinterpret_cast<const uint32_t*>(
+                            static_cast<uintptr_t>(player) + kPlayerAddrOffset);
+                        P2PReliable::PeerRttEntry& e = g_peerTable[count++];
+                        e.addr0 = addr[0];
+                        e.addr2 = addr[2];
+                        e.addr3 = addr[3];
+                        e.rttMs = rtt;
+                        player = g_nextPlayer(player);
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    g_peerCount = 0;
+                    g_maxRttMs = 0;
+                    return false;
+                }
+                g_peerCount = count;
+                g_maxRttMs = maxRtt;
+                return true;
+            }
+
+            void RefreshPeerTable()
+            {
+                const ULONGLONG now = GetTickCount64();
+                if (now < g_nextRttRefresh) return;
+                if (!ReadPeerTable())
+                {
+                    g_nextRttRefresh = now + kRttFaultBackoffMs;
+                    Log(L"[P2PSEND] adaptive retry: peer ping read faulted; configured waits kept for 10 s\n");
+                    return;
+                }
+                g_nextRttRefresh = now + kRttRefreshMs;
+            }
+
+            bool ReadPeerKey(const void* peer, uint32_t (&key)[3])
+            {
+                if (!peer) return false;
+                __try
+                {
+                    const uint32_t* addr = reinterpret_cast<const uint32_t*>(
+                        reinterpret_cast<uintptr_t>(peer) + kPeerAddrOffset);
+                    key[0] = addr[0];
+                    key[1] = addr[2];
+                    key[2] = addr[3];
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+                return true;
+            }
+
+            // This peer's round trip, else the worst one; 0 when nothing is known.
+            uint32_t PeerRttMs(const void* peer)
+            {
+                RefreshPeerTable();
+                uint32_t key[3] = {};
+                bool matched = false;
+                uint32_t rtt = g_maxRttMs;
+                if (ReadPeerKey(peer, key))
+                    rtt = P2PReliable::PeerRttOrMax(g_peerTable, g_peerCount,
+                                                    key[0], key[1], key[2], g_maxRttMs, &matched);
+                if (g_maxRttMs != 0)
+                {
+                    if (matched) ++g_matchedCount;
+                    else ++g_fallbackCount;
+                }
+                return rtt;
+            }
+
+            void MaybeLogAdaptive(uint32_t rttMs)
+            {
+                const ULONGLONG now = GetTickCount64();
+                if (g_lastLogTick != 0 && now - g_lastLogTick < kLogMinGapMs) return;
+                const uint32_t prev = g_loggedFirstMs;
+                const uint32_t cur = g_lastFirstMs;
+                // Log only a >= 25% change from the last logged value.
+                if (prev != 0)
+                {
+                    const uint32_t delta = cur > prev ? cur - prev : prev - cur;
+                    if (static_cast<uint64_t>(delta) * 4 < prev) return;
+                }
+                else if (rttMs == 0)
+                {
+                    return; // nothing adaptive to report yet
+                }
+                g_loggedFirstMs = cur;
+                g_lastLogTick = now;
+                Log(L"[P2PSEND] adaptive retry: peer rtt %u ms (max %u, matched %u, fallback %u) -> first retry %u ms, interval %u ms\n",
+                    rttMs, g_maxRttMs, g_matchedCount, g_fallbackCount, cur, g_lastIntervalMs);
+            }
+
+            void* __fastcall FirstRetryDeadline(void* self, void* peer, uint32_t lo, uint32_t hi)
+            {
+                if (hi == 0)
+                {
+                    const uint32_t rtt = PeerRttMs(peer);
+                    lo = P2PReliable::AdaptiveRetryMs(lo, rtt);
+                    g_lastFirstMs = lo;
+                    MaybeLogAdaptive(rtt);
+                }
+                return g_firstRetryOriginal(self, nullptr, lo, hi);
+            }
+
+            void* __fastcall IntervalDeadline(void* self, void* peer, uint32_t lo, uint32_t hi)
+            {
+                if (hi == 0)
+                {
+                    lo = P2PReliable::AdaptiveRetryMs(lo, PeerRttMs(peer));
+                    g_lastIntervalMs = lo;
+                }
+                return g_intervalOriginal(self, nullptr, lo, hi);
+            }
+
+            // Call targets. ecx/stack are already the helper's arguments; only
+            // edx (the peer) is added. Pump: eax holds the peer at the call.
+            // Send: the peer is [ebp-0x78] in the send function's frame.
+            __declspec(naked) void IntervalStub()
+            {
+                __asm
+                {
+                    mov edx, eax
+                    jmp IntervalDeadline
+                }
+            }
+
+            __declspec(naked) void FirstRetryStub()
+            {
+                __asm
+                {
+                    mov edx, dword ptr [ebp - 0x78]
+                    jmp FirstRetryDeadline
+                }
+            }
+        }
+
+        void InitializeP2PAdaptiveRetry()
+        {
+            bool enabled = true;
+            TryGetUserConfigBool("Network", "ReliableRetryAdaptToPing", enabled);
+            if (!enabled)
+            {
+                Log(L"[P2PSEND] Adaptive retry disabled; configured retry waits kept\n");
+                return;
+            }
+            const uint32_t nextPlayer = HookEngine::ResolveNamedAddress("P2PAdaptiveRetry::NextPlayer");
+            const uint32_t playerPing = HookEngine::ResolveNamedAddress("P2PAdaptiveRetry::PlayerPing");
+            if (nextPlayer == 0 || playerPing == 0)
+            {
+                Log(L"[SKIP] P2P adaptive retry: ping source unresolved (next 0x%08X ping 0x%08X)\n",
+                    nextPlayer, playerPing);
+                return;
+            }
+            g_nextPlayer = reinterpret_cast<NextPlayerFn>(nextPlayer);
+            g_playerPing = reinterpret_cast<PlayerPingFn>(playerPing);
+
+            struct Site
+            {
+                uint32_t call;
+                uint32_t helper;
+                const wchar_t* label;
+                void (*wrapper)();
+                DeadlineFn* original;
+            };
+            const Site sites[] = {
+                { HookEngine::ResolveNamedAddress("P2PAdaptiveRetry::FirstRetryCall"),
+                  HookEngine::ResolveNamedAddress("P2PAdaptiveRetry::FirstRetryHelper"),
+                  L"first retry", &FirstRetryStub, &g_firstRetryOriginal },
+                { HookEngine::ResolveNamedAddress("P2PAdaptiveRetry::IntervalCall"),
+                  HookEngine::ResolveNamedAddress("P2PAdaptiveRetry::IntervalHelper"),
+                  L"retry interval", &IntervalStub, &g_intervalOriginal },
+            };
+            int installed = 0;
+            for (const Site& site : sites)
+            {
+                const uint32_t call = site.call;
+                const uint32_t helper = site.helper;
+                if (call == 0 || helper == 0)
+                {
+                    Log(L"[SKIP] P2P adaptive %ls: call 0x%08X helper 0x%08X unresolved\n",
+                        site.label, call, helper);
+                    continue;
+                }
+                *site.original = reinterpret_cast<DeadlineFn>(helper);
+                if (!RedirectCallTarget(call, helper, reinterpret_cast<uintptr_t>(site.wrapper)))
+                {
+                    *site.original = nullptr;
+                    Log(L"[SKIP] P2P adaptive %ls: call at 0x%08X does not target 0x%08X\n",
+                        site.label, call, helper);
+                    continue;
+                }
+                ++installed;
+            }
+            Log(L"[P2PSEND] adaptive retry installed on %d of 2 deadline sites (wait = max(configured, 1.5 x this peer's rtt))\n",
+                installed);
+        }
+
+        // -----------------------------------------------------------------
         // Sync Join default on
         // -----------------------------------------------------------------
         //
