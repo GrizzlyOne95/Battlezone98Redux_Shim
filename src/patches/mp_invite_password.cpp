@@ -115,7 +115,7 @@ namespace BZROpenShim
             // A join held until the lobby list arrives (game thread only).
             bool g_Held = false;
             void* g_HeldSelf = nullptr;
-            void* g_HeldPassword = nullptr;  // self+0xA4: lives as long as the lobby object
+            uint64_t g_HeldAt = 0;  // a hold older than kPendingMs is dropped (the screen was left)
             uint8_t g_HeldId[kLobbyIdBytes] = {};
 
             bool IsEnabled()
@@ -181,6 +181,7 @@ namespace BZROpenShim
                 {
                     g_HavePending = true;
                     g_PendingAt = GetTickCount64();
+                    g_Held = false;  // a newer invite replaces a held one
                     char hex[kLobbyIdBytes * 2 + 1];
                     HexId(g_PendingId, hex);
                     LogShimA(LogLevel::Info, kComponent, "join requested: id %s, invite password length %u", hex,
@@ -231,7 +232,7 @@ namespace BZROpenShim
                     {
                         g_Held = true;
                         g_HeldSelf = self;
-                        g_HeldPassword = password;
+                        g_HeldAt = GetTickCount64();
                         std::memcpy(g_HeldId, id, kLobbyIdBytes);
                         LogShimA(LogLevel::Info, kComponent,
                                  "invited lobby is not listed yet; holding the join for the lobby list");
@@ -256,9 +257,14 @@ namespace BZROpenShim
                 const FnListReceived original = reinterpret_cast<FnListReceived>(g_ListReceivedOriginal);
                 if (original)
                     original(self, edx, count);
-                if (!g_Held || self != g_HeldSelf)
+                if (!g_Held)
                     return;
                 g_Held = false;
+                if (self != g_HeldSelf || GetTickCount64() - g_HeldAt > kPendingMs)
+                {
+                    LogShimA(LogLevel::Info, kComponent, "dropped a stale held invite join");
+                    return;
+                }
                 const FnJoinById join = reinterpret_cast<FnJoinById>(g_JoinByIdOriginal);
                 if (!join)
                     return;
@@ -275,7 +281,7 @@ namespace BZROpenShim
                 }
                 LogShimA(LogLevel::Info, kComponent, "lobby list arrived: sending the held invite join %s",
                          entry ? "(lobby has no password)" : "without a password (lobby not listed)");
-                join(self, nullptr, id, g_HeldPassword);
+                join(self, nullptr, id, reinterpret_cast<uint8_t*>(self) + kLobbyInvitePasswordOffset);
             }
 
             void RollBack()
