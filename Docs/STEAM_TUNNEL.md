@@ -194,8 +194,11 @@ either agent key set or while Join Game has switched this game onto another
 host's tunnel (one Steam tunnel transport per process); while the bridge is
 running, Join Game toward another host is refused. The host uses 127.0.0.2
 rather than 127.0.0.1 so the server's address stays apart from the agent's
-fixed 127.0.0.1 ports. UNVERIFIED until a live two-account test: friend join
-through the in-game bridge.
+fixed 127.0.0.1 ports. Verified live 2026-11-08 (two accounts, two PCs):
+the friend's Join Game request reached the host's in-game bridge over Steam
+relay and the server authorized the friend. The join was triggered with
+`steam://rungame/301650/<host SteamID>/...`, which raises the same callback
+as the friends-list button; the button's visibility itself is UNVERIFIED.
 
 How the pieces meet (`src/patches/steam_tunnel_join.cpp`, component
 TUNNELJOIN):
