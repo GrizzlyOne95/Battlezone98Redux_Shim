@@ -523,6 +523,11 @@ namespace BZROpenShim
             return !KillSwitched() && !g_ExportsMissing && GetModuleHandleW(L"steam_api.dll") != nullptr;
         }
 
+        uint64_t LocalSteamId()
+        {
+            return Available() && Resolve() ? g_Api.self : 0;
+        }
+
         bool HostListingOn()
         {
             if (g_Listing < 0)

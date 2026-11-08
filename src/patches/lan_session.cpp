@@ -191,7 +191,8 @@ namespace BZROpenShim::LanSession
         }
     }
 
-    bool StartHost(const std::wstring& gameRoot, bool inProcess, const std::string& bindAddress)
+    bool StartHost(const std::wstring& gameRoot, bool inProcess, const std::string& bindAddress,
+        EmbeddedLan::AdmissionPolicy policy)
     {
         auto& s = Data();
         Tick();
@@ -207,10 +208,10 @@ namespace BZROpenShim::LanSession
         s.snapshot.hostAddress = bindAddress.empty() ? HostAddress() : bindAddress;
         if (s.snapshot.hostAddress.empty())
         { s.snapshot.hostMessage = "No active LAN IPv4 address found."; return false; }
-        if (inProcess)
+        if (inProcess || !bindAddress.empty())
         {
             s.nativeHost = std::make_unique<EmbeddedLan::Host>();
-            if (!s.nativeHost->Start(s.snapshot.hostAddress))
+            if (!s.nativeHost->Start(s.snapshot.hostAddress, 1337, policy))
             {
                 s.snapshot.hostMessage = s.nativeHost->Error();
                 s.nativeHost.reset(); return false;

@@ -8,11 +8,13 @@
 #include "matchmaking_server.h"
 #include "net_optimizer.h"
 #include "shell_screens.h"
+#include "socket_tunnel.h"
 #include "steam_public_listing.h"
 #include "steam_tunnel_join.h"
 #include "patcher.h"
 #include <windows.h>
 #include <array>
+#include <atomic>
 #include <filesystem>
 #include <string>
 
@@ -50,6 +52,27 @@ namespace BZROpenShim
         // Matches the bridge docs: kept apart from the agent's 127.0.0.1 ports.
         constexpr const char* kSteamHostAddress = "127.0.0.2";
         std::string SwitchNote() { return "Stop and start the host to switch between LAN and Steam hosting."; }
+        // This game's SteamID64, cached on the game thread when the Steam host starts.
+        std::atomic<uint64_t> g_HostSteamId{0};
+        // Steam host admission, on the host's worker thread. A bridged peer's
+        // 127.0.1.<slot> source may log in only as the Steam id the bridge
+        // authenticated for that slot, so bans written from in-game ids match
+        // the bridge's. Any other loopback source is this PC (the host's own
+        // game): its own Steam id or a no-auth LAN login. Nothing else gets in.
+        // Trust boundary is the local user: any process on this PC can bind a
+        // loopback source, so this guards against remote peers, not local ones.
+        bool __cdecl SteamAdmission(const std::string& source, std::string& steamId, bool& lan)
+        {
+            uint64_t id = 0;
+            if (source.rfind("127.0.1.", 0) == 0)
+            {
+                if (!SocketTunnel::BridgedSteamId(source, id)) return false; // unknown slot
+                steamId = "S" + std::to_string(id); lan = false; return true;
+            }
+            if (!SocketTunnel::IsLoopback(source)) return false;
+            id = g_HostSteamId.load();
+            steamId = id ? "S" + std::to_string(id) : std::string(); lan = true; return true;
+        }
         // LAN hosts first, then public Steam listings.
         size_t GameCount(const LanSession::Snapshot& status)
         {
@@ -101,8 +124,10 @@ namespace BZROpenShim
             std::string note;
             if (forSteam && !SteamTunnelJoin::RestoreStartup(note))
             { g_Note = "Cannot host for Steam: " + note + "."; return; }
+            if (forSteam && !(g_HostSteamId = SteamPublicListing::LocalSteamId()))
+            { g_Note = "Cannot host for Steam: Steam is not ready yet; try again."; return; }
             g_JoinHostedWhenReady = LanSession::StartHost(GameRoot(), LanNoAuth::Enabled(),
-                forSteam ? std::string(kSteamHostAddress) : std::string());
+                forSteam ? std::string(kSteamHostAddress) : std::string(), forSteam ? SteamAdmission : nullptr);
             const auto status = LanSession::Status();
             Log(L"[LAN-HOST] start %hs: %hs\n", g_JoinHostedWhenReady ? "ok" : "failed", status.hostMessage.c_str());
         }

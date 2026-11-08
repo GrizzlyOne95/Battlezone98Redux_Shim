@@ -22,6 +22,8 @@ namespace BZROpenShim
 
         // steam_api.dll is loaded and the kill switch is not set.
         bool Available();
+        // Game thread. This game's own SteamID64, 0 until Steam is up.
+        uint64_t LocalSteamId();
 
         // Host opt-in, persisted as openshim.ini [Network] SteamPublicListing.
         bool HostListingOn();

@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "embedded_lan_host.h"
 
 namespace BZROpenShim::LanSession
 {
@@ -19,9 +20,11 @@ namespace BZROpenShim::LanSession
     // no shell/PATH execution. The optional helper lives at tools/lan/BZRServer.exe.
     // bindAddress empty: the routed private LAN IPv4. Otherwise it must be a
     // numeric 127.x.y.z address: a host reachable only through the in-game
-    // Steam bridge (SteamTunnelBridge=auto), not by other LAN PCs.
+    // Steam bridge (SteamTunnelBridge=auto), not by other LAN PCs. A Steam
+    // host always runs in this game (never the helper); policy, when set,
+    // decides who each in-game host connection may log in as.
     bool StartHost(const std::wstring& gameRoot, bool inProcess = false,
-        const std::string& bindAddress = {});
+        const std::string& bindAddress = {}, EmbeddedLan::AdmissionPolicy policy = nullptr);
     void StopHost();
     bool StartScan();
     void StopScan();

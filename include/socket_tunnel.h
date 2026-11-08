@@ -26,6 +26,9 @@ namespace BZROpenShim::SocketTunnel
     int Run(const Config&, std::atomic<bool>& stop, std::atomic<int>& ready, Logger);
     bool ParseEndpoint(const std::string&, std::string& ip, uint16_t& port);
     bool IsLoopback(const std::string&);
+    // Thread-safe. True when ip is a 127.0.1.<slot> source that a Steam bridge
+    // in this process assigned to a Steam-authenticated peer; fills its SteamID64.
+    bool BridgedSteamId(const std::string& ip, uint64_t& steamId);
     // OpenShim lifecycle wrapper; configured once before Winsock hooks install.
     // steamBridge hosts the Steam bridge inside this game process on the
     // game's own Steam session, so friends join without socket_tunnel.exe:
