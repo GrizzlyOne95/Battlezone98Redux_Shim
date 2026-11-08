@@ -186,6 +186,19 @@ TUNNELJOIN):
 Both games must be running with OpenShim; join from the menus. Kill switch:
 `OPENSHIM_DISABLE_STEAM_TUNNEL_JOIN=1`.
 
+Passworded lobbies (`src/patches/mp_invite_password.cpp`, component INVITEPW,
+`[Fixes] InvitePassword`): the stock host never fills the invite password, so
+an invite to a private, passworded lobby used to stall the friend on
+"gathering information from the server". The host now copies the lobby
+password into the invite (the friend types nothing). A passworded lobby
+publishes no `connect`, so friends join it by invite, not Join Game.
+Live 2026-11-08: host PC 1 created private lobby T741e (B1005) with a
+password; PC 2 (RazorScout) joined in 3.7 s with the invite connect string
+`-connect-galaxy-lobby=B1005,<password>`, and the host lobby listed both
+players. The string was rebuilt from the sender decompile and the host's live
+invite field, not captured from a real overlay Accept (PC 2 could not click
+it); Steam hands an accepted invite to the game as that same string.
+
 UNVERIFIED until the two-account live test:
 
 - whether `GetFriendRichPresence` returns the inviter's keys at callback time

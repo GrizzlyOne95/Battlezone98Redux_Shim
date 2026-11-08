@@ -217,9 +217,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     // nothing; [Fixes] HostLeave = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::HostLeave::InstallHostLeaveIfPossible());
 
-    // A Steam invite or Join Game into a passworded lobby joins with an empty
-    // password and stock JoinLobby refuses it locally. Fills the lobby's own
-    // password for the invited lobby only; byte-guarded and fail-closed;
+    // Stock hosts never put the lobby password into Steam invites, so an
+    // invited friend's join to a passworded lobby is refused. Copies the
+    // password into the invite field at lobby creation; byte-guarded and fail-closed;
     // [Fixes] InvitePassword = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::InvitePassword::InstallInvitePasswordIfPossible());
     // Steam invite / Join Game onto a host bridge (docs/STEAM_TUNNEL.md).
