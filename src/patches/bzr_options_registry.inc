@@ -538,6 +538,24 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::ReadOnNextUse,
       "DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many "
       "craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission." },
+    // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
+    { "Primary Monitor", "Graphics", "D3D11PrimaryMonitor", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "DX11 only: open the game window on the Windows primary monitor instead of a "
+      "side monitor. DX9 is untouched. Restart required." },
+    // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
+    { "Resolution Filter", "Graphics", "ResolutionListFilter", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Keep the Video options resolution list short: the current setting, the desktop size "
+      "and common sizes matching the desktop's aspect. Restart required." },
+    // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
+    { "Resolution Dropdown", "Graphics", "ResolutionDropdown", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Left click on the Video options resolution opens a list to pick from instead of "
+      "cycling. Right click keeps the stock behaviour. Restart required." },
     { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
       kShimSettingsReticleConvAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -748,6 +766,24 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Eases other players' craft toward each network update instead of snapping, "
       "for high-ping games. 100 ms suits most; higher looks smoother but lags more. "
       "Local only. Restart required." },
+    // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
+    { "Ping-Aware Retry", "Network", "ReliableRetryAdaptToPing", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Wait at least 1.5x each peer's round trip before resending a reliable packet, so "
+      "high-ping links only resend real losses. Same wire format. Restart required." },
+    // Patch filtered at startup; absent key = off, so defaultIndex 1 selects "0" (Off).
+    { "Infinite Lives", "Network", "InfiniteLives", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::RestartRequired,
+      "Host only: multiplayer games you host start with unlimited lives. Has no effect "
+      "as a guest. Restart required." },
+    // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
+    { "Map Letter Jump", "General", "MapListLetterJump", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "In the multiplayer map list, Ctrl+letter jumps to the next map starting with that "
+      "letter. Restart required." },
     { "Net Tuning", "Network", "GovernorTuning", nullptr, 0,
       kShimSettingsGovernorTuningValues, kShimSettingsGovernorTuningValues, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -882,7 +918,8 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
     { "RoutePreference", "Stock" }, { "UdpPort", "0" }, { "GovernorTuning", "Stock" },
-    { "RemoteSmoothingMs", "0" },
+    { "RemoteSmoothingMs", "0" }, { "InfiniteLives", "0" }, { "MapListLetterJump", "0" },
+    { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
 };
@@ -902,7 +939,7 @@ static const char* const kShimSettingsStockKeepKeys[] =
     "SatelliteVisibilityFix", "UnfocusedMouseRelease", "ApcAlliedTargetDeploy", "SplinterUndead",
     "HowitzerUndeployedRetaliation", "TugCargoPostLoad", "ConstructorRecycleStaleTarget",
     "PreciseTimestep", "MusicSingleFill", "ConstructorRemoteBuild", "RestoreCraftBounds",
-    "NetImprovements",
+    "NetImprovements", "ReliableRetryAdaptToPing",
     "ThreadScheduling", "DynamicGeometryPieceReuse", "DynamicGeometryFastSort",
     "AutoStage", "StatsTracking",
     "Renderer", "Headlights",
