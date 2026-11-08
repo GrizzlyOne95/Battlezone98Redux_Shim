@@ -64,4 +64,25 @@ namespace BZROpenShim::MenuTheme
         }
         return pixel;
     }
+    // Stock green (0,255,0) at full saturation and white level is the native look.
+    inline bool IsStockLook(const Settings& s)
+    {
+        return s.rgb==std::array<int,3>{0,255,0}&&s.saturation==100&&s.whiteLevel==100;
+    }
+    // Shell label text: queued ARGB colour (0xAARRGGBB). Runs the same green
+    // test and target as the artwork shader, so green labels follow the art
+    // and dim greens stay proportionally dim. Alpha is never touched.
+    inline uint32_t RecolorLabelArgb(uint32_t argb, const Settings& s)
+    {
+        if (!s.enabled||IsStockLook(s)) return argb;
+        // Only green text follows the theme. White, grey and red labels keep
+        // their colour; the white level would otherwise darken them too.
+        const uint32_t r=(argb>>16)&0xFF,g=(argb>>8)&0xFF,b=argb&0xFF;
+        if (g<=std::max(r,b)+1) return argb;
+        const std::array<float,4> in{((argb>>16)&0xFF)/255.0f,((argb>>8)&0xFF)/255.0f,(argb&0xFF)/255.0f,0};
+        const auto out=Colorize(in,s);
+        const auto byte=[](float v){return static_cast<uint32_t>(std::clamp(v,0.0f,1.0f)*255.0f+.5f);};
+        if (out[0]==in[0]&&out[1]==in[1]&&out[2]==in[2]) return argb;
+        return (argb&0xFF000000u)|(byte(out[0])<<16)|(byte(out[1])<<8)|byte(out[2]);
+    }
 }

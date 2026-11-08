@@ -7,5 +7,7 @@ namespace BZROpenShim::MenuTheme
     void ImageMaterialReady(const char* name, void* materialSlot) noexcept;
     bool RegisterScreen();
     bool ImageAdapterNeeded();
+    // Redirects the shell label colour apply call; idempotent, fails closed.
+    void InstallTextRecolor();
     constexpr uint32_t ScreenId = 0x4F530004;
 }
