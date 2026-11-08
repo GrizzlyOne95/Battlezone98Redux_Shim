@@ -31,7 +31,17 @@ namespace BZROpenShim::MenuTheme
             "osh_options_center.png", "osh_hub_center.png", "osh_category_center.png", "osh_reticle_center.png",
             "osh_keys_center.png", "osh_career_center.png", "osh_prelobby_center.png", "osh_lan_center.png", "osh_menu_theme_center.png",
             "osh_tile_hv.png", "osh_tile_ck.png", "osh_value_hv.png", "osh_value_ck.png",
-            "osh_key_hv.png", "osh_key_ck.png", "osh_tool_hv.png", "osh_tool_ck.png"
+            "osh_key_hv.png", "osh_key_ck.png", "osh_tool_hv.png", "osh_tool_ck.png",
+            // Multiplayer screens (lobby, chat, filters, vehicle/team pickers).
+            "multipc_center.png", "multipe_center.png", "MultiplayerModeButton_off.png", "MultiplayerModeButton_on.png", "MultiplayerModeButton_over.png",
+            "multi_createGame_button_off.png", "multi_createGame_button_on.png", "multi_createGame_button_over.png",
+            "sync_join.png", "sync_join_off.png", "sync_join_on.png", "sync_join_over.png", "SYNC.png",
+            "time_limit.png", "time_limit_off.png", "time_limit_on.png", "time_limit_over.png", "arros_leftRight.png", "arrows_upDown.png",
+            "mp1on.png", "mp1clk.png", "mp1lfton.png", "mp1lftclk.png", "mp1nwon.png", "mp1nwclk.png", "mp1rton.png", "mp1rtclk.png",
+            "mp2cbclk.png", "mpcoclk.png", "mpcvlon.png", "mpcvlclk.png", "mpcvron.png", "mpcvrclk.png",
+            "mpmdon.png", "mpmdclk.png", "mpmuon.png", "mpmuclk.png", "Filterdn.png", "Filterdn2.png",
+            "baudon.png", "baudclk.png", "dropon.png", "dropover.png", "kickon.png", "learron.png", "learroff.png", "learrclk.png",
+            "transon.png", "transclk.png", "whispon.png", "whispclk.png", "waiting_green.png"
     };
     inline bool IsMenuImage(std::string_view name)
     {

@@ -23,6 +23,7 @@ int main()
     Check(Colorize(green,theme)==std::array<float,4>{.75f,0,0,.25f},"white level brightens the artwork independently of hue and alpha");
     theme.whiteLevel=0;Check(Colorize(green,theme)==std::array<float,4>{0,0,0,.25f},"minimum white level keeps native transparency");
     Check(IsMenuImage("mainCenterPanel.png")&&IsMenuImage("topcorner.png")&&IsMenuImage("osh_menu_theme_center.png"),"stock and shim menu chrome qualify");
+    Check(IsMenuImage("mp1on.png")&&IsMenuImage("sync_join_on.png")&&IsMenuImage("MultiplayerModeButton_on.png"),"multiplayer screen art qualifies");
     for(const auto name:{"bzone.ogv","arial.png","radar.png","map_preview.png","aflagon.png","unknown_mod.png","../mainCenterPanel.png","MAINCenterPanel.png"})
         Check(!IsMenuImage(name),"fonts, movies, flags, HUD, unknown and ambiguous paths remain excluded");
     return ExitCode();
