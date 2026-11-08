@@ -20,6 +20,10 @@ namespace BZROpenShim
     // or Winsock hooks are not installed.
     bool RecycleBzrNetWebSocket();
 
+    // True once the getaddrinfo hook is live, so a tunnel switch can redirect
+    // the next BZRNet lookup.
+    bool BzrNetLookupHookInstalled();
+
     // The host BZRNet matchmaking lookups are redirected to (net.ini
     // [OpenShimSocket] MatchmakingRedirectAddress or the BZ_/OPENSHIM_
     // environment override), as the socket layer actually applies it. False,

@@ -147,6 +147,55 @@ same agent implementation without loading OpenShim. Do not run the standalone
 agent and the in-process agent simultaneously: only one may own these ports.
 The server's 8080 status endpoint stays local and never enters the tunnel.
 
+## Steam invite / Join Game
+
+The goal: a host runs their own server, and Steam friends reach it with an
+invite or Join Game, with no INI edits on the friend's side.
+
+Host (one PC, signed in to Steam):
+
+```powershell
+./tools/socket_tunnel/start_host.ps1 -Tunnel C:/BZRCoop/steam-tunnel
+```
+
+This starts `server.py` on 127.0.0.2 and `socket_tunnel.exe bridge --steam`
+in front of it. The host plays on the same PC with `Server = Custom` and
+`CustomServer = 127.0.0.2`. The bridge admits any Steam peer; the server does
+the auth (bans, passwords).
+
+How the pieces meet (`src/patches/steam_tunnel_join.cpp`, component
+TUNNELJOIN):
+
+- The bridge writes its SteamID to the named mapping
+  `Local\BZROpenShimSteamTunnelBridge` (same Windows session only).
+- The host's game reads it every 2 s and sets Steam rich presence
+  `openshim_tunnel=<SteamID>`. While the host is not in a stock lobby (the
+  "lounge"), it also sets `connect=-openshim-steam-tunnel` so friends see
+  Join Game. Both clear when the bridge stops.
+- The friend's game detours the rich-presence join handler (patches.json row
+  `LobbyOnRichPresenceJoinRequested`). It reads the inviter's
+  `openshim_tunnel` and live-switches the in-process agent to that bridge
+  (`SocketTunnel::SwitchSteamHost`), then recycles the BZRNet connection so
+  the lobby list comes from the host's server. A friend with no tunnel
+  presence switches back to the startup config. A stock lobby invite then
+  continues into the stock join; the lounge token stops after the switch.
+- Skipped, so stock behaviour runs: a startup `TunnelUdpBridge` config, a
+  target that is our own account, a join during a mission, or a missing
+  getaddrinfo hook.
+
+Both games must be running with OpenShim; join from the menus. Kill switch:
+`OPENSHIM_DISABLE_STEAM_TUNNEL_JOIN=1`.
+
+UNVERIFIED until the two-account live test:
+
+- whether `GetFriendRichPresence` returns the inviter's keys at callback time
+  without a prior `RequestFriendRichPresence` (the log says
+  `tunnel presence none` when it does not);
+- whether the pending lobby join survives the BZRNet recycle;
+- whether the game rewrites `connect` and makes Join Game flap;
+- a cold launch from Join Game (the token arrives on the command line);
+- joining from inside a mission (skipped today).
+
 ## Trusted LAN setup
 
 This M1 transport has **no encryption or authentication**. Use it only on

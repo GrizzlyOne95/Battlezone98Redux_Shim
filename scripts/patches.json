@@ -3536,6 +3536,24 @@
       "identity": "NotifyNowHost on exact GOG Redux 2.2.301, __cdecl(void), runs on the newly elected host. Its takeover `if (host id != 0) { TakeOwnership(0); TakeOwnership(hostId); }` never fires after a host leave because the NetPlayer destructor already zeroed the host id. mp_host_leave.cpp detours the first 11 bytes (push ebp / mov ebp,esp / push esi / cmp dword [0x00917F48],0; absolute operand only). Bytes read from the shipped image 2026-10-27."
     },
     {
+      "name": "LobbyOnJoinRequested",
+      "address": "0x007408C0",
+      "expected": "55 8B EC 6A FF 68 3B 0B 85 00 64 A1 00 00 00 00 50",
+      "identity": "CNetGameLobby::OnGameLobbyJoinRequested on exact GOG Redux 2.2.301, __thiscall(this, lobbyId16*, password string*, friend), ret 0xC; logs \"pending request to join lobby\" in the shell and \"Exiting game because of steam invite acceptance\" in a mission. Reached from the Steam join handler 0x00757E00 and two other invite sources. mp_invite_password.cpp detours the first 10 bytes (push ebp / mov ebp,esp / push -1 / push imm32 SEH handler; absolute operand only) to record the invited lobby id. Bytes read from the shipped image 2026-11-07."
+    },
+    {
+      "name": "LobbyJoinLobby",
+      "address": "0x00741990",
+      "expected": "55 8B EC 6A FF 68 FB 0D 85 00 64 A1 00 00 00 00 50",
+      "identity": "CNetGameLobby::JoinLobby on exact GOG Redux 2.2.301, __thiscall(this, lobby entry*, password string*), ret 8; logs \"CNetGameLobby::JoinLobby, requesting join to \". Returns 0 without sending when entry+0xB2 is set and the password differs from entry+0x98. mp_invite_password.cpp detours the first 10 bytes (same SEH prologue shape; absolute operand only) to pass the entry password for a recorded invite. Bytes read from the shipped image 2026-11-07."
+    },
+    {
+      "name": "LobbyOnRichPresenceJoinRequested",
+      "address": "0x00757E00",
+      "expected": "55 8B EC 6A FF 68 83 C6 85 00",
+      "identity": "GameRichPresenceJoinRequested_t handler on exact GOG Redux 2.2.301, __thiscall(this, callback*), ret 4; reached only through its callback registration (no direct callers). Callback: inviter SteamID at +0, m_rgchConnect[256] at +8; parses \"-connect-galaxy-lobby=\" and calls CNetGameLobby::OnGameLobbyJoinRequested 0x007408C0. steam_tunnel_join.cpp detours the first 10 bytes (SEH prologue; absolute operand only) to repoint the Steam tunnel at the inviter's bridge first. Bytes read from the shipped image 2026-11-07."
+    },
+    {
       "name": "NetTakeOwnership",
       "address": "0x004BAAD0",
       "expected": "55 8B EC 6A FF 68 88 9A 84 00",

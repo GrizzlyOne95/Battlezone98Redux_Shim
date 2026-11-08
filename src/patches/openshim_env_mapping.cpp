@@ -336,6 +336,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "DaywreckerArmoryCollision", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MP_INVITE_PASSWORD") ||
+            Equals(name, "BZR_DISABLE_MP_INVITE_PASSWORD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "InvitePassword", true, out);
+        }
         // New switches: these two had no opt-out of any kind before.
         if (Equals(name, "OPENSHIM_DISABLE_PRODUCER_SCRIPT_PREDICATES") ||
             Equals(name, "BZR_DISABLE_PRODUCER_SCRIPT_PREDICATES"))

@@ -63,6 +63,7 @@ struct SteamTransport::Impl
     ISteamNetworkingUtils* utils = nullptr;
     VoidFn run = nullptr, shutdown = nullptr;
     HSteamListenSocket listener = k_HSteamListenSocket_Invalid;
+    HANDLE announce = nullptr; // bridge: kBridgeAnnounceMapping, held while listening
     struct Connection { uint64_t identity = 0; bool connected = false; int lastState = -1; };
     std::map<HSteamNetConnection, Connection> connections;
     std::deque<SteamNetConnectionStatusChangedCallback_t> callbacks;
@@ -104,6 +105,7 @@ struct SteamTransport::Impl
     }
     ~Impl()
     {
+        if (announce) CloseHandle(announce);
         if (registered)
         {
             AcquireSRWLockExclusive(&callbackLock);
@@ -199,6 +201,16 @@ struct SteamTransport::Impl
             listener = sockets->CreateListenSocketP2P(kVirtualPort, 4, options);
             if (listener == k_HSteamListenSocket_Invalid) throw std::runtime_error("Steam CreateListenSocketP2P failed");
             Log("Steam P2P bridge listening (authenticated Steam identities; max eight connections)");
+            // Best effort: a missing announcement only disables Steam Join Game.
+            announce = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 8, kBridgeAnnounceMapping);
+            if (announce && GetLastError() == ERROR_ALREADY_EXISTS)
+            { CloseHandle(announce); announce = nullptr; Log("another bridge already announces itself; Steam Join Game points there"); }
+            else if (announce)
+            {
+                if (auto view = static_cast<uint64_t*>(MapViewOfFile(announce, FILE_MAP_WRITE, 0, 0, 8)))
+                { *view = identity.GetSteamID64(); UnmapViewOfFile(view); Log("bridge announced to the game on this Steam account (Join Game)"); }
+                else { CloseHandle(announce); announce = nullptr; }
+            }
         }
         else Connect(GetTickCount64());
     }

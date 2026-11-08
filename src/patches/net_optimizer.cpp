@@ -5609,6 +5609,11 @@ namespace
         return !hostPort.empty();
     }
 
+    bool BzrNetLookupHookInstalled()
+    {
+        return g_RealGetAddrInfoA != nullptr;
+    }
+
     bool RecycleBzrNetWebSocket()
     {
         if (!g_RealCloseSocket || !g_RealGetPeerName)
