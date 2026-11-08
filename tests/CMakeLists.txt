@@ -53,6 +53,11 @@ target_include_directories(p2p_early_unreliable_policy_tests PRIVATE ../include)
 target_compile_features(p2p_early_unreliable_policy_tests PRIVATE cxx_std_14)
 add_test(NAME p2p_early_unreliable_policy_tests COMMAND p2p_early_unreliable_policy_tests)
 
+add_executable(remote_smoothing_policy_tests remote_smoothing_policy_tests.cpp)
+target_include_directories(remote_smoothing_policy_tests PRIVATE ../include)
+target_compile_features(remote_smoothing_policy_tests PRIVATE cxx_std_14)
+add_test(NAME remote_smoothing_policy_tests COMMAND remote_smoothing_policy_tests)
+
 if(WIN32)
     execute_process(COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
         "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/Fetch-SteamNetworkingHeaders.ps1"

@@ -2241,6 +2241,20 @@ StockFactionsOnly = 0
 ; Legacy env alias: OPENSHIM_STOCK_FACTION_SET
 StockFactionSet = as
 
+; Remote-object display smoothing. Stock Redux moves a remote object's drawn
+; position 30% (and its rotation 50%) of the way toward its dead-reckoned
+; physics state every frame, so how smooth it looks depends on the frame rate:
+; at 200 fps a correction is swallowed in ~15 ms, at 30 fps in ~100 ms. Set a
+; time constant in milliseconds to blend by 1 - exp(-dt / tau) instead
+; (rotation settles about 2x faster, like stock). Corrections over 15 m snap.
+; Client-local and display-only: physics, hit detection, authority and the
+; wire format are unchanged, so it is safe with stock peers.
+; Accepted: integer 0..300. Default: 0 (stock). Suggested: 100.
+; Restart required after changing.
+; Site: GOG 2.2.301 GameObject::Simulate at 0x004DEEC0; a signature mismatch
+; keeps stock.
+RemoteSmoothingMs = 0
+
 
 [Gameplay]
 

@@ -48,6 +48,7 @@
 #include "p2p_reliable_send_fix.h"
 #include "precise_timestep.h"
 #include "armory_repair_pick.h"
+#include "remote_object_smoothing.h"
 #include "mouse_every_frame.h"
 #include "thread_scheduling.h"
 #include "pilot_fp_animation_trace.h"
@@ -274,6 +275,7 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
     // Guest RKIT repair pick of allied damaged buildings (always on, fail closed).
     PATCH_STAGE(BZROpenShim::InitializeArmoryRepairPick());
+    PATCH_STAGE(BZROpenShim::InitializeRemoteObjectSmoothing());
     // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
     PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
     // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf

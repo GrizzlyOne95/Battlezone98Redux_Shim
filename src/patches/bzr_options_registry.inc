@@ -59,6 +59,8 @@ static const char* const kShimSettingsNetRouteValues[] = { "Stock", "Direct", "R
 static const char* const kShimSettingsGovernorTuningValues[] = { "OpenShim", "Stock" };
 static const char* const kShimSettingsUdpPortValues[] = { "0", "17770", "17771", "17772", "17773" };
 static const char* const kShimSettingsUdpPortLabels[] = { "Automatic", "17770", "17771", "17772", "17773" };
+static const char* const kShimSettingsRemoteSmoothingValues[] = { "0", "50", "100", "150", "200" };
+static const char* const kShimSettingsRemoteSmoothingLabels[] = { "Off", "50 ms", "100 ms", "150 ms", "200 ms" };
 static const char* const kShimSettingsShadowFarValues[] = { "256", "stock" };
 static const char* const kShimSettingsShadowFarLabels[] = { "Full (256 m)", "Stock (128 m)" };
 static const char* const kShimSettingsNetRouteLabels[] = { "Stock", "Prefer Direct", "Force Relay" };
@@ -739,6 +741,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "OpenShim's socket layer as a whole. Off gives stock networking; "
       "turn it off to rule the shim out of a connection problem." },
+    // Read once at startup (remote_object_smoothing.cpp); absent key = 0, so defaultIndex 0 is Off.
+    { "Remote Smoothing", "Network", "RemoteSmoothingMs", nullptr, 0,
+      kShimSettingsRemoteSmoothingValues, kShimSettingsRemoteSmoothingLabels, 5, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Eases other players' craft toward each network update instead of snapping, "
+      "for high-ping games. 100 ms suits most; higher looks smoother but lags more. "
+      "Local only. Restart required." },
     { "Net Tuning", "Network", "GovernorTuning", nullptr, 0,
       kShimSettingsGovernorTuningValues, kShimSettingsGovernorTuningValues, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -873,6 +882,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
     { "RoutePreference", "Stock" }, { "UdpPort", "0" }, { "GovernorTuning", "Stock" },
+    { "RemoteSmoothingMs", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
 };

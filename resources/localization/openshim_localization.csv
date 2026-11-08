@@ -306,6 +306,8 @@ openshim_opt:UdpPort:label~UDP Port~~~~~~
 openshim_opt:UdpPort:desc~Fixed local UDP port for multiplayer peer traffic, for hosts who forward a router port. Automatic lets Windows choose; set others in openshim.ini. Restart required.~~~~~~
 openshim_opt:NetImprovements:label~Net Improvements~~~~~~
 openshim_opt:NetImprovements:desc~OpenShim's socket layer as a whole. Off gives stock networking; turn it off to rule the shim out of a connection problem.~~~~~~
+openshim_opt:RemoteSmoothingMs:label~Remote Smoothing~~~~~~
+openshim_opt:RemoteSmoothingMs:desc~Eases other players' craft toward each network update instead of snapping, for high-ping games. 100 ms suits most; higher looks smoother but lags more. Local only. Restart required.~~~~~~
 openshim_opt:GovernorTuning:label~Net Tuning~~~~~~
 openshim_opt:GovernorTuning:desc~Bandwidth governor and host auto-kick. Stock matches players who are not running OpenShim; net.ini still overrides per value.~~~~~~
 openshim_opt:StockFactionsOnly:label~Stock Factions~~~~~~
@@ -431,6 +433,10 @@ openshim_value:17770~17770~~~~~~
 openshim_value:17771~17771~~~~~~
 openshim_value:17772~17772~~~~~~
 openshim_value:17773~17773~~~~~~
+openshim_value:50 ms~50 ms~~~~~~
+openshim_value:100 ms~100 ms~~~~~~
+openshim_value:150 ms~150 ms~~~~~~
+openshim_value:200 ms~200 ms~~~~~~
 openshim_value:OpenShim~OpenShim~~~~~~
 openshim_value:Reset~Reset~~~~~~
 openshim_value:Confirm?~Confirm?~~~~~~
