@@ -184,6 +184,10 @@ runs:
       shell: pwsh
       run: ./tests/setup_maintenance_tests.ps1
 
+    - name: Test the VC++ x86 runtime prerequisite check
+      shell: pwsh
+      run: ./tests/vc_runtime_check_tests.ps1
+
     - name: Test Setup command-line action conflicts
       shell: pwsh
       run: |

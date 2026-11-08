@@ -20,6 +20,8 @@ An open-source native patch and compatibility layer for **Battlezone 98 Redux 2.
    - **Uninstall:** remove OpenShim-owned files and backups; keep player configuration and logs by default. An unchecked cleanup option can also remove OpenShim settings, logs, dumps, and uploader data.
 3. Close the game before any of these actions. Start Redux normally afterward; no Windows launch option is needed.
 
+**Requires** the x86 [Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x86.exe). Without it the game closes the moment you press Play; the installer warns if it is missing.
+
 **Note:** Normal Install/Update can replace `net.ini` after backing up the old file; Repair preserves an existing one. The full cleanup option removes current-user OpenShim data shared across installations, but retains shared `net.ini`, `BZLogger.txt`, and unrelated mods.
 
 ### Linux (Steam/Proton)
