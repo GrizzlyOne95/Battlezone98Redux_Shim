@@ -248,6 +248,27 @@ UNVERIFIED until the two-account live test:
 - a cold launch from Join Game (the token arrives on the command line);
 - joining from inside a mission (skipped today).
 
+## Steam ban gate (in-game bridge)
+
+The in-game bridge refuses a Steam peer whose Steam-authenticated SteamID64
+is listed in `bans.cfg` beside the game exe, before the connection reaches
+the game or server. It reads the same file as the in-game `/ban` command and
+the Ban button, so those keep working; only `S<steamid64>` lines count (`G`
+GOG ids are ignored). The bridge rereads the file when its size or write time
+changes: on each new connection that passes the bridge's identity and
+capacity checks, and every 2 s otherwise. A ban added while
+the peer is connected closes that peer's Steam connection within 2 s (log
+`closing banned Steam peer=...`); a refused join logs `refused banned Steam
+peer=...`, and the peer sees close reason 1002 "BZR: banned by host". A
+missing file means no bans; an unreadable or empty (mid-write) one keeps
+the last list.
+
+Limits: `/ban` records the id the client reports, so a Steam player is held
+out by the bridge only when that id is their real SteamID64. The standalone
+`socket_tunnel.exe bridge` has no ban gate (the server's own bans apply).
+UNVERIFIED live: unit tests cover parsing and reload; the refuse/close path
+has not run against a real Steam peer.
+
 ## Public Steam listing
 
 `src/patches/steam_public_listing.cpp` (component STEAMLIST). Lets strangers

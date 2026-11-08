@@ -13,6 +13,7 @@ namespace BZROpenShim::SocketTunnel
         bool steam = false;
         bool ownSteam = false; // standalone only: init/pump/shutdown our own Steam session
         std::string identityMap; // bridge: durable SteamID -> loopback source mapping
+        std::string banList; // bridge: bans.cfg; refuse/close S<steamid64> peers (empty = no gate)
         // All addresses are numeric IPv4. Defaults never expose a LAN listener.
         std::string listen = "127.0.0.1";
         uint16_t port = 27030;

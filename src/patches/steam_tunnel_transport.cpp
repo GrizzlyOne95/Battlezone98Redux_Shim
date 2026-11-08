@@ -7,6 +7,7 @@
 #include <windows.h>
 #include "steam_tunnel_transport.h"
 #include "socket_tunnel_protocol.h"
+#include "steam_ban_list.h"
 #include <steam/isteamnetworkingsockets.h>
 #include <steam/isteamnetworkingutils.h>
 #include <algorithm>
@@ -72,8 +73,29 @@ struct SteamTransport::Impl
     bool sawCallback = false;
     int lastRelay = -999, lastAuth = -999;
     uint64_t sentBytes = 0, receivedBytes = 0;
+    SteamBanList bans;
+    std::wstring bansPath;
+    uint64_t nextBanRefresh = 0;
 
     void Log(const char* message) { if (logger) logger(message); }
+    // Bridge only. A /ban written while a peer is connected closes that
+    // peer's Steam connection here too, so it cannot keep its tunnel open.
+    void RefreshBans(uint64_t now, bool force)
+    {
+        if (bansPath.empty() || (!force && now < nextBanRefresh)) return;
+        nextBanRefresh = now + 2000;
+        if (!bans.Refresh(bansPath)) return;
+        char text[128]; std::snprintf(text, sizeof(text), "Steam ban list loaded: %zu Steam ID(s) refused", bans.Size()); Log(text);
+        std::vector<std::pair<HSteamNetConnection, uint64_t>> banned;
+        for (const auto& entry : connections) if (bans.Banned(entry.second.identity)) banned.emplace_back(entry.first, entry.second.identity);
+        for (const auto& entry : banned)
+        {
+            std::snprintf(text, sizeof(text), "closing banned Steam peer=%llu", static_cast<unsigned long long>(entry.second)); Log(text);
+            events.push_back({entry.first, entry.second, false});
+            connections.erase(entry.first);
+            sockets->CloseConnection(entry.first, 1002, "BZR: banned by host", false);
+        }
+    }
     void Options(SteamNetworkingConfigValue_t (&options)[4])
     {
         options[0].SetPtr(k_ESteamNetworkingConfig_Callback_ConnectionStatusChanged, reinterpret_cast<void*>(&OnStatus));
@@ -135,6 +157,16 @@ struct SteamTransport::Impl
     void Start(const Config& config, std::atomic<bool>& stop, Logger log)
     {
         cfg = config; logger = log;
+        if (cfg.bridge && !cfg.banList.empty())
+        {
+            const int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, cfg.banList.c_str(), -1, nullptr, 0);
+            if (n <= 1) throw std::runtime_error("invalid Steam bridge ban-list path");
+            bansPath.assign(size_t(n), L'\0');
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, cfg.banList.c_str(), -1, bansPath.data(), n);
+            bansPath.resize(size_t(n - 1));
+            bans.Refresh(bansPath);
+            char text[128]; std::snprintf(text, sizeof(text), "Steam ban gate on (bans.cfg): %zu Steam ID(s) refused", bans.Size()); Log(text);
+        }
         if (!cfg.bridge && !IndividualSteamId(cfg.steamHost)) throw std::runtime_error("invalid Steam tunnel host");
         if (cfg.ownSteam)
         {
@@ -229,6 +261,12 @@ struct SteamTransport::Impl
             for (const auto& entry : connections) if (entry.second.identity == id) duplicate = true;
             if (info.m_eState != k_ESteamNetworkingConnectionState_Connecting || !IndividualSteamId(id) || duplicate || connections.size() >= 8)
             { sockets->CloseConnection(h, 1001, "BZR tunnel capacity or identity rejected", false); return; }
+            RefreshBans(now, true); // a /ban seconds ago must already hold
+            if (bans.Banned(id))
+            {
+                char text[96]; std::snprintf(text, sizeof(text), "refused banned Steam peer=%llu", static_cast<unsigned long long>(id)); Log(text);
+                sockets->CloseConnection(h, 1002, "BZR: banned by host", false); return;
+            }
             it = connections.emplace(h, Connection{id, false}).first;
             if (sockets->AcceptConnection(h) != k_EResultOK) { Close(h); return; }
         }
@@ -332,7 +370,7 @@ std::vector<SteamEvent> SteamTransport::Poll(uint64_t now)
     ReleaseSRWLockExclusive(&callbackLock);
     if (overflow) throw std::runtime_error("Steam callback queue overflow; transport stopped");
     for (const auto& change : changes) impl->Status(change, now);
-    impl->PollStates(now); impl->Connect(now); impl->Diagnostics(now);
+    impl->RefreshBans(now, false); impl->PollStates(now); impl->Connect(now); impl->Diagnostics(now);
     return std::exchange(impl->events, {});
 }
 SteamSend SteamTransport::Send(uint32_t connection, const std::vector<uint8_t>& bytes, bool reliable)
