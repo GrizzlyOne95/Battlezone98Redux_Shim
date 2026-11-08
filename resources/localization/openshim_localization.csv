@@ -222,6 +222,8 @@ openshim_opt:ShellCasings:label~Shell Casings~~~~~~
 openshim_opt:ShellCasings:desc~Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required.~~~~~~
 openshim_opt:SkinnedGibs:label~Skinned Gibs~~~~~~
 openshim_opt:SkinnedGibs:desc~When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from the posed model (visual only). Restart required.~~~~~~
+openshim_opt:FractureOnePiece:label~Fracture One-Piece~~~~~~
+openshim_opt:FractureOnePiece:desc~When a craft or building whose model is a single piece is fully fragmented, cut it into several capped pieces and throw them like debris (visual only). Restart required.~~~~~~
 openshim_opt:GpuSkinning:label~GPU Skinning~~~~~~
 openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission.~~~~~~
 openshim_opt:PlayerReticleConvergence:label~Reticle Convergence~~~~~~

@@ -828,8 +828,366 @@ int printGibs(const char *meshPath, const char *skeletonPath)
     // A humanoid must come apart into limbs, not one lump or a hundred bits.
     return gibs.size() >= 6 && gibs.size() <= 32 ? 0 : 1;
 }
+// ---- Runtime fracture -------------------------------------------------------
+struct FractureSource
+{
+    std::vector<std::array<float, 3>> positions;
+    std::vector<uint16_t> indices;
+};
+// A box of half extents (hx, hy, hz) with every face a grid x grid quad grid
+// (two triangles each), wound counter-clockwise from outside.
+FractureSource fractureBox(float hx, float hy, float hz, int grid)
+{
+    FractureSource out;
+    const float half[3] = {hx, hy, hz};
+    for (int axis = 0; axis < 3; ++axis)
+        for (int side = 0; side < 2; ++side)
+        {
+            const int u = (axis + 1) % 3, v = (axis + 2) % 3;
+            const auto at = [&](int i, int j) {
+                std::array<float, 3> p{};
+                p[static_cast<size_t>(axis)] = side ? half[axis] : -half[axis];
+                p[static_cast<size_t>(u)] = -half[u] + 2 * half[u] * static_cast<float>(i) / static_cast<float>(grid);
+                p[static_cast<size_t>(v)] = -half[v] + 2 * half[v] * static_cast<float>(j) / static_cast<float>(grid);
+                return p;
+            };
+            for (int i = 0; i < grid; ++i)
+                for (int j = 0; j < grid; ++j)
+                {
+                    const uint16_t base = static_cast<uint16_t>(out.positions.size());
+                    for (const auto &p : {at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)})
+                        out.positions.push_back(p);
+                    const uint16_t order[6] = {0, 1, 2, 0, 2, 3};
+                    for (int k = 0; k < 6; ++k)
+                        out.indices.push_back(static_cast<uint16_t>(base + (side ? order[k] : order[5 - k])));
+                }
+        }
+    return out;
+}
+FractureSource fractureOctahedron(float r)
+{
+    FractureSource out;
+    const std::array<float, 3> axes[6] = {{r, 0, 0}, {-r, 0, 0}, {0, r, 0}, {0, -r, 0}, {0, 0, r}, {0, 0, -r}};
+    for (int sx = 0; sx < 2; ++sx)
+        for (int sy = 0; sy < 2; ++sy)
+            for (int sz = 0; sz < 2; ++sz)
+            {
+                const auto a = axes[sx], b = axes[2 + sy], c = axes[4 + sz];
+                const uint16_t base = static_cast<uint16_t>(out.positions.size());
+                out.positions.insert(out.positions.end(), {a, b, c});
+                // (a, b, c) is counter-clockwise from outside when the triple product is positive.
+                const float det = a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) +
+                                  a[2] * (b[0] * c[1] - b[1] * c[0]);
+                const uint16_t order[3] = {0, static_cast<uint16_t>(det > 0 ? 1 : 2), static_cast<uint16_t>(det > 0 ? 2 : 1)};
+                for (uint16_t k : order)
+                    out.indices.push_back(static_cast<uint16_t>(base + k));
+            }
+    return out;
+}
+// position + normal + uv0 (stride 32), optional skeleton link and per-vertex bone weights.
+Bytes fractureMeshBytes(const FractureSource &src, const std::vector<uint16_t> &boneOfVertex = {}, bool link = false)
+{
+    Bytes body{boneOfVertex.empty() && !link ? uint8_t{0} : uint8_t{1}};
+    Bytes sub;
+    text(sub, "fracture_hull");
+    put(sub, uint8_t{0});
+    put(sub, static_cast<uint32_t>(src.indices.size()));
+    put(sub, uint8_t{0});
+    for (uint16_t i : src.indices)
+        put(sub, i);
+    Bytes g;
+    put(g, static_cast<uint32_t>(src.positions.size()));
+    Bytes decl;
+    for (const auto &e : {std::array<uint16_t, 5>{0, 2, 1, 0, 0}, std::array<uint16_t, 5>{0, 2, 4, 12, 0},
+                          std::array<uint16_t, 5>{0, 1, 7, 24, 0}})
+    {
+        Bytes element;
+        for (uint16_t v : e)
+            put(element, v);
+        chunk(decl, 0x5110, element);
+    }
+    chunk(g, 0x5100, decl);
+    Bytes vertices;
+    for (const auto &p : src.positions)
+    {
+        const float len = std::max(1e-3f, std::sqrt(p[0] * p[0] + p[1] * p[1] + p[2] * p[2]));
+        for (float v : {p[0], p[1], p[2], p[0] / len, p[1] / len, p[2] / len, p[0] * 0.25f, p[1] * 0.25f})
+            put(vertices, v);
+    }
+    Bytes buf;
+    put(buf, uint16_t{0});
+    put(buf, uint16_t{32});
+    chunk(buf, 0x5210, vertices);
+    chunk(g, 0x5200, buf);
+    chunk(sub, 0x5000, g);
+    for (uint32_t v = 0; v < boneOfVertex.size(); ++v)
+    {
+        Bytes a;
+        put(a, v);
+        put(a, boneOfVertex[v]);
+        put(a, 1.f);
+        chunk(sub, 0x4100, a);
+    }
+    chunk(body, 0x4000, sub);
+    if (link)
+    {
+        Bytes l;
+        text(l, "fracture.skeleton");
+        chunk(body, 0x6000, l);
+    }
+    Bytes bounds;
+    for (float v : {-1.f, -1.f, -1.f, 1.f, 1.f, 1.f, 2.f})
+        put(bounds, v);
+    chunk(body, 0x9000, bounds);
+    Bytes out;
+    put(out, uint16_t{0x1000});
+    text(out, "[MeshSerializer_v1.8]");
+    chunk(out, 0x3000, body);
+    return out;
+}
+struct FracturedTriangles
+{
+    std::vector<std::array<std::array<float, 3>, 3>> all;
+    size_t interior = 0;
+    bool nonFinite = false;
+};
+// Independent reader for the writer's output (32-bit indices, position at +0).
+FracturedTriangles readFracturePiece(const Bytes &mesh, const std::string &interior)
+{
+    FracturedTriangles out;
+    size_t p = 2;
+    while (mesh[p++] != '\n')
+    {
+    }
+    p += 6 + 1; // root chunk header + skeletal flag
+    while (p + 6 <= mesh.size())
+    {
+        uint16_t id;
+        uint32_t size;
+        std::memcpy(&id, &mesh[p], 2);
+        std::memcpy(&size, &mesh[p + 2], 4);
+        const size_t end = p + size;
+        if (id == 0x4000)
+        {
+            size_t q = p + 6;
+            std::string material;
+            while (mesh[q] != '\n')
+                material.push_back(static_cast<char>(mesh[q++]));
+            ++q;
+            ++q; // shared
+            uint32_t count;
+            std::memcpy(&count, &mesh[q], 4);
+            q += 4;
+            ++q; // wide
+            std::vector<uint32_t> indices(count);
+            std::memcpy(indices.data(), &mesh[q], count * 4);
+            q += count * 4;
+            q += 6; // 0x5000 header
+            uint32_t vertexCount;
+            std::memcpy(&vertexCount, &mesh[q], 4);
+            q += 4;
+            uint32_t declSize;
+            std::memcpy(&declSize, &mesh[q + 2], 4);
+            q += declSize;
+            uint16_t stride;
+            std::memcpy(&stride, &mesh[q + 8], 2);
+            const size_t data = q + 6 + 2 + 2 + 6;
+            std::vector<std::array<float, 3>> positions(vertexCount);
+            for (uint32_t v = 0; v < vertexCount; ++v)
+            {
+                std::memcpy(positions[v].data(), &mesh[data + static_cast<size_t>(v) * stride], 12);
+                for (float f : positions[v])
+                    out.nonFinite = out.nonFinite || !std::isfinite(f);
+            }
+            for (size_t i = 0; i + 2 < indices.size(); i += 3)
+                out.all.push_back({positions[indices[i]], positions[indices[i + 1]], positions[indices[i + 2]]});
+            if (material == interior)
+                out.interior += indices.size() / 3;
+        }
+        p = end;
+    }
+    return out;
+}
+double signedVolume(const FracturedTriangles &t)
+{
+    double volume = 0;
+    for (const auto &tri : t.all)
+    {
+        const auto &a = tri[0], &b = tri[1], &c = tri[2];
+        volume += (static_cast<double>(a[0]) * (static_cast<double>(b[1]) * c[2] - static_cast<double>(b[2]) * c[1]) -
+                   static_cast<double>(a[1]) * (static_cast<double>(b[0]) * c[2] - static_cast<double>(b[2]) * c[0]) +
+                   static_cast<double>(a[2]) * (static_cast<double>(b[0]) * c[1] - static_cast<double>(b[1]) * c[0])) /
+                  6.0;
+    }
+    return volume;
+}
+// Every welded directed edge must be matched by exactly one opposite edge.
+bool closedManifold(const FracturedTriangles &t)
+{
+    std::map<std::array<long long, 3>, int> weld;
+    const auto id = [&](const std::array<float, 3> &p) {
+        const std::array<long long, 3> key = {std::llround(p[0] * 1000.0), std::llround(p[1] * 1000.0),
+                                              std::llround(p[2] * 1000.0)};
+        return weld.emplace(key, static_cast<int>(weld.size())).first->second;
+    };
+    std::map<std::pair<int, int>, int> directed;
+    for (const auto &tri : t.all)
+    {
+        const int w[3] = {id(tri[0]), id(tri[1]), id(tri[2])};
+        if (w[0] == w[1] || w[1] == w[2] || w[0] == w[2])
+            continue;
+        for (int e = 0; e < 3; ++e)
+            ++directed[{w[e], w[(e + 1) % 3]}];
+    }
+    for (const auto &[edge, count] : directed)
+    {
+        const auto opposite = directed.find({edge.second, edge.first});
+        if (count != 1 || opposite == directed.end() || opposite->second != 1)
+            return false;
+    }
+    return true;
+}
+void fractureTests()
+{
+    using namespace BZROpenShim::NativeChunks;
+    FractureOptions options;
+    std::vector<GibPiece> pieces;
+    std::string error;
+    FractureStats stats;
+
+    // A 6 x 4 x 4 m box (radius 4.1 m): four capped, closed pieces whose volumes add up to the box.
+    const auto box = fractureBox(3.f, 2.f, 2.f, 3);
+    const auto boxMesh = fractureMeshBytes(box);
+    Require(ExtractFracture(boxMesh, {}, options, pieces, error, &stats), ("fracture box: " + error).c_str());
+    Require(pieces.size() == 4, "a small model gives the minimum piece count");
+    double volume = 0;
+    for (size_t i = 0; i < pieces.size(); ++i)
+    {
+        const auto &gib = pieces[i];
+        const auto tris = readFracturePiece(gib.piece.mesh, options.interiorMaterial);
+        Require(gib.piece.name == "frac_" + std::to_string(i) && gib.bone == 0 && gib.radius > 0.3f &&
+                    gib.piece.triangles == tris.all.size() && !tris.all.empty() && !tris.nonFinite,
+                "fracture pieces are named, non-empty and finite");
+        Require(tris.interior > 0 && tris.interior == gib.capTriangles && gib.capTriangles < gib.piece.triangles,
+                "every piece has interior cap triangles in their own submesh");
+        Require(closedManifold(tris), "fracture piece edges are 2-manifold (caps close the cuts)");
+        const double v = signedVolume(tris);
+        Require(v > 0.5, "fracture piece volume is positive (caps wind outward)");
+        volume += v;
+    }
+    Require(std::abs(volume - 96.0) < 0.5, "fracture pieces add up to the source volume");
+    Require(stats.cuts == 3 && stats.capLoops >= 6 && stats.openLoops == 0, "three cuts, every loop capped");
+
+    // Larger models split into more pieces, up to the maximum.
+    const auto big = fractureBox(8.f, 6.f, 6.f, 3);
+    Require(ExtractFracture(fractureMeshBytes(big), {}, options, pieces, error) && pieces.size() == 8,
+            "a 12 m+ model gives the maximum piece count");
+    const auto mid = fractureBox(5.f, 4.f, 4.f, 3);
+    Require(ExtractFracture(fractureMeshBytes(mid), {}, options, pieces, error) && pieces.size() > 4 &&
+                pieces.size() < 8,
+            "piece count rises between the radius limits");
+
+    // Determinism.
+    std::vector<GibPiece> again;
+    Require(ExtractFracture(boxMesh, {}, options, pieces, error) && ExtractFracture(boxMesh, {}, options, again, error) &&
+                again.size() == pieces.size(),
+            "fracture is repeatable");
+    for (size_t i = 0; i < again.size(); ++i)
+        Require(again[i].piece.mesh == pieces[i].piece.mesh &&
+                    std::memcmp(again[i].piece.center, pieces[i].piece.center, sizeof(again[i].piece.center)) == 0,
+                "same bytes give identical fracture pieces");
+
+    // Strict manifold closure on a pure triangle solid.
+    {
+        const auto octa = fractureOctahedron(2.f);
+        FractureOptions small = options;
+        small.minFaces = 8;
+        Require(ExtractFracture(fractureMeshBytes(octa), {}, small, pieces, error, &stats) && pieces.size() == 4 &&
+                    stats.openLoops == 0,
+                ("fracture octahedron: " + error).c_str());
+        double total = 0;
+        for (const auto &gib : pieces)
+        {
+            const auto tris = readFracturePiece(gib.piece.mesh, small.interiorMaterial);
+            Require(closedManifold(tris), "octahedron piece is 2-manifold");
+            total += signedVolume(tris);
+        }
+        Require(std::abs(total - 32.0 / 3.0) < 0.1, "octahedron pieces add up to its volume (4/3 r^3)");
+    }
+
+    // Skeletons: one driving bone is one piece, two are not.
+    {
+        const std::vector<uint16_t> one(box.positions.size(), 0);
+        std::vector<uint16_t> two(box.positions.size(), 0);
+        two[3] = 1;
+        const auto skeleton = fixtureSkeleton();
+        Require(ExtractFracture(fractureMeshBytes(box, one, true), skeleton, options, pieces, error) &&
+                    pieces.size() == 4 && pieces[0].bone == 0 && !pieces[0].boneName.empty(),
+                ("single bone fractures: " + error).c_str());
+        Require(!ExtractFracture(fractureMeshBytes(box, two, true), skeleton, options, pieces, error) && pieces.empty() &&
+                    error.find("not one piece") != std::string::npos,
+                "several driving bones is not one piece");
+    }
+
+    // Guards: tiny models, sparse models and junk fail closed.
+    Require(!ExtractFracture(fractureMeshBytes(fractureBox(0.4f, 0.4f, 0.4f, 3)), {}, options, pieces, error) && pieces.empty(),
+            "a model under 1 m is left alone");
+    Require(!ExtractFracture(fractureMeshBytes(fractureBox(3.f, 3.f, 3.f, 1)), {}, options, pieces, error) && pieces.empty(),
+            "a model with too few faces is left alone");
+    Require(!ExtractFracture(Bytes{1, 2, 3}, {}, options, pieces, error) && pieces.empty() && !error.empty(),
+            "garbage fails closed");
+
+    // An open mesh (a flat sheet, no closed surface) must not crash; its cuts stay uncapped.
+    {
+        FractureSource sheet;
+        const int n = 6;
+        for (int j = 0; j <= n; ++j)
+            for (int i = 0; i <= n; ++i)
+                sheet.positions.push_back({static_cast<float>(i) - 3.f, static_cast<float>(j) - 3.f, 0.f});
+        for (int j = 0; j < n; ++j)
+            for (int i = 0; i < n; ++i)
+            {
+                const uint16_t a = static_cast<uint16_t>(j * (n + 1) + i), b = static_cast<uint16_t>(a + 1),
+                               c = static_cast<uint16_t>(a + n + 1), d = static_cast<uint16_t>(c + 1);
+                for (uint16_t k : {a, b, d, a, d, c})
+                    sheet.indices.push_back(k);
+            }
+        FractureStats sheetStats;
+        const bool ok = ExtractFracture(fractureMeshBytes(sheet), {}, options, pieces, error, &sheetStats);
+        Require(!ok || (pieces.size() >= 2 && sheetStats.capLoops == 0),
+                "an open sheet fractures without caps or fails closed");
+        for (const auto &gib : pieces)
+            Require(gib.capTriangles == 0, "open source pieces are uncapped");
+    }
+}
+// Offline check against a real model: prints the fracture, like --gibs.
+int printFracture(const char *meshPath, const char *skeletonPath)
+{
+    using namespace BZROpenShim::NativeChunks;
+    const auto mesh = load(meshPath);
+    const Bytes skeleton = skeletonPath ? load(skeletonPath) : Bytes{};
+    std::vector<GibPiece> pieces;
+    FractureStats stats;
+    std::string error;
+    if (!ExtractFracture(mesh, skeleton, FractureOptions{}, pieces, error, &stats))
+    {
+        std::cerr << "ExtractFracture failed: " << error << '\n';
+        return 1;
+    }
+    for (const auto &p : pieces)
+        std::printf("  %-10s bone %u (%s) tris %5u caps %4u r %.3f centre (%.3f, %.3f, %.3f)\n", p.piece.name.c_str(),
+                    static_cast<unsigned>(p.bone), p.boneName.c_str(), static_cast<unsigned>(p.piece.triangles),
+                    static_cast<unsigned>(p.capTriangles), static_cast<double>(p.radius),
+                    static_cast<double>(p.piece.center[0]), static_cast<double>(p.piece.center[1]),
+                    static_cast<double>(p.piece.center[2]));
+    std::printf("%zu pieces, %u cuts, cap loops %u (fan %u), open %u\n", pieces.size(), stats.cuts, stats.capLoops,
+                stats.fanLoops, stats.openLoops);
+    return 0;
+}
 int main(int argc, char **argv)
 {
+    if ((argc == 3 || argc == 4) && std::string(argv[1]) == "--fracture")
+        return printFracture(argv[2], argc == 4 ? argv[3] : nullptr);
     if (argc == 4 && std::string(argv[1]) == "--gibs")
         return printGibs(argv[2], argv[3]);
     using namespace BZROpenShim::NativeChunks;
@@ -867,6 +1225,7 @@ int main(int argc, char **argv)
         return 0;
     }
     fleshTextureTests();
+    fractureTests();
     auto mesh = fixtureMesh(), skeleton = fixtureSkeleton();
     Require(StockFallbackKind("chunk1") == 1 && StockFallbackKind("CHUNK2") == 2,
             "stock chunklet names retain their shape");

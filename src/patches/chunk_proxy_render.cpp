@@ -5221,7 +5221,7 @@ namespace BZROpenShim
             // PartialFragmentObject stays unhooked and the full hook is a pure
             // pass-through for everything that is not a person.
             const bool trace = g_TraceChunkRender || g_TraceChunkEffectRuntime;
-            const bool gibs = IsSkinnedGibsEnabled();
+            const bool gibs = IsSkinnedGibsEnabled() || IsFractureEnabled();
             if ((!trace && !gibs) || g_ChunkEffectFragmentHooksInstalled)
                 return;
             if (trace && g_ChunkEffectPartialFragmentAddr == 0)

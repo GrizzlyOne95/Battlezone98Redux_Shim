@@ -47,6 +47,17 @@ struct GibFleshTexture
 };
 std::vector<GibFleshTexture> GibFleshTextures();
 
+// FractureOnePiece's cut faces: a dark scorched-metal material with a tiny
+// generated texture, made the same way (BZBase-derived, versioned header, yields
+// to a payload pack's own file of the same name).
+inline constexpr const char *kFractureInteriorMaterialName = "openshim_fracture_interior";
+inline constexpr const char *kFractureInteriorMaterialFile = "openshim_fracture_interior.material";
+inline constexpr const char *kFractureInteriorTextureFile = "openshim_fracture_interior.tga";
+inline constexpr const char *kFractureInteriorMaterialMarker = "// OpenShim FractureOnePiece default interior material";
+std::string FractureInteriorMaterialHeader();
+std::string FractureInteriorMaterialScript();
+std::vector<uint8_t> FractureInteriorTextureTga();
+
 // Full first lines of the current generated files, without the newline.
 std::string GibFleshMaterialHeader();
 std::string GibFleshZoneMaterialHeader();

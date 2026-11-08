@@ -1615,6 +1615,10 @@ namespace BZROpenShim
         // frame and simulated by the shim. [General] SkinnedGibs = 0 leaves
         // every path below inert.
         bool IsSkinnedGibsEnabled();
+        // [General] FractureOnePiece: craft and buildings whose model is one
+        // piece are cut into capped pieces at runtime and thrown like debris
+        // (same pool, tick and render path as the gibs, own producer).
+        bool IsFractureEnabled();
         // Inside ChunkEffect::FullFragmentObject (outermost call only).
         // Begin captures pose and returns true when this is a person it will
         // gib; End then spawns, hides the body and marks that call's legacy
@@ -1686,6 +1690,9 @@ namespace BZROpenShim
         {
             bool authored = false;
             std::string source;
+            // Fracture models only; -1 when unknown (not recorded in the cache).
+            int capLoops = -1;
+            int openLoops = -1;
             std::vector<SkinnedGibPieceInfo> pieces;
         };
         bool TryCaptureEntityMeshIdentity(
@@ -1695,6 +1702,10 @@ namespace BZROpenShim
             char* outGroup,
             size_t groupCapacity);
         bool PrepareSkinnedGibPayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out);
+        // FractureOnePiece: pieces for a one-piece model, cached under
+        // fracture/v1/<hash>/; a model that is not one piece (or too small)
+        // is cached as a negative result and returns false.
+        bool PrepareFracturePayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out);
         void ResetSkinnedGibPayloads();
         bool TryResolveGeneratedStockChunkFallback(const char* seed, char* out, size_t capacity);
         bool TryResolveNativeChunkPayload(const char* mesh, const char* geom,

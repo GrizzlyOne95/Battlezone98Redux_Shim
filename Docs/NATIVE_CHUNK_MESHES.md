@@ -140,6 +140,25 @@ this is not a promise of zero overhead for arbitrary assets and hardware.
   The Ogre group preserves active-mod resource selection. GOG Windows runtime
   is validated here; Steam, Proton and Wine were not exercised in this pass.
 
+## Runtime fracture of one-piece models (FractureOnePiece)
+
+A model with at most one vertex-driving bone (or no skeleton) has nothing for
+the engine to fragment into, so `[General] FractureOnePiece` (default on)
+cuts it at death. `NativeChunks::ExtractFracture` bisects the mesh recursively
+(4 pieces up to a 4 m bound radius, rising to 8 at 12 m; planes through 35-65 %
+of the longest axis, tilted up to 30 degrees, all randomness hashed from the
+mesh bytes), splits straddling triangles with every vertex element
+interpolated, and closes each cut at once with an ear-clipped cap in an extra
+`openshim_fracture_interior` submesh (dark scorched metal). Later cuts slice
+earlier caps like any other face. Pieces are written in the driving bone's
+bind frame (mesh space with no skeleton), centred, with `center` set, exactly
+like the gib pieces, and cached under `openshim/cache/chunks/fracture/v1/<hash>/`.
+A model that is not one piece, is under 1 m, or has too few faces is cached
+as a negative (`fracture.none`) and costs nothing on later deaths. The pieces
+run in the SkinnedGibs pool (same slots, tick and render path) with a metal
+ground response; each producer is gated by its own key. Open chains from a
+non-manifold source stay uncapped.
+
 ## Validation
 
 Piece frames and recentring (local 1.0.0.46): all 67 CTest checks pass,
