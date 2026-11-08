@@ -120,6 +120,7 @@ struct Host::Impl
     uint64_t next = 1;
     std::map<uint64_t,Client> clients;
     Model model;
+    AdmissionPolicy policy = nullptr;
     uint64_t datagramSince=0;
     unsigned datagramCount=0;
 
@@ -239,10 +240,12 @@ struct Host::Impl
                     Socket accepted; accepted.value=socket;
                     Nonblocking(socket);
                     char address[INET_ADDRSTRLEN]{}; inet_ntop(AF_INET,&sender.sin_addr,address,sizeof(address));
+                    Admission admission;
+                    if (policy && !policy(address,admission.steamId,admission.lan)) continue; // accepted closes it
                     const auto id = next++;
                     clients[id].socket = socket; clients[id].since = now;
                     accepted.value=INVALID_SOCKET;
-                    model.Connect(id,address);
+                    model.Connect(id,address,admission);
                 }
                 Datagrams(probe.value,false); Datagrams(discovery.value,true);
                 std::vector<uint64_t> removed;
@@ -296,10 +299,10 @@ struct Host::Impl
 };
 Host::Host() : impl(new Impl) {}
 Host::~Host() { Stop(); }
-bool Host::Start(const std::string& ip, unsigned short port)
+bool Host::Start(const std::string& ip, unsigned short port, AdmissionPolicy policy)
 {
     if (impl->running) return true;
-    impl->Stop(); impl->stop=false; impl->model=Model{};
+    impl->Stop(); impl->stop=false; impl->model=Model{}; impl->policy=policy;
     { std::lock_guard<std::mutex> lock(impl->errorLock); impl->error.clear(); }
     try
     {

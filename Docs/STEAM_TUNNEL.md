@@ -280,9 +280,14 @@ find a server that runs a Steam bridge, with no VPS and no friend invite.
   binds the host to `127.0.0.2:1337` instead of the LAN adapter, then joins
   it. That is a loopback server with a listener, so `SteamTunnelBridge=auto`
   starts the bridge and the listing follows; no INI edit or second program is
-  needed. The host is the same one LAN hosting uses: in this game under
-  LanNoAuth, otherwise `tools/lan/BZRServer.exe` (the dedicated server in LAN
-  mode, `--access-mode open`). Other LAN PCs cannot reach a loopback host:
+  needed. The Steam host always runs inside this game (`EmbeddedLan::Host`);
+  it never needs `tools/lan/BZRServer.exe`, which releases do not ship.
+  Identity is tied to the bridge: a bridged peer connects from its durable
+  `127.0.1.<slot>` source and may log in only as the Steam id the bridge
+  authenticated for that slot (authtype `steam`; its ticket is ignored and
+  never stored), so in-game `S<steamid64>` ids, bans included, match the
+  bridge's. An unknown `127.0.1.x` source is refused; any other loopback
+  source is this PC (the host's own game). Other LAN PCs cannot reach a loopback host:
   turn the Steam list off and restart the host for LAN play. Toggling, or
   pressing Start host, while a host of the other mode runs only shows "Stop
   and start the host to switch". Steam hosting first points the tunnel back to

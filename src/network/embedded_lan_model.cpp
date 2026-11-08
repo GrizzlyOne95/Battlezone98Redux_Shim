@@ -98,12 +98,14 @@ Model::Model()
         {"gameSettings","*"},{"GameVersion","2.2.301"},{"userPack",""}};
     lobbies.emplace(1,std::move(lounge));
 }
-void Model::Connect(uint64_t c, const std::string& ip)
+void Model::Connect(uint64_t c, const std::string& ip, const Admission& admission)
 {
     if (players.size() >= 16 || players.count(c)) return;
     std::string endpoint;
     if (!LanNoAuth::PrivateEndpoint(ip, endpoint)) return;
+    if (!admission.steamId.empty() && (admission.steamId[0] != 'S' || !LocalId("B" + admission.steamId.substr(1)))) return;
     players[c].ip = ip;
+    players[c].admission = admission;
 }
 bool Model::Admitted(uint64_t c) const
 {
@@ -113,7 +115,7 @@ bool Model::Admitted(uint64_t c) const
 Json Model::User(const Player& p) const
 {
     return {{"id",p.id},{"userId",p.id},{"name",p.name},{"realname",p.name},
-        {"playerName",p.name},{"authType","lan"},{"clientVersion","2.2.301"},
+        {"playerName",p.name},{"authType",p.authType},{"clientVersion","2.2.301"},
         {"inLounge",p.lobby < 0},{"isInLounge",p.lobby < 0},{"isAdmin",false},
         {"isAuth",true},{"isBB",false},{"lobby",p.lobby},{"ipAddress",p.ip},
         {"wanAddress",p.wan},{"lanAddresses",p.addresses},{"metadata",p.metadata}};
@@ -216,12 +218,19 @@ std::vector<Delivery> Model::Receive(uint64_t c, const Json& message)
             if (!p.id.empty() || !content.is_object()) return out;
             const auto id = content.value("id",std::string{});
             const auto name = content.value("name",std::string{});
-            bool valid = LocalId(id) && Printable(name,127) && content.value("authtype",std::string{}) == "lan" &&
+            const auto authType = content.value("authtype",std::string{});
+            // A Steam login must claim exactly the id the bridge verified for
+            // this connection; its ticket is not ours to check and is dropped.
+            const bool steam = authType == "steam" && !p.admission.steamId.empty() && id == p.admission.steamId;
+            const bool lan = authType == "lan" && p.admission.lan && LocalId(id);
+            bool valid = (steam || lan) && Printable(name,127) &&
                 content.value("clientVersion",std::string{}) == "2.2.301";
             for (const auto& peer : players) if (peer.second.id == id) valid = false;
-            for (const char* key : {"steamAppTicket","gogAppTicket","authTicket","platformTicket"})
-                if (content.contains(key) && Text(content[key]) != "") valid = false;
+            if (lan)
+                for (const char* key : {"steamAppTicket","gogAppTicket","authTicket","platformTicket"})
+                    if (content.contains(key) && Text(content[key]) != "") valid = false;
             if (!valid) { Send(out,c,"OnAuthorization",{{"success",false}}); return out; }
+            p.authType = authType;
             // Redux publishes endpoints in the initial Authorization and only
             // sends DoUpdate* when they change. Dropping the initial values
             // leaves an admitted room with no gameplay route indefinitely.
