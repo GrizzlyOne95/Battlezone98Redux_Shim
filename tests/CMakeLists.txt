@@ -583,7 +583,7 @@ openshim_add_test(stable_id_list_tests STD 20 SOURCES
     stable_id_list_tests.cpp
 )
 
-# steam_ban_list.h reads bans.cfg through Win32 file APIs.
+# steam_ban_list.h reads bans.cfg through Win32 file attributes.
 if(WIN32)
     openshim_add_test(steam_ban_list_tests STD 20 SOURCES
         steam_ban_list_tests.cpp
