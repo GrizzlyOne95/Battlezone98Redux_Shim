@@ -134,10 +134,12 @@ namespace BZROpenShim::HudPalette
                     void* player = g_BzrFn_GetPlayerHandle ? GameObjectFromHandleGog(g_BzrFn_GetPlayerHandle()) : nullptr;
                     if (player)
                     {
-                        Role role = Role::RadarNeutral;
-                        if (reinterpret_cast<Relation>(g_enemy)(player, team)) role = Role::RadarEnemy;
-                        else if (reinterpret_cast<Relation>(g_friend)(player, team)) role = Role::RadarFriendly;
-                        if (s[role]) result = ContactTint(stock, *s[role]);
+                        const int playerTeam = *reinterpret_cast<const int*>(
+                            static_cast<const uint8_t*>(player) + ObjectLayout::kGameObjectActualTeam);
+                        const bool enemy = reinterpret_cast<Relation>(g_enemy)(player, team);
+                        const auto role = ContactRole(enemy, !enemy && team == playerTeam,
+                                                      !enemy && reinterpret_cast<Relation>(g_friend)(player, team));
+                        if (role && s[*role]) result = ContactTint(stock, *s[*role]);
                     }
                 }
             }

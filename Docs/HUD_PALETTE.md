@@ -15,7 +15,7 @@ override that base; changing the base does not discard those choices.
 | --- | --- |
 | `RadarGridColor` | Projected terrain grid lines; retains native alpha. |
 | `RadarBackgroundOpacity` | Radar backdrop only, Default or 0–100 percent. |
-| `RadarFriendlyColor`, `RadarEnemyColor`, `RadarNeutralColor` | Normal radar contacts; native dimming and animated alpha remain. |
+| `RadarFriendlyColor`, `RadarEnemyColor`, `RadarNeutralColor` | Normal radar contacts; native dimming and animated alpha remain. `RadarFriendlyColor` is your own team only: allied teams keep the native ally colour. |
 | `HullHighColor`, `HullMediumColor`, `HullLowColor` | Cockpit health at ≥50%, 25–<50%, and <25%. |
 | `AmmoHudColor` | Cockpit ammo bar and label; native shot-cost marker and text remain. |
 | `UnitHealthHighColor`, `UnitHealthMediumColor`, `UnitHealthLowColor` | Command/selection health bars using the same native thresholds. |
