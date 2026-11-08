@@ -540,6 +540,10 @@ openshim_add_test(map_filter_extras_tests STD 14 SOURCES
     map_filter_extras_tests.cpp
 )
 
+openshim_add_test(map_letter_jump_policy_tests STD 14 SOURCES
+    map_letter_jump_policy_tests.cpp
+)
+
 openshim_add_test(lua_formation_fix_tests STD 14 SOURCES
     lua_formation_fix_tests.cpp
 )

@@ -215,6 +215,8 @@ namespace
         {
             return TryReadMappedBool(ini, "General", "MapRefreshFixes", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP"))
+            return TryReadMappedBool(ini, "General", "MapListLetterJump", true, out);
         if (Equals(name, "OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS"))
             return TryReadMappedBool(ini, "General", "MusicGlobalFocus", true, out);
         if (Equals(name, "OPENSHIM_DISABLE_CONTROL_SMOOTHING") ||

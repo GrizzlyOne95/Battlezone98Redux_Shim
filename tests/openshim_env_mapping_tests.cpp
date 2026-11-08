@@ -164,6 +164,13 @@ namespace
         ini.Set("General", "FastMenuTransitions", "1");
         Check(Mapped(ini, "OPENSHIM_DISABLE_FAST_MENU_TRANSITIONS") == "0", "FastMenuTransitions = 1 reads as DISABLE=0");
 
+        // MapListLetterJump: inverted switch.
+        Check(Mapped(ini, "OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP") == "<none>", "unset MapListLetterJump keeps the code default");
+        ini.Set("General", "MapListLetterJump", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP") == "1", "MapListLetterJump = 0 reads as DISABLE=1");
+        ini.Set("General", "MapListLetterJump", "1");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP") == "0", "MapListLetterJump = 1 reads as DISABLE=0");
+
         // PathBlockFaces: inverted switch, trace from [Diagnostics].
         Check(Mapped(ini, "OPENSHIM_DISABLE_PATH_BLOCK_FACES") == "<none>", "unset PathBlockFaces keeps the code default");
         ini.Set("General", "PathBlockFaces", "0");

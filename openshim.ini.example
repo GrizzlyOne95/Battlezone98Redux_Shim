@@ -208,6 +208,14 @@ MapRefreshFixes = 1
 ; Env override to enable: OPENSHIM_MAP_FILTER_EXTRAS
 MapFilterExtras = 0
 
+; Create Game map list quick jump: Ctrl+A..Ctrl+Z select the next map in the
+; displayed list whose title starts with that letter (wraps around). The
+; current filter is re-run unchanged, so the list and preview stay in sync.
+; Independent of MapFilterExtras. Byte-guarded; a mismatch stands it down.
+; Accepted: boolean. Default: ON. Restart required.
+; Env override to disable: OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP
+MapListLetterJump = 1
+
 ; Keep the soundtrack playing when the game is not the foreground window.
 ; Accepted: boolean. Default: ON. Restart required.
 ; Redux creates its streaming music buffer without DirectSound's GLOBALFOCUS
