@@ -1,5 +1,6 @@
 #include "ogre_shader_cache.h"
 #include "terrain_proxy.h"
+#include "terrain_tile_blend.h"
 #include "hook_engine.h"
 #include "engine_globals.h"
 #include "frame_capture_size.h"
@@ -5155,6 +5156,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         // this between the player and the render camera is a bad read.
         constexpr float kMaxPlayerEyeSeparation = 5120.0f;
         bool g_playerPositionRejectedLogged = false;
+        int g_playerPositionConsecutiveRejects = 0;
+        constexpr int kPlayerRejectWarnAfter = 30;
 
         bool GetCameraAimPoint(void* camera, float aimDistance, Vector3& aim,
                                bool& usedPlayer)
@@ -5196,12 +5199,14 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     {
                         origin = { playerX, playerY, playerZ };
                         usedPlayer = true;
+                        g_playerPositionConsecutiveRejects = 0;
                     }
-                    // An all-zero eye is a camera not placed yet (first sim tick):
-                    // the separation means nothing, so keep the one-shot warning
-                    // for a real disagreement.
+                    // Right after RUN_STARTED the player object still holds a
+                    // placeholder position ((4088,99.9,99126) in two separate
+                    // gate runs) and the eye may be unplaced (0,0,0); both settle within
+                    // a few frames. Warn only when the disagreement persists.
                     else if (!g_playerPositionRejectedLogged &&
-                             (eye->x != 0.0f || eye->y != 0.0f || eye->z != 0.0f))
+                             ++g_playerPositionConsecutiveRejects >= kPlayerRejectWarnAfter)
                     {
                         g_playerPositionRejectedLogged = true;
                         LogShimA(LogLevel::Warn, "terrain-proxy",
@@ -5435,6 +5440,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                     g_proxy.sourceMeshName = *meshName;
                     CaptureClusterHeightSignature(
                         g_proxy.heightHash, g_proxy.heightMinimum, g_proxy.heightMaximum);
+                    // The new world's terrain exists, so its TRN name is current.
+                    NotifyTerrainTileBlendWorldReady();
                     LogShimA(LogLevel::Info, "terrain-proxy",
                         "[TERRAIN-PROXY] selected zone=%d nativeZone=(%d,%d) cluster=%d nativeCluster=(%d,%d) zonePtr=%p sourceMesh=%p sourceEntity=%p sourceNode=%p heightHash=%08X heightRange=[%u,%u] followCamera=%d evaluated=%d containing=%d aim=(%.1f,%.1f,%.1f) aimOrigin=%s aimAhead=%.1f aimGap=%.1f mesh=\"%s\"",
                         zoneOrdinal, zoneX, zoneZ, g_proxy.clusterOrdinal, clusterX, clusterZ,

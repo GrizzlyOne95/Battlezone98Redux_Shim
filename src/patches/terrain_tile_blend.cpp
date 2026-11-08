@@ -123,6 +123,7 @@ namespace BZROpenShim
     namespace
     {
         std::atomic<bool> g_BlendPending{ false };
+        std::atomic<bool> g_BlendWorldReady{ false };
         // Ticks to keep retrying while the TRN name or the terrain vertex
         // buffer is not there yet (~10 s at 60 fps), then give up and log.
         constexpr int kBlendRetryTicks = 600;
@@ -134,8 +135,20 @@ namespace BZROpenShim
 
     void RequestTerrainTileBlendAtFirstSimTick()
     {
+        g_BlendWorldReady.store(false, std::memory_order_release);
         g_BlendRetriesLeft = kBlendRetryTicks;
         g_BlendPending.store(true, std::memory_order_release);
+    }
+
+    void NotifyTerrainTileBlendWorldReady()
+    {
+        g_BlendWorldReady.store(true, std::memory_order_release);
+    }
+
+    void TerrainTileBlendRenderTick()
+    {
+        if (g_BlendWorldReady.load(std::memory_order_acquire))
+            TerrainTileBlendSimTick();
     }
 
     void TerrainTileBlendSimTick()
