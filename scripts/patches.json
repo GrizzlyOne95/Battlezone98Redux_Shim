@@ -3554,6 +3554,12 @@
       "identity": "CNetGameLobby lobby-list lookup on exact GOG Redux 2.2.301, __thiscall(this, lobbyId16*, bool create), ret 8; returns the list entry (id +0x10, password string +0x98, passworded flag +0xB2) or 0. 0x0056F900 calls it as FindLobby(this, this+0x28, 0) for the active lobby. mp_invite_password.cpp calls it with create = 0 (read-only) and does not patch it. Bytes read from the shipped image 2026-11-08."
     },
     {
+      "name": "LobbyOnListReceived",
+      "address": "0x00740E70",
+      "expected": "55 8B EC 6A FF 68 39 B0 85 00 64 A1 00 00 00 00",
+      "identity": "CNetGameLobby::OnLobbyListReceived on exact GOG Redux 2.2.301 (logs \"CNetGameLobby::OnLobbyListReceived, matching lobbies: \"), __thiscall(this, int count), ret 4 at 0x00741678; creates each list entry with FindLobby and fills it from lobby data (FUN_00740e70 lines 139-170). mp_invite_password.cpp detours the first 10 bytes (SEH prologue; absolute operand only) to send a held invite join once the list exists. Bytes read from the shipped image 2026-11-08."
+    },
+    {
       "name": "LobbyOnRichPresenceJoinRequested",
       "address": "0x00757E00",
       "expected": "55 8B EC 6A FF 68 83 C6 85 00",

@@ -40,6 +40,16 @@
 //      (entry+0xB2), sends the entry's password (entry+0x98, the string the
 //      server sent with the lobby list). The record is consumed by the first
 //      join for that lobby. Every other join is untouched.
+//   3. The invite usually arrives before the list: it rebuilds the MP screen,
+//      and the first GetLobbyList answer lands ~3.5 s after RunCallbacks has
+//      called join-by-id (live 2026-11-08, PC 2: join 07:16:44.465, "Added
+//      lobby" 07:16:47.936). On a list miss from RunCallbacks (password ==
+//      this+0xA4) the join is held. An OnLobbyListReceived 0x00740E70 detour
+//      (__thiscall(this, count), ret 4 at 0x00741678; it creates and fills
+//      each entry, FUN_00740e70 lines 139-170) sends it after the original
+//      returns: with the entry's password when the lobby is listed and
+//      passworded, otherwise exactly as the game asked. Any other join cancels
+//      a held one.
 //
 // Only a player who was invited, or who can Join Game from the host's Steam
 // presence, gets the password filled. The client already holds the password
@@ -79,16 +89,22 @@ namespace BZROpenShim
                                                       uint32_t friendArg);
             using FnJoinById = void(__fastcall*)(void* self, void* edx, const void* lobbyId, void* password);
             using FnFindLobby = void*(__fastcall*)(void* self, void* edx, const void* lobbyId, uint32_t create);
+            using FnListReceived = void(__fastcall*)(void* self, void* edx, int count);
 
             // push ebp / mov ebp,esp / push -1 / push imm32 (absolute SEH handler).
             constexpr uint8_t kJoinRequestedStolen[10] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x3B, 0x0B, 0x85, 0x00 };
             constexpr uint8_t kJoinByIdStolen[10] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x58, 0xBC, 0x85, 0x00 };
+            constexpr uint8_t kListReceivedStolen[10] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x39, 0xB0, 0x85, 0x00 };
+            // CNetGameLobby's own invite password string; RunCallbacks passes it.
+            constexpr uintptr_t kLobbyInvitePasswordOffset = 0xA4;
 
             bool g_Done = false;
             InlineDetour32 g_JoinRequestedDetour = {};
             InlineDetour32 g_JoinByIdDetour = {};
             void* volatile g_JoinRequestedOriginal = nullptr;
             void* volatile g_JoinByIdOriginal = nullptr;
+            InlineDetour32 g_ListReceivedDetour = {};
+            void* volatile g_ListReceivedOriginal = nullptr;
             FnFindLobby g_FindLobby = nullptr;
 
             // Game thread only.
@@ -96,6 +112,11 @@ namespace BZROpenShim
             uint64_t g_PendingAt = 0;  // a stale invite must not fill a later manual join
             constexpr uint64_t kPendingMs = 120000;
             uint8_t g_PendingId[kLobbyIdBytes] = {};
+            // A join held until the lobby list arrives (game thread only).
+            bool g_Held = false;
+            void* g_HeldSelf = nullptr;
+            void* g_HeldPassword = nullptr;  // self+0xA4: lives as long as the lobby object
+            uint8_t g_HeldId[kLobbyIdBytes] = {};
 
             bool IsEnabled()
             {
@@ -183,6 +204,11 @@ namespace BZROpenShim
                 char hex[kLobbyIdBytes * 2 + 1];
                 HexId(id, hex);
                 const bool matches = g_HavePending && haveId && std::memcmp(id, g_PendingId, kLobbyIdBytes) == 0;
+                if (g_Held)
+                {
+                    g_Held = false;  // the player joined something else meanwhile
+                    LogShimA(LogLevel::Info, kComponent, "another join replaced the held invite join");
+                }
                 LogShimA(LogLevel::Info, kComponent, "join by id: id %s, password length %u, %s", hex, typedLength,
                          matches ? "the invited lobby" : (g_HavePending ? "not the invited lobby" : "no invite pending"));
                 if (!matches)
@@ -201,6 +227,16 @@ namespace BZROpenShim
                 uint8_t hasPassword = 0;
                 if (!entry)
                 {
+                    if (password == reinterpret_cast<uint8_t*>(self) + kLobbyInvitePasswordOffset)
+                    {
+                        g_Held = true;
+                        g_HeldSelf = self;
+                        g_HeldPassword = password;
+                        std::memcpy(g_HeldId, id, kLobbyIdBytes);
+                        LogShimA(LogLevel::Info, kComponent,
+                                 "invited lobby is not listed yet; holding the join for the lobby list");
+                        return;
+                    }
                     LogShimA(LogLevel::Info, kComponent, "invited lobby is not in the lobby list; joining without a password");
                     original(self, edx, lobbyId, password);
                     return;
@@ -215,8 +251,38 @@ namespace BZROpenShim
                 original(self, edx, lobbyId, reinterpret_cast<void*>(entry + kEntryPasswordOffset));
             }
 
+            void __fastcall ListReceivedHook(void* self, void* edx, int count)
+            {
+                const FnListReceived original = reinterpret_cast<FnListReceived>(g_ListReceivedOriginal);
+                if (original)
+                    original(self, edx, count);
+                if (!g_Held || self != g_HeldSelf)
+                    return;
+                g_Held = false;
+                const FnJoinById join = reinterpret_cast<FnJoinById>(g_JoinByIdOriginal);
+                if (!join)
+                    return;
+                uint8_t id[kLobbyIdBytes];
+                std::memcpy(id, g_HeldId, kLobbyIdBytes);
+                const uintptr_t entry = reinterpret_cast<uintptr_t>(SafeFindLobby(self, id));
+                uint8_t hasPassword = 0;
+                if (entry && SafeCopy(&hasPassword, entry + kEntryHasPasswordOffset, 1) && hasPassword)
+                {
+                    LogShimA(LogLevel::Info, kComponent,
+                             "lobby list arrived: sending the held invite join with the lobby's password");
+                    join(self, nullptr, id, reinterpret_cast<void*>(entry + kEntryPasswordOffset));
+                    return;
+                }
+                LogShimA(LogLevel::Info, kComponent, "lobby list arrived: sending the held invite join %s",
+                         entry ? "(lobby has no password)" : "without a password (lobby not listed)");
+                join(self, nullptr, id, g_HeldPassword);
+            }
+
             void RollBack()
             {
+                if (g_JoinByIdDetour.target)
+                    HookEngine::WriteMemory(static_cast<uint32_t>(g_JoinByIdDetour.target),
+                                            g_JoinByIdDetour.original.data(), g_JoinByIdDetour.patchLen);
                 if (g_JoinRequestedDetour.target)
                     HookEngine::WriteMemory(static_cast<uint32_t>(g_JoinRequestedDetour.target),
                                             g_JoinRequestedDetour.original.data(), g_JoinRequestedDetour.patchLen);
@@ -224,13 +290,14 @@ namespace BZROpenShim
 
             bool DoInstall()
             {
-                uint32_t requestedAddr = 0, joinAddr = 0, findAddr = 0;
+                uint32_t requestedAddr = 0, joinAddr = 0, findAddr = 0, listAddr = 0;
                 // Literal names so patch_registration_tests can check them
                 // against scripts/patches.json.
                 const HookEngine::EngineRow rows[] = {
                     { "LobbyOnJoinRequested", &requestedAddr },
                     { "LobbyJoinById", &joinAddr },
                     { "LobbyFindLobby", &findAddr },
+                    { "LobbyOnListReceived", &listAddr },
                 };
                 if (!HookEngine::BindEngineRows("InvitePassword", rows))
                 {
@@ -256,8 +323,17 @@ namespace BZROpenShim
                     RollBack();
                     return false;
                 }
-                LogShimA(LogLevel::Info, kComponent, "installed: OnGameLobbyJoinRequested 0x%08X, join-by-id 0x%08X",
-                         requestedAddr, joinAddr);
+                if (!InstallInlineDetour32(g_ListReceivedDetour, listAddr, reinterpret_cast<void*>(ListReceivedHook),
+                                           sizeof(kListReceivedStolen), kListReceivedStolen,
+                                           sizeof(kListReceivedStolen), &g_ListReceivedOriginal))
+                {
+                    LogShimA(LogLevel::Warn, kComponent, "OnLobbyListReceived failed its byte guard; not installed");
+                    g_ListReceivedDetour = {};
+                    RollBack();
+                    return false;
+                }
+                LogShimA(LogLevel::Info, kComponent, "installed: OnGameLobbyJoinRequested 0x%08X, join-by-id 0x%08X, "
+                         "OnLobbyListReceived 0x%08X", requestedAddr, joinAddr, listAddr);
                 return true;
             }
         }
