@@ -201,3 +201,16 @@ if (Test-Path -LiteralPath $shadowCheck) {
         Write-Warning "Files in the active mod are overridden by different copies in addon\ or an enabled addon mod. Run scripts\Find-ShadowedModFiles.ps1 for the list."
     }
 }
+
+# Advisory only, like the check above. The load chain imports MSVCP140.dll and
+# VCRUNTIME140.dll; without the x86 VC++ 2015-2022 runtime the game exits at
+# launch before openshim.log exists. Same test as Get-MissingVcRuntime in
+# install_windows.ps1: the 32-bit system folder or an app-local copy.
+$crtDir = Join-Path $env:SystemRoot $(if ([Environment]::Is64BitOperatingSystem) { 'SysWOW64' } else { 'System32' })
+$missingCrt = foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll') {
+    if (-not (Test-Path -LiteralPath (Join-Path $crtDir $dll)) -and
+        -not (Test-Path -LiteralPath (Join-Path $GameDir $dll))) { $dll }
+}
+if ($missingCrt) {
+    Write-Warning "Missing $($missingCrt -join ', '): install the x86 Visual C++ 2015-2022 Redistributable (winget install --id Microsoft.VCRedist.2015+.x86 -e) or the game will exit silently at launch."
+}

@@ -364,6 +364,27 @@ function Test-GameRunningFrom {
     return $false
 }
 
+# winmm.dll, bzloader.dll and plugins\openshim.dll link the shared MSVC CRT
+# (/MD) and import MSVCP140.dll and VCRUNTIME140.dll. Without the x86 Visual
+# C++ 2015-2022 runtime Windows cannot load winmm.dll and the game exits the
+# moment it starts: no logs folder, no openshim.log, no crash dump, no event
+# log entry. Returns the runtime DLLs that neither the 32-bit system folder
+# nor the game folder (app-local copies count) provides. The 64-bit runtime
+# does not help; the game is Win32.
+function Get-MissingVcRuntime {
+    param([string]$GameDir, [string]$SystemDir)
+    if (-not $SystemDir) {
+        $folder = if ([Environment]::Is64BitOperatingSystem) { "SysWOW64" } else { "System32" }
+        $SystemDir = Join-Path $env:SystemRoot $folder
+    }
+    foreach ($dll in "msvcp140.dll", "vcruntime140.dll") {
+        if (-not (Test-Path -LiteralPath (Join-Path $SystemDir $dll)) -and
+            -not (Test-Path -LiteralPath (Join-Path $GameDir $dll))) {
+            $dll
+        }
+    }
+}
+
 # Resolve one artifact set out of a tree. OpenShim-Suite.zip mirrors the
 # repository layout on purpose, so the extracted bundle, a local checkout, and
 # a flat directory beside an explicit OPENSHIM_DLL all resolve here. Returns
@@ -1094,6 +1115,19 @@ try {
                 throw "$wf vanished right after install - quarantined. Follow the steps above, then re-run."
             }
         }
+    }
+
+    # A warning, not a refusal: the files are correct, and installing the
+    # runtime afterwards needs no OpenShim re-run.
+    $missingRuntime = @(foreach ($gameDir in $gamePaths) { Get-MissingVcRuntime -GameDir $gameDir }) | Select-Object -Unique
+    if ($missingRuntime) {
+        Write-Host ""
+        Write-Host "MISSING PREREQUISITE: Microsoft Visual C++ 2015-2022 Redistributable (x86)" -ForegroundColor Red
+        Write-Host "Not found: $($missingRuntime -join ', '). Without it the game closes as soon as"
+        Write-Host "you press Play, with no error. Install the x86 (32-bit) package - the x64 one"
+        Write-Host "does not help - from:"
+        Write-Host "  https://aka.ms/vs/17/release/vc_redist.x86.exe" -ForegroundColor Cyan
+        Write-Host "or: winget install --id Microsoft.VCRedist.2015+.x86 -e"
     }
 
     Write-Host ""
