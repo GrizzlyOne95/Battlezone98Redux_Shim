@@ -263,6 +263,7 @@ try {
     if ($MaxNetworkLogging) { $launchCmd += ' -MaxNetworkLogging' }
     if ($MuteClients) { $launchCmd += ' -MuteClients' }
     if ($AllowNoAudioEndpoint) { $launchCmd += ' -AllowNoAudioEndpoint' }
+    if ($AllowOtherGames) { $launchCmd += ' -AllowOtherGames' }
     if ($InheritedLaunchLockOwner) {
         Assert-BZRCoopInheritedLaunchLock $InheritedLaunchLockOwner
         $env:BZR_LAUNCH_LOCK_HELD = "$InheritedLaunchLockOwner"

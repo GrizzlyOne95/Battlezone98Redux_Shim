@@ -45,6 +45,10 @@ param(
     [ValidateSet('official', 'local')]
     [string]$Matchmaking = 'local',
     [switch]$AllowOfficialServer,
+    # Launch while a Battlezone outside the BZRCoop root is running (the user's
+    # own game). Run-BZRCoopMission still refuses games under the BZRCoop root;
+    # this script alone does not check that.
+    [switch]$AllowOtherGames,
     [string]$LocalServerHealthUrl = 'http://127.0.0.1:8080/health',
     [string]$RunName = '',
     # Stock baseline: leave OpenShim's winmm.dll proxy out of the instances.
@@ -362,10 +366,14 @@ function Start-BZRCoopClients {
             # source, leaving both clients in Network Part 2 indefinitely.
             # Pin only these disposable clients to the private server relay.
             Set-BZRCoopIniValue (Join-Path $inst 'openshim.ini') 'Network' 'RoutePreference' 'Relay'
+            # An install set up for LAN play (NoAuthLan = 1) would send the
+            # private server an Authorization with an empty authtype, which it
+            # closes with 4002. The test clients authenticate as Goldberg Steam.
+            Set-BZRCoopIniValue (Join-Path $inst 'openshim.ini') 'Network' 'NoAuthLan' '0'
         }
         if ($i -gt 0) { Start-Sleep -Seconds $LaunchDelaySeconds }
         if ($MaxNetworkLogging) { Set-BZRCoopMaxNetworkLogging $inst }
-        if ($i -eq 0) { Assert-BZRSafeToLaunch } else { Assert-BZRSafeToLaunch -AllowRunning }
+        if ($i -eq 0 -and -not $AllowOtherGames) { Assert-BZRSafeToLaunch } else { Assert-BZRSafeToLaunch -AllowRunning }
         $p = Start-BZRGameProcess -FilePath (Join-Path $inst 'battlezone98redux.exe') -WorkingDirectory $inst `
                 -ArgumentList $clientGameArgs -PassThru
         $session.clients += [ordered]@{ index = $i; pid = $p.Id; dir = $inst; launchedAtMs = $clock.ElapsedMilliseconds }
