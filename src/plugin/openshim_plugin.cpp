@@ -35,6 +35,7 @@
 #include "dx11_colorspace_diagnostic.h"
 #include "d3d11_device_loss_recovery.h"
 #include "d3d11_primary_monitor.h"
+#include "resolution_list_filter.h"
 #include "dxgi_flip_model.h"
 #include "dx11_enhanced_fxaa.h"
 #include "dx11_scene_depth.h"
@@ -151,6 +152,11 @@ static unsigned __stdcall PatchThreadProc(void*)
     // inert until [Network] StockFactionsOnly is turned on, and the loader it
     // intercepts only runs when a multiplayer screen builds its vehicle list.
     PATCH_STAGE(BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible());
+
+    // Shorter options-screen resolution list. Needs the patches.json
+    // resolves, so it runs after the patcher; the options screen is built
+    // long after this.
+    PATCH_STAGE(BZROpenShim::InitializeResolutionListFilter());
 
     // Lua Send/Receive carries a Handle as the object's network id, which
     // map-authored objects (geysers, beacons) never get, so receivers see nil.

@@ -322,6 +322,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Only redirects the DX11 window's "no position" monitor lookup to the
     # primary monitor; every other lookup is forwarded unchanged.
     "Graphics/D3D11PrimaryMonitor",
+    # Only trims the options screen's resolution list; the current setting is
+    # always kept and unparsable entries fail open.
+    "Graphics/ResolutionListFilter",
     # Enhanced became the default render profile on 2026-10-22 at the user's
     # request; it only takes effect on DX11 with a verified resource set. The
     # marker records that the one-time Redux -> Enhanced move already ran.
@@ -506,6 +509,7 @@ $shippingPolicyChecks = @{
     "Network/LuaMapObjectHandles" = "1"
     "Graphics/D3D11DeviceLossRecovery" = "1"
     "Graphics/D3D11PrimaryMonitor" = "1"
+    "Graphics/ResolutionListFilter" = "1"
     "Graphics/RenderProfile" = "Enhanced"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"

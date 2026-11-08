@@ -1064,6 +1064,7 @@ else()
 endif()
 
 openshim_add_test(menu_theme_policy_tests STD 17 SOURCES menu_theme_policy_tests.cpp)
+openshim_add_test(resolution_list_policy_tests STD 17 SOURCES resolution_list_policy_tests.cpp)
 
 openshim_add_test(steam_launcher_argument_tests STD 17 SOURCES steam_launcher_argument_tests.cpp)
 
