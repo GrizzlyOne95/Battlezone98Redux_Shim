@@ -358,7 +358,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Full-resolution authored terrain tiles, with optional normal/specular maps, from a compatible "
       "pack. DX11 Enhanced only; other profiles keep the original atlas. Restart required." },
-    { "Terrain Micro Detail", "Terrain", "TerrainMicroRelief", nullptr, 0,
+    { "Micro Relief", "Terrain", "TerrainMicroRelief", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Experimental shallow ground relief. Visual only; collision is unchanged. "
@@ -400,11 +400,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Scale the cockpit radar. The projection re-anchors to the backdrop so the "
       "mesh and its underlay stay concentric." },
-    { "Satellite Zoom Out", "SinglePlayer", "SatelliteZoomOut", nullptr, 0,
+    { "Satellite Zoom", "SinglePlayer", "SatelliteZoomOut", nullptr, 0,
       kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
       ShimSettingApplyGroup::GlobalImprovement,
       "How much further than stock the satellite view can pull out. Single player only." },
-    { "Satellite Pan Speed", "SinglePlayer", "SatellitePanSpeed", nullptr, 0,
+    { "Satellite Pan", "SinglePlayer", "SatellitePanSpeed", nullptr, 0,
       kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
       ShimSettingApplyGroup::GlobalImprovement,
       "Satellite view pan speed, as a multiple of stock. Single player only." },
@@ -412,7 +412,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::JetFlames,
       "Faction-colored engine flames on jets and thrusters." },
-    { "Empty Craft Lights", "Display", "EmptyCraftLights", nullptr, 0,
+    { "Empty Craft Glow", "Display", "EmptyCraftLights", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::LiveEngineToggle,
       "Keep emissive running lights lit on craft that have no pilot." },
@@ -437,11 +437,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Also draw your own flag over your own craft; stock draws only other players'. Restart required." },
-    { "Death Chunk Meshes", "General", "ChunkMeshes", nullptr, 0,
+    { "Mesh Chunks", "General", "ChunkMeshes", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Generate destruction pieces from the model's mesh and skeleton. Restart required." },
-    { "Fast Menu Transitions", "General", "FastMenuTransitions", nullptr, 0,
+    { "Menu Caching", "General", "FastMenuTransitions", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Instant Action, Multiplayer and Custom Campaigns open and close without reloading every "
@@ -463,8 +463,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Raw Mouse Input", "General", "RawMouseInput", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
-      "Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see Unsmoothed Controls. Restart required." },
-    { "Unsmoothed Controls", "General", "DisableControlSmoothing", nullptr, 0,
+      "Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see No Smoothing. Restart required." },
+    { "No Smoothing", "General", "DisableControlSmoothing", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Steer, aim, throttle and strafe follow input directly instead of easing toward it, like BZ2's Control Smoothing Off. Affects mouse, keys and joystick. Restart required." },
@@ -501,7 +501,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::AutoSave,
       "Before OpenShim first replaces Save\\auto.sav, keep one copy of the file that was already there." },
-    { "Weapon Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
+    { "Aim Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
       "Walker-style convergence on an explicitly targeted craft. Single player only." },
@@ -527,7 +527,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from "
       "the posed model (visual only). Restart required." },
     // Absent key = on (inverted env mapping OPENSHIM_DISABLE_FRACTURE), so defaultIndex 0 selects "1" (On).
-    { "Fracture One-Piece", "General", "FractureOnePiece", nullptr, 0,
+    { "Fracture Debris", "General", "FractureOnePiece", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "When a craft or building whose model is a single piece is fully fragmented, cut it into "
@@ -551,12 +551,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Keep the Video options resolution list short: the current setting, the desktop size "
       "and common sizes matching the desktop's aspect. Restart required." },
     // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
-    { "Resolution Dropdown", "Graphics", "ResolutionDropdown", nullptr, 0,
+    { "Resolution List", "Graphics", "ResolutionDropdown", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Left click on the Video options resolution opens a list to pick from instead of "
       "cycling. Right click keeps the stock behaviour. Restart required." },
-    { "Reticle Convergence", "SinglePlayer", "PlayerReticleConvergence",
+    { "Reticle Converge", "SinglePlayer", "PlayerReticleConvergence",
       kShimSettingsReticleConvAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -595,9 +595,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "1.4/TRO attack AI: units strafe around their target, and a unit shot while holding "
       "position retreats. For older missions balanced around the less aggressive AI. "
-      "Choose all teams or only AI teams (not yours). Rocket tanks and turrets are unchanged. "
+      "Choose all teams or only AI teams. Rocket tanks and turrets are unchanged. "
       "An ODF can opt out with legacyAI = 0. Single player only." },
-    { "AI Howitzer Volley", "SinglePlayer", "AiWeaponMaskArtillery", nullptr, 0,
+    { "Howitzer Volley", "SinglePlayer", "AiWeaponMaskArtillery", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
       "Artillery AI fires every hardpoint its weaponMask names as one volley instead of the "
@@ -630,7 +630,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalTurbo,
       "Turbo available on all drivable units. Single player only." },
-    { "Satellite Fog Of War", "SinglePlayer", "SatelliteVisibilityFix", nullptr, 0,
+    { "Satellite Fog", "SinglePlayer", "SatelliteVisibilityFix", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::LiveEngineToggle,
       "In satellite view, hide enemies your team has not lit up, as BZ 1.5 did. Also applies "
@@ -639,7 +639,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::Headlights,
       "Headlight on your vehicle." },
-    { "Headlight Brightness", "SinglePlayer", "HeadlightBrightness", nullptr, 0,
+    { "Headlight Power", "SinglePlayer", "HeadlightBrightness", nullptr, 0,
       kShimSettingsHeadlightBrightnessValues, kShimSettingsHeadlightBrightnessLabels, 5, 2,
       ShimSettingApplyGroup::Headlights,
       "Player-vehicle headlight intensity relative to stock. Applies live." },
@@ -700,11 +700,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Let APC AI accept allied deploy targets. Single player only. Restart required." },
-    { "Splinter Undead Fix", "Fixes", "SplinterUndead", nullptr, 0,
+    { "Splinter Fix", "Fixes", "SplinterUndead", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Stop a destroyed splinter from spawning payload ordnance. Single player, and multiplayer while Splinter Sync is on. Restart required." },
-    { "Howitzer Deploy Fix", "Fixes", "HowitzerUndeployedRetaliation", nullptr, 0,
+    { "Howitzer Fix", "Fixes", "HowitzerUndeployedRetaliation", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required." },
@@ -712,7 +712,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Arm the stock deploy transition after a tug loads cargo. Single player only. Restart required." },
-    { "Recycle Release Fix", "Fixes", "ConstructorRecycleStaleTarget", nullptr, 0,
+    { "Recycle Fix", "Fixes", "ConstructorRecycleStaleTarget", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Free a constructor left deployed when another recycles its target first. Single player only. Restart required." },
@@ -724,7 +724,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Decode a new music track's first buffer once instead of twice, shortening the hitch at each track change. Restart required." },
-    { "Constructor Cleanup", "Fixes", "ConstructorRemoteBuild", nullptr, 0,
+    { "Builder Cleanup", "Fixes", "ConstructorRemoteBuild", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Clear a dead constructor's remote build state. Single player only. Restart required." },
@@ -824,7 +824,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Multiplayer opens a setup screen first (nickname, flag, server: Rebellion, Custom or "
       "Local); those pickers leave the lobby. Read when Multiplayer is clicked." },
     // defaultIndex 0 selects "1", matching an absent key (default on).
-    { "Auto-Install Updates", "Updater", "AutoStage", nullptr, 0,
+    { "Auto-Install", "Updater", "AutoStage", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::ReadOnNextUse,
       "Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim "
@@ -840,7 +840,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "and no mission script is required." },
     // Action row: no ini key, no cycling. Section/key stay null so the
     // settings reader and the lossless ini writer never touch it.
-    { "Reset Career Stats", nullptr, nullptr, nullptr, 0,
+    { "Reset Career", nullptr, nullptr, nullptr, 0,
       kShimSettingsActionValues, kShimSettingsActionValues, 2, 0,
       ShimSettingApplyGroup::CareerStatsReset,
       "Clear every recorded kill, death and mission play. Takes two clicks, "
@@ -855,13 +855,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "row can still be turned back on by itself. Most rows take effect after a restart." },
     // Action row: zips logs, settings and the newest crash dump into logs\.
     // Same null section/key contract; one click, and it changes nothing.
-    { "Troubleshooting Bundle", nullptr, nullptr, nullptr, 0,
+    { "Bug Report Zip", nullptr, nullptr, nullptr, 0,
       kShimSettingsBuildValues, kShimSettingsBuildValues, 2, 0,
       ShimSettingApplyGroup::TroubleshootingBundle,
-      "Pack the logs, settings and newest crash dump into one zip in the game's logs folder, "
-      "ready to send with a bug report. Network traces and the dump can hold player names, "
-      "addresses and session data, so send it privately rather than posting it. "
-      "It is built in the background and the file is named here when it is ready." },
+      "Pack the logs, settings and newest crash dump into one zip in the game's logs folder "
+      "for a bug report. Traces and the dump can hold player names, addresses and session "
+      "data, so send it privately. It is built in the background and named here when ready." },
 };
 
 // Reset to Stock writes these values, by canonical key, and nothing else.

@@ -2146,6 +2146,38 @@ namespace BZROpenShim
             return { std::move(first), std::move(second) };
         }
 
+        // Greedy wrap onto up to maxLines; *truncated reports an ellipsized last line.
+        static std::vector<std::string> WrapUiTextToLines(const char* text,
+                                                          float widthPx,
+                                                          size_t maxLines,
+                                                          bool* truncated = nullptr)
+        {
+            std::vector<std::string> lines;
+            std::string rest = TrimAsciiCopy(text ? text : "");
+            if (truncated)
+                *truncated = false;
+            while (!rest.empty() && lines.size() + 2 < maxLines)
+            {
+                auto split = WrapUiTextToTwoLines(rest.c_str(), widthPx);
+                if (split.second.empty())
+                    break;
+                // The first line is exact; the rest re-wraps from the untruncated tail.
+                lines.push_back(split.first);
+                rest = TrimAsciiCopy(rest.substr(split.first.size()));
+            }
+            if (!rest.empty() && maxLines > 0)
+            {
+                bool cut = false;
+                auto tail = WrapUiTextToTwoLines(rest.c_str(), widthPx, &cut);
+                if (truncated)
+                    *truncated = cut;
+                lines.push_back(std::move(tail.first));
+                if (lines.size() < maxLines && !tail.second.empty())
+                    lines.push_back(std::move(tail.second));
+            }
+            return lines;
+        }
+
         static bool SetInputBindingUiWrappedLabelText(void* firstLabel,
                                                       void* secondLabel,
                                                       const char* text,
@@ -3004,7 +3036,9 @@ namespace BZROpenShim
         constexpr float kShimRowH = 42.0f;
         constexpr float kShimRowPad = 16.0f;
         constexpr float kShimValueW = 160.0f;
-        constexpr Shell::Rect kShimCategoryInfo = { 228.0f, 690.0f, 984.0f, 120.0f };
+        // Five description lines plus the standing note (mkscreens.py CATEGORY_LAYOUT['info']).
+        constexpr size_t kShimCategoryInfoLines = 5;
+        constexpr Shell::Rect kShimCategoryInfo = { 228.0f, 690.0f, 984.0f, 228.0f };
 
         static Shell::Rect ShimHubTileRect(size_t index)
         {
@@ -3030,13 +3064,13 @@ namespace BZROpenShim
             return { x, value.y, value.x - x - 22.0f, kShimRowH };
         }
 
-        // Three text lines in an info box: two for a description, and one
-        // under the painted divider for a standing note.
-        static Shell::Rect ShimInfoLine(const Shell::Rect& box, size_t line)
+        // Text lines in an info box: descLines for a description, and one
+        // under the painted divider (line == descLines) for a standing note.
+        static Shell::Rect ShimInfoLine(const Shell::Rect& box, size_t line, size_t descLines = 2)
         {
             const float x = box.x + 24.0f;
             const float w = box.w - 48.0f;
-            if (line < 2)
+            if (line < descLines)
                 return { x, box.y + 14.0f + 32.0f * static_cast<float>(line), w, 30.0f };
             return { x, box.y + box.h - 42.0f, w, 30.0f };
         }
@@ -3154,7 +3188,7 @@ namespace BZROpenShim
             std::array<void*, kShimCategoryMaxRows> values = {};
             std::array<void*, 192> previewQuads = {};
             void* previewNote = nullptr;
-            void* info[3] = {};
+            void* info[kShimCategoryInfoLines + 1] = {};
             std::string status;
         };
         static ShimHubUi g_ShimHubUi;
@@ -3172,6 +3206,14 @@ namespace BZROpenShim
         static void SetShimInfoText(void* const (&info)[3], const char* text, float width)
         {
             SetInputBindingUiWrappedLabelText(info[0], info[1], text ? text : "", width);
+        }
+
+        static void SetShimCategoryInfoText(const char* text, float width)
+        {
+            const auto lines = WrapUiTextToLines(text, width, kShimCategoryInfoLines);
+            for (size_t line = 0; line < kShimCategoryInfoLines; ++line)
+                SetInputBindingUiLabelText(g_ShimCategoryUi.info[line],
+                                           line < lines.size() ? lines[line].c_str() : "");
         }
 
         // ---- hub ----------------------------------------------------------
@@ -3405,11 +3447,10 @@ namespace BZROpenShim
             if (!ui.screen)
                 return;
             const float width = ShimInfoLine(kShimCategoryInfo, 0).w;
-            SetShimInfoText(ui.info,
-                            ui.status.empty()
+            SetShimCategoryInfoText(ui.status.empty()
                                 ? ShimText("openshim_ui:category_hint", "Click a value to change it. Point at a setting to read what it does.")
                                 : ui.status.c_str(),
-                            width);
+                                    width);
             bool anyRestart = false;
             for (size_t slot = 0; slot < ui.rowCount; ++slot)
             {
@@ -3418,7 +3459,7 @@ namespace BZROpenShim
                               g_ShimSettingsRegistry[row].applyGroup == ShimSettingApplyGroup::RestartRequired;
             }
             SetInputBindingUiLabelTextFitted(
-                ui.info[2],
+                ui.info[kShimCategoryInfoLines],
                 anyRestart ? ShimText("openshim_ui:restart_note", "* Takes effect after restarting Battlezone.")
                            : ShimRuntimeLine().c_str(),
                 width);
@@ -3503,11 +3544,12 @@ namespace BZROpenShim
                             ShimSettingValueLabel(setting, (current + 1) % setting.valueCount));
                         // The hint is a convenience; never let it cut the description.
                         bool truncated = false;
-                        WrapUiTextToTwoLines(withHint.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w, &truncated);
+                        WrapUiTextToLines(withHint.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w,
+                                          kShimCategoryInfoLines, &truncated);
                         if (!truncated)
                             text = withHint;
                     }
-                    SetShimInfoText(ui.info, text.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w);
+                    SetShimCategoryInfoText(text.c_str(), ShimInfoLine(kShimCategoryInfo, 0).w);
                     return;
                 }
             }
@@ -3793,10 +3835,11 @@ namespace BZROpenShim
                 ui.values[slot] = Shell::AddButton(panel, panel, name, ShimValueRect(slot), "", skin, 1.0f,
                                                    0.0f, kShimCategoryRowClicks[slot], &OnShimCategoryHover);
             }
-            for (size_t line = 0; line < 3; ++line)
+            for (size_t line = 0; line <= kShimCategoryInfoLines; ++line)
             {
                 _snprintf_s(name, _TRUNCATE, "OpenShimCategory_Info%zu", line);
-                ui.info[line] = Shell::AddLabel(panel, panel, name, ShimInfoLine(kShimCategoryInfo, line), "");
+                ui.info[line] = Shell::AddLabel(panel, panel, name,
+                                                ShimInfoLine(kShimCategoryInfo, line, kShimCategoryInfoLines), "");
             }
             if (category == kShimReticleCategory || category == kShimDamageCategory)
             {
