@@ -165,6 +165,7 @@ namespace
             {
                 StopBridgeLocked(); misses = 0;
                 current = LaunchBridgeLocked(host) ? host : std::string();
+                if (current.empty()) retryAfter = GetTickCount64() + 60000; // no 2 s log spam
             }
             else if (alive && !want && ++misses >= 2) // two polls: ride out a server restart blip
             {

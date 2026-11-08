@@ -170,7 +170,8 @@ Nothing else to set: net.ini ships
 
 ```ini
 [OpenShimSocket]
-SteamTunnelBridge=auto   ; also the value when the key is absent
+; auto is also the value when the key is absent
+SteamTunnelBridge=auto
 ```
 
 With `auto`, OpenShim checks every 2 s whether the game's server selection
@@ -180,6 +181,10 @@ the bridge on a worker thread inside the host's game (log tag
 `[SteamBridge]`); two misses in a row stop it, and a bridge that fails retries
 after 60 s. A fixed value (`SteamTunnelBridge=127.0.0.2`) runs it always;
 empty turns it off. On GOG (no loaded `steam_api.dll`) `auto` stays off.
+Any loopback server counts, 127.0.0.1 included: a Steam friend can reach a
+dev or test server the host has running under `Server = Local`, and that
+server's own password or bans are the only gate. Only IPv4 listeners are
+seen; a server bound to `[::]` alone does not start the bridge.
 
 It borrows the game's Steam session, so Steam sees no second "game" process
 and BZR starts from Steam normally. Friends can join only while the host's
