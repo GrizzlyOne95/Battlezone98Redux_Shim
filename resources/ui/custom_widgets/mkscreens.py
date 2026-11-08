@@ -19,6 +19,7 @@ src/patches/lan_screen.cpp.
     python mkscreens.py            # writes every osh_*_center.png and button skin
     python mkscreens.py --preview  # also writes *_preview.png over black
 """
+import math
 import sys
 from pathlib import Path
 
@@ -56,11 +57,13 @@ def poly(d, pts, fill=None, outline=None, width=1):
         d.line(pts + [pts[0]], fill=outline, width=s(width), joint='curve')
 
 
-def frame(d):
+def frame(d, cap_y=None):
     """Outer frame after the Options panels: a stadium-shaped body whose
     middle is cut out as a chamfered black field, leaving two side brackets
     with half-round outer edges and short arms along the top and bottom,
-    plus a trace band above and below."""
+    plus a trace band above and below. With cap_y set, the brackets have no
+    lower arms: each ends in a flat, outlined cap at cap_y and the field runs
+    open to the bottom band, freeing the bottom of the screen."""
     top, bot = 120, 960
     # Trace bands across the full width: a dark strip of five lines with a
     # connector block at the centre, after the stock bands.
@@ -78,11 +81,28 @@ def frame(d):
     d.rounded_rectangle([s(0), s(top), s(W), s(bot)], radius=s((bot - top) / 2),
                         fill=FILL, outline=LINE, width=s(2))
     # Inner field: open between the arms, chamfered where the arms turn.
-    inner = [(372, top), (W - 372, top), (W - 372, 195), (W - 265, 195), (W - 208, 252),
-             (W - 208, bot - 132), (W - 265, bot - 75), (W - 372, bot - 75), (W - 372, bot),
-             (372, bot), (372, bot - 75), (265, bot - 75), (208, bot - 132), (208, 252),
-             (265, 195), (372, 195)]
+    if cap_y is None:
+        lower = [(W - 208, bot - 132), (W - 265, bot - 75), (W - 372, bot - 75),
+                 (W - 372, bot), (372, bot), (372, bot - 75), (265, bot - 75),
+                 (208, bot - 132)]
+    else:
+        lower = [(W - 208, cap_y), (W - 208, bot), (208, bot), (208, cap_y)]
+    inner = ([(372, top), (W - 372, top), (W - 372, 195), (W - 265, 195), (W - 208, 252)]
+             + lower + [(208, 252), (265, 195), (372, 195)])
     poly(d, inner, fill=(0, 0, 0, 255), outline=LINE, width=2)
+    if cap_y is not None:
+        # Cut each bracket off flat at cap_y and outline the cut, so the
+        # bracket ends in a squared end rather than tapering along the curve.
+        # Below the cap the bracket is cleared to transparent (as outside the
+        # body), leaving the field's outlined edge at x 208 down to the band.
+        for x0, x1 in ((0, 206), (W - 206, W)):
+            d.rectangle([s(x0), s(cap_y + 2), s(x1), s(bot + 2)], fill=(0, 0, 0, 0))
+        # The cap line spans only the body: from its round outer edge at
+        # cap_y to the field edge.
+        r = (bot - top) / 2
+        edge = r - math.sqrt(max(0.0, r * r - (cap_y - (top + r)) ** 2))
+        for x0, x1 in ((edge, 209), (W - 209, W - edge)):
+            d.rectangle([s(x0), s(cap_y - 1), s(x1), s(cap_y + 1)], fill=LINE)
     # The field runs into the bands, so the outline must not close across them.
     d.rectangle([s(374), s(top - 1), s(W - 374), s(top + 2)], fill=(0, 0, 0, 255))
     d.rectangle([s(374), s(bot - 2), s(W - 374), s(bot + 1)], fill=(0, 0, 0, 255))
@@ -269,10 +289,10 @@ def text_well(d, x, y, w, h):
     d.rectangle([s(x), s(y + h - 2), s(x + w), s(y + h)], fill=LINE)
 
 
-def new_panel():
+def new_panel(cap_y=None):
     img = Image.new('RGBA', (s(W), s(H)), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
-    frame(d)
+    frame(d, cap_y)
     return img, d
 
 
@@ -296,7 +316,10 @@ CATEGORY_LAYOUT = {
     'columns': [(228, 236, 476, 438), (736, 236, 476, 438)],
     'row_top': 14, 'row_pitch': 52, 'row_h': 42, 'rows': 8,
     'pad': 16, 'value_w': 160,
-    'info': (228, 690, 984, 120),
+    # 5 description lines + note (kShimCategoryInfo). It reaches below the
+    # standard bracket arms, so this screen caps the brackets: frame(d, cap_y=828).
+    'info': (228, 690, 984, 228),
+    'cap_y': 828,
 }
 # The key-binding editor on the stock Input screen (painted mode). Toolbar
 # widths and grouping mirror kInputBindingUiToolbarWidths / RightGroup, and
@@ -354,7 +377,7 @@ def hub_center():
 
 
 def category_center(reticle=False):
-    img, d = new_panel()
+    img, d = new_panel(CATEGORY_LAYOUT['cap_y'])
     title_plate(d, *CATEGORY_LAYOUT['title'])
     L = CATEGORY_LAYOUT
     for column, (bx, by, bw, bh) in enumerate(L['columns']):
