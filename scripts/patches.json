@@ -5633,6 +5633,42 @@
       "address": "0x007B0007",
       "expected": "83 C0 18 89 85 E8 FC FF FF",
       "identity": "Released GOG 2.2.301 the only store to [ebp-0x318] in the options ctor: map lookup result (0x004B2F10) + 0x18 = the currentValue BzrString* for the Video Mode option."
+    },
+    {
+      "name": "ResDropScreenCtor",
+      "address": "0x007AF4A0",
+      "expected": "55 8B EC 6A FF 68 13 10 86 00 64 A1 00 00 00 00 50 81 EC E0 03 00 00",
+      "identity": "Released GOG 2.2.301 cUI_OptionsGraphics constructor, thiscall(this), no stack args, plain ret at 0x007B1E6F; stores vtable 0x0089F608 (RTTI .?AVcUI_OptionsGraphics@@) at 0x007AF4E9. Only caller is the screen factory. Unique whole-image match of the 23 guard bytes. The resolution dropdown detours the first 10 bytes and injects after the original returns."
+    },
+    {
+      "name": "ResDropChecklistClick",
+      "address": "0x007C3720",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 4D FC E8 2F FC 00 00 0F B6 C0 85 C0 0F 84 8C 01 00 00 8B 4D FC 0F",
+      "identity": "Released GOG 2.2.301 cUI_Checklist vtable slot +0x20 (vtable 0x008A04D0, RTTI .?AVcUI_Checklist@@): mouse-press thiscall(this, int x, int y, int button), ret 0xC, bool in al. Reads the active byte via 0x007D3360 and +0x1E0, hit-tests the rect at +4/+8/+0xC/+0x10 via 0x007D2810, checks +0x145, then button 0 = next, 1 = previous. The dropdown compares the live vtable slot with this row before swapping in its wrapper."
+    },
+    {
+      "name": "ResDropChecklistSelectValue",
+      "address": "0x007C3C10",
+      "expected": "55 8B EC 83 EC 08 89 4D FC C7 45 F8 00 00 00 00 EB 09 8B 45 F8 83 C0 01 89 45 F8 8B 4D FC 81 C1",
+      "identity": "Released GOG 2.2.301 cUI_Checklist select-by-value thiscall(this, int value): walks the items vector at +0x1E4 comparing item value, stores the index at +0x1DC and updates the text child; does not call the +0x1D8 callback. The options ctor calls it at 0x007B01E2 to select the current video mode."
+    },
+    {
+      "name": "ResDropListRefresh",
+      "address": "0x007CB400",
+      "expected": "55 8B EC 83 EC 10 89 4D FC C7 45 F8 00 00 00 00 EB 09 8B 45 F8 83 C0 01 89 45 F8 8B 4D FC 81 C1",
+      "identity": "Released GOG 2.2.301 cUI_Selectlist row refresh thiscall(this): rewrites each row label (vector at +0x15C) from item (scroll +0x150 + row) in the item vector at +0x168. Called by the list's own scroll functions 0x007CB500/0x007CB540 after they change +0x150."
+    },
+    {
+      "name": "ResDropListScrollUp",
+      "address": "0x007CB500",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 50 01 00 00 00 7E 1D 8B 4D FC 8B 91 50 01 00 00 83 EA 01 8B",
+      "identity": "Released GOG 2.2.301 cUI_Selectlist scroll up thiscall(this): decrements +0x150 when positive and calls the refresh 0x007CB400. The list's page-up callback slot is void(void), so the dropdown routes it here with its own list pointer."
+    },
+    {
+      "name": "ResDropListScrollDown",
+      "address": "0x007CB540",
+      "expected": "55 8B EC 51 56 89 4D FC 8B 4D FC 81 C1 68 01 00 00 E8 FA FB E9 FF 8B F0 8B 4D FC 81 C1 5C 01 00",
+      "identity": "Released GOG 2.2.301 cUI_Selectlist scroll down thiscall(this): increments +0x150 while below item count (vector +0x168, 0x1C-byte elements) minus visible rows (vector +0x15C), then calls the refresh 0x007CB400."
     }
   ],
   "module_addresses": [

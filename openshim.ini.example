@@ -886,6 +886,13 @@ D3D11PrimaryMonitor = 1
 ;   Kill switch: OPENSHIM_DISABLE_RESOLUTION_LIST_FILTER=1.
 ResolutionListFilter = 1
 
+; Resolution dropdown in the options screen. Accepted: boolean. Default: 1.
+;   A left click on the resolution row opens a scrollable list of its entries;
+;   picking one selects it exactly as cycling would. Right click keeps the
+;   stock "previous value" behaviour. Logged under [ResDrop].
+;   Kill switch: OPENSHIM_DISABLE_RESOLUTION_DROPDOWN=1.
+ResolutionDropdown = 1
+
 ; DXGI flip-model presentation (DX11 only). Accepted: boolean. Default: 0.
 ;   Creates Ogre's D3D11 swap chain as DXGI_SWAP_EFFECT_FLIP_DISCARD with a
 ;   frame-latency waitable object instead of the stock blt model, so frames

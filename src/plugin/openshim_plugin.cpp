@@ -36,6 +36,7 @@
 #include "d3d11_device_loss_recovery.h"
 #include "d3d11_primary_monitor.h"
 #include "resolution_list_filter.h"
+#include "resolution_dropdown.h"
 #include "dxgi_flip_model.h"
 #include "dx11_enhanced_fxaa.h"
 #include "dx11_scene_depth.h"
@@ -157,6 +158,10 @@ static unsigned __stdcall PatchThreadProc(void*)
     // resolves, so it runs after the patcher; the options screen is built
     // long after this.
     PATCH_STAGE(BZROpenShim::InitializeResolutionListFilter());
+
+    // Dropdown for the options-screen resolution row; hooks the same screen
+    // ctor after the filter above has trimmed the list it reads.
+    PATCH_STAGE(BZROpenShim::InitializeResolutionDropdown());
 
     // Lua Send/Receive carries a Handle as the object's network id, which
     // map-authored objects (geysers, beacons) never get, so receivers see nil.
