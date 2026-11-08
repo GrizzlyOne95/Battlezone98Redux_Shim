@@ -28,7 +28,7 @@ Click **Multiplayer**. OpenShim shows a **SERVER** box before the lobby:
 - **Custom**: a server address you type.
 - **Local**: a server running on this PC.
 - **Local host tools**: the LAN screen (the button is named **LAN (no
-  sign-in)** when `NoAuthLan=1`), with **Start host**, **Steam list**, **Refresh** and the list of
+  sign-in)** when `NoAuthLan=1`), with **Start host**, **Steam list** (Steam copies only), **Refresh** and the list of
   games found.
 
 Your choice is saved in `openshim.ini` (`[Network] Server=` and
