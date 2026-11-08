@@ -43,6 +43,7 @@
 #include "perf_telemetry.h"
 #include "music_single_fill.h"
 #include "precise_timestep.h"
+#include "remote_object_smoothing.h"
 #include "mouse_every_frame.h"
 #include "thread_scheduling.h"
 #include "pilot_fp_animation_trace.h"
@@ -255,6 +256,7 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
     // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
+    PATCH_STAGE(BZROpenShim::InitializeRemoteObjectSmoothing());
     // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
     PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
     // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf

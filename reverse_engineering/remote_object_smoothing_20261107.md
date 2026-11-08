@@ -28,9 +28,8 @@ No decompiler output or PDB data is reproduced here, only addresses, offsets and
    (`FUN_004DB100`) then pushes on.
 4. No stock tunables were found (one reader and a string scan; UNVERIFIED as an absence). Every constant is hard-coded, and net.ini has no smoothing keys.
 5. Proposal: an opt-in shim wrapper around GameObject::Simulate (`0x004DEEC0`). It re-blends the
-   displayed transform with a time-based factor `α = 1 − exp(−dt/τ)` and adds a snap threshold. It
-   is not implemented in this session, because the hook site needs an entry detour (see "Hook site")
-   and the change should be tested at real latency.
+   displayed transform with a time-based factor `α = 1 − exp(−dt/τ)` and adds a snap threshold.
+   Implemented as `[Network] RemoteSmoothingMs` (see "Implementation").
 
 ## Q1. Receive path into the GameObject
 
@@ -143,7 +142,7 @@ Source: Steam `BZLogger.txt`, mtime 2026-11-07 16:19, window 16:07–16:18. Read
 - Note: TS ≈ 0.12 s while the ping is about 350 ms suggests sendTime is clock-synced, so one-way latency
   is about 0.12 s plus TimeStep (UNVERIFIED).
 
-## Design proposal (not implemented)
+## Design proposal
 
 Goal: make remote motion smooth independent of frame rate, without touching authority or physics.
 
@@ -153,7 +152,7 @@ Approach A (recommended first step): a time-based blend.
   display from D0 and P = true_transform (GO+0x28, which the original just set at step 5):
   - `α = 1 − exp(−dt / τ)`, where dt = TimeStep (`DAT_00946790` via `FUN_00822D60`) and τ comes from settings.
   - position = D0 + (P − D0)·α; rotation = slerp(D0, P, α_rot). Stock rotation uses 0.5/frame, a
-    shorter time constant than position, so use a separate rotation τ (about τ/2.5) using the same helpers (`FUN_0081F1E0`,
+    shorter time constant than position, so use a separate rotation τ (τ/1.94, stock's ln 0.5 / ln 0.7 ratio) using the same helpers (`FUN_0081F1E0`,
     `FUN_004DEAD0`, `FUN_004DEBE0`, `FUN_0081EFE0`) or a local quaternion slerp.
   - Snap when |P − D0| > `SnapDistance` (respawn or teleport) or when the posit_y sentinel was −1.0.
     The sentinel must be read before calling the original, which overwrites true_transform at step 5.
@@ -188,6 +187,30 @@ MP gate. Confirm with the settings owner (UNVERIFIED).
 - Calling convention: the decompile shows a single obj76* argument (R:FUN_004deec0). Confirm stdcall
   versus cdecl (the `ret` form) before writing the wrapper (UNVERIFIED).
 
+### Implementation (`src/patches/remote_object_smoothing.cpp`)
+
+- Entry detour on `0x004DEEC0` with the 9-byte prologue above; patches.json rows `GameObjectSimulate`,
+  `GameObjectSimulateRemoteCopy` (`0x004DEF02`) and `DistributedObjectIsRemote` (`0x004B9830`) pin the
+  sites, and the patch stands down if any row, `GameObject::FromObj76` or `TimeStep` fails to resolve.
+- Net-game gate: the wrapper reads byte `DAT_00917F7B` (patches.json `IsNetGameFlag`), the same byte
+  stock's check reads: `FUN_00572A70` returns `FUN_00571C40()` (R:FUN_00572a70:6), which returns
+  `DAT_00917f7b` (R:FUN_00571c40:4).
+- Remote test: DO+0x68 == 2 on GO+0x18, as `FUN_004B9830` (R:FUN_004b9830).
+- Sentinel frame (posit_y == −1.0): the wrapper keeps the stock result rather than snapping. Stock skips
+  the true_transform copy there, so physics starts from the display and the stock 0.3 blend is benign.
+- Rotation τ = τ/1.94: stock's per-frame time constants are −1/ln 0.7 = 2.80 frames (position) and
+  −1/ln 0.5 = 1.44 frames (rotation).
+- Snap at 15 m is new behaviour: stock has no snap (R:FUN_004deec0:107-175 has only the two blends).
+- dt is clamped to 0.1 s, so a hitch blends at most 1 − exp(−0.1/τ).
+- Non-rotation or non-finite input is skipped (stock result kept). Any SEH fault latches the patch off
+  for the session and logs one Warn line.
+- Freed-object writes: stock itself writes obj+0x20 after its 0x200 check (R:FUN_004deec0:142-175),
+  and the wrapper re-checks that flag and the remote byte before writing, so it touches the object only
+  where stock already does.
+- Settings: one key, `RemoteSmoothingMs` (0 = stock, default; clamped 0..300; suggested 100), ini-only,
+  restart required. There is no separate snap-distance key and no options-UI row yet.
+- A 30 s Info line reports blended/snapped/skipped counts.
+
 ### Risks
 
 - Hitbox mismatch: aiming, collision and lock-on on the guest use obj+0x20. A larger τ means more lag
@@ -208,4 +231,25 @@ MP gate. Confirm with the settings owner (UNVERIFIED).
 
 ## Live check
 
-Skipped. There is no implementation to measure, and a localhost harness cannot reproduce 350 ms jitter.
+This is an impaired 4-client A/B on 2026-11-07. Each arm ran `Run-BZRBattleLoad.ps1 -Mode Strategy -Units 40 -Seconds 60` through the private relay with `-Impair delay=150,jitter=40,loss=5,seed=1`. The run dirs are `C:\BZRCoop\runs\smooth-tau0-190325` and `smooth-tau100-190813`.
+
+| arm | clients with the hook | flow checks | remoteWarps | remoteJumpsOver25m | remote unit-frames per client |
+|---|---|---|---|---|---|
+| τ = 0 (stock) | none | 48/48 pass | 0 on all 4 | 0 | 230k-284k |
+| τ = 100 ms | 0 and 1 | 48/48 pass | 0 on all 4 | 0 | 233k-277k |
+
+- **Clients 2 and 3 are not a τ=100 sample.** In this co-op install, Instance2 and Instance3's `plugins\` folders are junctions to the GOG install's `plugins\`. During the run, another session deployed 1.0.0.73 there. So those two clients ran without the hook.
+- **Hook counters, clients 0 and 1:**
+  - The detour logged `enabled: tau=100 ms (rotation 52 ms), snap 15 m, detour 0x004DEEC0`.
+  - Each 30 s window logged 120k-130k `blended`, with `snapped=0`, `skipped=0` and no fault latch.
+  - That is about 4,000 blends per second, which matches the about 4,000 remote unit-frames per second the harness counted on the same client. So the blend runs once per remote object per rendered frame. This settles the reviewer's dt-cadence question for this build.
+- **Combat:** the hit-registration numbers (damage per enemy shot 0.42-0.83 per team) stay in the stock arm's range.
+
+What this shows:
+- The hook installs, runs on every remote object, never faults, never snaps at 150 ± 40 ms with 5 % loss, and changes no flow or combat check.
+- The harness's warp metric is 0 in **both** arms at this impairment. It counts large discontinuities, so it cannot see the per-frame display-error smoothing this patch changes.
+
+UNVERIFIED:
+- Visual smoothness. Nothing measured the displayed-versus-true error curve; that needs a frame capture, or a probe that logs the display error per frame.
+- Behaviour at real internet latency, and the 350 ms jitter case from the report that started this.
+- Steam or Proton builds.
