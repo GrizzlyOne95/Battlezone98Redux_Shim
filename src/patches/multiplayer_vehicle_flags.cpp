@@ -149,16 +149,17 @@ namespace BZROpenShim
         constexpr uint32_t kFlagObjectExcludedStateMask = 0x600;
 
         constexpr float kMultiplayerFlagRange = 100.0f;
-        // A 2x1 m billboard on an object a few metres away fills the view:
-        // a pilot standing by an empty craft or an ally on foot. Nearby
-        // objects are identifiable without a flag, so skip them.
-        constexpr float kMultiplayerFlagMinRange = 8.0f;
 
         constexpr float kMultiplayerFlagWidth = 2.0f;
 
         constexpr float kMultiplayerFlagHeight = 1.0f;
 
         constexpr float kMultiplayerFlagMinimumLift = 1.5f;
+
+        // The player's own flag (MultiplayerFlagShowOwnCraft) sat 1.5 m above
+        // a pilot's origin: at eye level, so it covered the first-person view.
+        // Lift only the own flag further so its 1 m billboard clears the head.
+        constexpr float kMultiplayerFlagOwnExtraLift = 2.0f;
 
         constexpr float kMultiplayerFlagHiddenY = -100000.0f;
 
@@ -1004,10 +1005,8 @@ namespace BZROpenShim
                 const float dx = position[0] - userPosition[0];
                 const float dy = position[1] - userPosition[1];
                 const float dz = position[2] - userPosition[2];
-                const float distanceSq = dx * dx + dy * dy + dz * dz;
-                if (distanceSq > (kMultiplayerFlagRange * kMultiplayerFlagRange) ||
-                    (!isOwnCraft &&
-                     distanceSq < (kMultiplayerFlagMinRange * kMultiplayerFlagMinRange)))
+                if ((dx * dx + dy * dy + dz * dz) >
+                    (kMultiplayerFlagRange * kMultiplayerFlagRange))
                 {
                     continue;
                 }
@@ -1018,7 +1017,8 @@ namespace BZROpenShim
                     continue;
                 }
 
-                position[1] += GetMultiplayerFlagObjectLift(gameObject);
+                position[1] += GetMultiplayerFlagObjectLift(gameObject) +
+                               (isOwnCraft ? kMultiplayerFlagOwnExtraLift : 0.0f);
                 if (!ConvertMultiplayerFlagPointToRenderSpace(position))
                     continue;
 
