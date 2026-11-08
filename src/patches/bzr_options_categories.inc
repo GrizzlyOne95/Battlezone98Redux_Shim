@@ -68,7 +68,7 @@ static const char* const kShimCategoryFixes[] = {
     "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
     "Effect Sort" };
 static const char* const kShimCategoryNetwork[] = {
-    "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
+    "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Stock Factions", "Map List Fixes",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
     "MP Setup Screen" };
 static const char* const kShimCategorySystem[] = {
