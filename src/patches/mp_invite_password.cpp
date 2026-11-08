@@ -14,10 +14,15 @@
 // 0x007408C0, which stores the password in its own this+0xA4; RunCallbacks
 // then joins by id with it (FUN_00740be0 line 79).
 //
-// The host never fills this+0xA4. CreateLobby 0x007426E0 (logs
-// "CNetGameLobby::CreateLobby called, creating game"; __thiscall(this, bool
-// private, string* password, string* name), ret 0xC at 0x007427E7) copies the
-// password to this+0x64 and the name to this+0x88 and nothing to this+0xA4.
+// The host never fills this+0xA4. Two lobby creators share one signature,
+// __thiscall(this, bool private, string* password, string* name), ret 0xC:
+// CreateGame 0x007427F0 (FUN_007427f0 line 36 logs "CNetGameLobby::CreateGame
+// called, creating game"; ret at 0x007428F0), the path the Create Game screen
+// takes (BZLogger, live 2026-11-08), and CreateLobby 0x007426E0 (FUN_007426e0
+// line 38, "CNetGameLobby::CreateLobby called, creating game"; ret at
+// 0x007427E7). Both copy the password to this+0x64 and the name to this+0x88
+// (CreateGame: string assigns at 0x00742822 and 0x0074283D) and nothing to
+// this+0xA4.
 // Live 2026-11-08 (PC 1 hosting private lobby B1001 with a password, read
 // with ReadProcessMemory): +0x64 holds the password, +0xA4 is empty. So every
 // invite goes out with no password and the server refuses the join
@@ -31,8 +36,9 @@
 // THE FIX
 // ============================================================================
 //
-// A CreateLobby detour (10 bytes: push ebp / mov ebp,esp / push -1 / push
-// imm32 SEH handler; absolute operand only) runs the original, then assigns
+// A detour on each creator (the same 10 bytes in both: push ebp / mov
+// ebp,esp / push -1 / push imm32 SEH handler; absolute operand only) runs the
+// original, then assigns
 // this+0xA4 = this+0x64 with the engine's own std::string operator=
 // 0x0041F710 (__thiscall(dst, const string* src), ret 4 at 0x0041F781), so
 // the engine's CRT owns the buffer. A lobby with no password assigns an empty
@@ -45,7 +51,7 @@
 // passworded lobby shows no Steam "Join Game"; friends join it by invite.
 //
 // UNVERIFIED: GOG Galaxy invites were not tested. UNVERIFIED: a guest's this+0xA4 keeps
-// the last hosted lobby's password until the next CreateLobby (harmless to
+// the last hosted lobby's password until the next lobby is created (harmless to
 // the server, which checks only passworded lobbies; it can hide the guest's
 // own "Join Game" presence).
 
@@ -72,15 +78,19 @@ namespace BZROpenShim
             // MSVC std::string (x86): 16-byte buffer/pointer, then size.
             constexpr uintptr_t kStringSizeOffset = 0x10;
 
+            // CreateGame and CreateLobby share this signature.
             using FnCreateLobby = void(__fastcall*)(void* self, void* edx, uint32_t isPrivate, void* password,
                                                     void* name);
             // __thiscall(dst, const string* src); called as fastcall with edx unused.
             using FnStringAssign = void*(__fastcall*)(void* dst, void* edx, const void* src);
 
             // push ebp / mov ebp,esp / push -1 / push 0x0084FCAB (SEH handler).
+            // Identical in CreateGame and CreateLobby.
             constexpr uint8_t kCreateLobbyStolen[10] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xAB, 0xFC, 0x84, 0x00 };
 
             bool g_Done = false;
+            InlineDetour32 g_CreateGameDetour = {};
+            void* volatile g_CreateGameOriginal = nullptr;
             InlineDetour32 g_CreateLobbyDetour = {};
             void* volatile g_CreateLobbyOriginal = nullptr;
             FnStringAssign g_StringAssign = nullptr;
@@ -121,11 +131,8 @@ namespace BZROpenShim
                 }
             }
 
-            void __fastcall CreateLobbyHook(void* self, void* edx, uint32_t isPrivate, void* password, void* name)
+            void CopyInvitePassword(void* self)
             {
-                const FnCreateLobby original = reinterpret_cast<FnCreateLobby>(g_CreateLobbyOriginal);
-                if (original)
-                    original(self, edx, isPrivate, password, name);
                 if (!self || !g_StringAssign)
                     return;
                 const uintptr_t lobby = reinterpret_cast<uintptr_t>(self);
@@ -145,12 +152,29 @@ namespace BZROpenShim
                          SafeStringSize(lobby + kInvitePasswordOffset));
             }
 
+            void __fastcall CreateGameHook(void* self, void* edx, uint32_t isPrivate, void* password, void* name)
+            {
+                const FnCreateLobby original = reinterpret_cast<FnCreateLobby>(g_CreateGameOriginal);
+                if (original)
+                    original(self, edx, isPrivate, password, name);
+                CopyInvitePassword(self);
+            }
+
+            void __fastcall CreateLobbyHook(void* self, void* edx, uint32_t isPrivate, void* password, void* name)
+            {
+                const FnCreateLobby original = reinterpret_cast<FnCreateLobby>(g_CreateLobbyOriginal);
+                if (original)
+                    original(self, edx, isPrivate, password, name);
+                CopyInvitePassword(self);
+            }
+
             bool DoInstall()
             {
-                uint32_t createAddr = 0, assignAddr = 0;
+                uint32_t gameAddr = 0, createAddr = 0, assignAddr = 0;
                 // Literal names so patch_registration_tests can check them
                 // against scripts/patches.json.
                 const HookEngine::EngineRow rows[] = {
+                    { "LobbyCreateGame", &gameAddr },
                     { "LobbyCreateLobby", &createAddr },
                     { "LobbyStringAssign", &assignAddr },
                 };
@@ -160,17 +184,29 @@ namespace BZROpenShim
                     return false;
                 }
                 g_StringAssign = reinterpret_cast<FnStringAssign>(static_cast<uintptr_t>(assignAddr));
-                if (!InstallInlineDetour32(g_CreateLobbyDetour, createAddr, reinterpret_cast<void*>(CreateLobbyHook),
-                                           sizeof(kCreateLobbyStolen), kCreateLobbyStolen, sizeof(kCreateLobbyStolen),
-                                           &g_CreateLobbyOriginal))
+                // Each detour installs on its own: one failing its byte guard
+                // leaves the other creator fixed.
+                const bool game = InstallInlineDetour32(
+                    g_CreateGameDetour, gameAddr, reinterpret_cast<void*>(CreateGameHook), sizeof(kCreateLobbyStolen),
+                    kCreateLobbyStolen, sizeof(kCreateLobbyStolen), &g_CreateGameOriginal);
+                if (!game)
                 {
-                    LogShimA(LogLevel::Warn, kComponent, "CreateLobby failed its byte guard; not installed");
-                    g_CreateLobbyDetour = {};
-                    g_StringAssign = nullptr;
-                    return false;
+                    LogShimA(LogLevel::Warn, kComponent, "CreateGame failed its byte guard; not hooked");
+                    g_CreateGameDetour = {};
                 }
-                LogShimA(LogLevel::Info, kComponent, "installed: CreateLobby 0x%08X, string assign 0x%08X",
-                         createAddr, assignAddr);
+                const bool lobby = InstallInlineDetour32(
+                    g_CreateLobbyDetour, createAddr, reinterpret_cast<void*>(CreateLobbyHook), sizeof(kCreateLobbyStolen),
+                    kCreateLobbyStolen, sizeof(kCreateLobbyStolen), &g_CreateLobbyOriginal);
+                if (!lobby)
+                {
+                    LogShimA(LogLevel::Warn, kComponent, "CreateLobby failed its byte guard; not hooked");
+                    g_CreateLobbyDetour = {};
+                }
+                if (!game && !lobby)
+                    return false;
+                LogShimA(LogLevel::Info, kComponent,
+                         "installed: CreateGame 0x%08X (%s), CreateLobby 0x%08X (%s), string assign 0x%08X", gameAddr,
+                         game ? "hooked" : "skipped", createAddr, lobby ? "hooked" : "skipped", assignAddr);
                 return true;
             }
         }

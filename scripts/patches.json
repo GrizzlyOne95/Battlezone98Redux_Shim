@@ -3542,6 +3542,12 @@
       "identity": "CNetGameLobby::CreateLobby on exact GOG Redux 2.2.301 (logs \"CNetGameLobby::CreateLobby called, creating game\"), __thiscall(this, bool private, string* password, string* name), ret 0xC at 0x007427E7; copies the password to this+0x64 and the name to this+0x88 but never fills this+0xA4, the string every Steam invite sender appends as \",password\" (FUN_007582e0, FUN_00755110). mp_invite_password.cpp detours the first 10 bytes (push ebp / mov ebp,esp / push -1 / push imm32 SEH handler; absolute operand only) and copies +0x64 into +0xA4 after the original. Bytes read from the shipped image 2026-11-08."
     },
     {
+      "name": "LobbyCreateGame",
+      "address": "0x007427F0",
+      "expected": "55 8B EC 6A FF 68 AB FC 84 00 64 A1 00 00 00 00",
+      "identity": "CNetGameLobby::CreateGame on exact GOG Redux 2.2.301 (logs \"CNetGameLobby::CreateGame called, creating game\"; the path the Create Game screen takes, live 2026-11-08), __thiscall(this, bool private, string* password, string* name), ret 0xC at 0x007428F0; copies the name to this+0x88 (0x00742822) and the password to this+0x64 (0x0074283D) but never fills this+0xA4. mp_invite_password.cpp detours the same 10 prologue bytes as LobbyCreateLobby and copies +0x64 into +0xA4 after the original. Bytes read from the shipped image 2026-11-08."
+    },
+    {
       "name": "LobbyStringAssign",
       "address": "0x0041F710",
       "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 3B 45 08 74",
