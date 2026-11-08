@@ -535,8 +535,8 @@
       "platforms": [
         "gog"
       ],
-      "pattern": "8B 0D E0 55 94 00 E8 A2 01 00 00 5D C3",
-      "offset": 7,
+      "pattern": "E8 92 01 00 00 5D C3 55 8B EC 8B 0D E0 55 94 00 E8 A2 01 00 00 5D C3",
+      "offset": 17,
       "expected_size": 4,
       "fallback": "0x007BEE2A",
       "require_unique": true,
@@ -2118,6 +2118,26 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the m32 of `mov [m32],ecx` at 0x007BF165 in FUN_007befd0 (decomp lines 33-39): int DAT_008E772C, shell music track, 0x0C in 98 mode and 0x1B in TRO (static .data initial value 0x0C). FUN_004341c0 line 24 starts the shell music from it. Unique match 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::DlcManager",
+      "pattern": "8B 8D E8 FB FF FF E8 ?? ?? ?? ?? 6A 01 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ??",
+      "offset": 13,
+      "mode": "rel32_target",
+      "fallback": "0x007647A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: SP view build FUN_007bf440 creates the 98/TRO toggle only when FUN_007537a0(FUN_007647a0(1), 1) is true (decomp lines 173-175), i.e. the TRO DLC is owned. This resolves FUN_007647a0 (cdecl, returns the DLC manager DAT_00945474). Unique whole-.text match at 0x007C04FC 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::DlcOwned",
+      "pattern": "8B 8D E8 FB FF FF E8 ?? ?? ?? ?? 6A 01 E8 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ??",
+      "offset": 20,
+      "mode": "rel32_target",
+      "fallback": "0x007537A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: SP view build FUN_007bf440 creates the 98/TRO toggle only when FUN_007537a0(FUN_007647a0(1), 1) is true (decomp lines 173-175), i.e. the TRO DLC is owned. This resolves FUN_007537a0 (__thiscall, one int DLC id, ret 4; returns the owned flag). Unique whole-.text match at 0x007C04FC 2026-11-08."
     },
     {
       "name": "TroMenuMovie::MainScreen",

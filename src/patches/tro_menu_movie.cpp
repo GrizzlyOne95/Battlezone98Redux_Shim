@@ -35,7 +35,8 @@ namespace BZROpenShim
         constexpr const char kTroMovie[] = "odyssey.ogv";
         // cUI_MainScreen banner widget ("movie"), created by 0x0078DDE0.
         constexpr uintptr_t kBannerWidgetOffset = 0x15C;
-        // Shell music track FUN_007befd0 stores in TRO mode (decomp lines 33-38).
+        // Shell music tracks FUN_007befd0 stores (decomp lines 33-39).
+        constexpr int32_t k98ShellTrack = 0xC;
         constexpr int32_t kTroShellTrack = 0x1B;
         constexpr const char kIniSection[] = "General";
         constexpr const char kIniKey[] = "LastSinglePlayerMode";
@@ -54,6 +55,9 @@ namespace BZROpenShim
         // wrapper; otherwise a saved TRO could be restored but never cleared.
         bool g_PersistEnabled = false;
         int g_SavedMode = -1;  // -1 unknown, 0 = 98, 1 = TRO
+        uint32_t g_DlcManagerFn = 0;
+        uint32_t g_DlcOwnedFn = 0;
+        volatile int32_t* g_ShellTrack = nullptr;
 
         bool ResolveOnce()
         {
@@ -97,16 +101,35 @@ namespace BZROpenShim
             }
         }
 
-        bool SeedTroMode(volatile int32_t* shellTrack)
+        bool SetMode(uint8_t tro)
         {
             __try {
-                *g_TroFlag = 1;
-                if (shellTrack) *shellTrack = kTroShellTrack;
+                *g_TroFlag = tro;
+                if (g_ShellTrack) *g_ShellTrack = tro ? kTroShellTrack : k98ShellTrack;
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {
                 return false;
             }
+        }
+
+        using DlcManagerFn = void*(__cdecl*)();
+        using DlcOwnedFn = bool(__thiscall*)(void*, int);
+        constexpr int kTroDlcId = 1;
+
+        // Same ownership test FUN_007bf440 uses before it creates the 98/TRO
+        // toggle (decomp lines 173-175). -1 = could not ask: the manager is
+        // created later in startup (FUN_00764f50, from FUN_00618c10) than
+        // patching runs, so at restore time this is usually -1.
+        int TroDlcOwned()
+        {
+            if (!g_DlcManagerFn || !g_DlcOwnedFn) return -1;
+            __try {
+                void* manager = reinterpret_cast<DlcManagerFn>(static_cast<uintptr_t>(g_DlcManagerFn))();
+                if (!manager) return -1;
+                return reinterpret_cast<DlcOwnedFn>(static_cast<uintptr_t>(g_DlcOwnedFn))(manager, kTroDlcId) ? 1 : 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return -1; }
         }
 
         bool MenuAlreadyBuilt()
@@ -124,9 +147,25 @@ namespace BZROpenShim
 
         void __fastcall TroModeRefreshHook(void* view)
         {
-            g_Refresh(view);
+            // A restored TRO on an install without the DLC: the SP view built
+            // no toggle (FUN_007bf440 lines 173-175) but still calls the
+            // refresh because the flag is set (0x007C11F7), and the refresh
+            // reads that toggle. Drop back to 98 instead; "unknown" counts as
+            // not owned. With the DLC the engine's own test has just passed,
+            // so this costs one lookup. The saved preference is kept, so a
+            // transient failure does not reset it. Unresolved check functions
+            // also block the restore, so then the flag can only have come from
+            // the toggle, which exists only with the DLC: no check needed.
+            bool fellBack = false;
+            if (*g_TroFlag != 0 && g_DlcManagerFn && g_DlcOwnedFn && TroDlcOwned() != 1) {
+                LogShimA(LogLevel::Warn, "TroMenuMovie", "TRO DLC not owned or not readable; returning to 98 mode");
+                SetMode(0);
+                fellBack = true;
+            } else {
+                g_Refresh(view);
+            }
             const int mode = (*g_TroFlag != 0) ? 1 : 0;
-            SaveMode(mode);
+            if (!fellBack) SaveMode(mode);
             const char* want = mode ? kTroMovie : kStockMovie;
             if (std::strcmp(g_BannerMovie, want) == 0) return;
             strcpy_s(g_BannerMovie, want);
@@ -167,6 +206,10 @@ namespace BZROpenShim
             return;
         }
         g_PersistEnabled = true;
+        // Resolved whatever the saved mode is: the refresh wrapper only
+        // checks ownership when these are set.
+        g_DlcManagerFn = HookEngine::ResolveNamedAddress("TroMenuMovie::DlcManager");
+        g_DlcOwnedFn = HookEngine::ResolveNamedAddress("TroMenuMovie::DlcOwned");
 
         std::string saved;
         if (!TryGetUserConfigString(kIniSection, kIniKey, saved)) {
@@ -179,10 +222,23 @@ namespace BZROpenShim
             return;
         }
 
+        // Without these the SP view cannot be checked for the DLC (see
+        // TroModeRefreshHook), so a TRO restore could fault there.
+        if (!g_DlcManagerFn || !g_DlcOwnedFn) {
+            LogShimA(LogLevel::Warn, "TroMenuMovie", "saved TRO mode not restored: TRO DLC check unresolved; starting in 98 mode");
+            return;
+        }
+        const int owned = TroDlcOwned();
+        if (owned == 0) {
+            LogShimA(LogLevel::Warn, "TroMenuMovie", "saved TRO mode not restored: TRO DLC not owned; starting in 98 mode");
+            return;
+        }
+
         // The music track is cosmetic; a miss leaves the 98 shell music
         // until the single-player screen runs the refresh.
         const uint32_t track = HookEngine::ResolveNamedAddress("TroMenuMovie::ShellMusicTrack");
-        if (!SeedTroMode(reinterpret_cast<volatile int32_t*>(static_cast<uintptr_t>(track)))) {
+        g_ShellTrack = reinterpret_cast<volatile int32_t*>(static_cast<uintptr_t>(track));
+        if (!SetMode(1)) {
             LogShimA(LogLevel::Warn, "TroMenuMovie", "seeding the saved TRO mode faulted; starting in 98 mode");
             return;
         }
@@ -193,7 +249,7 @@ namespace BZROpenShim
         // switches on the next menu build or SP toggle. (Ordering UNVERIFIED.)
         if (MenuAlreadyBuilt())
             LogShimA(LogLevel::Warn, "TroMenuMovie", "main menu was built before the TRO restore; banner stays 98 until it is rebuilt");
-        LogShimA(LogLevel::Info, "TroMenuMovie", "restored saved TRO single-player mode (shell track %s)",
-            track ? "set" : "unresolved");
+        LogShimA(LogLevel::Info, "TroMenuMovie", "restored saved TRO single-player mode (shell track %s, DLC %s)",
+            track ? "set" : "unresolved", owned == 1 ? "owned" : "not known yet; checked when the SP view opens");
     }
 }
