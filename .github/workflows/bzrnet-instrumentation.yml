@@ -36,7 +36,7 @@ jobs:
       - name: Configure tunnel tests
         run: cmake -S tests -B build/tunnel-tests -A Win32
       - name: Build tunnel protocol and configuration tests
-        run: cmake --build build/tunnel-tests --config Release --target socket_tunnel_protocol_tests socket_tunnel_config_tests steam_tunnel_policy_tests steam_tunnel_fixture
+        run: cmake --build build/tunnel-tests --config Release --target socket_tunnel_protocol_tests socket_tunnel_config_tests steam_tunnel_policy_tests steam_tunnel_fixture steam_ban_list_tests
       - name: Run tunnel protocol and configuration tests
         run: ctest --test-dir build/tunnel-tests -C Release -R "socket_tunnel|steam_tunnel|steam_ban_list" --output-on-failure
       - name: Build standalone Win32 tunnel
