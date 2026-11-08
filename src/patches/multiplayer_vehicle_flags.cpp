@@ -156,6 +156,11 @@ namespace BZROpenShim
 
         constexpr float kMultiplayerFlagMinimumLift = 1.5f;
 
+        // The player's own flag (MultiplayerFlagShowOwnCraft) sat 1.5 m above
+        // a pilot's origin: at eye level, so it covered the first-person view.
+        // Lift only the own flag further so its 1 m billboard clears the head.
+        constexpr float kMultiplayerFlagOwnExtraLift = 2.0f;
+
         constexpr float kMultiplayerFlagHiddenY = -100000.0f;
 
         bool g_FlagPayloadReady = false;
@@ -1012,7 +1017,8 @@ namespace BZROpenShim
                     continue;
                 }
 
-                position[1] += GetMultiplayerFlagObjectLift(gameObject);
+                position[1] += GetMultiplayerFlagObjectLift(gameObject) +
+                               (isOwnCraft ? kMultiplayerFlagOwnExtraLift : 0.0f);
                 if (!ConvertMultiplayerFlagPointToRenderSpace(position))
                     continue;
 
