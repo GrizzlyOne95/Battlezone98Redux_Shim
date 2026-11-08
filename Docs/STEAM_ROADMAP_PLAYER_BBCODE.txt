@@ -1,6 +1,6 @@
 [h1]Campaign Reimagined and OpenShim: Roadmap[/h1]
 
-[b]Updated 2026-11-07. Current version: Campaign Reimagined with OpenShim 1.0.0.71 and EXU 1.3.2.[/b]
+[b]Updated 2026-11-08. Current version: Campaign Reimagined with OpenShim 1.0.0.74 and EXU 1.3.2.[/b]
 
 [b]OpenShim[/b] is a community patch for Battlezone 98 Redux. It fixes engine bugs, adds the in-game OpenShim Options menu and powers the new visuals. [b]Campaign Reimagined (CR)[/b] is the remastered NSDF campaign built on top of it. [b]Extra Utilities (EXU)[/b] gives mod and mission makers the same tools.
 
@@ -22,6 +22,21 @@
 [*] [b]For modders[/b] - EXU and bzfile add Lua tools for cameras, HUD, materials, AI, production, file saving and more.
 [/list]
 
+[h2]Ways to Play Online[/h2]
+
+Click [b]Multiplayer[/b] and OpenShim shows a [b]SERVER[/b] box first. Every option except the first needs OpenShim on every PC. Steam and GOG players cannot play together.
+
+[list]
+[*] [b]Rebellion[/b] - the normal lobby browser, as before.
+[*] [b]Host for Steam friends, no port forwarding[/b] (Steam) - [b]Local host tools[/b], set [b]Steam list: On[/b], click [b]Start host[/b]. Friends accept your Steam invite or use [b]Join Game[/b] from the menus; it runs over Steam's relay. New: tested between two PCs, a full match through it not yet - please report how it goes.
+[*] [b]Public Steam list[/b] (Steam) - the same host also appears for every OpenShim player under [b]Local host tools > Refresh[/b] as a [b][Steam][/b] row. Set a lobby password to keep strangers out.
+[*] [b]Password invites[/b] - inviting a friend to a passworded lobby now just works; they no longer get stuck on "gathering information from the server".
+[*] [b]Custom[/b] - type a server address: a dedicated server, or a friend's PC over Tailscale or another VPN.
+[*] [b]LAN with no sign-in[/b] - experimental, off by default ([b]NoAuthLan=1[/b] in openshim.ini).
+[/list]
+
+Step-by-step instructions: [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/blob/main/Docs/PLAYER_CONNECTION_GUIDE.md]How to play multiplayer[/url].
+
 [h2]Still Open: Multiplayer[/h2]
 
 These are known problems we are still tracking down. Detailed reports and log files help most.
@@ -29,7 +44,7 @@ These are known problems we are still tracking down. Detailed reports and log fi
 [list]
 [*] [b]Daywrecker[/b] - terrain spikes after a hit. We have not been able to reproduce them yet. (The phantom blast at the Armory is fixed.)
 [*] [b]Splinter[/b] - shells that appear twice. We have not been able to reproduce this; tell us if you see it.
-[*] [b]Joining and leaving[/b] - friend invites don't carry the game password (a fix is in testing); when the host leaves, the host's own team's units still vanish.
+[*] [b]Host leaving[/b] - when the host leaves, the host's own team's units still vanish.
 [*] [b]Scoreboard[/b] - some kills credited to the wrong player, especially sniper kills by the host.
 [*] [b]Free camera[/b] - players in a match can sometimes use a free camera they shouldn't have.
 [*] [b]Bad connections[/b] - long stalls when packet loss is heavy.
@@ -48,11 +63,11 @@ These are known problems we are still tracking down. Detailed reports and log fi
 
 [h2]Experiments[/h2]
 
-Local host tools are in development on separate branches, keeping Official, Custom and Local choices. The older helper preview still needs Steam/Galaxy sign-in. A newer opt-in LAN prototype hosts the session inside the game with local identities and no helper or sign-in. Native GOG lobby entry/game creation and automated protocol checks pass; guest join, completed launch and two-PC matches still need qualification. Neither is included in the release.
+LAN play with no Steam or GOG sign-in is an opt-in prototype ([b]NoAuthLan=1[/b] in openshim.ini). Guest join, match launch and two-PC games still need testing.
 
 Not part of the release, and may never be: DLSS frame generation and ray-traced shadows, terrain tessellation, and fog that swirls around passing hovercraft.
 
-A Steam tunnel for home-hosted multiplayer is in development. A 10-minute match between two Steam accounts on two PCs has passed through it. Next: a host runs their own server, and Steam friends join it with an invite or Join Game, with no setup on their side. It is not ready for players.
+Steam hosting from your own PC is now in the release (see Ways to Play Online). Still to test: a full match through the one-click host, joining from inside a mission, and Linux/Steam Deck.
 
 [h2]Install and Update[/h2]
 
@@ -64,6 +79,8 @@ A Steam tunnel for home-hosted multiplayer is in development. A 10-minute match 
 [h2]Recent Updates[/h2]
 
 [list]
+[*] [b]2026-11-08 (1.0.0.74)[/b] - Steam players can host from their own PC with no port forwarding: Multiplayer > Local host tools > Start host. Friends join from your Steam invite or Join Game, and [b]Steam list: On[/b] lets other OpenShim Steam players find the game. Invites to passworded lobbies now work, and the host can ban players ([b]/ban[/b], saved in bans.cfg). New Lives option: Infinite. The main-menu banner plays The Red Odyssey video in TRO mode. The Options description box shows the full text. See Ways to Play Online above.
+[*] [b]2026-11-08 (1.0.0.72-73)[/b] - A cleared or fresh shader cache no longer makes the multiplayer game room compile shaders for 20+ seconds (a pre-built shader pack ships with the patch). The game room no longer shows "Not Responding" while it loads. HD terrain and tile blending now apply reliably on stock maps.
 [*] [b]2026-11-07 (1.0.0.71)[/b] - Entering a multiplayer game room no longer freezes the game for 20-30 seconds: it now takes about 6 seconds and the window stays responsive.
 [*] [b]2026-11-07 (1.0.0.70)[/b] - The first load of a mission after an update or driver change is much faster: terrain shaders compile 4-5 times quicker (the Black Dog campaign load dropped from about 105 to 29 seconds on an empty shader cache).
 [*] [b]2026-11-07 (1.0.0.69)[/b] - Terrain on some missions no longer turns flat and untextured. Loading a Campaign Reimagined mission no longer freezes the window while shaders compile (and the first launch after an update no longer hangs on a black window), and backing out of the custom campaign list is instant instead of a 20-second freeze. Fixes a crash when opening the pause menu and a crash after exiting on DirectX 11, and liquid ground such as lava now moves instead of rendering almost black. New in Options: Reset to Stock, a Troubleshooting Bundle button, and optional single-player Legacy Tank AI and AI orders.
@@ -82,6 +99,3 @@ A Steam tunnel for home-hosted multiplayer is in development. A 10-minute match 
 Post in this discussion or open an issue on [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/issues]GitHub[/url]. Say what you were doing, and attach the files from the [b]logs[/b] folder in your game folder, especially [b]openshim_crash.log[/b] if there is one.
 
 The full technical roadmap, with test evidence for every item, is on [url=https://github.com/GrizzlyOne95/Battlezone98Redux_Shim/blob/main/Docs/STEAM_ROADMAP_BBCODE.txt]GitHub[/url].
-
-[quote]LAN development review (2026-10-29): duplicate Direct LAN mesh PR #644 was closed; its branch is retained for research. Local host tools still require stock platform sign-in. Review fixes bind services to the selected private adapter, prefer the routed adapter and expose startup errors. All 155 Win32 CTests and the real-helper lifecycle check pass; isolated GOG startup reached readiness reporting, but native LAN UI and two-PC gameplay acceptance remain open. Nothing was released.[/quote]
-[quote]Steam tunnel review (2026-10-29): opt-in M1/M2 remain development previews. Review fixes bound local startup waiting and explain missing/uninitialized Steam-session failures. All 162 Win32 CTests pass. Native GOG reports an uninitialized Steam API; a fresh standalone Steam init failed. Remote SDR without publisher configuration and host-account coexistence remain UNKNOWN. Steam transport identity is not bound to the lobby user ID. Two-account gameplay and Proton/Wine acceptance are still required; no release.[/quote]
