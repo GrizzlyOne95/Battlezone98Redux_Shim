@@ -205,6 +205,7 @@
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\net_reorder_core.h" />
     <ClInclude Include="include\shim_log.h" />
+    <ClInclude Include="include\steam_launcher_argument.h" />
     <ClInclude Include="include\winmm_proxy.h" />
     <ClInclude Include="include\patches.h" />
     <ClInclude Include="include\patcher.h" />
