@@ -22,7 +22,9 @@ def script_tiles(path):
     match = re.search(r"\$uiTiles\s*=\s*@\((.*?)\)", text, re.S)
     if not match:
         raise AssertionError("no $uiTiles array in %s" % path)
-    return set(re.findall(r'"([^"]+)"', match.group(1)))
+    # $uiTiles also carries non-tile UI media (odyssey.ogv, the TRO main-menu
+    # banner); only the .png entries are tiles.
+    return {name for name in re.findall(r'"([^"]+)"', match.group(1)) if name.endswith(".png")}
 
 
 def source_tiles():

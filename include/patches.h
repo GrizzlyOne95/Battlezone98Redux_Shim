@@ -110,6 +110,10 @@ namespace BZROpenShim
             // points and screen-owned intro audio. Stock planet calls stay stock.
             { 0, HookEngine::PatchType::REL32, {}, "Custom Planet Video Playback", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Campaign Manifest ID", false, {} },
+            // Main-menu banner follows the SP 98/TRO toggle (odyssey.ogv in TRO).
+            { 0, HookEngine::PatchType::REL32, {}, "TRO Banner Mode Refresh 1/2", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "TRO Banner Mode Refresh 2/2", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "TRO Banner Movie Name", false, {} },
             // The map-description loader has a 2400-byte stack array and
             // appends a NUL after copying. Clamp to 2399, not 2400: the stock
             // limit triggers its range-check failure for any larger .des.
