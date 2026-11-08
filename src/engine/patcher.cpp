@@ -27,6 +27,7 @@
 #include "weapon_presentation_call_bridges.h"
 #include "weapon_presentation_native.h"
 #include "deferred_modable_rebuild.h"
+#include "mp_lives_infinite.h"
 #include "gas_copy_pool.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -430,10 +431,6 @@ namespace BZROpenShim
 
     static bool IsDisableControlSmoothingPatchName(const char* name) { return name && strcmp(name, "Disable Control Smoothing") == 0; }
 
-    // [Network] InfiniteLives (default OFF): host launch fill uses 99 lives
-    // instead of the lobby value. Guests take the host's value over the wire.
-    static bool IsInfiniteLivesPatchName(const char* name) { return name && strcmp(name, "Infinite Lives Host Fill") == 0; }
-
     static bool IsShellCasingPatchName(const char* name) { return name && strncmp(name, "Shell Casings ", 14) == 0; }
 
     // [General] ShellCasings (default OFF) arrives inverted through the env
@@ -585,11 +582,6 @@ namespace BZROpenShim
         }
         if (!ShouldEnableDisableControlSmoothing()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsDisableControlSmoothingPatchName(p.name.c_str()); }), patches.end());
-        }
-        bool infiniteLives = false;
-        TryGetUserConfigBool("Network", "InfiniteLives", infiniteLives);
-        if (!infiniteLives) {
-            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsInfiniteLivesPatchName(p.name.c_str()); }), patches.end());
         }
         bool muzzleFlash = false, meshRecoil = false;
         TryGetUserConfigBool("SinglePlayer", "MuzzleFlash", muzzleFlash);
@@ -1446,6 +1438,20 @@ namespace BZROpenShim
         }
     }
 
+    // The sixth "Infinite" step of the MP Lives button: five always-on sites,
+    // all or nothing. A step that cycles to 6 without the launch fill (or a
+    // label that says Infinite without effect) would mislead, so any miss
+    // leaves the stock button.
+    static void ArmInfiniteLives(std::vector<HookEngine::PatchDef>& patches, bool isSteam) {
+        bool any = false;
+        for (const auto& p : patches) if (MpLivesInfinite::IsPatchName(p.name.c_str())) { any = true; break; }
+        if (!any) return;
+        if (const char* why = MpLivesInfinite::Arm(patches, isSteam))
+            Log(L"[LIVES] infinite step disabled: %hs\n", why);
+        else
+            Log(L"[LIVES] infinite step armed\n");
+    }
+
     // A gameplay patch that did not land leaves its option dead; tell the
     // Options menu so it shows Unavailable instead of On.
     static void MarkPatchOptionFailed(const char* patchName) {
@@ -1514,6 +1520,7 @@ namespace BZROpenShim
                 if (p.address == 0 || p.expected_original.empty()) continue;
                 if (p.name.find("Offensive Attack") == std::string::npos &&
                     !IsBanFeaturePatchName(p.name.c_str()) &&
+                    !MpLivesInfinite::IsPatchName(p.name.c_str()) &&
                     !IsVehicleListModFixPatchName(p.name.c_str())) continue;
                 std::vector<uint8_t> cur(p.expected_original.size()); SIZE_T r;
                 if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(p.address), cur.data(), cur.size(), &r) || cur != p.expected_original) { all = false; break; }
@@ -1673,7 +1680,7 @@ namespace BZROpenShim
             MarkPatchOptionFailed(patch.name.c_str());
             return true;
         }), patches.end());
-        FillJmp5Payloads(patches); FillDwordPayloads(patches); FillRel32Payloads(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
+        FillJmp5Payloads(patches); FillDwordPayloads(patches); FillRel32Payloads(patches, isSteam); ArmInfiniteLives(patches, isSteam); FillArtilleryVolleyPayloads(patches); WaitForExpectedBytes(patches, isSteam);
         Hooks::ConfigureP2PReliablePatches(patches);
         Hooks::ConfigureP2PEarlyUnreliablePatches(patches);
         Hooks::ConfigureSyncJoinDefaultPatch(patches);

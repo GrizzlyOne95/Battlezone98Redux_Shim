@@ -72,7 +72,7 @@ static const char* const kShimCategoryFixes[] = {
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions", "Map List Fixes",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
-    "MP Setup Screen", "Infinite Lives", "Map Letter Jump" };
+    "MP Setup Screen", "Map Letter Jump" };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install Updates", "Career Stats", "Reset Career Stats", "Reset to Stock", "Troubleshooting Bundle",
     "AutoSave", "AutoSave Interval", "AutoSave Backups", "Fast Menu Transitions" };

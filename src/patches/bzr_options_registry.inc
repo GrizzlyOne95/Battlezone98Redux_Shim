@@ -772,12 +772,6 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Wait at least 1.5x each peer's round trip before resending a reliable packet, so "
       "high-ping links only resend real losses. Same wire format. Restart required." },
-    // Patch filtered at startup; absent key = off, so defaultIndex 1 selects "0" (Off).
-    { "Infinite Lives", "Network", "InfiniteLives", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::RestartRequired,
-      "Host only: multiplayer games you host start with unlimited lives. Has no effect "
-      "as a guest. Restart required." },
     // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
     { "Map Letter Jump", "General", "MapListLetterJump", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -918,7 +912,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
     { "RoutePreference", "Stock" }, { "UdpPort", "0" }, { "GovernorTuning", "Stock" },
-    { "RemoteSmoothingMs", "0" }, { "InfiniteLives", "0" }, { "MapListLetterJump", "0" },
+    { "RemoteSmoothingMs", "0" }, { "MapListLetterJump", "0" },
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
