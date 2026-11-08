@@ -35,11 +35,13 @@ namespace
     std::deque<SteamNetConnectionStatusChangedCallback_t>* callbackQueue = nullptr;
     bool callbackOverflow = false;
     std::atomic<uint64_t> lastStatusCallback{0};
+    std::atomic<uint64_t> statusCallbackCount{0};
     void OnStatus(SteamNetConnectionStatusChangedCallback_t* change)
     {
         // SteamAPI_RunCallbacks may be called on the game's main thread. Do not
         // call Steam, log, touch tunnel sockets or retain callback-owned memory.
         lastStatusCallback.store(GetTickCount64());
+        statusCallbackCount.fetch_add(1);
         AcquireSRWLockExclusive(&callbackLock);
         if (callbackQueue)
         {
@@ -61,11 +63,12 @@ struct SteamTransport::Impl
     ISteamNetworkingUtils* utils = nullptr;
     VoidFn run = nullptr, shutdown = nullptr;
     HSteamListenSocket listener = k_HSteamListenSocket_Invalid;
-    struct Connection { uint64_t identity = 0; bool connected = false; };
+    struct Connection { uint64_t identity = 0; bool connected = false; int lastState = -1; };
     std::map<HSteamNetConnection, Connection> connections;
     std::deque<SteamNetConnectionStatusChangedCallback_t> callbacks;
     std::vector<SteamEvent> events;
     uint64_t nextConnect = 0, lastDiagnostics = 0, startedAt = 0, lastCallbackWarning = 0;
+    bool sawCallback = false;
     int lastRelay = -999, lastAuth = -999;
     uint64_t sentBytes = 0, receivedBytes = 0;
 
@@ -186,7 +189,7 @@ struct SteamTransport::Impl
             throw std::runtime_error("could not pin Steam callback code lifetime");
         AcquireSRWLockExclusive(&callbackLock);
         const bool busy = callbackQueue != nullptr;
-        if (!busy) { lastStatusCallback = 0; startedAt = GetTickCount64(); callbackQueue = &callbacks; callbackOverflow = false; registered = true; }
+        if (!busy) { lastStatusCallback = 0; statusCallbackCount = 0; startedAt = GetTickCount64(); callbackQueue = &callbacks; callbackOverflow = false; registered = true; }
         ReleaseSRWLockExclusive(&callbackLock);
         if (busy) throw std::runtime_error("only one Steam tunnel transport per process");
         utils->InitRelayNetworkAccess();
@@ -219,6 +222,13 @@ struct SteamTransport::Impl
         }
         char text[256]; std::snprintf(text, sizeof(text), "Steam status peer=%llu connection=%u state=%d reason=%d detail=%.100s",
             static_cast<unsigned long long>(it->second.identity), h, int(info.m_eState), info.m_eEndReason, info.m_szEndDebug); Log(text);
+        it->second.lastState = int(info.m_eState);
+        Apply(h, info, now);
+    }
+    void Apply(HSteamNetConnection h, const SteamNetConnectionInfo_t& info, uint64_t now)
+    {
+        auto it = connections.find(h);
+        if (it == connections.end()) return;
         if (info.m_eState == k_ESteamNetworkingConnectionState_Connected)
         {
             const bool valid = info.m_identityRemote.GetSteamID64() == it->second.identity &&
@@ -230,6 +240,23 @@ struct SteamTransport::Impl
                  info.m_eState == k_ESteamNetworkingConnectionState_ProblemDetectedLocally)
         {
             events.push_back({h, it->second.identity, false}); Close(h); nextConnect = now + 5000;
+        }
+    }
+    // Fallback for a status callback that never arrives. Log on change only;
+    // drive the same connect/close/retry paths as a callback would.
+    void PollStates(uint64_t now)
+    {
+        std::vector<HSteamNetConnection> handles;
+        for (const auto& entry : connections) handles.push_back(entry.first);
+        for (const auto h : handles)
+        {
+            auto it = connections.find(h);
+            SteamNetConnectionInfo_t info{};
+            if (it == connections.end() || !sockets->GetConnectionInfo(h, &info) || int(info.m_eState) == it->second.lastState) continue;
+            it->second.lastState = int(info.m_eState);
+            char text[256]; std::snprintf(text, sizeof(text), "Steam polled peer=%llu connection=%u state=%d reason=%d detail=%.100s",
+                static_cast<unsigned long long>(it->second.identity), h, int(info.m_eState), info.m_eEndReason, info.m_szEndDebug); Log(text);
+            Apply(h, info, now);
         }
     }
     void Diagnostics(uint64_t now)
@@ -277,13 +304,23 @@ void SteamTransport::Start(const Config& cfg, std::atomic<bool>& stop, Logger lo
 std::vector<SteamEvent> SteamTransport::Poll(uint64_t now)
 {
     if (impl->initialized) impl->run();
+    // The shipped steam_api.dll predates SteamNetworkingSockets, and its
+    // SteamAPI_RunCallbacks was never seen to dispatch connection-status
+    // callbacks (no callback in five live attempts, game or standalone).
+    // The interface's own dispatcher drains them here, on this worker.
+    impl->sockets->RunCallbacks();
+    if (!impl->sawCallback && statusCallbackCount.load())
+    {
+        impl->sawCallback = true;
+        impl->Log("Steam status callbacks are being delivered");
+    }
     std::deque<SteamNetConnectionStatusChangedCallback_t> changes;
     AcquireSRWLockExclusive(&callbackLock);
     changes.swap(impl->callbacks); const bool overflow = callbackOverflow;
     ReleaseSRWLockExclusive(&callbackLock);
     if (overflow) throw std::runtime_error("Steam callback queue overflow; transport stopped");
     for (const auto& change : changes) impl->Status(change, now);
-    impl->Connect(now); impl->Diagnostics(now);
+    impl->PollStates(now); impl->Connect(now); impl->Diagnostics(now);
     return std::exchange(impl->events, {});
 }
 SteamSend SteamTransport::Send(uint32_t connection, const std::vector<uint8_t>& bytes, bool reliable)
