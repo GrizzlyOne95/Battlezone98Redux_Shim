@@ -284,6 +284,7 @@
     <ClCompile Include="src\patches\mp_lives_infinite.cpp" />
     <ClCompile Include="src\patches\mp_host_leave.cpp" />
     <ClCompile Include="src\patches\mp_invite_password.cpp" />
+    <ClCompile Include="src\patches\steam_public_listing.cpp" />
     <ClCompile Include="src\patches\steam_tunnel_join.cpp" />
     <ClCompile Include="src\patches\net_tag_dispatch.cpp" />
     <ClCompile Include="src\patches\mp_daywrecker_armory_collision.cpp" />
@@ -515,6 +516,7 @@
     <ClInclude Include="include\mp_lives_infinite.h" />
     <ClInclude Include="include\mp_host_leave_install.h" />
     <ClInclude Include="include\mp_invite_password_install.h" />
+    <ClInclude Include="include\steam_public_listing.h" />
     <ClInclude Include="include\steam_tunnel_join.h" />
     <ClInclude Include="include\net_tag_dispatch.h" />
     <ClInclude Include="include\mp_daywrecker_armory_collision_install.h" />

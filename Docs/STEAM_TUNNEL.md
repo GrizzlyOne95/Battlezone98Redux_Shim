@@ -248,6 +248,62 @@ UNVERIFIED until the two-account live test:
 - a cold launch from Join Game (the token arrives on the command line);
 - joining from inside a mission (skipped today).
 
+## Public Steam listing
+
+`src/patches/steam_public_listing.cpp` (component STEAMLIST). Lets strangers
+find a server that runs a Steam bridge, with no VPS and no friend invite.
+
+- Host: opt in with **Steam list: On** on the LAN screen (saved as
+  `openshim.ini [Network] SteamPublicListing=1`; default off). While a bridge
+  is announced on this PC, the game owns a public Steam lobby (appid 301650,
+  250 slots so searches never treat it as full) whose data is
+  `bridge=<SteamID>`, `name=<persona name>`, then `openshim=tunnel1`. The
+  lobby is left when the toggle goes off, the bridge stops, or its SteamID
+  changes. A failed create, or one with no result after 15 s, retries after
+  60 s (a late result is left at once). Every 2 s the host checks
+  that the advert still carries its tag; if Steam dropped it, a new one is
+  made.
+- Game guard: creating a lobby also enters it, and the game's own Steam
+  LobbyEnter_t callback (`SteamLobbyEnterRun`, 0x00750F90, calling
+  `CNetGameLobby::OnLobbyEntered` 0x0073E240) would leave the game's current
+  lobby and adopt the advert as its game room. The shim detours that
+  callback and drops enters for its own advert lobbies. An enter owned by
+  this account that arrives while a create is in flight (two at most) is held
+  until the create result names the advert, and replayed to the game if it was
+  not the advert; a failed or timed-out create replays every held enter.
+  Without the guard (row unbound or bytes differ) the host side never
+  creates a lobby and the LAN screen says so.
+- Joiner: **Refresh** on the LAN screen also runs a worldwide lobby search
+  for `openshim=tunnel1` (up to 50 results, own adverts dropped). An advert
+  is shown only when its lobby owner is the bridge it names (the in-game
+  bridge is the host's own account), so nobody can list another player's
+  bridge (if Steam reports no owner for an unjoined lobby, the check is
+  skipped); one row per bridge. Each row keeps the game it showed, so a list
+  that changes before the click never joins another game. A search with no
+  result after 15 s shows "timed out" and Refresh works again. Steam
+  servers follow the LAN hosts in the games list as `<name>  [Steam]`.
+  Choosing one calls `SteamTunnelJoin::JoinBridge`, which runs the same
+  switch checks as a friend join (no UDP bridge, not our own bridge, not in a
+  mission, BZRNet lookup hook installed), then reconnects BZRNet. A refusal
+  shows its reason on the status line. Choosing a LAN row afterwards first
+  points the tunnel back to its startup host.
+- Nobody joins the Steam lobby: it is an advert only. The server's own
+  password and bans remain the only gate.
+- Steam build only (the LAN screen hides the toggle without `steam_api.dll`).
+  Kill switch: `OPENSHIM_DISABLE_STEAM_PUBLIC_LISTING=1`.
+- Only an in-game bridge is listed. A standalone `socket_tunnel.exe bridge`
+  (for example a headless server) does not create its own lobby.
+
+UNVERIFIED until the live two-PC test: that `GetAPICallResult` returns
+results for handles never registered with a call-result object; that the
+worldwide search returns a lobby whose owner sits in no other lobby; that
+`GetLobbyOwner` reads the owner of an unjoined search result; that the game's
+own lobby browser does not show the adverts; that the
+Steam runtime bytes at 0x00750F90 match GOG once SteamStub settles; that
+Steam dispatches LobbyEnter_t on the game thread; and that the game's
+LobbyDataUpdate_t handler (0x00741B20, which only acts on lobbies in its own
+list) ignores the advert's data updates.
+
 ## Trusted LAN setup
 
 This M1 transport has **no encryption or authentication**. Use it only on

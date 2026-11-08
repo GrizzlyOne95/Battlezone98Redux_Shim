@@ -8,6 +8,8 @@
 #include "matchmaking_server.h"
 #include "net_optimizer.h"
 #include "shell_screens.h"
+#include "steam_public_listing.h"
+#include "steam_tunnel_join.h"
 #include "patcher.h"
 #include <windows.h>
 #include <array>
@@ -21,6 +23,8 @@ namespace BZROpenShim
         namespace Shell = ShellScreens;
         void* g_Status = nullptr;
         void* g_Search = nullptr;
+        void* g_Hint = nullptr;
+        void* g_SteamButton = nullptr;
         // mkscreens.py LAN_LAYOUT paints the panel these rects sit on.
         constexpr const char* kLanPanelTexture = "osh_lan_center.png";
         constexpr float kPadX = 28.0f;          // box text inset, as the pre-lobby
@@ -34,10 +38,20 @@ namespace BZROpenShim
 
         std::array<void*, 4> g_Rows{};
         std::array<std::string, 4> g_RowText{};
-        std::string g_StatusText, g_SearchText;
+        // What each row joins, fixed when its label is set, so a list that
+        // changes between drawing and clicking never joins another game.
+        struct RowTarget { bool steam = false; uint64_t bridge = 0; std::string endpoint, name; };
+        std::array<RowTarget, 4> g_RowTarget{};
+        std::string g_StatusText, g_SearchText, g_HintText, g_SteamButtonText;
         size_t g_Page = 0;
         bool g_JoinHostedWhenReady = false;
         std::string g_Note;
+        constexpr const char* kFirewallHint = "Hosting opens LAN listeners; Windows may ask for firewall access.";
+        // LAN hosts first, then public Steam listings.
+        size_t GameCount(const LanSession::Snapshot& status)
+        {
+            return status.hosts.size() + SteamPublicListing::Games().size();
+        }
         std::wstring GameRoot()
         {
             wchar_t path[32768]{};
@@ -86,6 +100,12 @@ namespace BZROpenShim
         {
             g_Note.clear(); g_Page = 0;
             LanSession::StartScan();
+            SteamPublicListing::StartBrowse();
+        }
+        void __cdecl ToggleSteamListing()
+        {
+            g_Note.clear();
+            SteamPublicListing::SetHostListing(!SteamPublicListing::HostListingOn());
         }
         void __cdecl ManualJoin()
         {
@@ -95,19 +115,27 @@ namespace BZROpenShim
         }
         template<size_t Row> void __cdecl Select()
         {
-            const auto status = LanSession::Status();
-            const auto index = g_Page * g_Rows.size() + Row;
-            if (index >= status.hosts.size()) return;
-            const auto& host = status.hosts[index];
-            // A loopback discovery answer from our managed host must use its
-            // actual LAN endpoint when we join, as other PCs will do.
-            const auto address = host.address == "127.0.0.1" && status.state == LanSession::HostState::Running
-                ? status.hostAddress : host.address;
-            Join(LanDiscovery::Endpoint(address, host.port));
+            const auto target = g_RowTarget[Row]; // copy: joining redraws the rows
+            if (target.steam)
+            {
+                std::string note;
+                g_JoinHostedWhenReady = false;
+                if (SteamTunnelJoin::JoinBridge(target.bridge, note))
+                    Shell::Back(Shell::LiveScreen(Shell::kLanScreenId));
+                else
+                    g_Note = "Cannot join " + target.name + ": " + note + ".";
+                return;
+            }
+            if (target.endpoint.empty()) return;
+            // A Steam join moved the tunnel; a LAN row must not go through it.
+            std::string note;
+            if (!SteamTunnelJoin::RestoreStartup(note))
+            { g_Note = "Cannot join " + target.endpoint + ": " + note + "."; return; }
+            Join(target.endpoint);
         }
         void __cdecl Next()
         {
-            const size_t count = LanSession::Status().hosts.size();
+            const size_t count = GameCount(LanSession::Status());
             const size_t rows = g_Rows.size();
             g_Page = count ? (g_Page + 1) % ((count + rows - 1) / rows) : 0;
         }
@@ -127,21 +155,44 @@ namespace BZROpenShim
             if (statusText != g_StatusText)
             { Shell::SetLabelText(g_Status, statusText.c_str()); g_StatusText = statusText; }
             // The count only matters with hosts; the label must end before Refresh.
-            const auto search = status.hosts.empty() ? status.scanMessage
+            auto search = status.hosts.empty() ? status.scanMessage
                 : status.scanMessage + " (" + std::to_string(status.hosts.size()) + " found)";
+            const bool steam = SteamPublicListing::Available();
+            if (steam && !SteamPublicListing::BrowseText().empty())
+                search += "; " + SteamPublicListing::BrowseText();
+            const auto hint = steam ? SteamPublicListing::HostListingText() : std::string(kFirewallHint);
+            if (hint != g_HintText)
+            { Shell::SetLabelText(g_Hint, hint.c_str()); g_HintText = hint; }
+            const std::string steamButton = SteamPublicListing::HostListingOn() ? "Steam list: On" : "Steam list: Off";
+            if (g_SteamButton && g_BzrFn_SetButtonLabel && steamButton != g_SteamButtonText)
+            { g_BzrFn_SetButtonLabel(g_SteamButton, steamButton.c_str()); g_SteamButtonText = steamButton; }
             if (search != g_SearchText)
             { Shell::SetLabelText(g_Search, search.c_str()); g_SearchText = search; }
             // Hosts expire; keep the page on the list instead of showing blanks.
-            if (g_Page && g_Page * g_Rows.size() >= status.hosts.size()) g_Page = 0;
+            const auto& games = SteamPublicListing::Games();
+            if (g_Page && g_Page * g_Rows.size() >= GameCount(status)) g_Page = 0;
             for (size_t row = 0; row < g_Rows.size(); ++row)
             {
                 const auto index = g_Page * g_Rows.size() + row;
                 std::string text;
+                RowTarget target;
                 if (index < status.hosts.size())
                 {
                     const auto& host = status.hosts[index];
                     text = host.name + "  [" + LanDiscovery::Endpoint(host.address, host.port) + "]";
+                    // A loopback discovery answer from our managed host must use its
+                    // actual LAN endpoint when we join, as other PCs will do.
+                    const auto address = host.address == "127.0.0.1" && status.state == LanSession::HostState::Running
+                        ? status.hostAddress : host.address;
+                    target.endpoint = LanDiscovery::Endpoint(address, host.port);
                 }
+                else if (index < GameCount(status))
+                {
+                    const auto& game = games[index - status.hosts.size()];
+                    text = game.name + "  [Steam]";
+                    target.steam = true; target.bridge = game.bridge; target.name = game.name;
+                }
+                g_RowTarget[row] = target;
                 if (g_Rows[row] && g_BzrFn_SetButtonLabel && text != g_RowText[row])
                 { g_BzrFn_SetButtonLabel(g_Rows[row], text.c_str()); g_RowText[row] = text; }
             }
@@ -149,7 +200,8 @@ namespace BZROpenShim
         bool Build(void* screen)
         {
             g_Note.clear(); g_Page = 0; g_JoinHostedWhenReady = false;
-            g_StatusText.clear(); g_SearchText.clear(); g_RowText.fill("");
+            g_StatusText.clear(); g_SearchText.clear(); g_HintText.clear(); g_SteamButtonText.clear(); g_RowText.fill(""); g_RowTarget.fill({});
+            const bool steam = SteamPublicListing::Available();
             const char* texture = Shell::IsTextureDeployed(kLanPanelTexture) ? kLanPanelTexture : nullptr;
             if (!texture) Log(L"[LAN] %hs is not deployed; the screen shows the bare stock background\n", kLanPanelTexture);
             void* panel = Shell::AddPanel(screen, nullptr, "OpenShimLAN", {0, 0, 1440, 1080}, texture);
@@ -158,7 +210,7 @@ namespace BZROpenShim
             Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {470, 132, 500, 56}, noAuth ? "LAN (NO SIGN-IN)" : "LOCAL HOST TOOLS", Shell::kTitleLabelFlags);
             const struct { const char* name; const Shell::Rect& box; const char* title; } headers[] = {
                 {"OpenShimLAN_HostHdr", kHostBox, "HOST"},
-                {"OpenShimLAN_GamesHdr", kGamesBox, "GAMES ON THIS NETWORK"},
+                {"OpenShimLAN_GamesHdr", kGamesBox, steam ? "GAMES ON THIS NETWORK AND STEAM" : "GAMES ON THIS NETWORK"},
                 {"OpenShimLAN_JoinHdr", kJoinBox, "JOIN BY ADDRESS"},
             };
             for (const auto& h : headers)
@@ -171,8 +223,10 @@ namespace BZROpenShim
                 slot = {nullptr, "osh_value_hv.png", "osh_value_ck.png"};
             Shell::AddButton(panel, panel, "OpenShimLAN_Host", {272, 294, 220, 42}, "Start host", slot, 1.0f, 0, &Start);
             Shell::AddButton(panel, panel, "OpenShimLAN_Stop", {508, 294, 220, 42}, "Stop host", slot, 1.0f, 0, &Stop);
+            g_SteamButton = steam ? Shell::AddButton(panel, panel, "OpenShimLAN_SteamList", {744, 294, 220, 42},
+                SteamPublicListing::HostListingOn() ? "Steam list: On" : "Steam list: Off", slot, 1.0f, 0, &ToggleSteamListing) : nullptr;
             g_Status = Shell::AddLabel(panel, panel, "OpenShimLAN_Status", {kTextX, 346, kTextW, 28}, "");
-            Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {kTextX, 374, kTextW, 28}, "Hosting opens LAN listeners; Windows may ask for firewall access.");
+            g_Hint = Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {kTextX, 374, kTextW, 28}, kFirewallHint);
             Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {kTextX, 402, kTextW, 28}, noAuth ? "Hosted by this game. No accounts or helper. Stop host disconnects players." : "Steam/Galaxy sign-in is still required. Stop host disconnects its players.");
 
             g_Search = Shell::AddLabel(panel, panel, "OpenShimLAN_Search", {kTextX, 504 + kCaptionDrop - 2, 540, 32}, "");
@@ -200,7 +254,7 @@ namespace BZROpenShim
         {
             LanSession::StopScan(); // Hosting intentionally survives menu and mission transitions.
             ResetPreLobbyLobbyWidgets();
-            g_Status = g_Search = nullptr; g_Rows.fill(nullptr);
+            g_Status = g_Search = g_Hint = g_SteamButton = nullptr; g_Rows.fill(nullptr);
             g_JoinHostedWhenReady = false;
         }
         bool OnChar(void*, uint8_t ch) { return PreLobbyForwardChar(ch); }

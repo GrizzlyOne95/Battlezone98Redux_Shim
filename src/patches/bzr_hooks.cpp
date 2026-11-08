@@ -26,6 +26,7 @@
 #include "gpu_instancing.h"
 #include "gpu_skinning.h"
 #include "mp_vehicle_preview_fix.h"
+#include "steam_public_listing.h"
 #include "steam_tunnel_join.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -1782,6 +1783,7 @@ namespace BZROpenShim
 
         // Steam presence for a local tunnel bridge (host side of Join Game).
         SteamTunnelJoin::Tick();
+        SteamPublicListing::Tick();
 
         static volatile long s_FiredLogBudget = 4;
         if (InterlockedDecrement(&s_FiredLogBudget) >= 0)
