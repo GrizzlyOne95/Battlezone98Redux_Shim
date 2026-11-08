@@ -192,6 +192,7 @@ Keys written:
 profile.<key>.career.totalKills / totalDeaths
 profile.<key>.career.spKills / spDeaths / mpKills / mpDeaths
 profile.<key>.career.missionsPlayed / spMissionsPlayed / mpMatchesPlayed
+profile.<key>.career.killsByClass.<pilot|tank|fighter|scout|bomber|turret|artillery|support|building|other>
 profile.<key>.mission.<mission>.kills / deaths / plays
 ```
 

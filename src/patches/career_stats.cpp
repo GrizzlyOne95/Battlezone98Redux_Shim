@@ -44,6 +44,8 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "career_kill_class.h"
+#include "kill_ticker.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -368,6 +370,169 @@ namespace BZROpenShim
         // thread from LegacyWorldUpdateRenderQueueHook. Producers never reach
         // it; they only publish.
         static CareerPendingVictim g_CareerPendingVictims[kCareerPendingVictimCapacity] = {};
+
+        // Kills-by-type bookkeeping. A victim's pending slot is cleared the
+        // moment its SimKill is published, but the SimKill (single player) and
+        // the NetPlayer::RecordDeath team event (multiplayer) are consumed
+        // later in the same drain, so the class resolved while the object was
+        // alive is parked here for a short while. Drain thread only (the
+        // queue-full RecordDeath fallback may read it from the detour; it is a
+        // best-effort lookup of small PODs and can only mis-attribute a bucket).
+        struct CareerRecentKill
+        {
+            bool inUse = false;
+            int victimHandle = 0;
+            int victimTeam = 0;
+            int killClass = static_cast<int>(CareerKillClass::Category::Other);
+            bool damagerWasLocalPlayer = false;
+            uint64_t ms = 0;
+        };
+        static constexpr size_t kCareerRecentKillCapacity = 16;
+        static CareerRecentKill g_CareerRecentKills[kCareerRecentKillCapacity] = {};
+        static size_t g_CareerRecentKillNext = 0;
+
+        // Per-match tally of local multiplayer kills that could / could not be
+        // matched to a damaged victim, logged when the session ends.
+        static int g_CareerMpKillsMatched = 0;
+        static int g_CareerMpKillsUnmatched = 0;
+
+        static int CareerOtherKillClass()
+        {
+            return static_cast<int>(CareerKillClass::Category::Other);
+        }
+
+        // Frame thread (the event drain): LookupUnitName uses the engine file
+        // read and an unlocked cache, and this is only called from
+        // CareerNoteDamageEvent. Heap use is bounded to the short label/name
+        // strings, once per newly seen victim, not per damage event.
+        static int CaptureCareerKillClass(void* object)
+        {
+            char label[40] = {};
+            if (!object || !TryGetCraftClassLabel(object, label, sizeof(label)))
+                return CareerOtherKillClass();
+            std::string unitName;
+            if (_stricmp(label, "wingman") == 0)
+            {
+                char odf[9] = {};
+                if (TryGetCraftOdfName(object, odf, sizeof(odf)))
+                    unitName = KillTicker::LookupUnitName(odf);
+            }
+            return static_cast<int>(CareerKillClass::Categorize(label, unitName));
+        }
+
+        static const char* CareerKillClassKey(int killClass)
+        {
+            if (killClass < 0 || killClass >= static_cast<int>(CareerKillClass::kCategoryCount))
+                killClass = CareerOtherKillClass();
+            return CareerKillClass::KillClassKey(static_cast<CareerKillClass::Category>(killClass));
+        }
+
+        static void CareerParkRecentKill(const CareerPendingVictim& victim, uint64_t now)
+        {
+            // Only kills the local player helped make can be claimed later, and
+            // a class an MP death already claimed must not be claimed twice.
+            if (!victim.damagerWasLocalPlayer || victim.classSpent)
+                return;
+            CareerRecentKill& slot = g_CareerRecentKills[g_CareerRecentKillNext];
+            g_CareerRecentKillNext = (g_CareerRecentKillNext + 1) % kCareerRecentKillCapacity;
+            slot.inUse = true;
+            slot.victimHandle = victim.victimHandle;
+            slot.victimTeam = victim.victimTeam;
+            slot.killClass = victim.killClass;
+            slot.damagerWasLocalPlayer = victim.damagerWasLocalPlayer;
+            slot.ms = now;
+        }
+
+        // Single player: the class parked for this victim handle, consumed.
+        static int CareerTakeKillClassByHandle(int victimHandle)
+        {
+            for (auto& e : g_CareerRecentKills)
+            {
+                if (e.inUse && e.victimHandle == victimHandle)
+                {
+                    const int cls = e.killClass;
+                    e = CareerRecentKill{};
+                    return cls;
+                }
+            }
+            return CareerOtherKillClass();
+        }
+
+        // Multiplayer, best effort: RecordDeath only names teams, so take the
+        // newest victim of that team the local player damaged within the
+        // timeout, first among kills already parked, then among victims still
+        // pending. No match counts as Other.
+        static int CareerClaimMpKillClass(int killedTeam, bool& matched)
+        {
+            matched = false;
+            const uint64_t now = GetTickCount64();
+            CareerRecentKill* bestKill = nullptr;
+            for (auto& e : g_CareerRecentKills)
+            {
+                if (e.inUse && e.victimTeam == killedTeam && e.damagerWasLocalPlayer &&
+                    now - e.ms < kCareerPendingVictimTimeoutMs &&
+                    (!bestKill || e.ms > bestKill->ms))
+                    bestKill = &e;
+            }
+            if (bestKill)
+            {
+                const int cls = bestKill->killClass;
+                *bestKill = CareerRecentKill{};
+                matched = true;
+                return cls;
+            }
+            CareerPendingVictim* bestPending = nullptr;
+            for (auto& e : g_CareerPendingVictims)
+            {
+                if (e.inUse && e.victimTeam == killedTeam && e.damagerWasLocalPlayer &&
+                    !e.classSpent && now - e.lastDamageMs < kCareerPendingVictimTimeoutMs &&
+                    (!bestPending || e.lastDamageMs > bestPending->lastDamageMs))
+                    bestPending = &e;
+            }
+            if (bestPending)
+            {
+                const int cls = bestPending->killClass;
+                // Spent: the death event consumed it, so a second kill of the
+                // same team must not reuse it. damagerWasLocalPlayer stays as
+                // it is because SimKill publishes it.
+                bestPending->classSpent = true;
+                matched = true;
+                return cls;
+            }
+            return CareerOtherKillClass();
+        }
+
+        // Multiplayer: someone else killed a unit of killedTeam. If the local
+        // player had damaged it, its parked entry would otherwise sit there
+        // and give its class to the next local kill on that team. Drop the
+        // newest such entry.
+        static void CareerDropMpKillClass(int killedTeam)
+        {
+            const uint64_t now = GetTickCount64();
+            CareerRecentKill* newest = nullptr;
+            for (auto& e : g_CareerRecentKills)
+            {
+                if (e.inUse && e.victimTeam == killedTeam &&
+                    now - e.ms < kCareerPendingVictimTimeoutMs &&
+                    (!newest || e.ms > newest->ms))
+                    newest = &e;
+            }
+            if (newest)
+                *newest = CareerRecentKill{};
+        }
+
+        static void CareerLogMpKillMatching()
+        {
+            static LONG s_budget = 16;
+            if ((g_CareerMpKillsMatched || g_CareerMpKillsUnmatched) && s_budget > 0)
+            {
+                --s_budget;
+                Log(L"[CAREER] Multiplayer kills by type this match: %d matched to a victim, %d counted as other\n",
+                    g_CareerMpKillsMatched, g_CareerMpKillsUnmatched);
+            }
+            g_CareerMpKillsMatched = 0;
+            g_CareerMpKillsUnmatched = 0;
+        }
 
         // Mirrors the engine's own death test. Both signals are read because
         // either one alone has a hole: healthRatio is reset by the load path,
@@ -891,12 +1056,22 @@ namespace BZROpenShim
             // RecordDeath exposes team ids here; keep the first pass conservative
             // by suppressing same-team kills and counting only cross-team kills.
             const bool localKill = (killerTeam == localTeam && killerTeam > 0 && killerTeam != killedTeam);
+            if (!localKill)
+                CareerDropMpKillClass(killedTeam);
             if (!localDeath && !localKill)
                 return;
 
             const std::string profileKey = ResolveCareerStatsProfileKey();
             const std::string missionKey = ResolveCareerStatsMissionKey();
             const std::string profilePrefix = "profile." + profileKey;
+
+            std::string killClassKey;
+            if (localKill)
+            {
+                bool matched = false;
+                killClassKey = CareerKillClassKey(CareerClaimMpKillClass(killedTeam, matched));
+                ++(matched ? g_CareerMpKillsMatched : g_CareerMpKillsUnmatched);
+            }
 
             AcquireSRWLockExclusive(&g_CareerStatsLock);
 
@@ -911,6 +1086,7 @@ namespace BZROpenShim
                 {
                     QueueCareerIncrementLocked(profilePrefix + ".career.totalKills", 1);
                     QueueCareerIncrementLocked(profilePrefix + ".career.mpKills", 1);
+                    QueueCareerIncrementLocked(profilePrefix + ".career.killsByClass." + killClassKey, 1);
                     QueueCareerIncrementLocked(profilePrefix + ".mission." + missionKey + ".kills", 1);
                 }
                 if (localDeath)
@@ -938,6 +1114,7 @@ namespace BZROpenShim
             {
                 IncrementCareerStatsInteger(data, profilePrefix + ".career.totalKills", 1);
                 IncrementCareerStatsInteger(data, profilePrefix + ".career.mpKills", 1);
+                IncrementCareerStatsInteger(data, profilePrefix + ".career.killsByClass." + killClassKey, 1);
                 if (!missionKey.empty())
                     IncrementCareerStatsInteger(data, profilePrefix + ".mission." + missionKey + ".kills", 1);
             }
@@ -965,6 +1142,8 @@ namespace BZROpenShim
         {
             for (auto& entry : g_CareerPendingVictims)
                 entry = CareerPendingVictim{};
+            for (auto& entry : g_CareerRecentKills)
+                entry = CareerRecentKill{};
         }
 
         // Producer side. Called from DamageRevealProbeHook, so it must stay
@@ -1076,6 +1255,7 @@ namespace BZROpenShim
                 slot->inUse = true;
                 slot->victimHandle = victimHandle;
                 slot->firstSeenMs = event.tickMs;
+                slot->killClass = CaptureCareerKillClass(GameObjectFromHandleGog(victimHandle));
             }
 
             slot->lastDamageMs = event.tickMs;
@@ -1155,6 +1335,7 @@ namespace BZROpenShim
 
                 if (died)
                 {
+                    CareerParkRecentKill(entry, now);
                     PublishSimEvent(OpenShimEventType::SimKill,
                                     entry.victimHandle,
                                     entry.damagerHandle,
@@ -1501,12 +1682,16 @@ namespace BZROpenShim
             const std::string profileKey = ResolveCareerStatsProfileKey();
             const std::string missionKey = ResolveCareerStatsMissionKey();
             const std::string profilePrefix = "profile." + profileKey;
+            const std::string killClassKey = localKill
+                ? std::string(CareerKillClassKey(CareerTakeKillClassByHandle(SimEventArg(event, 0))))
+                : std::string();
 
             AcquireSRWLockExclusive(&g_CareerStatsLock);
             if (localKill)
             {
                 QueueCareerIncrementLocked(profilePrefix + ".career.totalKills", 1);
                 QueueCareerIncrementLocked(profilePrefix + ".career.spKills", 1);
+                QueueCareerIncrementLocked(profilePrefix + ".career.killsByClass." + killClassKey, 1);
                 if (!missionKey.empty())
                     QueueCareerIncrementLocked(profilePrefix + ".mission." + missionKey + ".kills", 1);
             }
@@ -1585,11 +1770,14 @@ namespace BZROpenShim
                 break;
             case OpenShimEventType::SimSessionStarted:
                 ClearCareerPendingVictims();
+                g_CareerMpKillsMatched = 0;
+                g_CareerMpKillsUnmatched = 0;
                 if (SimEventArg(event, 0) == 0)
                     CareerRecordSinglePlayerSessionStart();
                 break;
             case OpenShimEventType::SimSessionEnded:
                 ClearCareerPendingVictims();
+                CareerLogMpKillMatching();
                 // Ended is drained on the next world's first frame; let the
                 // writer take it rather than stall that frame.
                 SignalCareerFlush();
