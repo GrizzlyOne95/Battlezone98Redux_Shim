@@ -156,7 +156,7 @@ struct SteamTransport::Impl
             // The Steam build imports this DLL before shim startup. Do not
             // stall a GOG client that cannot supply this transport capability.
             if (!GetModuleHandleExW(0, L"steam_api.dll", &dll))
-                throw std::runtime_error("Steam tunnel unavailable: requires the Steam build with its loaded steam_api.dll; clear SteamTunnelHost to use another connection");
+                throw std::runtime_error("Steam tunnel unavailable: requires the Steam build with its loaded steam_api.dll; clear SteamTunnelHost or SteamTunnelBridge to use another connection");
         }
         auto user = Export<HandleFn>(dll, "SteamAPI_GetHSteamUser");
         auto pipe = Export<HandleFn>(dll, "SteamAPI_GetHSteamPipe");

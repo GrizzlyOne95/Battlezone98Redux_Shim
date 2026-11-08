@@ -27,7 +27,17 @@ namespace BZROpenShim::SocketTunnel
     bool ParseEndpoint(const std::string&, std::string& ip, uint16_t& port);
     bool IsLoopback(const std::string&);
     // OpenShim lifecycle wrapper; configured once before Winsock hooks install.
-    void Configure(const std::string& steamHost, const std::string& udpBridge);
+    // steamBridge hosts the Steam bridge inside this game process on the
+    // game's own Steam session, so friends join without socket_tunnel.exe:
+    //   ""            off
+    //   "auto"        only while localServer() names a numeric loopback IPv4
+    //                 (no port) with a TCP listener on 1337, i.e. this game
+    //                 points at a dedicated server running on this PC
+    //   "127.0.0.x"   always, toward that server
+    // Exclusive with the agent keys: one Steam tunnel transport per process.
+    using LocalServerSource = bool (*)(std::string& host);
+    void Configure(const std::string& steamHost, const std::string& udpBridge,
+                   const std::string& steamBridge = {}, LocalServerSource localServer = nullptr);
     bool Requested();
     bool Ready();
     // Logical server identity for community-key derivation. Never resolve this
