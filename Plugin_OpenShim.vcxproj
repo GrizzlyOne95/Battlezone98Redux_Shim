@@ -282,6 +282,8 @@
     <ClCompile Include="src\patches\mp_splinter_sync.cpp" />
     <ClCompile Include="src\patches\mp_lives_infinite.cpp" />
     <ClCompile Include="src\patches\mp_host_leave.cpp" />
+    <ClCompile Include="src\patches\mp_invite_password.cpp" />
+    <ClCompile Include="src\patches\steam_tunnel_join.cpp" />
     <ClCompile Include="src\patches\net_tag_dispatch.cpp" />
     <ClCompile Include="src\patches\mp_daywrecker_armory_collision.cpp" />
     <ClCompile Include="src\patches\lua_handle_sync.cpp" />
@@ -511,6 +513,8 @@
     <ClInclude Include="include\mp_splinter_sync_install.h" />
     <ClInclude Include="include\mp_lives_infinite.h" />
     <ClInclude Include="include\mp_host_leave_install.h" />
+    <ClInclude Include="include\mp_invite_password_install.h" />
+    <ClInclude Include="include\steam_tunnel_join.h" />
     <ClInclude Include="include\net_tag_dispatch.h" />
     <ClInclude Include="include\mp_daywrecker_armory_collision_install.h" />
     <ClInclude Include="include\lua_handle_sync.h" />

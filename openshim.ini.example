@@ -624,6 +624,19 @@ HostLeave = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION
 DaywreckerArmoryCollision = 1
 
+; Let a Steam invite reach a password-protected lobby. Stock never puts the
+; lobby password into the host's invites, so an invited friend joins with no
+; password, the server refuses it, and the friend waits on "gathering
+; information from the server". With this on, a host's new lobby copies its
+; password into the invite; the friend types nothing. Joins from the lobby
+; list still ask for the password. Host-side; the invite carries the password
+; the stock way. A passworded lobby shows no Steam "Join Game"; invite friends.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_INVITE_PASSWORD
+InvitePassword = 1
+
 ; Start every new hosted game with Sync Join on. Sync Join locks the game once
 ; it starts so nobody joins mid-game; a late joiner loads the mission fresh
 ; and pushes its own starting units to the host, which duplicates them and

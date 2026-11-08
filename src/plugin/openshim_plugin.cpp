@@ -66,6 +66,8 @@
 #include "mp_mission_end_sync_install.h"
 #include "mp_splinter_sync_install.h"
 #include "mp_host_leave_install.h"
+#include "mp_invite_password_install.h"
+#include "steam_tunnel_join.h"
 #include "mp_daywrecker_armory_collision_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
@@ -214,6 +216,14 @@ static unsigned __stdcall PatchThreadProc(void*)
     // lone-player Game Over caused by the leave. Byte-guarded and all-or-
     // nothing; [Fixes] HostLeave = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::HostLeave::InstallHostLeaveIfPossible());
+
+    // Stock hosts never put the lobby password into Steam invites, so an
+    // invited friend's join to a passworded lobby is refused. Copies the
+    // password into the invite field at lobby creation; byte-guarded and fail-closed;
+    // [Fixes] InvitePassword = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::InvitePassword::InstallInvitePasswordIfPossible());
+    // Steam invite / Join Game onto a host bridge (docs/STEAM_TUNNEL.md).
+    PATCH_STAGE(BZROpenShim::SteamTunnelJoin::InstallSteamTunnelJoinIfPossible());
 
     // A remote Daywrecker copy has no launcher recorded, so one spawned inside
     // the Armory detonates on it. Exempts an Armory collision for an ownerless

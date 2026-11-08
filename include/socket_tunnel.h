@@ -35,5 +35,12 @@ namespace BZROpenShim::SocketTunnel
     std::string CommunityEndpoint();
     // Bound the first resolver wait while the worker binds its local ports.
     bool WaitReady(unsigned timeoutMs = 1000);
-    void Stop();
+    // Steam Join Game: restart the agent toward another bridge (0 = off), on
+    // the game thread. Waits for the old worker. False after Stop() or when
+    // the exit guard cannot be installed. Replaces a UDP-bridge config.
+    bool SwitchSteamHost(uint64_t steamHost);
+    uint64_t SteamHost(); // 0 when not tunnelling over Steam
+    bool Failed(); // the worker stopped on an error (e.g. port 1337 occupied)
+    bool UdpBridgeConfigured();
+    void Stop(); // final
 }

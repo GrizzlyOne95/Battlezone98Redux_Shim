@@ -25,6 +25,9 @@ namespace BZROpenShim::SocketTunnel
         if (!IndividualSteamId(value)) return false;
         result = value; return true;
     }
+    // A running bridge publishes its SteamID here (8 bytes, same Windows
+    // session) so the game on that account can advertise it as Steam presence.
+    constexpr const wchar_t* kBridgeAnnounceMapping = L"Local\\BZROpenShimSteamTunnelBridge";
     inline std::string SteamCommunityEndpoint(uint64_t id)
     { return IndividualSteamId(id) ? "steam." + std::to_string(id) + ".openshim.invalid:1337" : ""; }
     // Mapping never reuses an assigned slot. Bans remain attached to the same

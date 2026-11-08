@@ -3536,6 +3536,30 @@
       "identity": "NotifyNowHost on exact GOG Redux 2.2.301, __cdecl(void), runs on the newly elected host. Its takeover `if (host id != 0) { TakeOwnership(0); TakeOwnership(hostId); }` never fires after a host leave because the NetPlayer destructor already zeroed the host id. mp_host_leave.cpp detours the first 11 bytes (push ebp / mov ebp,esp / push esi / cmp dword [0x00917F48],0; absolute operand only). Bytes read from the shipped image 2026-10-27."
     },
     {
+      "name": "LobbyCreateLobby",
+      "address": "0x007426E0",
+      "expected": "55 8B EC 6A FF 68 AB FC 84 00 64 A1 00 00 00 00",
+      "identity": "CNetGameLobby::CreateLobby on exact GOG Redux 2.2.301 (logs \"CNetGameLobby::CreateLobby called, creating game\"), __thiscall(this, bool private, string* password, string* name), ret 0xC at 0x007427E7; copies the password to this+0x64 and the name to this+0x88 but never fills this+0xA4, the string every Steam invite sender appends as \",password\" (FUN_007582e0, FUN_00755110). mp_invite_password.cpp detours the first 10 bytes (push ebp / mov ebp,esp / push -1 / push imm32 SEH handler; absolute operand only) and copies +0x64 into +0xA4 after the original. Bytes read from the shipped image 2026-11-08."
+    },
+    {
+      "name": "LobbyCreateGame",
+      "address": "0x007427F0",
+      "expected": "55 8B EC 6A FF 68 AB FC 84 00 64 A1 00 00 00 00",
+      "identity": "CNetGameLobby::CreateGame on exact GOG Redux 2.2.301 (logs \"CNetGameLobby::CreateGame called, creating game\"; the path the Create Game screen takes, live 2026-11-08), __thiscall(this, bool private, string* password, string* name), ret 0xC at 0x007428F0; copies the name to this+0x88 (0x00742822) and the password to this+0x64 (0x0074283D) but never fills this+0xA4. mp_invite_password.cpp detours the same 10 prologue bytes as LobbyCreateLobby and copies +0x64 into +0xA4 after the original. Bytes read from the shipped image 2026-11-08."
+    },
+    {
+      "name": "LobbyStringAssign",
+      "address": "0x0041F710",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 3B 45 08 74",
+      "identity": "Engine std::string copy assignment on exact GOG Redux 2.2.301, __thiscall(dst, const string* src), ret 4 at 0x0041F781, returns dst (same function as the Campaign Manifest ID String Assignment scan). mp_invite_password.cpp calls it, unpatched, so the engine CRT owns the copied lobby password. Bytes read from the shipped image 2026-11-08."
+    },
+    {
+      "name": "LobbyOnRichPresenceJoinRequested",
+      "address": "0x00757E00",
+      "expected": "55 8B EC 6A FF 68 83 C6 85 00",
+      "identity": "GameRichPresenceJoinRequested_t handler on exact GOG Redux 2.2.301, __thiscall(this, callback*), ret 4; reached only through its callback registration (no direct callers). Callback: inviter SteamID at +0, m_rgchConnect[256] at +8; parses \"-connect-galaxy-lobby=\" and calls CNetGameLobby::OnGameLobbyJoinRequested 0x007408C0. steam_tunnel_join.cpp detours the first 10 bytes (SEH prologue; absolute operand only) to repoint the Steam tunnel at the inviter's bridge first. Bytes read from the shipped image 2026-11-07."
+    },
+    {
       "name": "NetTakeOwnership",
       "address": "0x004BAAD0",
       "expected": "55 8B EC 6A FF 68 88 9A 84 00",

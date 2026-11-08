@@ -234,6 +234,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Remote copies hold detonation until their first state; a rebuilt
     # ownerless in-flight Daywrecker ignores the Armory. Local only.
     "Fixes/DaywreckerArmoryCollision",
+    # Fills the invited lobby's own password into an invite join. Local only.
+    "Fixes/InvitePassword",
     # Multiplayer splinter deploy position and damage kill, as two new tags
     # that stock peers ignore. SplinterUndead also runs in a network game
     # while this is on.
@@ -490,6 +492,7 @@ $shippingPolicyChecks = @{
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/MissionEndSync" = "1"
     "Fixes/DaywreckerArmoryCollision" = "1"
+    "Fixes/InvitePassword" = "1"
     "Fixes/SplinterSync" = "1"
     "Fixes/HostLeave" = "1"
     "Fixes/SyncJoinDefaultOn" = "1"
