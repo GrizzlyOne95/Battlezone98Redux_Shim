@@ -348,6 +348,71 @@ void TestStartupFilenameRecognition()
     Check(!IsStartupConfigFilename("Ogre.cf"), "truncated rejected");
 }
 
+void TestCarryDisplayMode()
+{
+    std::printf("TestCarryDisplayMode\n");
+    const std::string base =
+        "Render System=Direct3D11 Rendering Subsystem\r\n"
+        "\r\n"
+        "[Direct3D9 Rendering Subsystem]\r\n"
+        "Full Screen=Yes\r\n"
+        "Video Mode=1920 x 1080 @ 32-bit colour\r\n"
+        "\r\n"
+        "[Direct3D11 Rendering Subsystem]\r\n"
+        "Full Screen=No\r\n"
+        "Video Mode=1024 x 768 @ 32-bit colour\r\n"
+        "\r\n"
+        "[OpenGL Rendering Subsystem]\r\n"
+        "Full Screen=No\r\n"
+        "Video Mode=1024 x 576\r\n";
+
+    // DX9 -> DX11: both values carried, nothing else touched.
+    std::string cfg = base;
+    Check(CarryDisplayModeAcrossSections(cfg, "Direct3D9 Rendering Subsystem",
+                                         "Direct3D11 Rendering Subsystem"),
+          "dx9->dx11 carries");
+    std::string expect = base;
+    const size_t dx11 = expect.find("[Direct3D11");
+    expect.replace(expect.find("Full Screen=No", dx11), 14, "Full Screen=Yes");
+    expect.replace(expect.find("1024 x 768 @ 32-bit colour"), 26,
+                   "1920 x 1080 @ 32-bit colour");
+    ExpectStr(cfg, expect, "only the DX11 display values changed");
+
+    // DX11 -> DX9 (source section after target): offsets stay valid.
+    std::string back = base;
+    Check(CarryDisplayModeAcrossSections(back, "Direct3D11 Rendering Subsystem",
+                                         "Direct3D9 Rendering Subsystem"),
+          "dx11->dx9 carries");
+    Check(back.find("[Direct3D9 Rendering Subsystem]\r\nFull Screen=No\r\n"
+                    "Video Mode=1024 x 768 @ 32-bit colour\r\n") != std::string::npos,
+          "dx9 section took dx11 values");
+
+    // No-ops: same section, OpenGL or empty source, already equal.
+    std::string same = base;
+    Check(!CarryDisplayModeAcrossSections(same, "Direct3D11 Rendering Subsystem",
+                                          "Direct3D11 Rendering Subsystem"),
+          "same section no-op");
+    Check(!CarryDisplayModeAcrossSections(same, "OpenGL Rendering Subsystem",
+                                          "Direct3D11 Rendering Subsystem"),
+          "opengl source refused");
+    Check(!CarryDisplayModeAcrossSections(same, "", "Direct3D11 Rendering Subsystem"),
+          "empty previous refused");
+    ExpectStr(same, base, "refused input untouched");
+    Check(!CarryDisplayModeAcrossSections(cfg, "Direct3D9 Rendering Subsystem",
+                                          "Direct3D11 Rendering Subsystem"),
+          "already equal is a no-op");
+
+    // Target section lacking the keys: nothing is added.
+    std::string sparse =
+        "[Direct3D9 Rendering Subsystem]\nVideo Mode=800 x 600 @ 32-bit colour\n"
+        "[Direct3D11 Rendering Subsystem]\nVSync=Yes\n";
+    const std::string sparseCopy = sparse;
+    Check(!CarryDisplayModeAcrossSections(sparse, "Direct3D9 Rendering Subsystem",
+                                          "Direct3D11 Rendering Subsystem"),
+          "missing target keys not added");
+    ExpectStr(sparse, sparseCopy, "sparse untouched");
+}
+
 int main()
 {
     std::printf("backend_selection_tests\n");
@@ -356,6 +421,7 @@ int main()
     TestBootRequestResolution();
     TestSubsystemNames();
     TestTransportImage();
+    TestCarryDisplayMode();
     TestOutcomeClassification();
     TestReasonNames();
     TestMinimalConfigImage();
