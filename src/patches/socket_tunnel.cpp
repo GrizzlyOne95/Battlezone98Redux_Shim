@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <map>
+#include <mutex>
 #include <random>
 #include <set>
 #include <stdexcept>
@@ -23,6 +24,12 @@ namespace BZROpenShim::SocketTunnel
 {
 namespace
 {
+    // Last identity map a bridge in this process loaded or extended; read by
+    // BridgedSteamId on other threads.
+    std::mutex g_BridgedLock;
+    std::map<uint64_t, unsigned> g_Bridged;
+    void PublishBridged(const SteamIdentityMap& map)
+    { std::lock_guard<std::mutex> lock(g_BridgedLock); g_Bridged = map.slots; }
     struct Socket
     {
         SOCKET s = INVALID_SOCKET;
@@ -135,7 +142,7 @@ namespace
             HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (file == INVALID_HANDLE_VALUE)
             {
-                if (GetLastError() == ERROR_FILE_NOT_FOUND) return;
+                if (GetLastError() == ERROR_FILE_NOT_FOUND) { PublishBridged(identityMap); return; }
                 throw std::runtime_error("cannot read Steam identity map");
             }
             LARGE_INTEGER size{}; DWORD read = 0;
@@ -146,6 +153,7 @@ namespace
             if (!ok || !identityMap.Load(text)) throw std::runtime_error("invalid Steam identity map; preserve/repair it before retrying");
             for (const auto& entry : identityMap.slots)
                 if (SteamIdentityMap::Ip(entry.second) == cfg.server) throw std::runtime_error("identity-map address conflicts with server address");
+            PublishBridged(identityMap);
         }
         std::string SteamSource(uint64_t id)
         {
@@ -163,6 +171,7 @@ namespace
             if (!ok || !MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
                 throw std::runtime_error("cannot persist Steam peer identity; peer refused");
             identityMap = std::move(updated);
+            PublishBridged(identityMap);
             return SteamIdentityMap::Ip(slot);
         }
         void Start(uint64_t now, std::atomic<bool>& stop)
@@ -562,6 +571,16 @@ namespace
         IN_ADDR a{};
         return inet_pton(AF_INET, ip.c_str(), &a) == 1 && (ntohl(a.s_addr) >> 24) == 127;
     }
+    bool BridgedSteamId(const std::string& ip, uint64_t& steamId)
+    {
+        steamId = 0;
+        IN_ADDR a{};
+        if (inet_pton(AF_INET, ip.c_str(), &a) != 1 || (ntohl(a.s_addr) >> 8) != 0x7F0001) return false;
+        const unsigned slot = ntohl(a.s_addr) & 0xFF;
+        std::lock_guard<std::mutex> lock(g_BridgedLock);
+        for (const auto& entry : g_Bridged) if (entry.second == slot) { steamId = entry.first; return true; }
+        return false;
+    }
     bool ParseEndpoint(const std::string& text, std::string& ip, uint16_t& port)
     {
         const auto colon = text.find(':');
@@ -587,6 +606,7 @@ namespace
             while (!stop.load()) { runtime.Tick(GetTickCount64()); runtime.Wait(); }
         }
         catch (const std::exception& error) { if (logger) logger(error.what()); ready = -1; result = 2; }
+        if (cfg.bridge) PublishBridged(SteamIdentityMap{}); // a stopped bridge vouches for no slot
         WSACleanup(); return result;
     }
 }

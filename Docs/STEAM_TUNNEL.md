@@ -253,6 +253,29 @@ UNVERIFIED until the two-account live test:
 `src/patches/steam_public_listing.cpp` (component STEAMLIST). Lets strangers
 find a server that runs a Steam bridge, with no VPS and no friend invite.
 
+- One-click hosting: with **Steam list: On**, the LAN screen's **Start host**
+  binds the host to `127.0.0.2:1337` instead of the LAN adapter, then joins
+  it. That is a loopback server with a listener, so `SteamTunnelBridge=auto`
+  starts the bridge and the listing follows; no INI edit or second program is
+  needed. The Steam host always runs inside this game (`EmbeddedLan::Host`);
+  it never needs `tools/lan/BZRServer.exe`, which releases do not ship.
+  Identity is tied to the bridge: a bridged peer connects from its durable
+  `127.0.1.<slot>` source and may log in only as the Steam id the bridge
+  authenticated for that slot (authtype `steam`; its ticket is ignored and
+  never stored), so in-game `S<steamid64>` ids, bans included, match the
+  bridge's. An unknown `127.0.1.x` source is refused; any other loopback
+  source is this PC (the host's own game). Other LAN PCs cannot reach a loopback host:
+  turn the Steam list off and restart the host for LAN play. Toggling, or
+  pressing Start host, while a host of the other mode runs only shows "Stop
+  and start the host to switch". Steam hosting first points the tunnel back to
+  its startup host if a Steam join moved it. The bridge still obeys its own
+  rules: with `SteamTunnelBridge` set to something other than auto, an agent
+  key set, or no `steam_api.dll`, the loopback host is reachable by nobody.
+  The gate is the game's own lobby password; the LAN screen offers no ban
+  control. UNVERIFIED until the live two-PC test: that a
+  Steam peer's game session (not only its lobby join) works through a
+  loopback LAN host.
+
 - Host: opt in with **Steam list: On** on the LAN screen (saved as
   `openshim.ini [Network] SteamPublicListing=1`; default off). While a bridge
   is announced on this PC, the game owns a public Steam lobby (appid 301650,

@@ -71,6 +71,30 @@ int main()
     CHECK(Has(m.Disconnect(1),"OnLobbyRemoved"));
     CHECK(m.Receive(2,Message("DoP2PConnect",{{"player","B1"}})).empty());
     CHECK(m.Receive(2,Message("DoJoinLobby",Json::array())).empty());
+    // Steam bridge admission: only the Steam id the bridge authenticated.
+    {
+        Model steam;
+        const Admission bridged{"S76561198000000001",false}, host{"S76561198000000002",true};
+        steam.Connect(1,"127.0.1.1",bridged); steam.Connect(2,"127.0.1.2",bridged);
+        steam.Connect(3,"127.0.0.1",host); steam.Connect(4,"127.0.1.4",{"X1",false});
+        auto as=[](const char* id,const char* type){ auto a=Auth(id); a["content"]["authtype"]=type; a["content"]["steamAppTicket"]="ticket"; return a; };
+        CHECK(Has(steam.Receive(1,as("S76561198000000009","steam")),"OnAuthorization",false)); // another id
+        CHECK(Has(steam.Receive(1,Auth("B1")),"OnAuthorization",false)); // bridged: no LAN login
+        CHECK(steam.Receive(4,as("S76561198000000001","steam")).empty()); // malformed admission never connects
+        const auto ok=steam.Receive(1,as("S76561198000000001","steam"));
+        CHECK(Has(ok,"OnAuthorization"));
+        CHECK(std::any_of(ok.begin(),ok.end(),[](const Delivery& d){return d.message.dump().find("\"authType\":\"steam\"")!=std::string::npos;}));
+        CHECK(std::none_of(ok.begin(),ok.end(),[](const Delivery& d){return d.message.dump().find("ticket")!=std::string::npos;}));
+        CHECK(Has(steam.Receive(2,as("S76561198000000001","steam")),"OnAuthorization",false)); // same id twice
+        CHECK(Has(steam.Receive(3,as("S76561198000000003","steam")),"OnAuthorization",false)); // host, wrong id
+        CHECK(Has(steam.Receive(3,as("S76561198000000002","steam")),"OnAuthorization")); // host's own game
+        auto lanTicket=Auth("B3"); lanTicket["content"]["steamAppTicket"]="ticket";
+        Model lanHost; lanHost.Connect(1,"127.0.0.1",host);
+        CHECK(Has(lanHost.Receive(1,lanTicket),"OnAuthorization",false)); // LAN still refuses tickets
+        CHECK(Has(lanHost.Receive(1,Auth("B3")),"OnAuthorization"));
+        Model plain; plain.Connect(1,"192.168.1.1"); // no admission: LAN logins only
+        CHECK(Has(plain.Receive(1,as("S76561198000000002","steam")),"OnAuthorization",false));
+    }
     // Deep nesting is rejected before parsing; ordinary messages still parse.
     CHECK(ParseBounded(std::string(30000,'[')+std::string(30000,']')).is_discarded());
     CHECK(ParseBounded("{\"a\":"+std::string(33,'[')+std::string(33,']')+"}").is_discarded());
