@@ -3536,34 +3536,16 @@
       "identity": "NotifyNowHost on exact GOG Redux 2.2.301, __cdecl(void), runs on the newly elected host. Its takeover `if (host id != 0) { TakeOwnership(0); TakeOwnership(hostId); }` never fires after a host leave because the NetPlayer destructor already zeroed the host id. mp_host_leave.cpp detours the first 11 bytes (push ebp / mov ebp,esp / push esi / cmp dword [0x00917F48],0; absolute operand only). Bytes read from the shipped image 2026-10-27."
     },
     {
-      "name": "LobbyOnJoinRequested",
-      "address": "0x007408C0",
-      "expected": "55 8B EC 6A FF 68 3B 0B 85 00 64 A1 00 00 00 00 50",
-      "identity": "CNetGameLobby::OnGameLobbyJoinRequested on exact GOG Redux 2.2.301, __thiscall(this, lobbyId16*, password string*, friend), ret 0xC; logs \"pending request to join lobby\" in the shell and \"Exiting game because of steam invite acceptance\" in a mission. Reached from the Steam join handler 0x00757E00 and two other invite sources. mp_invite_password.cpp detours the first 10 bytes (push ebp / mov ebp,esp / push -1 / push imm32 SEH handler; absolute operand only) to record the invited lobby id. Bytes read from the shipped image 2026-11-07."
+      "name": "LobbyCreateLobby",
+      "address": "0x007426E0",
+      "expected": "55 8B EC 6A FF 68 AB FC 84 00 64 A1 00 00 00 00",
+      "identity": "CNetGameLobby::CreateLobby on exact GOG Redux 2.2.301 (logs \"CNetGameLobby::CreateLobby called, creating game\"), __thiscall(this, bool private, string* password, string* name), ret 0xC at 0x007427E7; copies the password to this+0x64 and the name to this+0x88 but never fills this+0xA4, the string every Steam invite sender appends as \",password\" (FUN_007582e0, FUN_00755110). mp_invite_password.cpp detours the first 10 bytes (push ebp / mov ebp,esp / push -1 / push imm32 SEH handler; absolute operand only) and copies +0x64 into +0xA4 after the original. Bytes read from the shipped image 2026-11-08."
     },
     {
-      "name": "LobbyJoinById",
-      "address": "0x0074B7C0",
-      "expected": "55 8B EC 6A FF 68 58 BC 85 00 64 A1 00 00 00 00 50",
-      "identity": "BZRNetLobby join-by-id on exact GOG Redux 2.2.301 (vtable 0x0089ADDC slot +0x7C), __thiscall(this, lobbyId16*, password string*), ret 8; parses the id and sends the join with the given password, no client-side check. Every join reaches it: CNetGameLobby::RunCallbacks for a parked invite (passes this+0xA4, the invite's empty password), JoinLobby 0x00741990 and JoinLobbyFromLaunchInvite 0x00741840. mp_invite_password.cpp detours the first 10 bytes (SEH prologue; absolute operand only) to send the lobby's own password for a recorded invite. Bytes read from the shipped image 2026-11-08."
-    },
-    {
-      "name": "LobbyFindLobby",
-      "address": "0x007470B0",
-      "expected": "55 8B EC 6A FF 68 5B B8 85 00 64 A1 00 00 00 00 50",
-      "identity": "CNetGameLobby lobby-list lookup on exact GOG Redux 2.2.301, __thiscall(this, lobbyId16*, bool create), ret 8; returns the list entry (id +0x10, password string +0x98, passworded flag +0xB2) or 0. 0x0056F900 calls it as FindLobby(this, this+0x28, 0) for the active lobby. mp_invite_password.cpp calls it with create = 0 (read-only) and does not patch it. Bytes read from the shipped image 2026-11-08."
-    },
-    {
-      "name": "LobbyOnListReceived",
-      "address": "0x00740E70",
-      "expected": "55 8B EC 6A FF 68 39 B0 85 00 64 A1 00 00 00 00",
-      "identity": "CNetGameLobby::OnLobbyListReceived on exact GOG Redux 2.2.301 (logs \"CNetGameLobby::OnLobbyListReceived, matching lobbies: \"), __thiscall(this, int count), ret 4 at 0x00741678; creates each list entry with FindLobby and fills it from lobby data (FUN_00740e70 lines 139-170). mp_invite_password.cpp detours the first 10 bytes (SEH prologue; absolute operand only) to send a held invite join once the list exists. Bytes read from the shipped image 2026-11-08."
-    },
-    {
-      "name": "LobbyEnterLounge",
-      "address": "0x006C6320",
-      "expected": "55 8B EC 6A FF 68 41 23 85 00 64 A1 00 00 00 00",
-      "identity": "BZRNet WebSocket client EnterLounge on exact GOG Redux 2.2.301, __thiscall(ws), plain ret at 0x006C65A8; sets byte ws+0xC34 (0x006C636D) and sends the \"DoEnterLounge\" message (0x006C65B0 clears it). Join-by-id 0x0074B7C0 calls it first (0x0074B7EB-0x0074B814: ws = *(this+0xC8), skipped when ws+0xC34 is set); the server sends no lobby list before it. mp_invite_password.cpp calls it, unpatched, when it holds an invite join for the lobby list. Bytes read from the shipped image 2026-11-08."
+      "name": "LobbyStringAssign",
+      "address": "0x0041F710",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 3B 45 08 74",
+      "identity": "Engine std::string copy assignment on exact GOG Redux 2.2.301, __thiscall(dst, const string* src), ret 4 at 0x0041F781, returns dst (same function as the Campaign Manifest ID String Assignment scan). mp_invite_password.cpp calls it, unpatched, so the engine CRT owns the copied lobby password. Bytes read from the shipped image 2026-11-08."
     },
     {
       "name": "LobbyOnRichPresenceJoinRequested",
