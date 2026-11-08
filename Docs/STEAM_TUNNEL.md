@@ -195,9 +195,11 @@ publishes no `connect`, so friends join it by invite, not Join Game.
 Live 2026-11-08: host PC 1 created private lobby T741e (B1005) with a
 password; PC 2 (RazorScout) joined in 3.7 s with the invite connect string
 `-connect-galaxy-lobby=B1005,<password>`, and the host lobby listed both
-players. The string was rebuilt from the sender decompile and the host's live
-invite field, not captured from a real overlay Accept (PC 2 could not click
-it); Steam hands an accepted invite to the game as that same string.
+players. Real Accept, same day: PC 2 hosted private passworded T741f (B1007)
+and sent a Steam invite; PC 1 (DAGrizzler, game already running) clicked
+Accept in Steam and joined 6 s later with no password prompt: PC 1 logged
+`[TUNNELJOIN] join request ... (lobby)`, the host assigned DAGrizzler team 2,
+and the server listed userCount 2 for B1007.
 
 UNVERIFIED until the two-account live test:
 
