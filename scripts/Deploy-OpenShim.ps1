@@ -170,7 +170,8 @@ $uiFiles = @(
     'osh_key_hv.png',
     'osh_key_ck.png',
     'osh_tool_hv.png',
-    'osh_tool_ck.png'
+    'osh_tool_ck.png',
+    'odyssey.ogv'
 )
 New-Item -ItemType Directory -Force -Path $uiTargetDir | Out-Null
 foreach ($name in $uiFiles) {
