@@ -163,6 +163,43 @@ in front of it. The host plays on the same PC with `Server = Custom` and
 `CustomServer = 127.0.0.2`. The bridge admits any Steam peer; the server does
 the auth (bans, passwords).
 
+In-game bridge (no `socket_tunnel.exe`, Steam build only): run
+`./tools/socket_tunnel/start_host.ps1 -InGameBridge` (server only) and play
+with `Server = Custom`, `CustomServer = 127.0.0.2` (or `Server = Local`).
+Nothing else to set: net.ini ships
+
+```ini
+[OpenShimSocket]
+; auto is also the value when the key is absent
+SteamTunnelBridge=auto
+```
+
+With `auto`, OpenShim checks every 2 s whether the game's server selection
+is a numeric loopback address (no port) with a TCP listener on 1337 (it reads
+the TCP table; the server sees no probe connections). While both hold it runs
+the bridge on a worker thread inside the host's game (log tag
+`[SteamBridge]`); two misses in a row stop it, and a bridge that fails retries
+after 60 s. A fixed value (`SteamTunnelBridge=127.0.0.2`) runs it always;
+empty turns it off. On GOG (no loaded `steam_api.dll`) `auto` stays off.
+Any loopback server counts, 127.0.0.1 included: a Steam friend can reach a
+dev or test server the host has running under `Server = Local`, and that
+server's own password or bans are the only gate. Only IPv4 listeners are
+seen; a server bound to `[::]` alone does not start the bridge.
+
+It borrows the game's Steam session, so Steam sees no second "game" process
+and BZR starts from Steam normally. Friends can join only while the host's
+game runs; an always-on server keeps the standalone bridge. The peer map is
+`steam_tunnel_peers.txt` beside the game exe. The bridge never runs with
+either agent key set or while Join Game has switched this game onto another
+host's tunnel (one Steam tunnel transport per process); while the bridge is
+running, Join Game toward another host is refused. The host uses 127.0.0.2
+rather than 127.0.0.1 so the server's address stays apart from the agent's
+fixed 127.0.0.1 ports. Verified live 2026-11-08 (two accounts, two PCs):
+the friend's Join Game request reached the host's in-game bridge over Steam
+relay and the server authorized the friend. The join was triggered with
+`steam://rungame/301650/<host SteamID>/...`, which raises the same callback
+as the friends-list button; the button's visibility itself is UNVERIFIED.
+
 How the pieces meet (`src/patches/steam_tunnel_join.cpp`, component
 TUNNELJOIN):
 
