@@ -66,6 +66,7 @@ namespace BZROpenShim::KillTicker
         ConfirmedKill g_pending[kPendingCapacity] = {};         // g_lock
         size_t g_pendingCount = 0;                              // g_lock
         std::unordered_map<std::string, std::string> g_names;  // g_lock
+        std::unordered_map<std::string, std::string> g_unitNames;  // frame thread only
         ReadFileFn g_readFile = nullptr; // frame thread
         int g_readState = 0;             // 0 unresolved, 1 ready, -1 unavailable
         bool g_anchorLogged = false;
@@ -330,5 +331,34 @@ namespace BZROpenShim::KillTicker
         g_names.clear();
         ReleaseSRWLockExclusive(&g_lock);
         InterlockedExchange(&g_logBudget, 16);
+        g_unitNames.clear();
+    }
+
+    // Frame thread only: ReadOdfText shares g_readFile/g_readState and the
+    // engine's file read, neither of which is synchronised. g_unitNames is
+    // therefore unlocked and is cleared in ResetMission (also frame thread).
+    std::string LookupUnitName(const char* odf)
+    {
+        std::string key;
+        for (size_t i = 0; odf && i < kOdfChars && odf[i]; ++i)
+        {
+            char c = odf[i];
+            if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+            key.push_back(c);
+        }
+        if (key.empty())
+            return std::string();
+        const auto found = g_unitNames.find(key);
+        if (found != g_unitNames.end())
+            return found->second;
+        std::string text, unitName;
+        // A failed read is not cached: the next kill tries again.
+        if (!ReadOdfText(key + ".odf", text))
+            return std::string();
+        unitName = ParseUnitName(text);
+        if (g_unitNames.size() >= kNameCacheMax)
+            g_unitNames.clear();
+        g_unitNames.emplace(key, unitName);
+        return unitName;
     }
 }

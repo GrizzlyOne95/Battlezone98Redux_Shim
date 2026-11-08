@@ -656,6 +656,11 @@ namespace BZROpenShim
             // them from the table afterwards, which cannot work.
             int distinctDamagers = 0;
             uint64_t lastDistinctDamagerMs = 0;
+            // CareerKillClass::Category as an int (kills-by-type record),
+            // resolved on the drain while the victim is still alive. 9 = Other.
+            int killClass = 9;
+            // Set when a multiplayer death claimed killClass; it is not parked again.
+            bool classSpent = false;
         };
         int GetGameObjectActualTeam(void* objectPtr);
         bool SatelliteWorldIsLive();
@@ -861,6 +866,8 @@ namespace BZROpenShim
         extern bool g_LoggedEngineFlameVtableHook;
         void ResolveEngineFlameRuntimeTargets();
         bool TryGetCraftOdfName(void* craftPtr, char* out, size_t outSize);
+        // classLabel ("wingman", "person", ...) from class+0x18; see above.
+        bool TryGetCraftClassLabel(void* craftPtr, char* out, size_t outSize);
         void InitializeJetFlamesConfig();
         void ResetEngineFlameOdfColors();
 
