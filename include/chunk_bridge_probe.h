@@ -46,6 +46,20 @@ namespace ChunkBridgeProbe
         }
         return TryReadOgreLinksUnchecked(candidate, entity, light);
     }
+
+    // The +0x8C owner walk reads owner+0xF0..+0xFC, then names at the owner
+    // entity's +0xC4/+0xD4 (16 bytes each, plus the +0x84/+0x94 fallbacks).
+    // Pointer shape alone let text (0x61657720) and 1.0f (0x3F800000) through
+    // in a 1.0.0.66 player log; both faulted under SEH.
+    inline constexpr size_t kLegacyOwnerReadSpan = 0xF8 + sizeof(void*);
+    inline constexpr size_t kOwnerEntityNameSpan = 0xD4 + 16;
+
+    inline bool IsCandidateSpanReadable(const void* candidate, size_t span) noexcept
+    {
+        const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
+        return address >= 0x00010000 && address % sizeof(void*) == 0 &&
+               MemoryAccess::IsReadable(candidate, span);
+    }
 }
 }
 #endif

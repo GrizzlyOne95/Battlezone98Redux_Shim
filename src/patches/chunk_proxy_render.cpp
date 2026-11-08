@@ -4628,6 +4628,9 @@ namespace BZROpenShim
             uint32_t seenWalk = 0;
         };
         static std::unordered_map<const void*, ChunkBridgeRootProbe> g_ChunkBridgeRootProbes;
+        // Same walk-scoped scheme for the +0x8C owner and its +0xF4 entity
+        // (see IsOwnerSpanReadable).
+        static std::unordered_map<const void*, ChunkBridgeRootProbe> g_ChunkOwnerSpanProbes;
         static uint32_t g_ChunkBridgeRootProbeWalk = 0;
 
         static bool TryReadOgreLinksCached(const void* root, void*& entity, void*& light)
@@ -4650,14 +4653,20 @@ namespace BZROpenShim
             return probe.readable;
         }
 
-        static void PruneChunkBridgeRootProbes()
+        static void PruneChunkProbeMap(std::unordered_map<const void*, ChunkBridgeRootProbe>& probes)
         {
-            for (auto it = g_ChunkBridgeRootProbes.begin(); it != g_ChunkBridgeRootProbes.end();)
+            for (auto it = probes.begin(); it != probes.end();)
             {
                 it = it->second.seenWalk == g_ChunkBridgeRootProbeWalk
                     ? std::next(it)
-                    : g_ChunkBridgeRootProbes.erase(it);
+                    : probes.erase(it);
             }
+        }
+
+        static void PruneChunkBridgeRootProbes()
+        {
+            PruneChunkProbeMap(g_ChunkBridgeRootProbes);
+            PruneChunkProbeMap(g_ChunkOwnerSpanProbes);
         }
 
         static bool TryReadSnapshotOgreLinks(const void* root, void*& entity, void*& light, bool useRootCache)
@@ -4820,6 +4829,30 @@ namespace BZROpenShim
             return address >= 0x00010000 && (address % sizeof(void*)) == 0;
         }
 
+        // Check the span the owner walk reads next, not just pointer shape
+        // (see ChunkBridgeProbe::kLegacyOwnerReadSpan). Each SEH-caught fault
+        // here was a first-chance exception and a crash-log entry. The active
+        // walk caches the verdict like the bridge roots do.
+        static bool IsOwnerSpanReadable(const void* candidate, size_t span, bool useRootCache)
+        {
+            if (!IsPointerShaped(candidate))
+                return false;
+            if (!useRootCache)
+                return ChunkBridgeProbe::IsCandidateSpanReadable(candidate, span);
+
+            auto [it, inserted] = g_ChunkOwnerSpanProbes.try_emplace(candidate);
+            ChunkBridgeRootProbe& probe = it->second;
+            probe.seenWalk = g_ChunkBridgeRootProbeWalk;
+            // One verdict per pointer serves both roles, so check the larger span.
+            // Recheck readable verdicts too: the owner's pages can be released while
+            // a chunk still points at it, and a stale "readable" would fault again
+            // under SEH every walk.
+            if (inserted || (g_ChunkBridgeRootProbeWalk % 16) == 0)
+                probe.readable = ChunkBridgeProbe::IsCandidateSpanReadable(candidate,
+                    (std::max)(span, ChunkBridgeProbe::kLegacyOwnerReadSpan));
+            return probe.readable;
+        }
+
         static ChunkBridgeSnapshot CaptureChunkBridgeSnapshotImpl(const uint8_t* objectBytes, bool useRootCache)
         {
             ChunkBridgeSnapshot snapshot = {};
@@ -4852,7 +4885,7 @@ namespace BZROpenShim
                 // Legacy OBJ76 layouts observed in Redux helpers place the owning GameObject*
                 // at +0x8C, which is the bridge we want to validate for native death chunks.
                 snapshot.legacyOwner = *reinterpret_cast<void* const*>(objectBytes + 0x8C);
-                if (!IsPointerShaped(snapshot.legacyOwner))
+                if (!IsOwnerSpanReadable(snapshot.legacyOwner, ChunkBridgeProbe::kLegacyOwnerReadSpan, useRootCache))
                     snapshot.legacyOwner = nullptr;
                 if (snapshot.legacyOwner)
                 {
@@ -4862,7 +4895,7 @@ namespace BZROpenShim
                     snapshot.ownerObj = *reinterpret_cast<void* const*>(ownerBytes + 0xF8);
                     if (!IsPointerShaped(snapshot.ownerBridgeRoot))
                         snapshot.ownerBridgeRoot = nullptr;
-                    if (!IsPointerShaped(snapshot.ownerEntity))
+                    if (!IsOwnerSpanReadable(snapshot.ownerEntity, ChunkBridgeProbe::kOwnerEntityNameSpan, useRootCache))
                         snapshot.ownerEntity = nullptr;
 
                     if (snapshot.ownerBridgeRoot)

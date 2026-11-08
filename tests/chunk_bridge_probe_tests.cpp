@@ -4,6 +4,9 @@
 #include <cstring>
 #include <initializer_list>
 
+using BZROpenShim::ChunkBridgeProbe::IsCandidateSpanReadable;
+using BZROpenShim::ChunkBridgeProbe::kLegacyOwnerReadSpan;
+using BZROpenShim::ChunkBridgeProbe::kOwnerEntityNameSpan;
 using BZROpenShim::ChunkBridgeProbe::TryReadOgreLinks;
 
 namespace
@@ -66,6 +69,25 @@ int main()
         }
     }
 
+    // Owner walk: a whole page passes both spans; shape failures do not.
+    CHECK(IsCandidateSpanReadable(pages, kLegacyOwnerReadSpan));
+    CHECK(IsCandidateSpanReadable(pages, kOwnerEntityNameSpan));
+    CHECK(!IsCandidateSpanReadable(nullptr, kLegacyOwnerReadSpan));
+    CHECK(!IsCandidateSpanReadable(pages + 2, kLegacyOwnerReadSpan));
+    // ASCII and 1.0f from the 1.0.0.66 log, declined whenever unmapped.
+    for (uintptr_t candidate : {uintptr_t{0x61657720}, uintptr_t{0x3F800000}})
+    {
+        if (!BZROpenShim::MemoryAccess::IsReadable(
+                reinterpret_cast<void*>(candidate), kLegacyOwnerReadSpan))
+        {
+            CHECK(!IsCandidateSpanReadable(
+                reinterpret_cast<void*>(candidate), kLegacyOwnerReadSpan));
+            CHECK(!IsCandidateSpanReadable(
+                reinterpret_cast<void*>(candidate), kOwnerEntityNameSpan));
+        }
+    }
+    CHECK(g_accessViolations == 0);
+
     DWORD oldProtect = 0;
     OpenShimTest::Require(VirtualProtect(pages + pageSize, pageSize, PAGE_NOACCESS,
         &oldProtect) != 0, "protect second page");
@@ -73,6 +95,12 @@ int main()
     // Neither output may escape and no first-chance exception should occur.
     CheckRejected(pages + pageSize - 0xA8);
     CheckRejected(pages + pageSize);
+    // Owner spans that start readable but end in the protected page.
+    CHECK(!IsCandidateSpanReadable(pages + pageSize - 0x80, kLegacyOwnerReadSpan));
+    CHECK(!IsCandidateSpanReadable(pages + pageSize - 0x80, kOwnerEntityNameSpan));
+    CHECK(IsCandidateSpanReadable(pages + pageSize - kLegacyOwnerReadSpan,
+        kLegacyOwnerReadSpan));
+    CHECK(g_accessViolations == 0);
 
     OpenShimTest::Require(VirtualProtect(pages, pageSize, PAGE_READWRITE | PAGE_GUARD,
         &oldProtect) != 0, "guard first page");
