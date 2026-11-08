@@ -196,7 +196,13 @@ namespace BZROpenShim
                          static_cast<unsigned long long>(inviter), lounge ? "lounge" : (connect[0] ? "lobby" : "empty"),
                          announced.empty() ? "none" : announced.c_str(), static_cast<unsigned long long>(target));
                 if (target == SocketTunnel::SteamHost())
-                    return;
+                {
+                    // Same host: nothing to do unless its worker died (e.g. a
+                    // local server held 1337); then this join restarts it.
+                    if (!target || !SocketTunnel::Failed())
+                        return;
+                    LogShimA(LogLevel::Info, kComponent, "tunnel to this host had stopped; restarting it");
+                }
                 if (g_StartupUdp)
                 {
                     LogShimA(LogLevel::Warn, kComponent, "TunnelUdpBridge is configured; not switching to Steam");

@@ -40,6 +40,7 @@ namespace BZROpenShim::SocketTunnel
     // the exit guard cannot be installed. Replaces a UDP-bridge config.
     bool SwitchSteamHost(uint64_t steamHost);
     uint64_t SteamHost(); // 0 when not tunnelling over Steam
+    bool Failed(); // the worker stopped on an error (e.g. port 1337 occupied)
     bool UdpBridgeConfigured();
     void Stop(); // final
 }

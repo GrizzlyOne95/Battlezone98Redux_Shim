@@ -109,6 +109,7 @@ namespace
         ReleaseSRWLockShared(&configLock);
         return udp;
     }
+    bool Failed() { return ready.load() < 0; }
     bool Requested() { return requested.load(); }
     bool Ready() { return ready.load() == 1 && !stop.load(); }
     std::string CommunityEndpoint()

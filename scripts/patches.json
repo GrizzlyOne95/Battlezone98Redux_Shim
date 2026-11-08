@@ -3542,10 +3542,16 @@
       "identity": "CNetGameLobby::OnGameLobbyJoinRequested on exact GOG Redux 2.2.301, __thiscall(this, lobbyId16*, password string*, friend), ret 0xC; logs \"pending request to join lobby\" in the shell and \"Exiting game because of steam invite acceptance\" in a mission. Reached from the Steam join handler 0x00757E00 and two other invite sources. mp_invite_password.cpp detours the first 10 bytes (push ebp / mov ebp,esp / push -1 / push imm32 SEH handler; absolute operand only) to record the invited lobby id. Bytes read from the shipped image 2026-11-07."
     },
     {
-      "name": "LobbyJoinLobby",
-      "address": "0x00741990",
-      "expected": "55 8B EC 6A FF 68 FB 0D 85 00 64 A1 00 00 00 00 50",
-      "identity": "CNetGameLobby::JoinLobby on exact GOG Redux 2.2.301, __thiscall(this, lobby entry*, password string*), ret 8; logs \"CNetGameLobby::JoinLobby, requesting join to \". Returns 0 without sending when entry+0xB2 is set and the password differs from entry+0x98. mp_invite_password.cpp detours the first 10 bytes (same SEH prologue shape; absolute operand only) to pass the entry password for a recorded invite. Bytes read from the shipped image 2026-11-07."
+      "name": "LobbyJoinById",
+      "address": "0x0074B7C0",
+      "expected": "55 8B EC 6A FF 68 58 BC 85 00 64 A1 00 00 00 00 50",
+      "identity": "BZRNetLobby join-by-id on exact GOG Redux 2.2.301 (vtable 0x0089ADDC slot +0x7C), __thiscall(this, lobbyId16*, password string*), ret 8; parses the id and sends the join with the given password, no client-side check. Every join reaches it: CNetGameLobby::RunCallbacks for a parked invite (passes this+0xA4, the invite's empty password), JoinLobby 0x00741990 and JoinLobbyFromLaunchInvite 0x00741840. mp_invite_password.cpp detours the first 10 bytes (SEH prologue; absolute operand only) to send the lobby's own password for a recorded invite. Bytes read from the shipped image 2026-11-08."
+    },
+    {
+      "name": "LobbyFindLobby",
+      "address": "0x007470B0",
+      "expected": "55 8B EC 6A FF 68 5B B8 85 00 64 A1 00 00 00 00 50",
+      "identity": "CNetGameLobby lobby-list lookup on exact GOG Redux 2.2.301, __thiscall(this, lobbyId16*, bool create), ret 8; returns the list entry (id +0x10, password string +0x98, passworded flag +0xB2) or 0. 0x0056F900 calls it as FindLobby(this, this+0x28, 0) for the active lobby. mp_invite_password.cpp calls it with create = 0 (read-only) and does not patch it. Bytes read from the shipped image 2026-11-08."
     },
     {
       "name": "LobbyOnRichPresenceJoinRequested",
