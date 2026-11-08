@@ -46,6 +46,7 @@
 #include "perf_telemetry.h"
 #include "music_single_fill.h"
 #include "precise_timestep.h"
+#include "armory_repair_pick.h"
 #include "mouse_every_frame.h"
 #include "thread_scheduling.h"
 #include "pilot_fp_animation_trace.h"
@@ -268,6 +269,8 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
     // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
+    // Guest RKIT repair pick of allied damaged buildings (always on, fail closed).
+    PATCH_STAGE(BZROpenShim::InitializeArmoryRepairPick());
     // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
     PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
     // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf
