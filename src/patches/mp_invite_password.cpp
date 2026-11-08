@@ -133,6 +133,26 @@ namespace BZROpenShim
                 }
             }
 
+            // 16 id bytes as hex, for the diagnostic lines.
+            void HexId(const uint8_t* id, char (&out)[kLobbyIdBytes * 2 + 1])
+            {
+                static const char digits[] = "0123456789abcdef";
+                for (size_t i = 0; i < kLobbyIdBytes; ++i)
+                {
+                    out[i * 2] = digits[id[i] >> 4];
+                    out[i * 2 + 1] = digits[id[i] & 0xF];
+                }
+                out[kLobbyIdBytes * 2] = 0;
+            }
+
+            uint32_t StringSize(const void* str)
+            {
+                uint32_t size = 0xFFFFFFFFu;
+                if (str)
+                    SafeCopy(&size, reinterpret_cast<uintptr_t>(str) + kStringSizeOffset, sizeof(size));
+                return size;
+            }
+
             void __fastcall JoinRequestedHook(void* self, void* edx, const void* lobbyId, void* password,
                                               uint32_t friendArg)
             {
@@ -140,6 +160,10 @@ namespace BZROpenShim
                 {
                     g_HavePending = true;
                     g_PendingAt = GetTickCount64();
+                    char hex[kLobbyIdBytes * 2 + 1];
+                    HexId(g_PendingId, hex);
+                    LogShimA(LogLevel::Info, kComponent, "join requested: id %s, invite password length %u", hex,
+                             StringSize(password));
                 }
                 const FnJoinRequested original = reinterpret_cast<FnJoinRequested>(g_JoinRequestedOriginal);
                 if (original)
@@ -154,19 +178,21 @@ namespace BZROpenShim
                 uint8_t id[kLobbyIdBytes] = {};
                 if (g_HavePending && GetTickCount64() - g_PendingAt > kPendingMs)
                     g_HavePending = false;
-                if (!g_HavePending || !lobbyId || !SafeCopy(id, reinterpret_cast<uintptr_t>(lobbyId), kLobbyIdBytes) ||
-                    std::memcmp(id, g_PendingId, kLobbyIdBytes) != 0)
+                const bool haveId = lobbyId && SafeCopy(id, reinterpret_cast<uintptr_t>(lobbyId), kLobbyIdBytes);
+                const uint32_t typedLength = StringSize(password);
+                char hex[kLobbyIdBytes * 2 + 1];
+                HexId(id, hex);
+                const bool matches = g_HavePending && haveId && std::memcmp(id, g_PendingId, kLobbyIdBytes) == 0;
+                LogShimA(LogLevel::Info, kComponent, "join by id: id %s, password length %u, %s", hex, typedLength,
+                         matches ? "the invited lobby" : (g_HavePending ? "not the invited lobby" : "no invite pending"));
+                if (!matches)
                 {
                     original(self, edx, lobbyId, password);
                     return;
                 }
 
                 g_HavePending = false;  // one join per invite
-                uint32_t typedLength = 0;
-                if (!password ||
-                    !SafeCopy(&typedLength, reinterpret_cast<uintptr_t>(password) + kStringSizeOffset,
-                              sizeof(typedLength)) ||
-                    typedLength != 0)
+                if (typedLength != 0)
                 {
                     original(self, edx, lobbyId, password);
                     return;
@@ -181,6 +207,7 @@ namespace BZROpenShim
                 }
                 if (!SafeCopy(&hasPassword, entry + kEntryHasPasswordOffset, 1) || !hasPassword)
                 {
+                    LogShimA(LogLevel::Info, kComponent, "invited lobby has no password; joining as is");
                     original(self, edx, lobbyId, password);
                     return;
                 }
