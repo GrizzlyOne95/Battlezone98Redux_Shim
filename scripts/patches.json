@@ -533,6 +533,16 @@
   ],
   "resolves": [
     {
+      "name": "MpLives::StdStringFromCStr",
+      "pattern": "83 EC 18 8B CC 89 A5 44 FF FF FF 50 E8 ?? ?? ?? ?? 89 85 40 FF FF FF 8B 4D 0C E8",
+      "offset": 12,
+      "mode": "rel32_target",
+      "fallback": "0x00416EF0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "std::string constructor from a char* (thiscall, ecx = destination, one stack argument) on exact GOG Redux 2.2.301, reached by the call at 0x0079BD52 in the generic cycle helper FUN_0079BA90 and by the call at 0x0079A7FF in the lobby refresh FUN_00799D70. Both label sites in mp_lives_infinite.cpp must reach this target before they are redirected, and the thunks tail-jump to it. Static analysis only; not live-tested."
+    },
+    {
       "name": "P2PAdaptiveRetry::FirstRetryCall",
       "pattern": "8B 4D 88 81 C1 A4 00 00 00 E8 ?? ?? ?? ?? 89 85 44 FF FF FF 6A 00 68 ?? ?? ?? ?? 8D 8D FC FE FF FF E8 ?? ?? ?? ??",
       "offset": 33,
@@ -6144,14 +6154,54 @@
       "identity": "SetPlatform(int) at 0x004344B0 in GOG battlezone98redux.exe SHA256 8D71F56C1314E69A8AD38F4EEAF20A8FF825965A84CF196E5F77EA4CC3377413: stores the platform (0 pc, 1 osx, 2 ios) and writes 1 to the input-smoothing bypass flag 0x009198F4 only for ios, 0 otherwise (0x004344D7). Called from window init (0x00618D02) and the -platform command-line parser (0x007D5536); these are the flag's only writers. UserProcess::Execute (0x0060ABxx-0x0060B5xx) tests it at ten sites (0x60AEC5 .. 0x60B50C) to assign steer/pitch/throttle/strafe targets directly instead of low-passing them ((target-cur)*dt*5 analog, *1 keyboard; the BZ 1.5 decompile shows the same filter). BZCC exposes the same choice as options.play.smoothing. Pattern is a unique whole-image match on 2026-09-26; the payload rewrites the else-branch immediate so every SetPlatform call leaves smoothing off."
     },
     {
-      "name": "Infinite Lives Host Fill",
-      "pattern": "89 55 DC 8B 85 30 FE FF FF 8B 88 20 01 00 00 89 4D D4 8B 95 30 FE FF FF 8B 82 1C 01 00 00 89 45 D0",
-      "offset": 24,
-      "expected_size": 6,
-      "fallback": "0x00000000",
-      "expected_original": "8B 82 1C 01 00 00",
+      "name": "Infinite Lives Click Max",
+      "pattern": "C7 45 E8 01 00 00 00 C7 45 EC 05 00 00 00 0F B6 45 0C 50",
+      "offset": 10,
+      "expected_size": 1,
+      "fallback": "0x0079CBC2",
+      "expected_original": "05",
       "require_unique": true,
-      "identity": "GOG 2.2.301 SHA256 8D71F56C...3377413 host game launch at 0x0079A456: mov eax,[edx+0x11C] copies the lobby game-info lives value into the launch parameter block (stored to [ebp-0x30] at 0x0079A45C). Guests receive the host's value over the network (FUN_00573930), so only the host runs this fill. Opt-in [Network] InfiniteLives replaces it with mov eax,99 / nop. Static analysis only; the lives decrement at 0x00572AF1 is deliberately untouched. Not live-tested."
+      "identity": "GOG 2.2.301 SHA256 8D71F56C...3377413 FUN_0079CB90 (MP match-setup Lives button click, host only) at 0x0079CBBF: mov [ebp-0x14],5 is the cycle maximum handed to the generic cycle helper FUN_0079BA90 (maximum at [ebp+0x2C], minimum at [ebp+0x28]). The imm8 becomes 6, adding the \"Infinite\" step. Static analysis only (disassembly of the GOG exe); not live-tested."
+    },
+    {
+      "name": "Infinite Lives Config Clamp",
+      "pattern": "83 B8 1C 01 00 00 05 76 0D 8B 4D 08 C7 81 1C 01 00 00 02 00 00 00",
+      "offset": 6,
+      "expected_size": 1,
+      "fallback": "0x00742344",
+      "expected_original": "05",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 SHA256 8D71F56C...3377413 multi.ini load in FUN_00742090 at 0x0074233E: cmp [eax+0x11C],5 / jbe, else the lives value is reset to 2. The imm8 becomes 6 so a saved Infinite (6) survives a restart. Static analysis only (disassembly of the GOG exe); not live-tested."
+    },
+    {
+      "name": "Infinite Lives Host Label",
+      "pattern": "83 EC 18 8B CC 89 A5 44 FF FF FF 50 E8 ?? ?? ?? ?? 89 85 40 FF FF FF 8B 4D 0C E8",
+      "offset": 13,
+      "expected_size": 4,
+      "fallback": "0x0079BD53",
+      "expected_original": "99 B1 C7 FF",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 SHA256 8D71F56C...3377413 generic cycle helper FUN_0079BA90 (also the player-limit button, where 6 is real) at 0x0079BD52: call 0x00416EF0 builds the std::string label from the formatted number. The thunk substitutes \"Infinite\" only for the Lives button (button arg [ebp+0xC] == screen [ebp-0x90] + 0x198; Player Limit uses +0x19C) when the value is 6. The ostream write at 0x0079BBEF that feeds multi.ini is deliberately untouched, so the file keeps \"6\". The callee is checked against the MpLives::StdStringFromCStr resolve before the rel32 is rewritten. Static analysis only (disassembly of the GOG exe); not live-tested."
+    },
+    {
+      "name": "Infinite Lives Lobby Label",
+      "pattern": "83 EC 18 8B CC 89 A5 80 FD FF FF 8D 55 E4 52 E8 ?? ?? ?? ?? 89 85 74 FD FF FF 8B 85 34 FE FF FF 8B 88 98 01 00 00",
+      "offset": 16,
+      "expected_size": 4,
+      "fallback": "0x0079A800",
+      "expected_original": "EC C6 C7 FF",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 SHA256 8D71F56C...3377413 lobby refresh FUN_00799D70 (every frame, host and guests) at 0x0079A7FF: sprintf(\"%u\", gameinfo->lives) then call 0x00416EF0 builds the label set on the Lives button (screen+0x198) via 0x007C44A0. The thunk reads gameinfo at [ebp-0x1D0] and substitutes \"Infinite\" when lives (+0x11C) is 6. The callee is checked against the MpLives::StdStringFromCStr resolve. Static analysis only (disassembly of the GOG exe); not live-tested."
+    },
+    {
+      "name": "Infinite Lives Launch Fill",
+      "pattern": "8B 55 1C 8B 42 58 A3 ?? ?? ?? ?? 8B 4D 1C 8B 51 58 89 15",
+      "offset": 0,
+      "expected_size": 6,
+      "fallback": "0x00574130",
+      "expected_original": "8B 55 1C 8B 42 58",
+      "require_unique": true,
+      "identity": "GOG 2.2.301 SHA256 8D71F56C...3377413 launch FUN_005740A0 at 0x00574130: mov edx,[ebp+0x1C] / mov eax,[edx+0x58] load the launch-block lives, stored to the live counters 0x008E8D04 and (after re-reading [ecx+0x58]) 0x00917FA4. The 6-byte JMP5 thunk replays both loads and, for 6, uses 99 and writes it back into the block so the second read agrees. Returns to 0x00574136. The lives decrement is untouched. Static analysis only (disassembly of the GOG exe); not live-tested."
     },
     {
       "name": "UI Render Exception Fail-Soft",

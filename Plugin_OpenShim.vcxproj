@@ -280,6 +280,7 @@
     <ClCompile Include="src\patches\lua_send_length.cpp" />
     <ClCompile Include="src\patches\mp_mission_end_sync.cpp" />
     <ClCompile Include="src\patches\mp_splinter_sync.cpp" />
+    <ClCompile Include="src\patches\mp_lives_infinite.cpp" />
     <ClCompile Include="src\patches\mp_host_leave.cpp" />
     <ClCompile Include="src\patches\net_tag_dispatch.cpp" />
     <ClCompile Include="src\patches\mp_daywrecker_armory_collision.cpp" />
@@ -508,6 +509,7 @@
     <ClInclude Include="include\lua_send_length_install.h" />
     <ClInclude Include="include\mp_mission_end_sync_install.h" />
     <ClInclude Include="include\mp_splinter_sync_install.h" />
+    <ClInclude Include="include\mp_lives_infinite.h" />
     <ClInclude Include="include\mp_host_leave_install.h" />
     <ClInclude Include="include\net_tag_dispatch.h" />
     <ClInclude Include="include\mp_daywrecker_armory_collision_install.h" />

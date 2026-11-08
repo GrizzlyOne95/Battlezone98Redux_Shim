@@ -316,8 +316,6 @@ openshim_opt:RemoteSmoothingMs:label~Remote Smoothing~~~~~~
 openshim_opt:RemoteSmoothingMs:desc~Eases other players' craft toward each network update instead of snapping, for high-ping games. 100 ms suits most; higher looks smoother but lags more. Local only. Restart required.~~~~~~
 openshim_opt:ReliableRetryAdaptToPing:label~Ping-Aware Retry~~~~~~
 openshim_opt:ReliableRetryAdaptToPing:desc~Wait at least 1.5x each peer's round trip before resending a reliable packet, so high-ping links only resend real losses. Same wire format. Restart required.~~~~~~
-openshim_opt:InfiniteLives:label~Infinite Lives~~~~~~
-openshim_opt:InfiniteLives:desc~Host only: multiplayer games you host start with unlimited lives. Has no effect as a guest. Restart required.~~~~~~
 openshim_opt:MapListLetterJump:label~Map Letter Jump~~~~~~
 openshim_opt:MapListLetterJump:desc~In the multiplayer map list, Ctrl+letter jumps to the next map starting with that letter. Restart required.~~~~~~
 openshim_opt:GovernorTuning:label~Net Tuning~~~~~~

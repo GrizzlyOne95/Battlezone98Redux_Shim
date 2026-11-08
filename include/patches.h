@@ -353,7 +353,13 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early Unreliable Deliver", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early NAK Accept", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "Sync Join Default On", false, {} },
-            { 0, HookEngine::PatchType::BYTES, { 0xB8, 0x63, 0x00, 0x00, 0x00, 0x90 }, "Infinite Lives Host Fill", false, {} },
+            // "Infinite" sixth step of the MP Lives button; always on, armed
+            // all-or-nothing by mp_lives_infinite.cpp.
+            { 0, HookEngine::PatchType::BYTES, { 0x06 }, "Infinite Lives Click Max", false, {} },
+            { 0, HookEngine::PatchType::BYTES, { 0x06 }, "Infinite Lives Config Clamp", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Infinite Lives Host Label", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Infinite Lives Lobby Label", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Infinite Lives Launch Fill", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Local", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Remote", false, {} },
         };
