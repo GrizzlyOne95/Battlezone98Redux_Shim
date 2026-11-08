@@ -2107,7 +2107,17 @@
       "fallback": "0x009455DC",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the m32 of `mov [m32],al` at 0x007BF142 in FUN_007befd0 (decomp line 32): byte DAT_009455DC, 0 = 98 mode, non-zero = TRO. Read by FUN_007bf440 and FUN_007c12a0. Not persisted across launches. Unique match 2026-11-08."
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the m32 of `mov [m32],al` at 0x007BF142 in FUN_007befd0 (decomp line 32): byte DAT_009455DC, 0 = 98 mode, non-zero = TRO. Read by FUN_007bf440 and FUN_007c12a0. Stock does not persist it; OpenShim seeds it at startup from [General] LastSinglePlayerMode. Unique match 2026-11-08."
+    },
+    {
+      "name": "TroMenuMovie::ShellMusicTrack",
+      "pattern": "C7 45 E8 0C 00 00 00 8B 4D E8 89 0D ?? ?? ?? ??",
+      "offset": 12,
+      "mode": "abs32_operand",
+      "fallback": "0x008E772C",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the m32 of `mov [m32],ecx` at 0x007BF165 in FUN_007befd0 (decomp lines 33-39): int DAT_008E772C, shell music track, 0x0C in 98 mode and 0x1B in TRO (static .data initial value 0x0C). FUN_004341c0 line 24 starts the shell music from it. Unique match 2026-11-08."
     },
     {
       "name": "TroMenuMovie::MainScreen",

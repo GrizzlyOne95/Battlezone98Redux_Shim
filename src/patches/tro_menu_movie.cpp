@@ -1,18 +1,27 @@
-// Main-menu banner follows the single-player 98/TRO toggle.
+// Main-menu banner follows the single-player 98/TRO toggle, and the mode
+// survives a restart.
 //
 // Stock cUI_MainScreen builds its banner widget (+0x15C) with the literal
 // "bzone.ogv" (push at 0x0078DEBC in the GOG 2.2.301 build). "TRO Banner
 // Movie Name" points that push at g_BannerMovie instead, and the wrapper
 // below runs after the SP view's mode refresh (the only writer of the TRO
-// flag) to pick the name and re-point an already-built banner.
+// flag) to pick the name, re-point an already-built banner and save the mode
+// to openshim.ini ([General] LastSinglePlayerMode).
 //
-// The flag is process state only: a fresh launch shows the 98 banner until
-// the single-player screen has been opened once.
+// Stock keeps the mode for the session only. The refresh (FUN_007befd0) is a
+// toggle: it flips the four campaign flags' visibility and sets the TRO flag
+// from the Black Dog flag's (decomp lines 16-32). When the SP view is built,
+// FUN_007bf440 (line 348) calls it once if the flag is already set, which
+// puts the fresh view into TRO. So restoring a saved TRO mode only needs the
+// flag (and the shell music track the refresh would have set) seeded before
+// the first menu build; the engine does the rest.
 #include "tro_menu_movie.h"
+#include "bzr_options_ui.h"
 #include "hook_engine.h"
 #include "shim_log.h"
 #include <Windows.h>
 #include <cstring>
+#include <string>
 
 namespace BZROpenShim
 {
@@ -26,15 +35,25 @@ namespace BZROpenShim
         constexpr const char kTroMovie[] = "odyssey.ogv";
         // cUI_MainScreen banner widget ("movie"), created by 0x0078DDE0.
         constexpr uintptr_t kBannerWidgetOffset = 0x15C;
+        // Shell music track FUN_007befd0 stores in TRO mode (decomp lines 33-38).
+        constexpr int32_t kTroShellTrack = 0x1B;
+        constexpr const char kIniSection[] = "General";
+        constexpr const char kIniKey[] = "LastSinglePlayerMode";
+        constexpr unsigned kAllSitesHooked = 0x3;
 
         char g_BannerMovie[16] = "bzone.ogv";
         Refresh g_Refresh = nullptr;
         SetMovie g_SetMovie = nullptr;
         Play g_Play = nullptr;
-        const volatile uint8_t* g_TroFlag = nullptr;
+        volatile uint8_t* g_TroFlag = nullptr;
         void* const volatile* g_MainScreen = nullptr;
         bool g_Resolved = false;
         bool g_ResolveOk = false;
+        unsigned g_HookedSites = 0;
+        // Saving is only safe when both refresh calls run through the
+        // wrapper; otherwise a saved TRO could be restored but never cleared.
+        bool g_PersistEnabled = false;
+        int g_SavedMode = -1;  // -1 unknown, 0 = 98, 1 = TRO
 
         bool ResolveOnce()
         {
@@ -54,7 +73,7 @@ namespace BZROpenShim
             g_Refresh = reinterpret_cast<Refresh>(static_cast<uintptr_t>(refresh));
             g_SetMovie = reinterpret_cast<SetMovie>(static_cast<uintptr_t>(setMovie));
             g_Play = reinterpret_cast<Play>(static_cast<uintptr_t>(play));
-            g_TroFlag = reinterpret_cast<const volatile uint8_t*>(static_cast<uintptr_t>(flag));
+            g_TroFlag = reinterpret_cast<volatile uint8_t*>(static_cast<uintptr_t>(flag));
             g_MainScreen = reinterpret_cast<void* const volatile*>(static_cast<uintptr_t>(screen));
             g_ResolveOk = true;
             return true;
@@ -78,10 +97,37 @@ namespace BZROpenShim
             }
         }
 
+        bool SeedTroMode(volatile int32_t* shellTrack)
+        {
+            __try {
+                *g_TroFlag = 1;
+                if (shellTrack) *shellTrack = kTroShellTrack;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                return false;
+            }
+        }
+
+        bool MenuAlreadyBuilt()
+        {
+            __try { return *g_MainScreen != nullptr; }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        void SaveMode(int mode)
+        {
+            if (!g_PersistEnabled || mode == g_SavedMode) return;
+            if (WriteShimUserConfigValue(kIniSection, kIniKey, mode ? "TRO" : "98"))
+                g_SavedMode = mode;
+        }
+
         void __fastcall TroModeRefreshHook(void* view)
         {
             g_Refresh(view);
-            const char* want = (*g_TroFlag != 0) ? kTroMovie : kStockMovie;
+            const int mode = (*g_TroFlag != 0) ? 1 : 0;
+            SaveMode(mode);
+            const char* want = mode ? kTroMovie : kStockMovie;
             if (std::strcmp(g_BannerMovie, want) == 0) return;
             strcpy_s(g_BannerMovie, want);
             ApplyToBuiltBanner();
@@ -104,5 +150,50 @@ namespace BZROpenShim
             return nullptr;
         }
         return reinterpret_cast<void*>(&TroModeRefreshHook);
+    }
+
+    void NoteTroModeRefreshHookInstalled(unsigned siteIndex)
+    {
+        if (siteIndex < 2) g_HookedSites |= (1u << siteIndex);
+    }
+
+    void RestoreSavedTroMode()
+    {
+        if (g_HookedSites != kAllSitesHooked || !g_ResolveOk) {
+            if (g_HookedSites != 0)
+                LogShimA(LogLevel::Warn, "TroMenuMovie",
+                    "only refresh sites 0x%X of 0x3 hooked; single-player mode is not saved or restored",
+                    g_HookedSites);
+            return;
+        }
+        g_PersistEnabled = true;
+
+        std::string saved;
+        if (!TryGetUserConfigString(kIniSection, kIniKey, saved)) {
+            g_SavedMode = -1;
+            return;
+        }
+        saved = TrimAsciiCopy(saved);
+        if (_stricmp(saved.c_str(), "TRO") != 0) {
+            g_SavedMode = (_stricmp(saved.c_str(), "98") == 0) ? 0 : -1;
+            return;
+        }
+
+        // The music track is cosmetic; a miss leaves the 98 shell music
+        // until the single-player screen runs the refresh.
+        const uint32_t track = HookEngine::ResolveNamedAddress("TroMenuMovie::ShellMusicTrack");
+        if (!SeedTroMode(reinterpret_cast<volatile int32_t*>(static_cast<uintptr_t>(track)))) {
+            LogShimA(LogLevel::Warn, "TroMenuMovie", "seeding the saved TRO mode faulted; starting in 98 mode");
+            return;
+        }
+        strcpy_s(g_BannerMovie, kTroMovie);
+        g_SavedMode = 1;
+        // Patching runs beside the game thread, so the menu may already be
+        // up with bzone.ogv. It is not re-pointed from this thread; it
+        // switches on the next menu build or SP toggle. (Ordering UNVERIFIED.)
+        if (MenuAlreadyBuilt())
+            LogShimA(LogLevel::Warn, "TroMenuMovie", "main menu was built before the TRO restore; banner stays 98 until it is rebuilt");
+        LogShimA(LogLevel::Info, "TroMenuMovie", "restored saved TRO single-player mode (shell track %s)",
+            track ? "set" : "unresolved");
     }
 }
