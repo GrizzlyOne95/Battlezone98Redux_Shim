@@ -63,9 +63,22 @@ disassembly (no PDB data). Code: `src/patches/resolution_dropdown.cpp`; rows:
 - The wrapper mirrors the stock gates (active, enabled, rect, clickable) with
   direct field reads instead of calling `0x007D3360`/`0x007D2810`.
 
-## UNVERIFIED (no live run was made)
-- Draw order of the list over the rows below it (z-order is the Ogre element
-  order, not the child vector order checked above).
-- Whether the highlight and the 260 x 240 design-space size look right.
-- Click-through: children are walked from the front, so inserting the list first
-  is expected to keep rows underneath from taking a click on the open list.
+## Ctor details used by the dropdown
+Cited from the GOG ghidrecomp corpus, `FUN_007c9de0-007c9de0.c` and
+`FUN_007cca20-007cca20.c` (bzr_gog_best_effort).
+- Ctor param 10 is a text-colour enum, not an ARGB: it is passed to
+  `FUN_007cca20` for each row label (7c9de0 line 423), which writes +0x91c as
+  0 white, 1 black, 2 red, 4 0x3333ff, anything else green (7cca20 lines 9-37).
+- Each row label then gets `FUN_007d2870("filton.png")` as its off texture
+  (7c9de0 line 427): that bitmap is the selection bar. The dropdown replaces it
+  with `uibtn.png` after construction so the selected row stays readable.
+- Page arrows are stored at this[0x5e] (line 263) and this[0x5f] (line 327).
+
+## Verified live (GOG 2.2.301, 2026-11-08, windowed 1600x900)
+- A small `cUI_Overlay` backdrop drew nothing on this screen; a button-backed
+  plate (flags 0x20, `uiplate.png` in all three states, enabled byte +0x148 = 0)
+  draws and lets clicks through.
+- Stock value captions draw above injected widgets, so the list opens in the
+  empty column right of the values instead of over them.
+- Pick updates the row value; reopening highlights the current choice; a click
+  outside closes the list through the full-screen catcher.
