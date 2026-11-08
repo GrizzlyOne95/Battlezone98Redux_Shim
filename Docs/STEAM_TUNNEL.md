@@ -266,8 +266,10 @@ the last list.
 Limits: `/ban` records the id the client reports, so a Steam player is held
 out by the bridge only when that id is their real SteamID64. The standalone
 `socket_tunnel.exe bridge` has no ban gate (the server's own bans apply).
-UNVERIFIED live: unit tests cover parsing and reload; the refuse/close path
-has not run against a real Steam peer.
+Verified live 2026-11-08 (two accounts, two PCs, one-click Steam host):
+banning the connected friend logged `closing banned Steam peer` about 1 s
+later and the friend saw reason 1002; its retries logged `refused banned
+Steam peer`; deleting bans.cfg let it rejoin and the server authorized it.
 
 ## Public Steam listing
 
@@ -288,9 +290,11 @@ find a server that runs a Steam bridge, with no VPS and no friend invite.
   rules: with `SteamTunnelBridge` set to something other than auto, an agent
   key set, or no `steam_api.dll`, the loopback host is reachable by nobody.
   The gate is the game's own lobby password; the LAN screen offers no ban
-  control. UNVERIFIED until the live two-PC test: that a
-  Steam peer's game session (not only its lobby join) works through a
-  loopback LAN host.
+  control. Verified live 2026-11-08: a Steam friend found the
+  `[Steam]` row, joined, and the loopback LAN host's server authorized it.
+  UNVERIFIED: both players in the same game room. Without in-game LAN
+  NoAuth, Start host needs `tools/lan/BZRServer.exe` (a build that accepts
+  `--lan-discovery --lan-managed`) beside the game.
 
 - Host: opt in with **Steam list: On** on the LAN screen (saved as
   `openshim.ini [Network] SteamPublicListing=1`; default off). While a bridge
