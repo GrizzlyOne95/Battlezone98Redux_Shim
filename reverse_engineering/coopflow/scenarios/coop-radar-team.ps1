@@ -14,7 +14,7 @@ function Read-RadarGlobals([int]$c) {
     if (-not $client.pid) { throw "no pid for c$c" }
     $cmds = 'dd 0x917b00 L1; dd 0x917a70 L1; dd 0x917afc L1; dd dwo(0x917afc)+0x174 L1; dd 0x9175b0 L1; dd 0x917578 L1; qd'
     $out = & $cmd /c "`"$cdb`" -pv -p $($client.pid) -c `"$cmds`"" 2>&1 | Out-String
-    $vals = @([regex]::Matches($out, '(?m)^([0-9a-f]{8})\s+([0-9a-f]{8})\s*$') | ForEach-Object { $_.Groups[2].Value })
+    $vals = @([regex]::Matches($out, '(?m)^(?:[0-9a-f]{8}`)?([0-9a-f]{8})\s+([0-9a-f]{8})\s*$') | ForEach-Object { $_.Groups[2].Value })
     [pscustomobject]@{ client = $c; pid = $client.pid; ownTeam = $vals[0]; allyGate = $vals[1]; userObj = $vals[2]; userObjTeam = $vals[3]; ownColor = $vals[4]; allyColor = $vals[5]; raw = if ($vals.Count -lt 6) { $out } else { $null } }
 }
 $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
@@ -52,9 +52,9 @@ Invoke-CRFlowStep 'cdb: radar own-team globals' {
 # (handle >> 20) * 0x400 (FUN_004da060).
 Invoke-CRFlowStep 'cdb: building colour cache on every client' {
     foreach ($c in $C) {
-        $list = Invoke-CRFlow $c 'local t = {} for h in AllObjects() do if IsBuilding(h) or IsCraft(h) then t[#t+1] = { id = tostring(h), team = GetTeamNum(h), odf = GetOdf(h), bld = IsBuilding(h) } end end return t'
+        $list = Invoke-CRFlow $c 'local function p(f, ...) local ok, a = pcall(f, ...); if ok then return a end return nil end local t = {} for h in AllObjects() do if IsValid(h) then local b = p(IsBuilding, h) == true local k = p(IsCraft, h) == true local tm = p(GetTeamNum, h) if (b or k) and tm and tm ~= 0 then t[#t+1] = { id = tostring(h), team = tm, odf = p(GetOdf, h), bld = b } end end end return { rows = t }'
         $client = @((Get-CRFlowSession).clients) | Where-Object { $_.index -eq $c } | Select-Object -First 1
-        $rows = @($list) | Select-Object -First 24
+        $rows = @($list.rows) | Select-Object -First 24
         if ($rows.Count -eq 0) { throw "c$c returned no objects from AllObjects()" }
         $cmds = 'dd 0x917b00 L1; '
         foreach ($r in $rows) {
