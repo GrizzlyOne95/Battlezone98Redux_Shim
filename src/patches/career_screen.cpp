@@ -6,9 +6,12 @@
 //
 // The panel art is resources/ui/custom_widgets/osh_career_center.png, painted
 // by mkscreens.py. Its title plate and four boxes are the layout contract with
-// the constants below; change both together.
+// the constants below; change both together. The boxes carry no baked-in text,
+// so the fourth box (KILLS BY TYPE, two columns of five rows) sits in the same
+// painted rectangle as the others and the art is unchanged.
 
 #include "bzr_options_ui.h"
+#include "career_kill_class.h"
 #include "patcher.h"
 #include "shell_screens.h"
 
@@ -39,6 +42,7 @@ namespace BZROpenShim
         constexpr float kRowTop = 62.0f;       // first row, below the header band
         constexpr float kRowH = 46.0f;
         constexpr float kValueW = 150.0f;
+        constexpr float kColumnValueW = 64.0f;  // value column inside a two-column box
         constexpr size_t kRowsPerBox = 5;
 
         // The stock top-corner Back button: Options builds its Back as
@@ -55,6 +59,10 @@ namespace BZROpenShim
         // on). Values are summed across profiles: an install normally has one,
         // and summing is the honest answer when it has more rather than
         // silently picking whichever came first.
+        // The nine named kill categories, in CareerKillClass::Category order;
+        // "other" is derived on the screen, never read from the file.
+        constexpr size_t kNamedKillClasses = 9;
+
         struct CareerTotals
         {
             bool fileFound = false;
@@ -68,6 +76,7 @@ namespace BZROpenShim
             long long missionsPlayed = 0;
             long long spMissions = 0;
             long long mpMatches = 0;
+            long long killsByClass[kNamedKillClasses] = {};
             int missionsRecorded = 0;
         };
 
@@ -115,6 +124,15 @@ namespace BZROpenShim
                 else if (tail == "career.missionsPlayed")   out.missionsPlayed += value;
                 else if (tail == "career.spMissionsPlayed") out.spMissions += value;
                 else if (tail == "career.mpMatchesPlayed")  out.mpMatches += value;
+                else if (tail.rfind("career.killsByClass.", 0) == 0)
+                {
+                    const std::string classKey = tail.substr(sizeof("career.killsByClass.") - 1);
+                    for (size_t c = 0; c < kNamedKillClasses; ++c)
+                    {
+                        if (classKey == CareerKillClass::KillClassKey(static_cast<CareerKillClass::Category>(c)))
+                            out.killsByClass[c] += value;
+                    }
+                }
                 else if (tail.rfind("mission.", 0) == 0)
                 {
                     const size_t nameEnd = tail.find('.', sizeof("mission.") - 1);
@@ -150,6 +168,10 @@ namespace BZROpenShim
         {
             std::string title;
             CareerRow rows[kRowsPerBox];
+            // Optional second column (KILLS BY TYPE): when columns2 is set the
+            // box is drawn as two equal columns, rows[] left and rows2[] right.
+            bool columns2 = false;
+            CareerRow rows2[kRowsPerBox];
         };
 
         void BuildCareerBoxes(CareerBox (&boxes)[4])
@@ -178,7 +200,7 @@ namespace BZROpenShim
             boxes[2].rows[1] = { "Deaths", num(t.mpDeaths) };
             boxes[2].rows[2] = { "Matches played", num(t.mpMatches) };
 
-            boxes[3].title = "RECORD";
+            boxes[3].title = "KILLS BY TYPE";
             if (!t.fileFound)
             {
                 boxes[3].rows[0] = { "No record yet.", "" };
@@ -187,9 +209,28 @@ namespace BZROpenShim
                 boxes[3].rows[4] = { "Off switch: OpenShim Settings.", "" };
                 return;
             }
-            boxes[3].rows[0] = { "Distinct missions", num(t.missionsRecorded) };
+            boxes[0].rows[3] = { "Distinct missions", num(t.missionsRecorded) };
             if (t.profiles > 1)
-                boxes[3].rows[1] = { "Profiles combined", num(t.profiles) };
+                boxes[0].rows[4] = { "Profiles combined", num(t.profiles) };
+
+            // "Other" is whatever the total holds beyond the nine named
+            // categories: kills recorded before this feature existed and kills
+            // whose victim could not be classified.
+            long long named = 0;
+            for (long long v : t.killsByClass)
+                named += v;
+            const long long other = t.totalKills > named ? t.totalKills - named : 0;
+            boxes[3].columns2 = true;
+            boxes[3].rows[0] = { "Pilots", num(t.killsByClass[0]) };
+            boxes[3].rows[1] = { "Tanks", num(t.killsByClass[1]) };
+            boxes[3].rows[2] = { "Fighters", num(t.killsByClass[2]) };
+            boxes[3].rows[3] = { "Scouts", num(t.killsByClass[3]) };
+            boxes[3].rows[4] = { "Bombers", num(t.killsByClass[4]) };
+            boxes[3].rows2[0] = { "Turrets", num(t.killsByClass[5]) };
+            boxes[3].rows2[1] = { "Artillery", num(t.killsByClass[6]) };
+            boxes[3].rows2[2] = { "Support", num(t.killsByClass[7]) };
+            boxes[3].rows2[3] = { "Buildings", num(t.killsByClass[8]) };
+            boxes[3].rows2[4] = { "Other", num(other) };
         }
 
         void __cdecl OnCareerBackClicked()
@@ -224,22 +265,30 @@ namespace BZROpenShim
                                 { box.x + kBoxPadX, box.y + 4.0f, box.w - 2.0f * kBoxPadX, kBoxHeaderH - 6.0f },
                                 boxes[b].title.c_str());
 
-                for (size_t r = 0; r < kRowsPerBox; ++r)
+                const size_t columns = boxes[b].columns2 ? 2 : 1;
+                const float innerW = box.w - 2.0f * kBoxPadX;
+                const float columnW = innerW / static_cast<float>(columns);
+                const float valueW = boxes[b].columns2 ? kColumnValueW : kValueW;
+                for (size_t c = 0; c < columns; ++c)
                 {
-                    const CareerRow& row = boxes[b].rows[r];
-                    if (row.caption.empty())
-                        continue;
-                    const float y = box.y + kRowTop + kRowH * static_cast<float>(r);
-                    _snprintf_s(name, _TRUNCATE, "OpenShimCareer_Cap%zu_%zu", b, r);
-                    Shell::AddLabel(panel, panel, name,
-                                    { box.x + kBoxPadX, y, box.w - 2.0f * kBoxPadX - kValueW, kRowH },
-                                    row.caption.c_str());
-                    if (row.value.empty())
-                        continue;
-                    _snprintf_s(name, _TRUNCATE, "OpenShimCareer_Val%zu_%zu", b, r);
-                    Shell::AddLabel(panel, panel, name,
-                                    { box.x + box.w - kBoxPadX - kValueW, y, kValueW, kRowH },
-                                    row.value.c_str());
+                    const float columnX = box.x + kBoxPadX + columnW * static_cast<float>(c);
+                    for (size_t r = 0; r < kRowsPerBox; ++r)
+                    {
+                        const CareerRow& row = c == 0 ? boxes[b].rows[r] : boxes[b].rows2[r];
+                        if (row.caption.empty())
+                            continue;
+                        const float y = box.y + kRowTop + kRowH * static_cast<float>(r);
+                        _snprintf_s(name, _TRUNCATE, "OpenShimCareer_Cap%zu_%zu_%zu", b, c, r);
+                        Shell::AddLabel(panel, panel, name,
+                                        { columnX, y, columnW - valueW, kRowH },
+                                        row.caption.c_str());
+                        if (row.value.empty())
+                            continue;
+                        _snprintf_s(name, _TRUNCATE, "OpenShimCareer_Val%zu_%zu_%zu", b, c, r);
+                        Shell::AddLabel(panel, panel, name,
+                                        { columnX + columnW - valueW, y, valueW, kRowH },
+                                        row.value.c_str());
+                    }
                 }
             }
 

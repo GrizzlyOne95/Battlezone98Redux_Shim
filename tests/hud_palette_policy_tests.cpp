@@ -32,5 +32,9 @@ int main()
     Check(BZROpenShim::HudColors::Parse("Red") == 0xFFFF4040u &&
           BZROpenShim::HudColors::Parse("Yellow") == 0xFFFFFF40u,
           "warning color choices parse as native ARGB");
+    Check(ContactRole(false, true, true) == Role::RadarFriendly, "the player's own team takes the friendly colour");
+    Check(!ContactRole(false, false, true).has_value(), "an allied team keeps the native ally colour");
+    Check(ContactRole(true, false, false) == Role::RadarEnemy, "enemies take the enemy colour");
+    Check(ContactRole(false, false, false) == Role::RadarNeutral, "unrelated teams take the neutral colour");
     return OpenShimTest::ExitCode();
 }

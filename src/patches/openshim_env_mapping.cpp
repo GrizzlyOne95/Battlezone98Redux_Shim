@@ -184,6 +184,10 @@ namespace
             return ini(IniFile::Main, "General", "SkinnedGibsForce", out);
         if (Equals(name, "OPENSHIM_TRACE_SKINNED_GIBS"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSkinnedGibs", false, out);
+        // FractureOnePiece: one-piece craft and buildings cut into capped pieces on death
+        // (shares the gib pool; the trace flag above also covers its log lines).
+        if (Equals(name, "OPENSHIM_DISABLE_FRACTURE"))
+            return TryReadMappedBool(ini, "General", "FractureOnePiece", true, out);
         // ShellCasings: cosmetic casings from cannon-like weapons. The class
         // list and numeric keys are read raw and parsed by the feature.
         if (Equals(name, "OPENSHIM_DISABLE_SHELL_CASINGS") || Equals(name, "BZR_DISABLE_SHELL_CASINGS"))
@@ -215,6 +219,8 @@ namespace
         {
             return TryReadMappedBool(ini, "General", "MapRefreshFixes", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP"))
+            return TryReadMappedBool(ini, "General", "MapListLetterJump", true, out);
         if (Equals(name, "OPENSHIM_DISABLE_MUSIC_GLOBAL_FOCUS"))
             return TryReadMappedBool(ini, "General", "MusicGlobalFocus", true, out);
         if (Equals(name, "OPENSHIM_DISABLE_CONTROL_SMOOTHING") ||

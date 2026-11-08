@@ -34,6 +34,9 @@
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
 #include "d3d11_device_loss_recovery.h"
+#include "d3d11_primary_monitor.h"
+#include "resolution_list_filter.h"
+#include "resolution_dropdown.h"
 #include "dxgi_flip_model.h"
 #include "dx11_enhanced_fxaa.h"
 #include "dx11_scene_depth.h"
@@ -42,7 +45,10 @@
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
 #include "music_single_fill.h"
+#include "p2p_reliable_send_fix.h"
 #include "precise_timestep.h"
+#include "armory_repair_pick.h"
+#include "remote_object_smoothing.h"
 #include "mouse_every_frame.h"
 #include "thread_scheduling.h"
 #include "pilot_fp_animation_trace.h"
@@ -129,6 +135,7 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializeOgreAnimationProfiler());
     PATCH_STAGE(BZROpenShim::InitializeDx11ColorSpaceDiagnostic());
     PATCH_STAGE(BZROpenShim::InitializeD3D11DeviceLossRecovery());
+    PATCH_STAGE(BZROpenShim::InitializeD3D11PrimaryMonitor());
     // Opt-in; hooks the shared DXGI factory vtable before Ogre makes its
     // render window, so it must arm here rather than wait for the renderer.
     PATCH_STAGE(BZROpenShim::InitializeDxgiFlipModel());
@@ -143,12 +150,23 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the optimizer's existing IAT targets without changing network behavior.
     PATCH_STAGE(BZROpenShim::InitializeBzrNetInstrumentation());
     PATCH_STAGE(BZROpenShim::RunPatcher(SHIM_VERSION));
+    // Ping-adaptive reliable retry waits; needs the patches.json resolves, so after RunPatcher.
+    PATCH_STAGE(BZROpenShim::Hooks::InitializeP2PAdaptiveRetry());
 
     // Multiplayer starting-vehicle list faction policy. Installs after the
     // patcher so scripts/patches.json resolves are loaded; the hook itself is
     // inert until [Network] StockFactionsOnly is turned on, and the loader it
     // intercepts only runs when a multiplayer screen builds its vehicle list.
     PATCH_STAGE(BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible());
+
+    // Shorter options-screen resolution list. Needs the patches.json
+    // resolves, so it runs after the patcher; the options screen is built
+    // long after this.
+    PATCH_STAGE(BZROpenShim::InitializeResolutionListFilter());
+
+    // Dropdown for the options-screen resolution row; hooks the same screen
+    // ctor after the filter above has trimmed the list it reads.
+    PATCH_STAGE(BZROpenShim::InitializeResolutionDropdown());
 
     // Lua Send/Receive carries a Handle as the object's network id, which
     // map-authored objects (geysers, beacons) never get, so receivers see nil.
@@ -255,6 +273,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
     // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
+    // Guest RKIT repair pick of allied damaged buildings (always on, fail closed).
+    PATCH_STAGE(BZROpenShim::InitializeArmoryRepairPick());
+    PATCH_STAGE(BZROpenShim::InitializeRemoteObjectSmoothing());
     // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
     PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
     // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf

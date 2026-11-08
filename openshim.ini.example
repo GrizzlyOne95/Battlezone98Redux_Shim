@@ -132,6 +132,22 @@ SkinnedGibsLinger = 8
 ; Multiplier for the random part of the launch velocity (0..5). Default: 1.0.
 SkinnedGibsForce = 1.0
 
+; Fracture one-piece models: when a craft or building whose model has at most
+; one vertex-driving bone (or no skeleton) is fully fragmented, the engine
+; yields at most one whole-model chunk. With this on, the model's own .mesh is
+; cut at runtime into 4..8 capped pieces (more for larger models) that are
+; thrown like debris, using the SkinnedGibs pool and the legacy launch values
+; with a heavier metal ground response. Cut faces use openshim_fracture_interior,
+; written to the cache root unless a chunk payload directory ships its own
+; openshim_fracture_interior.material. The cut pieces are cached under
+; openshim/cache/chunks/fracture. Models under 1 m, or with several driving
+; bones, are left to the engine. Visual only: the engine's own chunk
+; simulation is untouched, and 0 restores exactly the previous behaviour.
+; GOG build only. Per-spawn log lines under TraceSkinnedGibs.
+; Accepted: 0 = OFF, non-zero = ON. Default: 1.
+; Legacy env alias: OPENSHIM_DISABLE_FRACTURE
+FractureOnePiece = 1
+
 ; Shell casings: when a cannon-like weapon fires, a small brass casing is
 ; ejected from the weapon's breech, tumbles, bounces off the terrain, the
 ; firing hull and nearby objects, then lies on the ground and sinks away.
@@ -207,6 +223,14 @@ MapRefreshFixes = 1
 ; Exposed on the OpenShim Settings page as "Map Filters+"; restart required.
 ; Env override to enable: OPENSHIM_MAP_FILTER_EXTRAS
 MapFilterExtras = 0
+
+; Create Game map list quick jump: Ctrl+A..Ctrl+Z select the next map in the
+; displayed list whose title starts with that letter (wraps around). The
+; current filter is re-run unchanged, so the list and preview stay in sync.
+; Independent of MapFilterExtras. Byte-guarded; a mismatch stands it down.
+; Accepted: boolean. Default: ON. Restart required.
+; Env override to disable: OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP
+MapListLetterJump = 1
 
 ; Keep the soundtrack playing when the game is not the foreground window.
 ; Accepted: boolean. Default: ON. Restart required.
@@ -863,6 +887,27 @@ RenderProfile = Enhanced
 ;   and DX9 is untouched. Logged under [DX11 Recovery].
 ;   Kill switch: OPENSHIM_DISABLE_D3D11_DEVICE_LOSS_RECOVERY=1.
 D3D11DeviceLossRecovery = 1
+
+; DX11 window on the primary monitor. Accepted: boolean. Default: 1.
+;   With no saved position, Ogre's DX11 window opens on the monitor furthest
+;   right and down, which on a multi-monitor desk is a side monitor (DX9 uses
+;   the monitor picked in the launcher). With this on, that window opens on
+;   the Windows primary monitor instead. DX9 is untouched. Logged under
+;   [DX11 Monitor]. Kill switch: OPENSHIM_DISABLE_D3D11_PRIMARY_MONITOR=1.
+D3D11PrimaryMonitor = 1
+; Shorter resolution list in the options screen. Accepted: boolean. Default: 1.
+;   Keeps the current setting, the desktop size, and common sizes whose aspect
+;   ratio is within 0.02 of the desktop's, one entry per size. Anything the
+;   filter cannot parse is kept. Logged under [ResList].
+;   Kill switch: OPENSHIM_DISABLE_RESOLUTION_LIST_FILTER=1.
+ResolutionListFilter = 1
+
+; Resolution dropdown in the options screen. Accepted: boolean. Default: 1.
+;   A left click on the resolution row opens a scrollable list of its entries;
+;   picking one selects it exactly as cycling would. Right click keeps the
+;   stock "previous value" behaviour. Logged under [ResDrop].
+;   Kill switch: OPENSHIM_DISABLE_RESOLUTION_DROPDOWN=1.
+ResolutionDropdown = 1
 
 ; DXGI flip-model presentation (DX11 only). Accepted: boolean. Default: 0.
 ;   Creates Ogre's D3D11 swap chain as DXGI_SWAP_EFFECT_FLIP_DISCARD with a
@@ -1840,6 +1885,13 @@ TracePlayerKills = 0
 ; Requires an explicit LAN selection and numeric private IPv4. Development opt-in.
 NoAuthLan = 0
 
+; Set to 1 to give every player 99 lives when you host a multiplayer game,
+; instead of the lobby lives value. Host only: guests receive the host's value,
+; so setting it on a guest has no effect. Restart required.
+; Patches the host launch fill at 0x0079A456 (GOG 2.2.301); fails closed on a
+; byte mismatch. The lives decrement is untouched.
+InfiniteLives = 0
+
 ; OpenShim's socket layer as a whole. Off installs none of it: no winsock
 ; hooks, no bandwidth governor, no auto-kick relaxation, no packet
 ; reorder/duplicate mitigation, no DSCP marking.
@@ -1883,6 +1935,12 @@ ReliableSendBacklogFix = 1
 ; key uses it too); 1000 / 2500 restores stock.
 ReliableFirstRetryMs = 300
 ReliableRetryIntervalMs = 800
+
+; Raise both waits above to 1.5x that peer's round trip when that is larger,
+; so a high-ping link only resends real losses (at 350 ms ping a fixed 300 ms
+; first retry fires before the ACK can arrive). Low ping is unchanged. Sender
+; side, same wire format. 0 keeps the fixed waits. Restart required.
+ReliableRetryAdaptToPing = 1
 
 ; BZRNet P2P early unreliable receive. Stock Redux accepts a packet only when
 ; its stamp is the next reliable stamp it expects, and unreliable updates carry
@@ -2182,6 +2240,20 @@ StockFactionsOnly = 0
 ; Ignored entirely when StockFactionsOnly = 0.
 ; Legacy env alias: OPENSHIM_STOCK_FACTION_SET
 StockFactionSet = as
+
+; Remote-object display smoothing. Stock Redux moves a remote object's drawn
+; position 30% (and its rotation 50%) of the way toward its dead-reckoned
+; physics state every frame, so how smooth it looks depends on the frame rate:
+; at 200 fps a correction is swallowed in ~15 ms, at 30 fps in ~100 ms. Set a
+; time constant in milliseconds to blend by 1 - exp(-dt / tau) instead
+; (rotation settles about 2x faster, like stock). Corrections over 15 m snap.
+; Client-local and display-only: physics, hit detection, authority and the
+; wire format are unchanged, so it is safe with stock peers.
+; Accepted: integer 0..300. Default: 0 (stock). Suggested: 100.
+; Restart required after changing.
+; Site: GOG 2.2.301 GameObject::Simulate at 0x004DEEC0; a signature mismatch
+; keeps stock.
+RemoteSmoothingMs = 0
 
 
 [Gameplay]

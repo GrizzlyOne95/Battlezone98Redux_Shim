@@ -260,6 +260,9 @@
     <ClCompile Include="src\patches\d3d11_constant_lookup_cache.cpp" />
     <ClCompile Include="src\patches\d3d_compile_cache.cpp" />
     <ClCompile Include="src\patches\d3d11_device_loss_recovery.cpp" />
+    <ClCompile Include="src\patches\d3d11_primary_monitor.cpp" />
+    <ClCompile Include="src\patches\resolution_list_filter.cpp" />
+    <ClCompile Include="src\patches\resolution_dropdown.cpp" />
     <ClCompile Include="src\patches\dxgi_flip_model.cpp" />
     <ClCompile Include="src\patches\dx11_enhanced_fxaa.cpp" />
     <ClCompile Include="src\engine\frame_bridge_producer.cpp" />
@@ -289,6 +292,8 @@
     <ClCompile Include="src\patches\perf_telemetry.cpp" />
     <ClCompile Include="src\patches\music_single_fill.cpp" />
     <ClCompile Include="src\patches\precise_timestep.cpp" />
+    <ClCompile Include="src\patches\armory_repair_pick.cpp" />
+    <ClCompile Include="src\patches\remote_object_smoothing.cpp" />
     <ClCompile Include="src\patches\mouse_every_frame.cpp" />
     <ClCompile Include="src\patches\thread_scheduling.cpp" />
     <ClCompile Include="src\patches\net_optimizer.cpp" />
@@ -391,6 +396,7 @@
     <ClInclude Include="include\autosave_notice.h" />
     <ClInclude Include="include\autosave_notice_layout.h" />
     <ClInclude Include="include\hud_gauge_overlay.h" />
+    <ClInclude Include="include\career_kill_class.h" />
     <ClInclude Include="include\kill_ticker.h" />
     <ClInclude Include="include\kill_ticker_policy.h" />
     <ClInclude Include="include\bzr_hooks.h" />
@@ -431,6 +437,10 @@
     <ClInclude Include="include\d3d_compile_cache.h" />
     <ClInclude Include="include\dxbc_cache_policy.h" />
     <ClInclude Include="include\d3d11_device_loss_recovery.h" />
+    <ClInclude Include="include\d3d11_primary_monitor.h" />
+    <ClInclude Include="include\resolution_list_filter.h" />
+    <ClInclude Include="include\resolution_dropdown.h" />
+    <ClInclude Include="include\resolution_list_policy.h" />
     <ClInclude Include="include\dxgi_flip_model.h" />
     <ClInclude Include="include\dx11_scene_depth.h" />
     <ClInclude Include="include\scene_depth_facts.h" />
@@ -470,6 +480,10 @@
     <ClInclude Include="include\perf_telemetry.h" />
     <ClInclude Include="include\music_single_fill.h" />
     <ClInclude Include="include\precise_timestep.h" />
+    <ClInclude Include="include\armory_repair_pick.h" />
+    <ClInclude Include="include\armory_repair_pick_policy.h" />
+    <ClInclude Include="include\remote_object_smoothing.h" />
+    <ClInclude Include="include\remote_smoothing_policy.h" />
     <ClInclude Include="include\mouse_every_frame.h" />
     <ClInclude Include="include\thread_scheduling.h" />
     <ClInclude Include="include\net_optimizer.h" />

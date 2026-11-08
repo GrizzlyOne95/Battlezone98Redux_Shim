@@ -12,6 +12,8 @@
 #include <Windows.h>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
+#include "hook_engine.h"
 #include <string>
 #include <vector>
 
@@ -321,6 +323,49 @@ namespace BZROpenShim::MenuTheme
             Log(L"[MENUTHEME] image=%hs result=%hs materials=%zu\n",name,ok?"themed":"native",g_entries.size());
         }
         catch(...) { Log(L"[MENUTHEME] Image adapter unavailable; native material retained\n"); }
+    }
+
+    namespace
+    {
+        using SetLabelColor = void(__cdecl*)(void*,uint32_t);
+        SetLabelColor g_setLabelColor=nullptr;
+        bool g_textInstallTried=false;
+        // Replaces only the colour-apply CALL in the queued-label draw loop
+        // (FUN_00687AC0); the setter's 60 other callers, HUD included, are untouched.
+        void __cdecl LabelColorHook(void* font,uint32_t argb)
+        {
+            if(!g_read)ReadConfig();
+            // Labels are recoloured in the shell only: the run state is
+            // RUN_STARTED (5) for the whole of a mission, pause menu included.
+            int state=0;
+            if(g_preview.enabled&&Hooks::TryReadBzrRunState(state)&&state!=Hooks::kBzrRunStateStarted)
+                argb=RecolorLabelArgb(argb,g_preview);
+            g_setLabelColor(font,argb);
+        }
+    }
+
+    void InstallTextRecolor()
+    {
+        if(g_textInstallTried)return;
+        g_textInstallTried=true;
+        uint32_t site=0;
+        if(HookEngine::ResolveEngineAddress("MenuTextColorApply",site)!=HookEngine::EngineAddressStatus::Bound)
+        {
+            LogShimA(LogLevel::Warn,"menutheme","[MENUTHEME] label recolor stands down: guard bytes did not verify");
+            return;
+        }
+        const uintptr_t call=site+13;
+        int32_t rel=0;
+        std::memcpy(&rel,reinterpret_cast<const void*>(call+1),sizeof(rel));
+        const uintptr_t stock=call+5+rel;
+        g_setLabelColor=reinterpret_cast<SetLabelColor>(stock);
+        if(!Hooks::RedirectCallTarget(call,stock,reinterpret_cast<uintptr_t>(&LabelColorHook)))
+        {
+            g_setLabelColor=nullptr;
+            LogShimA(LogLevel::Warn,"menutheme","[MENUTHEME] label recolor stands down: call site did not match");
+            return;
+        }
+        LogShimA(LogLevel::Info,"menutheme","[MENUTHEME] label recolor installed at 0x%08X",static_cast<uint32_t>(call));
     }
 
     bool ImageAdapterNeeded(){if(!g_read)ReadConfig();return g_preview.enabled;}

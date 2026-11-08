@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstring>
 #include <map>
+#include <new>
 #include <optional>
 #include <regex>
 #include <set>
@@ -2809,6 +2810,757 @@ bool ExtractGibs(const Bytes &bytes, const Bytes &skeleton, const GibOptions &op
     {
         gibs.clear();
         error = e.what();
+        return false;
+    }
+}
+// ---------------------------------------------------------------------------
+// Runtime fracture: cut a one-piece model into capped pieces (see
+// FractureOptions in native_chunk_mesh.h).
+namespace
+{
+struct FracSub
+{
+    std::string material;
+    Geometry g;
+    std::vector<uint32_t> indices;
+};
+struct FracPiece
+{
+    std::vector<FracSub> subs;
+    bool dead = false;
+    size_t faces() const
+    {
+        size_t n = 0;
+        for (const FracSub &s : subs)
+            n += s.indices.size() / 3;
+        return n;
+    }
+};
+struct FracRng
+{
+    uint64_t state;
+    float next()
+    {
+        state = mix64(state + 0x9e3779b97f4a7c15ULL);
+        return static_cast<float>(state >> 40) * (1.0f / 16777216.0f);
+    }
+};
+// Bytes per element, 0 for a type the cutter copies from the first vertex.
+size_t fractureElementBytes(uint16_t type)
+{
+    if (type <= 3)
+        return (static_cast<size_t>(type) + 1) * 4;
+    if (type == 4 || (type >= 9 && type <= 11))
+        return 4;
+    if (type >= 5 && type <= 8)
+        return (static_cast<size_t>(type) - 4) * 2;
+    return 0;
+}
+void blendElement(const Element &e, uint8_t *dst, const uint8_t *a, const uint8_t *b, float t)
+{
+    if (e.type <= 3)
+    {
+        const size_t n = static_cast<size_t>(e.type) + 1;
+        float fa[4], fb[4], out[4];
+        std::memcpy(fa, a, n * 4);
+        std::memcpy(fb, b, n * 4);
+        for (size_t i = 0; i < n; ++i)
+            out[i] = fa[i] + (fb[i] - fa[i]) * t;
+        if (isDirection(e.semantic) && n >= 3)
+        {
+            const V d = normalize3({out[0], out[1], out[2]});
+            const float length = std::sqrt(out[0] * out[0] + out[1] * out[1] + out[2] * out[2]);
+            if (length >= 1e-12f)
+                std::memcpy(out, d.data(), 12);
+            else
+                std::memcpy(out, fa, 12);
+        }
+        std::memcpy(dst, out, n * 4);
+    }
+    else if (e.type == 4 || (e.type >= 9 && e.type <= 11))
+    {
+        for (int i = 0; i < 4; ++i)
+            dst[i] = static_cast<uint8_t>(std::clamp(std::lround(a[i] + (static_cast<float>(b[i]) - a[i]) * t), 0L, 255L));
+    }
+    else if (e.type >= 5 && e.type <= 8)
+    {
+        const size_t n = static_cast<size_t>(e.type) - 4;
+        for (size_t i = 0; i < n; ++i)
+        {
+            int16_t sa, sb;
+            std::memcpy(&sa, a + i * 2, 2);
+            std::memcpy(&sb, b + i * 2, 2);
+            const long v = std::clamp(std::lround(sa + (static_cast<float>(sb) - sa) * t), -32768L, 32767L);
+            const int16_t out = static_cast<int16_t>(v);
+            std::memcpy(dst + i * 2, &out, 2);
+        }
+    }
+}
+// Appends a vertex a + t (b - a) with every kept element interpolated.
+uint32_t lerpVertex(Geometry &g, uint32_t a, uint32_t b, float t)
+{
+    const uint32_t index = g.count;
+    for (auto &[source, buf] : g.buffers)
+    {
+        const size_t stride = buf.stride;
+        buf.data.resize((static_cast<size_t>(index) + 1) * stride);
+        uint8_t *dst = buf.data.data() + static_cast<size_t>(index) * stride;
+        const uint8_t *pa = buf.data.data() + static_cast<size_t>(a) * stride;
+        const uint8_t *pb = buf.data.data() + static_cast<size_t>(b) * stride;
+        std::memcpy(dst, pa, stride);
+        for (const Element &e : g.elements)
+        {
+            if (e.source != source || e.semantic == 2 || e.semantic == 3)
+                continue;
+            const size_t bytes = fractureElementBytes(e.type);
+            if (!bytes || static_cast<size_t>(e.offset) + bytes > stride)
+                continue;
+            blendElement(e, dst + e.offset, pa + e.offset, pb + e.offset, t);
+        }
+    }
+    ++g.count;
+    return index;
+}
+// Keeps only referenced vertices.
+void compactSub(FracSub &sub)
+{
+    Geometry &g = sub.g;
+    std::vector<uint32_t> remap(g.count, 0xFFFFFFFFu);
+    uint32_t used = 0;
+    for (uint32_t &index : sub.indices)
+    {
+        if (index >= g.count)
+            throw std::runtime_error("index outside vertex data");
+        if (remap[index] == 0xFFFFFFFFu)
+            remap[index] = used++;
+        index = remap[index];
+    }
+    for (auto &[source, buf] : g.buffers)
+    {
+        Bytes data(static_cast<size_t>(used) * buf.stride);
+        for (uint32_t v = 0; v < g.count; ++v)
+            if (remap[v] != 0xFFFFFFFFu)
+                std::memcpy(data.data() + static_cast<size_t>(remap[v]) * buf.stride,
+                            buf.data.data() + static_cast<size_t>(v) * buf.stride, buf.stride);
+        buf.data = std::move(data);
+    }
+    g.count = used;
+}
+void compactPiece(FracPiece &piece)
+{
+    auto &subs = piece.subs;
+    subs.erase(std::remove_if(subs.begin(), subs.end(), [](const FracSub &s) { return s.indices.empty(); }), subs.end());
+    for (FracSub &s : subs)
+        compactSub(s);
+}
+bool pieceBounds(const FracPiece &piece, V &lo, V &hi)
+{
+    lo = {1e30f, 1e30f, 1e30f};
+    hi = {-1e30f, -1e30f, -1e30f};
+    bool any = false;
+    for (const FracSub &s : piece.subs)
+    {
+        if (s.indices.empty())
+            continue;
+        const PositionReader position(s.g);
+        for (const uint32_t index : s.indices)
+        {
+            const V p = position(index);
+            for (int i = 0; i < 3; ++i)
+            {
+                lo[i] = std::min(lo[i], p[i]);
+                hi[i] = std::max(hi[i], p[i]);
+            }
+            any = true;
+        }
+    }
+    return any;
+}
+std::array<long long, 3> fractureWeldKey(const V &p)
+{
+    return {std::llround(static_cast<double>(p[0]) / 1e-4), std::llround(static_cast<double>(p[1]) / 1e-4),
+            std::llround(static_cast<double>(p[2]) / 1e-4)};
+}
+struct FractureCut
+{
+    FracPiece a, b; // a: signed distance > 0, b: < 0
+    std::vector<std::pair<int, int>> edgesA, edgesB; // directed cap edges (welded ids), already reversed
+    std::vector<V> weldPosition;
+};
+// Splits `src` (whose geometry grows by the new vertices) by the plane
+// dot(n, x) = planeD. Straddling triangles are clipped, interpolating every kept
+// vertex element; the cut points of both sides are position-identical.
+FractureCut cutPiece(FracPiece &src, V n, float planeD, float eps)
+{
+    FractureCut out;
+    std::map<std::array<long long, 3>, int> weld;
+    const auto weldId = [&](const V &p) {
+        const auto key = fractureWeldKey(p);
+        const auto found = weld.find(key);
+        if (found != weld.end())
+            return found->second;
+        const int id = static_cast<int>(out.weldPosition.size());
+        weld.emplace(key, id);
+        out.weldPosition.push_back(p);
+        return id;
+    };
+    struct PolyVertex
+    {
+        uint32_t index;
+        bool cut;
+    };
+    out.a.subs.resize(src.subs.size());
+    out.b.subs.resize(src.subs.size());
+    for (size_t s = 0; s < src.subs.size(); ++s)
+    {
+        FracSub &sub = src.subs[s];
+        Geometry &g = sub.g;
+        out.a.subs[s].material = out.b.subs[s].material = sub.material;
+        std::vector<uint32_t> &outA = out.a.subs[s].indices, &outB = out.b.subs[s].indices;
+        const uint32_t originalCount = g.count;
+        std::vector<float> dist(originalCount);
+        {
+            const PositionReader position(g);
+            for (uint32_t v = 0; v < originalCount; ++v)
+                dist[v] = dot3(n, position(v)) - planeD;
+        }
+        std::map<std::pair<uint32_t, uint32_t>, uint32_t> crossings;
+        const auto distanceOf = [&](uint32_t index) { return dist.at(index); };
+        const auto crossing = [&](uint32_t i0, uint32_t i1) {
+            const V p0 = position(g, i0), p1 = position(g, i1);
+            if (p1 < p0)
+                std::swap(i0, i1);
+            const auto key = std::make_pair(i0, i1);
+            const auto found = crossings.find(key);
+            if (found != crossings.end())
+                return found->second;
+            const float d0 = distanceOf(i0), d1 = distanceOf(i1);
+            float t = d0 / (d0 - d1);
+            t = std::clamp(t, 0.0f, 1.0f);
+            const uint32_t index = lerpVertex(g, i0, i1, t);
+            crossings.emplace(key, index);
+            return index;
+        };
+        const auto addEdge = [&](std::vector<std::pair<int, int>> &edges, const V &x, const V &y) {
+            const int wx = weldId(x), wy = weldId(y);
+            if (wx != wy)
+                edges.push_back({wy, wx}); // reversed: the cap winds opposite to the skin
+        };
+        for (size_t f = 0; f + 2 < sub.indices.size(); f += 3)
+        {
+            const uint32_t idx[3] = {sub.indices[f], sub.indices[f + 1], sub.indices[f + 2]};
+            float d[3];
+            int pos = 0, neg = 0;
+            for (int k = 0; k < 3; ++k)
+            {
+                d[k] = distanceOf(idx[k]);
+                if (std::abs(d[k]) <= eps)
+                    d[k] = 0.0f;
+                pos += d[k] > 0;
+                neg += d[k] < 0;
+            }
+            if (!pos || !neg)
+            {
+                bool toA = neg == 0;
+                if (!pos && !neg)
+                {
+                    const V p0 = position(g, idx[0]), p1 = position(g, idx[1]), p2 = position(g, idx[2]);
+                    toA = dot3(cross3(sub3(p1, p0), sub3(p2, p0)), n) >= 0;
+                }
+                else if (pos + neg == 1)
+                {
+                    // Two vertices on the plane: that triangle edge is a boundary of this side.
+                    for (int k = 0; k < 3; ++k)
+                        if (d[k] == 0.0f && d[(k + 1) % 3] == 0.0f)
+                            addEdge(toA ? out.edgesA : out.edgesB, position(g, idx[k]), position(g, idx[(k + 1) % 3]));
+                }
+                auto &list = toA ? outA : outB;
+                list.insert(list.end(), {idx[0], idx[1], idx[2]});
+                continue;
+            }
+            std::vector<PolyVertex> polyA, polyB;
+            for (int k = 0; k < 3; ++k)
+            {
+                const int next = (k + 1) % 3;
+                if (d[k] > 0)
+                    polyA.push_back({idx[k], false});
+                else if (d[k] < 0)
+                    polyB.push_back({idx[k], false});
+                else
+                {
+                    polyA.push_back({idx[k], true});
+                    polyB.push_back({idx[k], true});
+                }
+                if ((d[k] > 0 && d[next] < 0) || (d[k] < 0 && d[next] > 0))
+                {
+                    const uint32_t made = crossing(idx[k], idx[next]);
+                    polyA.push_back({made, true});
+                    polyB.push_back({made, true});
+                }
+            }
+            const auto emit = [&](const std::vector<PolyVertex> &poly, std::vector<uint32_t> &list,
+                                  std::vector<std::pair<int, int>> &edges) {
+                const size_t m = poly.size();
+                if (m < 3)
+                    return;
+                for (size_t i = 1; i + 1 < m; ++i)
+                    list.insert(list.end(), {poly[0].index, poly[i].index, poly[i + 1].index});
+                for (size_t i = 0; i < m; ++i)
+                    if (poly[i].cut && poly[(i + 1) % m].cut)
+                    {
+                        addEdge(edges, position(g, poly[i].index), position(g, poly[(i + 1) % m].index));
+                        break;
+                    }
+            };
+            emit(polyA, outA, out.edgesA);
+            emit(polyB, outB, out.edgesB);
+        }
+        out.a.subs[s].g = g;
+        out.b.subs[s].g = std::move(g);
+    }
+    compactPiece(out.a);
+    compactPiece(out.b);
+    return out;
+}
+const Element kCapElements[3] = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
+bool isCapSub(const FracSub &s, const std::string &material)
+{
+    if (s.material != material || s.g.elements.size() != 3 || s.g.buffers.size() != 1)
+        return false;
+    for (int i = 0; i < 3; ++i)
+        if (std::memcmp(&s.g.elements[static_cast<size_t>(i)], &kCapElements[i], sizeof(Element)) != 0)
+            return false;
+    return s.g.buffers.begin()->first == 0 && s.g.buffers.begin()->second.stride == kCapStride;
+}
+void appendCapTriangles(FracPiece &piece, const CapMesh &cap, const std::string &material)
+{
+    const auto &list = cap.indices[kZoneMuscle];
+    if (list.empty())
+        return;
+    FracSub *target = nullptr;
+    for (FracSub &s : piece.subs)
+        if (isCapSub(s, material))
+            target = &s;
+    if (!target)
+    {
+        piece.subs.emplace_back();
+        target = &piece.subs.back();
+        target->material = material;
+        target->g.elements.assign(kCapElements, kCapElements + 3);
+        target->g.buffers.emplace(uint16_t{0}, Buffer{kCapStride, {}});
+    }
+    Geometry &g = target->g;
+    Buffer &buffer = g.buffers.begin()->second;
+    const uint32_t base = g.count;
+    buffer.data.resize((static_cast<size_t>(base) + cap.vertices.size()) * kCapStride);
+    uint8_t *dst = buffer.data.data() + static_cast<size_t>(base) * kCapStride;
+    for (const CapVertex &vertex : cap.vertices)
+    {
+        std::memcpy(dst, vertex.p.data(), 12);
+        std::memcpy(dst + 12, vertex.n.data(), 12);
+        std::memcpy(dst + 24, &vertex.u, 4);
+        std::memcpy(dst + 28, &vertex.v, 4);
+        dst += kCapStride;
+    }
+    g.count = base + static_cast<uint32_t>(cap.vertices.size());
+    for (const uint32_t index : list)
+        target->indices.push_back(base + index);
+}
+// The ear clipper drops collinear rim points without a triangle, which would
+// leave a T-junction against the skin that still has them. Splits the cap
+// triangle owning the edge each dropped point lies on, so the piece stays
+// watertight.
+void splitDroppedRimPoints(CapMesh &cap, size_t first)
+{
+    auto &list = cap.indices[kZoneMuscle];
+    std::vector<char> referenced(cap.vertices.size(), 0);
+    for (const uint32_t index : list)
+        referenced[index] = 1;
+    for (size_t v = first; v < cap.vertices.size(); ++v)
+    {
+        if (referenced[v])
+            continue;
+        const V p = cap.vertices[v].p;
+        for (size_t t = 0; t + 2 < list.size(); t += 3)
+        {
+            bool split = false;
+            for (int e = 0; e < 3 && !split; ++e)
+            {
+                const uint32_t a = list[t + static_cast<size_t>(e)], b = list[t + static_cast<size_t>((e + 1) % 3)],
+                               c = list[t + static_cast<size_t>((e + 2) % 3)];
+                const V ab = sub3(cap.vertices[b].p, cap.vertices[a].p);
+                const float length2 = dot3(ab, ab);
+                if (!(length2 > 1e-12f))
+                    continue;
+                const float along = dot3(sub3(p, cap.vertices[a].p), ab) / length2;
+                if (!(along > 1e-4f && along < 1.0f - 1e-4f))
+                    continue;
+                const V off = sub3(sub3(p, cap.vertices[a].p), scale3(ab, along));
+                if (dot3(off, off) > 1e-6f * length2)
+                    continue;
+                list[t] = a;
+                list[t + 1] = static_cast<uint32_t>(v);
+                list[t + 2] = c;
+                list.insert(list.end(), {static_cast<uint32_t>(v), b, c});
+                referenced[v] = 1;
+                split = true;
+            }
+            if (split)
+                break;
+        }
+    }
+}
+// Closes the cut loops of one side. `outward` points out of the piece through
+// the cut plane. Loops whose winding runs against it (holes, or a source with
+// flipped winding) are left open unless every loop does.
+void capSide(FracPiece &piece, const std::vector<std::pair<int, int>> &rawEdges, const std::vector<V> &weldPosition,
+             V outward, const FractureOptions &options, FractureStats &stats)
+{
+    std::set<std::pair<int, int>> edgeSet(rawEdges.begin(), rawEdges.end());
+    const std::vector<std::pair<int, int>> edges(edgeSet.begin(), edgeSet.end());
+    if (edges.empty())
+        return;
+    std::vector<int> scratch(weldPosition.size(), -1);
+    const auto loops = boundaryLoops(edges, scratch);
+    struct Candidate
+    {
+        std::vector<V> points;
+        V centre, newell;
+        float length;
+        float facing;
+    };
+    std::vector<Candidate> closed;
+    for (const auto &loop : loops)
+    {
+        bool isClosed = true;
+        for (size_t i = 0; i < loop.size(); ++i)
+            isClosed = isClosed && edgeSet.count({loop[i], loop[(i + 1) % loop.size()]}) != 0;
+        if (!isClosed)
+        {
+            ++stats.openLoops;
+            continue;
+        }
+        Candidate c;
+        for (const int w : loop)
+            c.points.push_back(weldPosition.at(static_cast<size_t>(w)));
+        c.centre = {};
+        for (const V &p : c.points)
+            c.centre = add(c.centre, p);
+        c.centre = scale3(c.centre, 1.0f / static_cast<float>(c.points.size()));
+        c.newell = {};
+        for (size_t i = 0; i < c.points.size(); ++i)
+        {
+            const V p = c.points[i], q = c.points[i + 1 == c.points.size() ? 0 : i + 1];
+            c.newell = add(c.newell, V{(p[1] - q[1]) * (p[2] + q[2]), (p[2] - q[2]) * (p[0] + q[0]),
+                                       (p[0] - q[0]) * (p[1] + q[1])});
+        }
+        c.length = std::sqrt(dot3(c.newell, c.newell));
+        c.facing = dot3(c.newell, outward);
+        closed.push_back(std::move(c));
+    }
+    bool anyOutward = false;
+    for (const Candidate &c : closed)
+        anyOutward = anyOutward || c.facing > 0;
+    CapMesh cap;
+    for (Candidate &c : closed)
+    {
+        if (!anyOutward)
+        {
+            std::reverse(c.points.begin(), c.points.end());
+            c.facing = -c.facing;
+        }
+        if (!(c.facing > 0) || !(c.length > 1e-9f))
+        {
+            ++stats.openLoops;
+            continue;
+        }
+        bool banded = false;
+        const size_t loopFirst = cap.vertices.size();
+        if (addEarCap(cap, c.points, outward, c.centre, options.capUvScale, false, banded))
+            splitDroppedRimPoints(cap, loopFirst);
+        else
+        {
+            addFanCap(cap, c.points, outward, c.centre, options.capUvScale);
+            ++stats.fanLoops;
+        }
+        ++stats.capLoops;
+    }
+    appendCapTriangles(piece, cap, options.interiorMaterial);
+    compactPiece(piece);
+}
+uint64_t fnv1a64(const Bytes &b)
+{
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (const uint8_t c : b)
+    {
+        h ^= c;
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+} // namespace
+bool ExtractFracture(const Bytes &bytes, const Bytes &skeleton, const FractureOptions &options,
+                     std::vector<GibPiece> &fragments, std::string &error, FractureStats *statsOut)
+{
+    fragments.clear();
+    error.clear();
+    FractureStats stats;
+    try
+    {
+        if (bytes.size() > 64 * 1024 * 1024 || skeleton.size() > 16 * 1024 * 1024)
+            throw std::runtime_error("oversized Ogre resource");
+        if (!(options.minFaceFraction >= 0 && options.minFaceFraction <= 0.5f) || options.minPieces < 2 ||
+            options.maxPieces < options.minPieces || options.maxPieces > 64 || options.cutAttempts < 1 ||
+            !(options.highRadius > options.lowRadius) || !(options.tiltDegrees >= 0 && options.tiltDegrees <= 60))
+            throw std::runtime_error("invalid fracture options");
+        const auto m = model(bytes);
+
+        // One piece: at most one vertex-driving bone. The cut happens in mesh
+        // space; the driving bone only decides the output frame.
+        Frame frame;
+        uint16_t boneId = 0;
+        std::string boneName;
+        if (!skeleton.empty())
+        {
+            auto bs = bones(skeleton);
+            for (auto &[id, b] : bs)
+                derive(id, bs);
+            std::set<uint16_t> driving;
+            for (const Sub &sub : m.subs)
+                for (const Assignment &a : sub.shared ? m.assignments : sub.assignments)
+                    if (a.weight > 0)
+                        driving.insert(a.bone);
+            if (driving.size() > 1)
+                throw std::runtime_error("not one piece: several bones drive vertices");
+            if (driving.size() == 1)
+                boneId = *driving.begin();
+            else
+            {
+                int roots = 0;
+                for (const auto &[id, b] : bs)
+                    if (b.parent < 0)
+                    {
+                        ++roots;
+                        boneId = id;
+                    }
+                if (roots != 1)
+                    boneId = 0;
+            }
+            const auto bone = bs.find(boneId);
+            if (bone != bs.end())
+            {
+                frame = boneFrame(bone->second);
+                boneName = bone->second.name;
+            }
+            else if (!driving.empty())
+                throw std::runtime_error("driving bone missing from skeleton");
+        }
+
+        FracPiece whole;
+        size_t sourceFaces = 0;
+        for (const Sub &sub : m.subs)
+        {
+            if (sub.operation != 4)
+                throw std::runtime_error("unsupported primitive operation");
+            if (sub.indices.size() % 3)
+                throw std::runtime_error("incomplete triangle list");
+            if (sub.indices.empty())
+                continue;
+            FracSub fs;
+            fs.material = sub.material;
+            fs.g = sub.shared ? m.geometry : sub.geometry;
+            fs.indices = sub.indices;
+            sourceFaces += fs.indices.size() / 3;
+            whole.subs.push_back(std::move(fs));
+        }
+        if (sourceFaces < options.minFaces)
+            throw std::runtime_error("too few faces to fracture");
+        compactPiece(whole);
+        V lo, hi;
+        if (!pieceBounds(whole, lo, hi))
+            throw std::runtime_error("empty mesh");
+        const V diagonal = sub3(hi, lo);
+        const float radius = 0.5f * std::sqrt(dot3(diagonal, diagonal));
+        if (!std::isfinite(radius) || radius > 100000)
+            throw std::runtime_error("invalid bounds");
+        if (radius < options.minRadius)
+            throw std::runtime_error("below minimum fracture radius");
+        const float blend = std::clamp((radius - options.lowRadius) / (options.highRadius - options.lowRadius), 0.0f, 1.0f);
+        const uint32_t target = options.minPieces + static_cast<uint32_t>(std::lround(blend * (options.maxPieces - options.minPieces)));
+        const float eps = 2e-5f * std::max(radius, 1e-3f);
+        const size_t minSideFaces = std::max<size_t>(1, static_cast<size_t>(std::ceil(options.minFaceFraction * static_cast<float>(sourceFaces))));
+        const uint64_t seed = fnv1a64(bytes);
+
+        std::vector<FracPiece> pieces;
+        pieces.push_back(std::move(whole));
+        const float tilt = options.tiltDegrees * 3.14159265f / 180.0f;
+        uint32_t cutIndex = 0;
+        while (pieces.size() < target)
+        {
+            int best = -1;
+            float bestExtent = 0;
+            V bestLo{}, bestHi{};
+            for (size_t i = 0; i < pieces.size(); ++i)
+            {
+                if (pieces[i].dead || pieces[i].faces() < 2 * minSideFaces || pieces[i].faces() < 4)
+                    continue;
+                V plo, phi;
+                if (!pieceBounds(pieces[i], plo, phi))
+                    continue;
+                const V e = sub3(phi, plo);
+                const float extent = std::max({e[0], e[1], e[2]});
+                if (extent > bestExtent)
+                {
+                    bestExtent = extent;
+                    best = static_cast<int>(i);
+                    bestLo = plo;
+                    bestHi = phi;
+                }
+            }
+            if (best < 0)
+                break;
+            FracPiece &victim = pieces[static_cast<size_t>(best)];
+            const V e = sub3(bestHi, bestLo);
+            const int axis = e[0] >= e[1] && e[0] >= e[2] ? 0 : (e[1] >= e[2] ? 1 : 2);
+            bool done = false;
+            for (uint32_t attempt = 0; attempt < options.cutAttempts && !done; ++attempt)
+            {
+                FracRng rng{seed ^ mix64((static_cast<uint64_t>(cutIndex) << 8) + attempt + 1)};
+                const float t = 0.35f + 0.30f * rng.next();
+                const float angle = tilt * rng.next();
+                const float phi = 6.2831853f * rng.next();
+                V base{};
+                base[static_cast<size_t>(axis)] = 1.0f;
+                V u{}, w{};
+                u[static_cast<size_t>((axis + 1) % 3)] = 1.0f;
+                w[static_cast<size_t>((axis + 2) % 3)] = 1.0f;
+                const V perp = add(scale3(u, std::cos(phi)), scale3(w, std::sin(phi)));
+                const V n = normalize3(add(scale3(base, std::cos(angle)), scale3(perp, std::sin(angle))));
+                V point = scale3(add(bestLo, bestHi), 0.5f);
+                point[static_cast<size_t>(axis)] = bestLo[static_cast<size_t>(axis)] + t * e[static_cast<size_t>(axis)];
+                const float planeD = dot3(n, point);
+                FracPiece copy = victim; // a rejected cut must leave the piece untouched
+                FractureCut cut = cutPiece(copy, n, planeD, eps);
+                if (cut.a.faces() < minSideFaces || cut.b.faces() < minSideFaces ||
+                    cut.edgesA.empty() || cut.edgesB.empty())
+                    continue;
+                capSide(cut.a, cut.edgesA, cut.weldPosition, scale3(n, -1.0f), options, stats);
+                capSide(cut.b, cut.edgesB, cut.weldPosition, n, options, stats);
+                ++stats.cuts;
+                victim = std::move(cut.a);
+                pieces.push_back(std::move(cut.b));
+                done = true;
+            }
+            ++cutIndex;
+            if (!done)
+                victim.dead = true;
+        }
+        if (pieces.size() < 2)
+            throw std::runtime_error("could not cut the model");
+
+        // Serialize like ExtractGibs: bone frame, centred on the piece bounds.
+        std::vector<GibPiece> result;
+        for (size_t k = 0; k < pieces.size(); ++k)
+        {
+            const FracPiece &piece = pieces[k];
+            Frame pieceFrame = frame;
+            V plo{1e30f, 1e30f, 1e30f}, phi{-1e30f, -1e30f, -1e30f};
+            uint32_t capTriangles = 0;
+            for (const FracSub &s : piece.subs)
+            {
+                if (s.material == options.interiorMaterial)
+                    capTriangles += static_cast<uint32_t>(s.indices.size() / 3);
+                const PositionReader position(s.g);
+                for (uint32_t v = 0; v < s.g.count; ++v)
+                {
+                    const V local = toFrame(frame, position(v));
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        plo[i] = std::min(plo[i], local[i]);
+                        phi[i] = std::max(phi[i], local[i]);
+                    }
+                }
+            }
+            for (int i = 0; i < 3; ++i)
+            {
+                pieceFrame.center[i] = (plo[i] + phi[i]) * 0.5f;
+                if (!std::isfinite(pieceFrame.center[i]) || std::abs(pieceFrame.center[i]) > 100000)
+                    throw std::runtime_error("invalid fracture centre");
+            }
+            Bytes body;
+            put(body, uint16_t{0x1000});
+            line(body, "[MeshSerializer_v1.8]");
+            const size_t meshChunk = openChunk(body, 0x3000);
+            put(body, uint8_t{0});
+            uint32_t triangles = 0;
+            float pieceRadius = 0;
+            V lo2{1e30f, 1e30f, 1e30f}, hi2{-1e30f, -1e30f, -1e30f};
+            for (const FracSub &s : piece.subs)
+            {
+                if (s.indices.empty())
+                    continue;
+                std::vector<uint32_t> vertices(s.g.count);
+                for (uint32_t v = 0; v < s.g.count; ++v)
+                    vertices[v] = v;
+                const size_t subChunk = openChunk(body, 0x4000);
+                line(body, s.material);
+                put(body, uint8_t{0});
+                put(body, static_cast<uint32_t>(s.indices.size()));
+                put(body, uint8_t{1});
+                body.insert(body.end(), reinterpret_cast<const uint8_t *>(s.indices.data()),
+                            reinterpret_cast<const uint8_t *>(s.indices.data() + s.indices.size()));
+                const size_t geometryChunk = openChunk(body, 0x5000);
+                appendGeometry(body, s.g, vertices, pieceFrame, lo2, hi2, pieceRadius);
+                closeChunk(body, geometryChunk);
+                closeChunk(body, subChunk);
+                triangles += static_cast<uint32_t>(s.indices.size() / 3);
+            }
+            if (!triangles)
+                continue;
+            Bytes bounds;
+            for (float v : lo2)
+                put(bounds, v);
+            for (float v : hi2)
+                put(bounds, v);
+            put(bounds, pieceRadius);
+            chunk(body, 0x9000, bounds);
+            closeChunk(body, meshChunk);
+            GibPiece out;
+            out.piece.name = "frac_" + std::to_string(result.size());
+            out.piece.mesh = std::move(body);
+            out.piece.triangles = triangles;
+            for (int i = 0; i < 3; ++i)
+                out.piece.center[i] = pieceFrame.center[i];
+            out.bone = boneId;
+            out.boneName = boneName;
+            out.radius = pieceRadius;
+            out.capTriangles = capTriangles;
+            result.push_back(std::move(out));
+        }
+        if (result.size() < 2)
+            throw std::runtime_error("no fracture pieces");
+        fragments = std::move(result);
+        if (statsOut)
+            *statsOut = stats;
+        return true;
+    }
+    catch (const std::bad_alloc &)
+    {
+        fragments.clear();
+        error = "out of memory";
+        if (statsOut)
+        {
+            *statsOut = stats;
+            statsOut->transient = true;
+        }
+        return false;
+    }
+    catch (const std::exception &e)
+    {
+        fragments.clear();
+        error = e.what();
+        if (statsOut)
+            *statsOut = stats;
         return false;
     }
 }

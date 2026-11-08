@@ -9,6 +9,7 @@
 #define OPENSHIM_CHUNK_CACHE_GIBS_DIR "gibs/v6/"
 #define OPENSHIM_CHUNK_CACHE_FALLBACK_DIR "fallback/v1/"
 #define OPENSHIM_CHUNK_CACHE_CASINGS_DIR "casings/v1/"
+#define OPENSHIM_CHUNK_CACHE_FRACTURE_DIR "fracture/v1/"
 
 #include <cstddef>
 #include <cstdint>

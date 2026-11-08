@@ -92,6 +92,41 @@ struct GibPiece
 };
 bool ExtractGibs(const std::vector<uint8_t> &mesh, const std::vector<uint8_t> &skeleton, const GibOptions &options,
                  std::vector<GibPiece> &pieces, std::string &error);
+// Runtime fracture (OpenShim FractureOnePiece): a model with at most one
+// vertex-driving bone (or no skeleton) is cut into capped pieces by recursive
+// bisection, so a one-piece craft or building can be thrown apart like debris.
+// Everything is deterministic: the cut planes hash the mesh bytes. Every cut is
+// closed immediately (ear-clipped on the plane, fan as a last resort) in an
+// extra submesh using `interiorMaterial`; open chains of a non-manifold source
+// stay uncapped. Pieces are written like ExtractGibs output: in the driving
+// bone's bind frame (mesh space with no skeleton, bone 0), centred, `center`
+// filled, `radius` set, named frac_<n>. Returns false (with `error`) for a
+// model that is not one piece, too small or too sparse to cut.
+struct FractureOptions
+{
+    float minRadius = 1.0f;       // bound radius below which a model is left alone
+    float lowRadius = 4.0f;       // radius at or below which minPieces is used
+    float highRadius = 12.0f;     // radius at or above which maxPieces is used
+    uint32_t minPieces = 4;
+    uint32_t maxPieces = 8;
+    float minFaceFraction = 0.04f; // a cut leaving a side with fewer source faces is retried
+    uint32_t cutAttempts = 4;
+    float tiltDegrees = 30.0f;
+    float capUvScale = 1.0f;
+    uint32_t minFaces = 16;       // sources with fewer triangles are not cut
+    std::string interiorMaterial = "openshim_fracture_interior";
+};
+struct FractureStats
+{
+    uint32_t cuts = 0;
+    uint32_t capLoops = 0;  // closed loops capped (ear-clipped or fan)
+    uint32_t fanLoops = 0;  // of those, the fan fallback
+    uint32_t openLoops = 0; // open chains or hole loops left uncapped
+    bool transient = false; // failed for a reason other than the mesh itself (out of memory)
+};
+bool ExtractFracture(const std::vector<uint8_t> &mesh, const std::vector<uint8_t> &skeleton,
+                     const FractureOptions &options, std::vector<GibPiece> &pieces, std::string &error,
+                     FractureStats *stats = nullptr);
 // The stock chunklet shapes already embedded for batching, emitted on demand
 // with the game's scrap material. No skeleton, texture or payload pack needed.
 Piece StockFallbackMesh(unsigned kind);

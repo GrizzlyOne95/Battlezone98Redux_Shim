@@ -53,6 +53,11 @@ target_include_directories(p2p_early_unreliable_policy_tests PRIVATE ../include)
 target_compile_features(p2p_early_unreliable_policy_tests PRIVATE cxx_std_14)
 add_test(NAME p2p_early_unreliable_policy_tests COMMAND p2p_early_unreliable_policy_tests)
 
+add_executable(remote_smoothing_policy_tests remote_smoothing_policy_tests.cpp)
+target_include_directories(remote_smoothing_policy_tests PRIVATE ../include)
+target_compile_features(remote_smoothing_policy_tests PRIVATE cxx_std_14)
+add_test(NAME remote_smoothing_policy_tests COMMAND remote_smoothing_policy_tests)
+
 if(WIN32)
     execute_process(COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File
         "${CMAKE_CURRENT_SOURCE_DIR}/../scripts/Fetch-SteamNetworkingHeaders.ps1"
@@ -528,6 +533,10 @@ openshim_add_test(deferred_modable_policy_tests STD 17 SOURCES
     deferred_modable_policy_tests.cpp
 )
 
+openshim_add_test(armory_repair_pick_tests STD 17 SOURCES
+    armory_repair_pick_tests.cpp
+)
+
 openshim_add_test(bool_token_tests STD 20 SOURCES
     bool_token_tests.cpp
 )
@@ -538,6 +547,10 @@ openshim_add_test(matchmaking_server_tests STD 17 SOURCES
 
 openshim_add_test(map_filter_extras_tests STD 14 SOURCES
     map_filter_extras_tests.cpp
+)
+
+openshim_add_test(map_letter_jump_policy_tests STD 14 SOURCES
+    map_letter_jump_policy_tests.cpp
 )
 
 openshim_add_test(lua_formation_fix_tests STD 14 SOURCES
@@ -700,6 +713,10 @@ openshim_add_test(autosave_gate_tests STD 20 SOURCES
 
 openshim_add_test(autosave_notice_layout_tests STD 20 SOURCES
     autosave_notice_layout_tests.cpp
+)
+
+openshim_add_test(career_kill_class_tests STD 17 SOURCES
+    career_kill_class_tests.cpp
 )
 
 openshim_add_test(kill_ticker_policy_tests STD 17 SOURCES
@@ -1060,6 +1077,9 @@ else()
 endif()
 
 openshim_add_test(menu_theme_policy_tests STD 17 SOURCES menu_theme_policy_tests.cpp)
+openshim_add_test(resolution_list_policy_tests STD 17 SOURCES resolution_list_policy_tests.cpp)
+
+openshim_add_test(steam_launcher_argument_tests STD 17 SOURCES steam_launcher_argument_tests.cpp)
 
 openshim_add_test(shell_casing_policy_tests STD 20 SOURCES shell_casing_policy_tests.cpp)
 openshim_add_test(shell_casing_finish_tests STD 20 SOURCES shell_casing_finish_tests.cpp)

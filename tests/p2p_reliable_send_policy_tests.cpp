@@ -22,5 +22,31 @@ int main() {
         check(!BZROpenShim::P2PReliable::ParseRetryMs(text, ms), text);
         check(ms == 1234, "invalid input preserves stock value");
     }
+    using BZROpenShim::P2PReliable::AdaptiveRetryMs;
+    check(AdaptiveRetryMs(300, 0) == 300, "no ping sample keeps the configured wait");
+    check(AdaptiveRetryMs(300, 40) == 300, "low ping keeps the configured wait");
+    check(AdaptiveRetryMs(300, 200) == 300, "rtt*1.5 equal to the base keeps it");
+    check(AdaptiveRetryMs(300, 350) == 525, "350 ms rtt waits 525 ms");
+    check(AdaptiveRetryMs(800, 350) == 800, "interval base above 1.5x rtt wins");
+    check(AdaptiveRetryMs(800, 1000) == 1500, "high rtt raises the interval");
+    check(AdaptiveRetryMs(300, 100000) == 10000, "huge rtt is capped");
+    check(AdaptiveRetryMs(300, 0xFFFFFFFFu) == 10000, "rtt near UINT32_MAX does not overflow");
+    check(AdaptiveRetryMs(300, 0xFFFFFFFEu) == 10000, "rtt UINT32_MAX-1 does not overflow");
+    using BZROpenShim::P2PReliable::PeerRttEntry;
+    using BZROpenShim::P2PReliable::PeerRttOrMax;
+    const PeerRttEntry table[] = {
+        {1, 2, 3, 120}, {1, 2, 4, 400}, {9, 9, 9, 0}
+    };
+    bool matched = false;
+    check(PeerRttOrMax(table, 3, 1, 2, 4, 400 + 1, &matched) == 400 && matched, "matching peer uses its own rtt");
+    check(PeerRttOrMax(table, 3, 7, 7, 7, 555, &matched) == 555 && !matched, "unknown peer falls back to the max");
+    check(PeerRttOrMax(table, 3, 9, 9, 9, 555, &matched) == 555 && !matched, "matched rtt 0 falls back to the max");
+    check(PeerRttOrMax(table, 3, 1, 2, 3, 555, nullptr) == 120, "match works without the out flag");
+    check(PeerRttOrMax(table, 0, 1, 2, 3, 0, &matched) == 0 && !matched, "empty table with no max yields 0");
+    check(PeerRttOrMax(table, 0, 1, 2, 3, 77, &matched) == 77, "empty table yields the max");
+    const uint32_t addrA[4] = {1, 0xAAAAAAAAu, 2, 3};
+    const uint32_t addrB[4] = {1, 0x55555555u, 2, 3};
+    check(PeerRttOrMax(table, 3, addrA, 555, &matched) == 120 && matched, "address key matches");
+    check(PeerRttOrMax(table, 3, addrB, 555, &matched) == 120 && matched, "dword 1 difference still matches");
     return failures ? 1 : 0;
 }

@@ -89,8 +89,12 @@ namespace BZROpenShim
             void* /*unusedEdx*/,
             uint8_t character)
         {
-            // The Create Game map search box, while it is being edited.
+            // Ctrl+letter jumps the Create Game map list. It goes first so a
+            // control code never reaches the search box either.
             uint8_t routed = 0;
+            if (TryRouteMapListLetterJump(character, routed))
+                return routed;
+            // The Create Game map search box, while it is being edited.
             if (TryRouteMapSearchChar(character, g_BzrFn_TextEntryAppendCharOriginal, routed))
                 return routed;
 

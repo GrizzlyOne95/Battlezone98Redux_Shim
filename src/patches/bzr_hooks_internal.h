@@ -656,6 +656,11 @@ namespace BZROpenShim
             // them from the table afterwards, which cannot work.
             int distinctDamagers = 0;
             uint64_t lastDistinctDamagerMs = 0;
+            // CareerKillClass::Category as an int (kills-by-type record),
+            // resolved on the drain while the victim is still alive. 9 = Other.
+            int killClass = 9;
+            // Set when a multiplayer death claimed killClass; it is not parked again.
+            bool classSpent = false;
         };
         int GetGameObjectActualTeam(void* objectPtr);
         bool SatelliteWorldIsLive();
@@ -861,6 +866,8 @@ namespace BZROpenShim
         extern bool g_LoggedEngineFlameVtableHook;
         void ResolveEngineFlameRuntimeTargets();
         bool TryGetCraftOdfName(void* craftPtr, char* out, size_t outSize);
+        // classLabel ("wingman", "person", ...) from class+0x18; see above.
+        bool TryGetCraftClassLabel(void* craftPtr, char* out, size_t outSize);
         void InitializeJetFlamesConfig();
         void ResetEngineFlameOdfColors();
 
@@ -969,6 +976,9 @@ namespace BZROpenShim
         // Hands a character to the Create Game map search box while it is
         // being edited; false leaves it to the caller. mp_map_filter_extras.cpp.
         bool TryRouteMapSearchChar(uint8_t character, FnUiTextEntryAppendChar original, uint8_t& result);
+        // Ctrl+letter quick jump in the Create Game map list: true (result 1)
+        // when the character was a jump and must not reach the chat entry.
+        bool TryRouteMapListLetterJump(uint8_t character, uint8_t& result);
         bool IsWidgetLiveChildOfParent(void* parent, void* widget);
         const char* EnsureInvalidThumbnailTextureName();
         void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result);
@@ -1612,6 +1622,10 @@ namespace BZROpenShim
         // frame and simulated by the shim. [General] SkinnedGibs = 0 leaves
         // every path below inert.
         bool IsSkinnedGibsEnabled();
+        // [General] FractureOnePiece: craft and buildings whose model is one
+        // piece are cut into capped pieces at runtime and thrown like debris
+        // (same pool, tick and render path as the gibs, own producer).
+        bool IsFractureEnabled();
         // Inside ChunkEffect::FullFragmentObject (outermost call only).
         // Begin captures pose and returns true when this is a person it will
         // gib; End then spawns, hides the body and marks that call's legacy
@@ -1683,6 +1697,9 @@ namespace BZROpenShim
         {
             bool authored = false;
             std::string source;
+            // Fracture models only; -1 when unknown (not recorded in the cache).
+            int capLoops = -1;
+            int openLoops = -1;
             std::vector<SkinnedGibPieceInfo> pieces;
         };
         bool TryCaptureEntityMeshIdentity(
@@ -1692,6 +1709,10 @@ namespace BZROpenShim
             char* outGroup,
             size_t groupCapacity);
         bool PrepareSkinnedGibPayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out);
+        // FractureOnePiece: pieces for a one-piece model, cached under
+        // fracture/v1/<hash>/; a model that is not one piece (or too small)
+        // is cached as a negative result and returns false.
+        bool PrepareFracturePayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out);
         void ResetSkinnedGibPayloads();
         bool TryResolveGeneratedStockChunkFallback(const char* seed, char* out, size_t capacity);
         bool TryResolveNativeChunkPayload(const char* mesh, const char* geom,

@@ -187,6 +187,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # MapRefreshFixes includes the multiplayer map-list refresh/jump and
     # selection-preservation repair and is deliberately part of the ON baseline.
     "General/MapRefreshFixes",
+    # Client-side UI only: Ctrl+A..Z in the Create Game map list jump to the
+    # next map starting with that letter. Never touches the filter or the
+    # network.
+    "General/MapListLetterJump",
     "General/MusicGlobalFocus",
     "General/OgreMaterialCollisionGuard",
     "General/EditorOverheadPlacementOrder",
@@ -298,6 +302,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Sender-side native netcode fix: same wire format, so no mixed-client
     # divergence; stock peers just receive reliable messages on time.
     "Network/ReliableSendBacklogFix",
+    # Sender-side: waits max(configured, 1.5 x peer rtt) before a reliable
+    # resend. Same wire format; low-ping behaviour is unchanged.
+    "Network/ReliableRetryAdaptToPing",
     # Receiver-side native netcode fix: same wire format, so no mixed-client
     # divergence; future-stamped position updates are applied instead of
     # dropped behind a lost reliable fragment. Live-qualified 2026-10-10.
@@ -315,6 +322,15 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "General/EditorSaveToSourceFolder",
     # Acts only after a GPU reset, to keep the recreated D3D11 device alive.
     "Graphics/D3D11DeviceLossRecovery",
+    # Only redirects the DX11 window's "no position" monitor lookup to the
+    # primary monitor; every other lookup is forwarded unchanged.
+    "Graphics/D3D11PrimaryMonitor",
+    # Only trims the options screen's resolution list; the current setting is
+    # always kept and unparsable entries fail open.
+    "Graphics/ResolutionListFilter",
+    # Replaces the resolution row's click-to-cycle with a list; the selection
+    # path is the control's own, and any guard mismatch leaves it stock.
+    "Graphics/ResolutionDropdown",
     # Enhanced became the default render profile on 2026-10-22 at the user's
     # request; it only takes effect on DX11 with a verified resource set. The
     # marker records that the one-time Redux -> Enhanced move already ran.
@@ -452,6 +468,7 @@ $shippingPolicyChecks = @{
     "General/CustomBindsUi" = "1"
     "General/SettingsUi" = "1"
     "General/MapRefreshFixes" = "1"
+    "General/MapListLetterJump" = "1"
     "General/MusicGlobalFocus" = "1"
     "General/OgreMaterialCollisionGuard" = "1"
     "General/EditorOverheadPlacementOrder" = "1"
@@ -495,8 +512,12 @@ $shippingPolicyChecks = @{
     "Network/NetImprovements" = "1"
     "Network/GovernorTuning" = "OpenShim"
     "Network/ReliableSendBacklogFix" = "1"
+    "Network/ReliableRetryAdaptToPing" = "1"
     "Network/LuaMapObjectHandles" = "1"
     "Graphics/D3D11DeviceLossRecovery" = "1"
+    "Graphics/D3D11PrimaryMonitor" = "1"
+    "Graphics/ResolutionListFilter" = "1"
+    "Graphics/ResolutionDropdown" = "1"
     "Graphics/RenderProfile" = "Enhanced"
     "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"

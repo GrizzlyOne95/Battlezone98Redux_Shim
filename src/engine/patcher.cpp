@@ -430,6 +430,10 @@ namespace BZROpenShim
 
     static bool IsDisableControlSmoothingPatchName(const char* name) { return name && strcmp(name, "Disable Control Smoothing") == 0; }
 
+    // [Network] InfiniteLives (default OFF): host launch fill uses 99 lives
+    // instead of the lobby value. Guests take the host's value over the wire.
+    static bool IsInfiniteLivesPatchName(const char* name) { return name && strcmp(name, "Infinite Lives Host Fill") == 0; }
+
     static bool IsShellCasingPatchName(const char* name) { return name && strncmp(name, "Shell Casings ", 14) == 0; }
 
     // [General] ShellCasings (default OFF) arrives inverted through the env
@@ -581,6 +585,11 @@ namespace BZROpenShim
         }
         if (!ShouldEnableDisableControlSmoothing()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsDisableControlSmoothingPatchName(p.name.c_str()); }), patches.end());
+        }
+        bool infiniteLives = false;
+        TryGetUserConfigBool("Network", "InfiniteLives", infiniteLives);
+        if (!infiniteLives) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsInfiniteLivesPatchName(p.name.c_str()); }), patches.end());
         }
         bool muzzleFlash = false, meshRecoil = false;
         TryGetUserConfigBool("SinglePlayer", "MuzzleFlash", muzzleFlash);

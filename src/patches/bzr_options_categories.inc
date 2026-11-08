@@ -19,10 +19,12 @@ constexpr const char* kShimRowEffects = "Visual Effects";
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
     "Shadow Distance", "HD Terrain Tiles", "Terrain Micro Detail", "GPU Skinning",
+    "Primary Monitor", "Resolution Filter", "Resolution Dropdown",
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
     "Jet Flames", "Emissive Pulse", "Star Twinkle", "Death Chunk Meshes",
-    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Skinned Gibs" };
+    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Skinned Gibs",
+    "Fracture One-Piece" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Brightness", "Headlight Color", "Headlight Beam",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
@@ -68,9 +70,9 @@ static const char* const kShimCategoryFixes[] = {
     "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
     "Effect Sort" };
 static const char* const kShimCategoryNetwork[] = {
-    "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Stock Factions", "Map List Fixes",
+    "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions", "Map List Fixes",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
-    "MP Setup Screen" };
+    "MP Setup Screen", "Infinite Lives", "Map Letter Jump" };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install Updates", "Career Stats", "Reset Career Stats", "Reset to Stock", "Troubleshooting Bundle",
     "AutoSave", "AutoSave Interval", "AutoSave Backups", "Fast Menu Transitions" };

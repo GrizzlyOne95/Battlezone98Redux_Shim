@@ -28,6 +28,7 @@
 #include "cli_multiparam_parser.h"
 #include "editor_view_order.h"
 #include "render_profile_runtime.h"
+#include "steam_launcher_argument.h"
 #include "BZROpenShim.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -147,6 +148,13 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
     switch (reason)
     {
     case DLL_PROCESS_ATTACH:
+    {
+        // Drop the launcher path Steam's %command% adds when a player skips
+        // Rebellion's launcher (see steam_launcher_argument.h). It has to go
+        // before the snapshot and before stock's parser reads it as a
+        // mission file. In-place, same length - loader-lock safe.
+        const int launcherArgsBlanked =
+            BZROpenShim::SteamLauncherArgument::BlankSteamLauncherArgument(GetCommandLineA());
         // Capture the pristine command line BEFORE anything can run: stock's
         // parser strtok()s the GetCommandLineA() buffer in place once main()
         // starts, and the startup renderer seam must still see /renderer:...
@@ -154,6 +162,9 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         // string copy - loader-lock safe.
         BZROpenShim::RenderProfiles::CaptureCommandLineSnapshot();
         BZROpenShim::Initialize();
+        if (launcherArgsBlanked > 0)
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain",
+                                  "[Launcher] ignored the Steam launcher path on the command line");
         BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain",
                               "DLL_PROCESS_ATTACH hModule=0x%p reserved=0x%p",
                               hModule, reserved);
@@ -201,6 +212,7 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
             return FALSE;
         }
         break;
+    }
 
     case DLL_PROCESS_DETACH:
         if (reserved != nullptr)

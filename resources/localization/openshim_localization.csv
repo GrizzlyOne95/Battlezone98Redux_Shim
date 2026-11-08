@@ -222,8 +222,16 @@ openshim_opt:ShellCasings:label~Shell Casings~~~~~~
 openshim_opt:ShellCasings:desc~Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required.~~~~~~
 openshim_opt:SkinnedGibs:label~Skinned Gibs~~~~~~
 openshim_opt:SkinnedGibs:desc~When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from the posed model (visual only). Restart required.~~~~~~
+openshim_opt:FractureOnePiece:label~Fracture One-Piece~~~~~~
+openshim_opt:FractureOnePiece:desc~When a craft or building whose model is a single piece is fully fragmented, cut it into several capped pieces and throw them like debris (visual only). Restart required.~~~~~~
 openshim_opt:GpuSkinning:label~GPU Skinning~~~~~~
 openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission.~~~~~~
+openshim_opt:D3D11PrimaryMonitor:label~Primary Monitor~~~~~~
+openshim_opt:D3D11PrimaryMonitor:desc~DX11 only: open the game window on the Windows primary monitor instead of a side monitor. DX9 is untouched. Restart required.~~~~~~
+openshim_opt:ResolutionListFilter:label~Resolution Filter~~~~~~
+openshim_opt:ResolutionListFilter:desc~Keep the Video options resolution list short: the current setting, the desktop size and common sizes matching the desktop's aspect. Restart required.~~~~~~
+openshim_opt:ResolutionDropdown:label~Resolution Dropdown~~~~~~
+openshim_opt:ResolutionDropdown:desc~Left click on the Video options resolution opens a list to pick from instead of cycling. Right click keeps the stock behaviour. Restart required.~~~~~~
 openshim_opt:PlayerReticleConvergence:label~Reticle Convergence~~~~~~
 openshim_opt:PlayerReticleConvergence:desc~Same convergence, but toward the smart-reticle world point; no target lock required. Single player only.~~~~~~
 openshim_opt:SmartReticleRange:label~Reticle Range~~~~~~
@@ -304,6 +312,14 @@ openshim_opt:UdpPort:label~UDP Port~~~~~~
 openshim_opt:UdpPort:desc~Fixed local UDP port for multiplayer peer traffic, for hosts who forward a router port. Automatic lets Windows choose; set others in openshim.ini. Restart required.~~~~~~
 openshim_opt:NetImprovements:label~Net Improvements~~~~~~
 openshim_opt:NetImprovements:desc~OpenShim's socket layer as a whole. Off gives stock networking; turn it off to rule the shim out of a connection problem.~~~~~~
+openshim_opt:RemoteSmoothingMs:label~Remote Smoothing~~~~~~
+openshim_opt:RemoteSmoothingMs:desc~Eases other players' craft toward each network update instead of snapping, for high-ping games. 100 ms suits most; higher looks smoother but lags more. Local only. Restart required.~~~~~~
+openshim_opt:ReliableRetryAdaptToPing:label~Ping-Aware Retry~~~~~~
+openshim_opt:ReliableRetryAdaptToPing:desc~Wait at least 1.5x each peer's round trip before resending a reliable packet, so high-ping links only resend real losses. Same wire format. Restart required.~~~~~~
+openshim_opt:InfiniteLives:label~Infinite Lives~~~~~~
+openshim_opt:InfiniteLives:desc~Host only: multiplayer games you host start with unlimited lives. Has no effect as a guest. Restart required.~~~~~~
+openshim_opt:MapListLetterJump:label~Map Letter Jump~~~~~~
+openshim_opt:MapListLetterJump:desc~In the multiplayer map list, Ctrl+letter jumps to the next map starting with that letter. Restart required.~~~~~~
 openshim_opt:GovernorTuning:label~Net Tuning~~~~~~
 openshim_opt:GovernorTuning:desc~Bandwidth governor and host auto-kick. Stock matches players who are not running OpenShim; net.ini still overrides per value.~~~~~~
 openshim_opt:StockFactionsOnly:label~Stock Factions~~~~~~
@@ -429,6 +445,10 @@ openshim_value:17770~17770~~~~~~
 openshim_value:17771~17771~~~~~~
 openshim_value:17772~17772~~~~~~
 openshim_value:17773~17773~~~~~~
+openshim_value:50 ms~50 ms~~~~~~
+openshim_value:100 ms~100 ms~~~~~~
+openshim_value:150 ms~150 ms~~~~~~
+openshim_value:200 ms~200 ms~~~~~~
 openshim_value:OpenShim~OpenShim~~~~~~
 openshim_value:Reset~Reset~~~~~~
 openshim_value:Confirm?~Confirm?~~~~~~

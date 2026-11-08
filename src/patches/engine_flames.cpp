@@ -119,6 +119,7 @@ namespace BZROpenShim
         constexpr int kEngineFlameColorBlackDog = 5;
 
         constexpr size_t kGameObjectClassOdfNameOffset = 0x30;
+        constexpr size_t kGameObjectClassLabelOffset = 0x18;
 
         static bool g_LoggedExuEngineFlameBridge = false;
 
@@ -611,6 +612,45 @@ namespace BZROpenShim
             {
                 if (out && outSize)
                     out[0] = '\0';
+                return false;
+            }
+        }
+
+        // Same chain as TryGetCraftOdfName, then the char* at class+0x18: the
+        // gameplay category ("wingman", "person", "i76building", ...). Copies
+        // into `out` (truncating) under __try; false when unreadable or empty.
+        bool TryGetCraftClassLabel(void* craftPtr, char* out, size_t outSize)
+        {
+            if (out && outSize)
+                out[0] = '\0';
+            if (!craftPtr || !out || outSize == 0)
+                return false;
+
+            __try
+            {
+                void* classSub = reinterpret_cast<uint8_t*>(craftPtr) + kGameObjectClassSubObjOffset;
+                auto** vtbl = *reinterpret_cast<void***>(classSub);
+                if (!vtbl)
+                    return false;
+
+                using ClassGetter = void*(__thiscall*)(void*);
+                void* klass = reinterpret_cast<ClassGetter>(vtbl[0])(classSub);
+                if (!klass)
+                    return false;
+
+                const char* label = *reinterpret_cast<const char* const*>(
+                    reinterpret_cast<uint8_t*>(klass) + kGameObjectClassLabelOffset);
+                if (!label)
+                    return false;
+                size_t i = 0;
+                for (; i + 1 < outSize && label[i]; ++i)
+                    out[i] = label[i];
+                out[i] = '\0';
+                return out[0] != '\0';
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                out[0] = '\0';
                 return false;
             }
         }

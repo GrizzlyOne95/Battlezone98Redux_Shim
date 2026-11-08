@@ -91,6 +91,16 @@ OpenShimSetup.exe is unsigned and native proxy DLLs can trigger security heurist
 
 The **opt-in test-crew uploader** is separate from normal installation. When a webhook is configured, the Windows install script may attempt to add a Microsoft Defender folder exclusion for the current user's `%LOCALAPPDATA%\openshim` uploader directory, if the caller has sufficient privileges. Understand this change before opting in; it is not required for ordinary player installs.
 
+### Skipping the Rebellion launcher on Steam (optional)
+
+Steam opens Rebellion's launcher window before the game. To start the game directly, set **Steam → Battlezone 98 Redux → Properties → Launch Options** to the game executable followed by `%command%`, for example:
+
+```
+"C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\battlezone98redux.exe" %command%
+```
+
+Use your own game folder. Steam appends the launcher's path to that line; OpenShim removes it before the game reads its command line, because the game would otherwise try to load it as a mission. Without OpenShim installed this option fails, so clear it when you uninstall. Windows only; untested together with Proton or the upload wrapper.
+
 ## Linux: Steam with Proton
 
 Use a host terminal, **not** a shell inside the Steam Snap sandbox.

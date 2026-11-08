@@ -12,6 +12,8 @@
 
 #include "kill_ticker_policy.h"
 
+#include <string>
+
 namespace BZROpenShim::KillTicker
 {
     // Applies [Display] KillTicker. Installs the overlay painter and the
@@ -28,6 +30,11 @@ namespace BZROpenShim::KillTicker
     // Frame thread, once per frame: resolves network candidates, turns
     // verified kills into lines (reading unit names) and expires old lines.
     void Tick();
+
+    // The [GameObjectClass] unitName of `odf` (sanitised, cached per ODF),
+    // empty when the ODF cannot be read or has none. FRAME THREAD ONLY: it
+    // uses the engine's file read and an unlocked cache.
+    std::string LookupUnitName(const char* odf);
 
     // Mission/session change: drops lines, candidates and the name cache.
     void ResetMission() noexcept;

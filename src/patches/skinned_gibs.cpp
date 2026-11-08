@@ -12,6 +12,11 @@
 // pool is separate from the chunk proxy slots, and [General] SkinnedGibs = 0
 // leaves every entry point below a no-op.
 //
+// FractureOnePiece shares this pool, tick and render path: a craft or building
+// (anything that is not a person) whose model is one piece is cut into capped
+// pieces by NativeChunks::ExtractFracture (cached under fracture/v1/<hash>/)
+// and thrown with the metal ground response. Own key, own producer.
+//
 // Split: NativeChunks::ExtractGibs (runtime, cached under
 // openshim/cache/chunks/gibs/v6/<hash>/), or an authored gibs.txt payload from
 // scripts/export_gib_payloads.py. Rendering: shim-owned entities on the chunk
@@ -71,6 +76,15 @@ namespace BZROpenShim
                 float maxStep = 0.1f;
             };
             constexpr GibTuning kTuning = {};
+            // Fracture pieces (rigid metal): same launch values, heavier ground response.
+            struct MetalTuning
+            {
+                float restitution = 0.25f;
+                float friction = 0.4f;
+                float spinDamp = 0.6f;
+                float maxLifetime = 12.0f;
+            };
+            constexpr MetalTuning kMetalTuning = {};
 
             constexpr const char* kPersonRtti = ".?AVPerson@@";
             constexpr size_t kGameObjectRenderBridgeOffset = 0x0F0;
@@ -84,6 +98,7 @@ namespace BZROpenShim
             {
                 bool initialized = false;
                 bool enabled = true;
+                bool fractureEnabled = true;
                 bool trace = false;
                 size_t maxGibs = 160;
                 float linger = 8.0f;
@@ -115,6 +130,8 @@ namespace BZROpenShim
                 // [General] SkinnedGibs (default ON) arrives inverted through
                 // the env mapping, like ChunkMeshes.
                 g_Config.enabled = !EnvFlagEnabled("OPENSHIM_DISABLE_SKINNED_GIBS");
+                // [General] FractureOnePiece (default ON), inverted the same way.
+                g_Config.fractureEnabled = !EnvFlagEnabled("OPENSHIM_DISABLE_FRACTURE");
                 g_Config.trace = EnvFlagEnabled("OPENSHIM_TRACE_SKINNED_GIBS");
                 double value = 0.0;
                 if (ReadEnvNumber("OPENSHIM_SKINNED_GIBS_MAX", value))
@@ -125,8 +142,9 @@ namespace BZROpenShim
                     g_Config.force = static_cast<float>(std::clamp(value, 0.0, 5.0));
                 LogChunkDiagnostic(
                     "skinnedgibs",
-                    L"[SKINNEDGIBS] config enabled=%u max=%zu linger=%.2f force=%.2f trace=%u\n",
+                    L"[SKINNEDGIBS] config enabled=%u fracture=%u max=%zu linger=%.2f force=%.2f trace=%u\n",
                     g_Config.enabled ? 1u : 0u,
+                    g_Config.fractureEnabled ? 1u : 0u,
                     g_Config.maxGibs,
                     static_cast<double>(g_Config.linger),
                     static_cast<double>(g_Config.force),
@@ -206,6 +224,7 @@ namespace BZROpenShim
             struct DeathCapture
             {
                 bool active = false;
+                bool fracture = false; // a non-person one-piece model
                 void* entity = nullptr;
                 void* chunkEffect = nullptr;
                 uint32_t chunkCountBefore = 0;
@@ -442,6 +461,7 @@ namespace BZROpenShim
                 bool sinking = false;
                 bool impacted = false;
                 bool hasGround = true;
+                bool metal = false; // fracture piece: metal ground response
                 Vec3 position = {};
                 Vec3 velocity = {};
                 Vec3 omega = {};
@@ -681,16 +701,25 @@ namespace BZROpenShim
                 for (const SkinnedGibPieceInfo& piece : capture.model.pieces)
                 {
                     const int boneIndex = FindBone(capture, piece);
-                    if (boneIndex < 0)
+                    // A fracture piece of a skeleton-less model sits in mesh
+                    // space: the entity node is its whole frame.
+                    const bool meshSpace = boneIndex < 0 && capture.fracture && piece.boneName.empty();
+                    if (boneIndex < 0 && !meshSpace)
                     {
                         ++failed;
                         continue;
                     }
-                    const BoneSample& bone = capture.bones[boneIndex];
+                    static const BoneSample kNoBone = {};
+                    const BoneSample& bone = meshSpace ? kNoBone : capture.bones[boneIndex];
                     const Vec3 offset = {piece.offset[0], piece.offset[1], piece.offset[2]};
                     Vec3 local;
                     Quat localOrientation;
-                    if (capture.model.authored)
+                    if (meshSpace)
+                    {
+                        localOrientation = {1, 0, 0, 0};
+                        local = offset;
+                    }
+                    else if (capture.model.authored)
                     {
                         // Model-space piece: the bone's skinning transform,
                         // derived * inverse(bind), applied to the pivot.
@@ -767,6 +796,7 @@ namespace BZROpenShim
                     slot->sinking = false;
                     slot->impacted = false;
                     slot->hasGround = true;
+                    slot->metal = capture.fracture;
                     slot->serial = ++g_SpawnSerial;
                     const float position[3] = {world.x, world.y, world.z};
                     const float quat[4] = {orientation.w, orientation.x, orientation.y, orientation.z};
@@ -786,13 +816,26 @@ namespace BZROpenShim
                         LogChunkDiagnostic(
                             "skinnedgibs",
                             L"[SKINNEDGIBS]   gib mesh=%hs bone=%hs pos=(%.2f, %.2f, %.2f) vel=(%.2f, %.2f, %.2f) r=%.3f\n",
-                            piece.resource.c_str(), bone.name, static_cast<double>(world.x),
+                            piece.resource.c_str(), meshSpace ? "(mesh)" : bone.name, static_cast<double>(world.x),
                             static_cast<double>(world.y), static_cast<double>(world.z),
                             static_cast<double>(slot->velocity.x), static_cast<double>(slot->velocity.y),
                             static_cast<double>(slot->velocity.z), static_cast<double>(radius));
                     }
                 }
-                if (AcquireGibLogSlot())
+                if (capture.fracture)
+                {
+                    // One line per fracture spawn.
+                    if (AcquireGibLogSlot())
+                    {
+                        LogChunkDiagnostic(
+                            "skinnedgibs",
+                            L"[FRACTURE] mesh=%hs pieces=%zu spawned=%zu failed=%zu capLoops=%d openLoops=%d active=%zu pool=%zu at (%.1f, %.1f, %.1f)\n",
+                            capture.meshName, capture.model.pieces.size(), spawned, failed, capture.model.capLoops,
+                            capture.model.openLoops, g_ActiveCount, g_Slots.size(), static_cast<double>(origin.x),
+                            static_cast<double>(origin.y), static_cast<double>(origin.z));
+                    }
+                }
+                else if (AcquireGibLogSlot())
                 {
                     LogChunkDiagnostic(
                         "skinnedgibs",
@@ -809,7 +852,11 @@ namespace BZROpenShim
             bool StepGib(GibSlot& slot, float dt, FnTerrainHeightAt terrain)
             {
                 slot.age += dt;
-                if (slot.age >= kTuning.maxLifetime + kTuning.sinkSeconds)
+                const float maxLifetime = slot.metal ? kMetalTuning.maxLifetime : kTuning.maxLifetime;
+                const float restitution = slot.metal ? kMetalTuning.restitution : kTuning.restitution;
+                const float friction = slot.metal ? kMetalTuning.friction : kTuning.friction;
+                const float spinDamp = slot.metal ? kMetalTuning.spinDamp : kTuning.spinDamp;
+                if (slot.age >= maxLifetime + kTuning.sinkSeconds)
                     return false;
 
                 if (slot.sinking)
@@ -821,11 +868,11 @@ namespace BZROpenShim
                 if (slot.settled)
                 {
                     slot.settledAge += dt;
-                    if (slot.settledAge >= g_Config.linger || slot.age >= kTuning.maxLifetime - kTuning.sinkSeconds)
+                    if (slot.settledAge >= g_Config.linger || slot.age >= maxLifetime - kTuning.sinkSeconds)
                         slot.sinking = true;
                     return true;
                 }
-                if (slot.age >= kTuning.maxLifetime)
+                if (slot.age >= maxLifetime)
                     return false; // still airborne (no ground below): just retire
 
                 slot.velocity.y -= kTuning.gravity * dt;
@@ -854,9 +901,8 @@ namespace BZROpenShim
                     {
                         const Vec3 normalPart = Scale(normal, normalSpeed);
                         const Vec3 tangentPart = Sub(slot.velocity, normalPart);
-                        slot.velocity = Sub(Scale(tangentPart, 1.0f - kTuning.friction),
-                                            Scale(normalPart, kTuning.restitution));
-                        slot.omega = Scale(slot.omega, kTuning.spinDamp);
+                        slot.velocity = Sub(Scale(tangentPart, 1.0f - friction), Scale(normalPart, restitution));
+                        slot.omega = Scale(slot.omega, spinDamp);
                         if (!slot.impacted)
                         {
                             slot.impacted = true;
@@ -912,6 +958,12 @@ namespace BZROpenShim
             return g_Config.enabled;
         }
 
+        bool IsFractureEnabled()
+        {
+            InitializeConfig();
+            return g_Config.fractureEnabled;
+        }
+
         bool IsSkinnedGibSuppressedChunk(const uint8_t* objectBytes, const void* geomRef)
         {
             if (!objectBytes || g_Suppressed.empty())
@@ -925,16 +977,21 @@ namespace BZROpenShim
         bool SkinnedGibsBeginFullFragment(void* chunkEffect, void* obj76, const float* velocity)
         {
             g_Capture.active = false;
-            if (!obj76 || !chunkEffect || !IsSkinnedGibsEnabled())
+            if (!obj76 || !chunkEffect)
+                return false;
+            const bool gibsOn = IsSkinnedGibsEnabled(), fractureOn = IsFractureEnabled();
+            if (!gibsOn && !fractureOn)
                 return false;
 
-            // Persons only, and only their whole body: the root handed to
-            // FullFragmentObject must be the person's own object tree.
+            // Only a whole body: the root handed to FullFragmentObject must be
+            // the object's own tree. Persons become limb gibs; anything else
+            // is a fracture candidate (a one-piece craft or building).
             void* gameObject = nullptr;
             if (!TryGetGameObjectFromObj76(obj76, gameObject) || !gameObject)
                 return false;
             char className[64] = {};
-            if (std::strcmp(TryGetRttiClassName(gameObject, className, sizeof(className)), kPersonRtti) != 0)
+            const bool person = std::strcmp(TryGetRttiClassName(gameObject, className, sizeof(className)), kPersonRtti) == 0;
+            if (person ? !gibsOn : !fractureOn)
                 return false;
             void* liveObj76 = nullptr;
             if (!TryGetGameObjectObj76(gameObject, liveObj76) || liveObj76 != obj76)
@@ -952,6 +1009,9 @@ namespace BZROpenShim
             DeathCapture& capture = g_Capture;
             capture.entity = entity;
             capture.chunkEffect = chunkEffect;
+            capture.fracture = !person;
+            capture.boneCount = 0;
+            capture.model = {};
             if (!TryCaptureEntityMeshIdentity(entity, capture.meshName, sizeof(capture.meshName), capture.group,
                                               sizeof(capture.group)))
             {
@@ -969,24 +1029,29 @@ namespace BZROpenShim
 
             void* skeleton = nullptr;
             uint16_t boneCount = 0;
-            if (!CaptureSkeletonSafe(api, entity, skeleton, boneCount))
+            const bool hasSkeleton = CaptureSkeletonSafe(api, entity, skeleton, boneCount);
+            // A person needs its skeleton; a fracture model may have none.
+            if (!hasSkeleton && person)
                 return false;
-            capture.boneCount = std::min<uint16_t>(boneCount, kMaxCapturedBones);
-            uint16_t valid = 0;
-            for (uint16_t index = 0; index < capture.boneCount; ++index)
-                if (CaptureBoneSafe(api, skeleton, index, capture.bones[index]))
-                    ++valid;
-            if (!valid)
-                return false;
+            if (hasSkeleton)
+            {
+                capture.boneCount = std::min<uint16_t>(boneCount, kMaxCapturedBones);
+                uint16_t valid = 0;
+                for (uint16_t index = 0; index < capture.boneCount; ++index)
+                    if (CaptureBoneSafe(api, skeleton, index, capture.bones[index]))
+                        ++valid;
+                if (!valid && person)
+                    return false;
+            }
             ReadVelocitySafe(velocity, capture.velocity);
 
             // The split is cached per model; the first death of a new model
-            // pays for it here, once.
-            if (!PrepareSkinnedGibPayloads(capture.meshName, capture.group, capture.model) ||
-                capture.model.pieces.empty())
-            {
+            // pays for it here, once. A fracture model that is not one piece
+            // is a cached negative: nothing more happens on its deaths.
+            const bool prepared = person ? PrepareSkinnedGibPayloads(capture.meshName, capture.group, capture.model)
+                                         : PrepareFracturePayloads(capture.meshName, capture.group, capture.model);
+            if (!prepared || capture.model.pieces.empty())
                 return false;
-            }
 
             capture.chunkCountBefore = 0;
             TryReadChunkEffectCount(reinterpret_cast<const uint8_t*>(chunkEffect), capture.chunkCountBefore);
@@ -1041,7 +1106,7 @@ namespace BZROpenShim
 
         void TickSkinnedGibs(void* chunkEffect, float dt)
         {
-            if (!IsSkinnedGibsEnabled())
+            if (!IsSkinnedGibsEnabled() && !IsFractureEnabled())
                 return;
             PruneSuppressed(chunkEffect);
             if (!g_ActiveCount)
@@ -1258,7 +1323,7 @@ namespace BZROpenShim
 
         void SubmitSkinnedGibsToRenderQueue(void* renderQueue)
         {
-            if (!renderQueue || !IsSkinnedGibsEnabled())
+            if (!renderQueue || (!IsSkinnedGibsEnabled() && !IsFractureEnabled()))
                 return;
             if (!g_ResourcePrimeAttempted)
             {
@@ -1350,7 +1415,7 @@ namespace BZROpenShim
             const std::filesystem::path& cacheRoot,
             const std::vector<std::filesystem::path>& payloadDirectories)
         {
-            if (!IsSkinnedGibsEnabled() || cacheRoot.empty())
+            if ((!IsSkinnedGibsEnabled() && !IsFractureEnabled()) || cacheRoot.empty())
                 return;
             try
             {
@@ -1420,6 +1485,33 @@ namespace BZROpenShim
                                        ours.string().c_str(), output ? 1u : 0u);
                     return false;
                 };
+                // FractureOnePiece's interior material (its own producer, own key).
+                if (IsFractureEnabled())
+                {
+                    bool wroteInterior = false;
+                    const bool interiorForeign =
+                        ensureFile(NC::kFractureInteriorMaterialFile, NC::kFractureInteriorMaterialMarker,
+                                   NC::FractureInteriorMaterialHeader(), NC::FractureInteriorMaterialScript(),
+                                   wroteInterior);
+                    const auto path = cacheRoot / NC::kFractureInteriorTextureFile;
+                    const auto head = readHead(path);
+                    if (interiorForeign)
+                    {
+                        if (NC::IsGeneratedGibFleshTga(head))
+                            std::filesystem::remove(path, ec);
+                    }
+                    else if (!NC::IsCurrentGibFleshTga(head))
+                    {
+                        const auto tga = NC::FractureInteriorTextureTga();
+                        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                        out.write(reinterpret_cast<const char*>(tga.data()), static_cast<std::streamsize>(tga.size()));
+                        out.close();
+                        LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] wrote interior texture %hs ok=%u\n",
+                                           path.string().c_str(), out ? 1u : 0u);
+                    }
+                }
+                if (!IsSkinnedGibsEnabled())
+                    return;
                 bool wroteMain = false, wroteZones = false;
                 const bool mainForeign = ensureFile(NC::kGibFleshMaterialFile, NC::kGibFleshMaterialMarker,
                                                     NC::GibFleshMaterialHeader(), NC::GibFleshMaterialScript(),
