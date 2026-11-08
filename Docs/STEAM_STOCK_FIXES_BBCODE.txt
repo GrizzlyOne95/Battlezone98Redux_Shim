@@ -37,6 +37,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed a crash when a mission script calls GetIndependence while a save is still loading. Stock only checks for a missing AI, not the temporary stand-in used while a save loads.
 [*] Fixed the Lua CanBuild and IsBusy checks giving wrong answers for base producers. Stock only recognises the four specific producer types, not the base producer. [i](SP)[/i]
 [*] Fixed the multiplayer map list jumping or resetting while browsing (Steam). Stock rebuilds the list on refresh without keeping your selection or scroll position.
+[*] Fixed accepting a Steam invite to a passworded game failing to join (Steam). Stock joins an invited game with an empty password instead of the game's own.
 [*] Fixed the multiplayer vehicle list using stock assets instead of the selected mod's. Stock reused description files cached from other mods and ignored the selected map's own vehicle list.
 [*] Fixed the black craft in the multiplayer Create Game preview on DX11. Stock's preview viewport has shadows turned off but still uses a shadow shader setup, so the craft drew black.
 [*] Fixed the Create Game map layout preview overflowing its frame. Stock resizes the preview to the 500-pixel map texture, far larger than its frame.
