@@ -5197,7 +5197,11 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         origin = { playerX, playerY, playerZ };
                         usedPlayer = true;
                     }
-                    else if (!g_playerPositionRejectedLogged)
+                    // An all-zero eye is a camera not placed yet (first sim tick):
+                    // the separation means nothing, so keep the one-shot warning
+                    // for a real disagreement.
+                    else if (!g_playerPositionRejectedLogged &&
+                             (eye->x != 0.0f || eye->y != 0.0f || eye->z != 0.0f))
                     {
                         g_playerPositionRejectedLogged = true;
                         LogShimA(LogLevel::Warn, "terrain-proxy",

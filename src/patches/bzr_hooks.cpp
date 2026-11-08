@@ -1804,6 +1804,9 @@ namespace BZROpenShim
         GpuSkinningRenderFrameTick();
         GpuInstancingRenderFrameTick();
         PlanetEnvironmentRenderFrameTick();
+        // Primary driver of the pending terrain seam blend (ChunkEffect::Simulate
+        // is the secondary one); the pending flag makes double-driving a no-op.
+        TerrainTileBlendSimTick();
     }
 
     void __fastcall ChunkEffectSimulateHook(void* thisPtr, void* /*edx*/, float dt)
@@ -1821,6 +1824,7 @@ namespace BZROpenShim
         // Multiplayer vehicle flags: render from the sim tick whenever the
         // engine is not dispatching the hooked FlagDisplay::Submit slot.
         MaybeDriveMultiplayerFlagRenderFallback();
+        TerrainTileBlendSimTick();
         OgreShaderCacheTick();
         MaybeLogDx11EnhancedLightingState();
         if (BZROpenShim::UiPerf::IsEnabled())

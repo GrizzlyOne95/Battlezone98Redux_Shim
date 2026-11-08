@@ -11,6 +11,7 @@
 #include <Windows.h>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -119,7 +120,40 @@ namespace BZROpenShim
         }
     }
 
+    namespace
+    {
+        std::atomic<bool> g_BlendPending{ false };
+        // Ticks to keep retrying while the TRN name or the terrain vertex
+        // buffer is not there yet (~10 s at 60 fps), then give up and log.
+        constexpr int kBlendRetryTicks = 600;
+        int g_BlendRetriesLeft = 0;
+
+        // Returns false only for "not ready yet" (worth retrying next tick).
+        bool ApplyTerrainTileBlend(bool lastAttempt);
+    }
+
+    void RequestTerrainTileBlendAtFirstSimTick()
+    {
+        g_BlendRetriesLeft = kBlendRetryTicks;
+        g_BlendPending.store(true, std::memory_order_release);
+    }
+
+    void TerrainTileBlendSimTick()
+    {
+        if (!g_BlendPending.exchange(false, std::memory_order_acq_rel))
+            return;
+        const bool lastAttempt = --g_BlendRetriesLeft <= 0;
+        if (!ApplyTerrainTileBlend(lastAttempt) && !lastAttempt)
+            g_BlendPending.store(true, std::memory_order_release);
+    }
+
     void ApplyTerrainTileBlendForCurrentMission()
+    {
+        ApplyTerrainTileBlend(true);
+    }
+
+    namespace {
+    bool ApplyTerrainTileBlend(bool lastAttempt)
     {
         const auto managerAddress =
             HookEngine::ResolveNamedAddress("Terrain::GetManager");
@@ -131,15 +165,16 @@ namespace BZROpenShim
         {
             LogShimA(LogLevel::Warn, "terrain-blend",
                 "[TERRAIN-BLEND] required released terrain helpers unresolved; stock seams retained");
-            return;
+            return true;
         }
 
         char trnName[MAX_PATH] = {};
         if (!ReadCurrentTrnName(trnName))
         {
-            LogShimA(LogLevel::Warn, "terrain-blend",
-                "[TERRAIN-BLEND] current TRN name unavailable; stock seams retained");
-            return;
+            if (lastAttempt)
+                LogShimA(LogLevel::Warn, "terrain-blend",
+                    "[TERRAIN-BLEND] current TRN name unavailable; stock seams retained");
+            return false;
         }
 
         const auto getManager = reinterpret_cast<FnTerrainManager>(managerAddress);
@@ -156,11 +191,11 @@ namespace BZROpenShim
             LogShimA(LogLevel::Warn, "terrain-blend",
                 "[TERRAIN-BLEND] native TRN read failed trn=\"%s\"; stock seams retained",
                 trnName);
-            return;
+            return true;
         }
 
         if (!manager || !BZROpenShim::MemoryAccess::IsReadable(manager, 0x84))
-            return;
+            return false;
 
         std::uint8_t* vertices = nullptr;
         void* gpuBuffer = nullptr;
@@ -173,16 +208,16 @@ namespace BZROpenShim
         }
         __except (EXCEPTION_EXECUTE_HANDLER)
         {
-            return;
+            return true;
         }
 
         if (!BZROpenShim::MemoryAccess::IsWritable(vertices, kTerrainVertexBytes))
-            return;
+            return false;
         if (!g_seamMaskCaptured && !CaptureSeamMask(vertices))
         {
             LogShimA(LogLevel::Warn, "terrain-blend",
                 "[TERRAIN-BLEND] shared COLOR0 layout did not match the released 97x97 seam mask; stock seams retained");
-            return;
+            return true;
         }
 
         const float blend = NormalizeTerrainTileBlend(requestedBlend);
@@ -192,7 +227,7 @@ namespace BZROpenShim
             LogShimA(LogLevel::Info, "terrain-blend",
                 "[TERRAIN-BLEND] trn=\"%s\" blend=%.3f edgeAlpha=%u unchanged",
                 trnName, static_cast<double>(blend), edgeAlpha);
-            return;
+            return true;
         }
 
         for (std::size_t index = 0; index < kTerrainVertexCount; ++index)
@@ -206,7 +241,7 @@ namespace BZROpenShim
             LogShimA(LogLevel::Warn, "terrain-blend",
                 "[TERRAIN-BLEND] trn=\"%s\" blend=%.3f CPU mask updated but GPU upload failed",
                 trnName, static_cast<double>(blend));
-            return;
+            return true;
         }
 
         g_currentEdgeAlpha = edgeAlpha;
@@ -214,5 +249,7 @@ namespace BZROpenShim
             "[TERRAIN-BLEND] trn=\"%s\" blend=%.3f edgeAlpha=%u seamVertices=%zu applied",
             trnName, static_cast<double>(blend), edgeAlpha,
             kExpectedSeamVertexCount);
+        return true;
     }
+    } // namespace
 }

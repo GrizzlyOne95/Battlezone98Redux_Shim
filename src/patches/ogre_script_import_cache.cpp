@@ -324,10 +324,26 @@ namespace BZROpenShim
                          tiers, families, static_cast<long>(pruned));
         }
 
+        // A Modable rebuild parses ~2000 scripts in one main-thread call
+        // (~6 s in the MP game room). Peeking between files answers sent
+        // messages so Windows does not mark the window hung, like the
+        // DXBC compile pump. PM_NOREMOVE leaves posted input queued.
+        void PumpMessagesBetweenScripts()
+        {
+            static thread_local ULONGLONG t_LastPump = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now - t_LastPump < 100)
+                return;
+            t_LastPump = now;
+            MSG pending;
+            PeekMessageW(&pending, nullptr, 0, 0, PM_NOREMOVE);
+        }
+
         OgreSharedPtrPod* __fastcall ParseHook(void* parser, void* /*edx*/,
                                                OgreSharedPtrPod* ret,
                                                const OgreSharedPtrPod& tokens)
         {
+            PumpMessagesBetweenScripts();
             if (t_CaptureSlot && !t_CaptureSlot->rep && !g_LayoutRejected)
                 PruneImportTokens(tokens);
             OgreSharedPtrPod* result = g_ParseOriginal(parser, ret, tokens);
