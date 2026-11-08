@@ -13,3 +13,6 @@
 # localization_table.csv; scripts/sync_options_localization.py --check compares
 # bytes, so no checkout may rewrite it.
 resources/localization/*.csv -text
+
+# Binary seed pack: never let autocrlf rewrite it.
+*.pack binary

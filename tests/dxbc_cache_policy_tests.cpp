@@ -25,6 +25,73 @@ static uint64_t Key(const std::string& src, const char* entry, const char* targe
     return ComputeKey(src.data(), src.size(), entry, target, f1, f2);
 }
 
+// A minimal valid DXBC payload: fourcc + total size at offset 24.
+static std::vector<unsigned char> FakeDxbc(size_t n, unsigned char fill)
+{
+    std::vector<unsigned char> b(n, fill);
+    std::memcpy(b.data(), "DXBC", 4);
+    const uint32_t total = static_cast<uint32_t>(n);
+    std::memcpy(b.data() + 24, &total, 4);
+    return b;
+}
+
+static void AppendU32(std::vector<unsigned char>& v, uint32_t x)
+{
+    const auto* p = reinterpret_cast<const unsigned char*>(&x);
+    v.insert(v.end(), p, p + 4);
+}
+
+static std::vector<unsigned char> Pack(const std::vector<std::pair<uint64_t, std::vector<unsigned char>>>& entries)
+{
+    std::vector<unsigned char> v(kSeedMagic, kSeedMagic + 8);
+    AppendU32(v, kSeedVersion);
+    AppendU32(v, static_cast<uint32_t>(entries.size()));
+    for (const auto& e : entries)
+    {
+        const EntryHeader h = MakeHeader(e.first, 100, e.second.data(), e.second.size());
+        AppendU32(v, static_cast<uint32_t>(sizeof(h) + e.second.size()));
+        const auto* hp = reinterpret_cast<const unsigned char*>(&h);
+        v.insert(v.end(), hp, hp + sizeof(h));
+        v.insert(v.end(), e.second.begin(), e.second.end());
+    }
+    return v;
+}
+
+static void TestSeedPack()
+{
+    const auto a = FakeDxbc(40, 1), b = FakeDxbc(64, 2);
+    std::vector<unsigned char> pack = Pack({ { 5, a }, { 9, b } });
+    std::vector<SeedRecord> index;
+    Check(IndexSeedPack(pack.data(), pack.size(), index) && index.size() == 2, "seed pack indexes");
+    const SeedRecord* r = FindSeed(index, 9);
+    size_t off = 0, size = 0;
+    Check(r && ValidateEntry(pack.data() + r->offset, r->size, 9, 100, &off, &size) && size == b.size() &&
+              std::memcmp(pack.data() + r->offset + off, b.data(), b.size()) == 0,
+          "seed lookup returns its blob");
+    Check(!FindSeed(index, 7) && !FindSeed(index, 1) && !FindSeed(index, 10), "absent keys miss");
+    Check(!ValidateEntry(pack.data() + r->offset, r->size, 9, 99, &off, &size), "preprocessed length still checked");
+
+    Check(IndexSeedPack(Pack({}).data(), 16, index) && index.empty(), "empty pack");
+    std::vector<unsigned char> bad = Pack({ { 9, b }, { 5, a } });
+    Check(!IndexSeedPack(bad.data(), bad.size(), index) && index.empty(), "unsorted rejected");
+    bad = Pack({ { 5, a }, { 5, b } });
+    Check(!IndexSeedPack(bad.data(), bad.size(), index), "duplicate rejected");
+    bad = pack;
+    bad.push_back(0);
+    Check(!IndexSeedPack(bad.data(), bad.size(), index), "trailing byte rejected");
+    Check(!IndexSeedPack(pack.data(), pack.size() - 1, index), "truncated rejected");
+    bad = pack;
+    bad[0] = 'X';
+    Check(!IndexSeedPack(bad.data(), bad.size(), index), "bad magic rejected");
+    bad = pack;
+    bad[8] = 2;
+    Check(!IndexSeedPack(bad.data(), bad.size(), index), "other version rejected");
+    bad = pack;
+    bad[12] = 0xFF; bad[13] = 0xFF; bad[14] = 0xFF; bad[15] = 0xFF;
+    Check(!IndexSeedPack(bad.data(), bad.size(), index), "absurd count rejected");
+    Check(!IndexSeedPack(nullptr, 0, index), "null pack");
+}
+
 int main()
 {
     const uint64_t base = Key("float4 main() { return 0; }", "main", "ps_3_0", 1, 2);
@@ -90,6 +157,8 @@ int main()
         Check(!ValidateEntry(f.data(), f.size(), base, pre, &off, &size),
               variant == 0 ? "bad fourcc rejected" : "bad dxbc size field rejected");
     }
+
+    TestSeedPack();
 
     if (g_Failures == 0)
         std::puts("dxbc_cache_policy_tests: all passed");
