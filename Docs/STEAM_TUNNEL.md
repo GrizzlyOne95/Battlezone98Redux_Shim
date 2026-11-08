@@ -248,6 +248,29 @@ UNVERIFIED until the two-account live test:
 - a cold launch from Join Game (the token arrives on the command line);
 - joining from inside a mission (skipped today).
 
+## Steam ban gate (in-game bridge)
+
+The in-game bridge refuses a Steam peer whose Steam-authenticated SteamID64
+is listed in `bans.cfg` beside the game exe, before the connection reaches
+the game or server. It reads the same file as the in-game `/ban` command and
+the Ban button, so those keep working; only `S<steamid64>` lines count (`G`
+GOG ids are ignored). The bridge rereads the file when its size or write time
+changes: on each new connection that passes the bridge's identity and
+capacity checks, and every 2 s otherwise. A ban added while
+the peer is connected closes that peer's Steam connection within 2 s (log
+`closing banned Steam peer=...`); a refused join logs `refused banned Steam
+peer=...`, and the peer sees close reason 1002 "BZR: banned by host". A
+missing file means no bans; an unreadable or empty (mid-write) one keeps
+the last list.
+
+Limits: `/ban` records the id the client reports, so a Steam player is held
+out by the bridge only when that id is their real SteamID64. The standalone
+`socket_tunnel.exe bridge` has no ban gate (the server's own bans apply).
+Verified live 2026-11-08 (two accounts, two PCs, one-click Steam host):
+banning the connected friend logged `closing banned Steam peer` about 1 s
+later and the friend saw reason 1002; its retries logged `refused banned
+Steam peer`; deleting bans.cfg let it rejoin and the server authorized it.
+
 ## Public Steam listing
 
 `src/patches/steam_public_listing.cpp` (component STEAMLIST). Lets strangers
@@ -272,9 +295,11 @@ find a server that runs a Steam bridge, with no VPS and no friend invite.
   rules: with `SteamTunnelBridge` set to something other than auto, an agent
   key set, or no `steam_api.dll`, the loopback host is reachable by nobody.
   The gate is the game's own lobby password; the LAN screen offers no ban
-  control. UNVERIFIED until the live two-PC test: that a
-  Steam peer's game session (not only its lobby join) works through a
-  loopback LAN host.
+  control. Verified live 2026-11-08: a Steam friend found the
+  `[Steam]` row, joined, and the loopback LAN host's server authorized it.
+  UNVERIFIED: both players in the same game room. Without in-game LAN
+  NoAuth, Start host needs `tools/lan/BZRServer.exe` (a build that accepts
+  `--lan-discovery --lan-managed`) beside the game.
 
 - Host: opt in with **Steam list: On** on the LAN screen (saved as
   `openshim.ini [Network] SteamPublicListing=1`; default off). While a bridge

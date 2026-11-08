@@ -494,6 +494,7 @@
     <ClInclude Include="include\net_optimizer.h" />
     <ClInclude Include="include\socket_tunnel.h" />
     <ClInclude Include="include\socket_tunnel_protocol.h" />
+    <ClInclude Include="include\steam_ban_list.h" />
     <ClInclude Include="include\steam_tunnel_policy.h" />
     <ClInclude Include="include\steam_tunnel_transport.h" />
     <ClInclude Include="include\net_reorder_core.h" />

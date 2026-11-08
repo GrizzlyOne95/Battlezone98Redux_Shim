@@ -33,14 +33,16 @@ namespace
     void BridgeLog(const char* message) { LogShimA(LogLevel::Info, "net", "[SteamBridge] %s", message); }
     DWORD WINAPI BridgeWorker(void*) { return DWORD(Run(bridgeConfig, bridgeStop, bridgeReady, BridgeLog)); }
     bool BridgeRunning() { return bridgeThread && WaitForSingleObject(bridgeThread, 0) == WAIT_TIMEOUT; }
-    // Same file the standalone bridge keeps beside its exe: a peer keeps its
+    // UTF-8 path of a file beside the game exe. steam_tunnel_peers.txt is the
+    // file the standalone bridge keeps beside its exe: a peer keeps its
     // loopback address (and any server ban) across bridge restarts.
-    std::string PeersPath()
+    // bans.cfg is the in-game /ban list (moderation.cpp, same directory).
+    std::string ExeSiblingPath(const wchar_t* name)
     {
         wchar_t path[32768]{};
         const DWORD n = GetModuleFileNameW(nullptr, path, DWORD(std::size(path)));
         if (!n || n >= std::size(path)) return {};
-        std::wstring wide(path, n); wide.resize(wide.find_last_of(L"\\/") + 1); wide += L"steam_tunnel_peers.txt";
+        std::wstring wide(path, n); wide.resize(wide.find_last_of(L"\\/") + 1); wide += name;
         const int size = WideCharToMultiByte(CP_UTF8, 0, wide.c_str(), -1, nullptr, 0, nullptr, nullptr);
         if (size <= 1) return {};
         std::string text(size_t(size), 0);
@@ -90,7 +92,8 @@ namespace
         bridgeConfig = Config{};
         bridgeConfig.bridge = bridgeConfig.steam = true; // borrow game init and callback pump
         bridgeConfig.server = server;
-        bridgeConfig.identityMap = PeersPath();
+        bridgeConfig.identityMap = ExeSiblingPath(L"steam_tunnel_peers.txt");
+        bridgeConfig.banList = ExeSiblingPath(L"bans.cfg");
         if (bridgeConfig.identityMap.empty()) { bridgeReady = -1; BridgeLog("game path unavailable for the peer map; host bridge not started"); return false; }
         bridgeReady = 0;
         bridgeThread = CreateThread(nullptr, 0, BridgeWorker, nullptr, 0, nullptr);
