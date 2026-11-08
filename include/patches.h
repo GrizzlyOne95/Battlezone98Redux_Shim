@@ -353,6 +353,7 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early Unreliable Deliver", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "P2P Early NAK Accept", false, {} },
             { 0, HookEngine::PatchType::BYTES, {}, "Sync Join Default On", false, {} },
+            { 0, HookEngine::PatchType::BYTES, { 0xB8, 0x63, 0x00, 0x00, 0x00, 0x90 }, "Infinite Lives Host Fill", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Local", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Remote", false, {} },
         };
