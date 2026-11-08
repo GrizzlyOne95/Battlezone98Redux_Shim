@@ -744,6 +744,160 @@ bool prepareGibsSafe(const std::string &meshName, const std::string &group,
         return false;
     }
 }
+// FractureOnePiece payloads: same piece cache as the gibs under fracture/v1/<hash>/,
+// plus fracture.txt (cap statistics) and fracture.none, the negative marker for
+// a model that is not one piece or too small, so later deaths and later
+// sessions only read and hash the resources.
+std::map<std::string, GibModelEntry> fractureModels;
+bool prepareFracture(const std::string &meshName, const std::string &group,
+                     BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+{
+    using namespace BZROpenShim::Hooks;
+    const std::string key = base(meshName);
+    if (key.empty())
+        return false;
+    const auto found = fractureModels.find(key);
+    if (found != fractureModels.end())
+    {
+        if (found->second.ready)
+            out = found->second.info;
+        return found->second.ready;
+    }
+    // Any failure below is remembered for the mission: no retry per death.
+    auto &entry = fractureModels[key];
+    const auto started = std::chrono::steady_clock::now();
+    static auto singleton = ResolveOgreProc<Singleton>("?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
+    void *manager = singleton ? singleton() : nullptr;
+    std::vector<uint8_t> bytes, skeleton;
+    if (!manager || !readResource(manager, meshName, group, bytes))
+        return false;
+    const auto skeletonName = NativeChunks::SkeletonName(bytes);
+    if (!skeletonName.empty() && !readResource(manager, skeletonName, group, skeleton))
+    {
+        LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] skip mesh=%hs reason=skeleton unreadable\n", meshName.c_str());
+        return false;
+    }
+    // Bump kFractureAlgorithmVersion whenever the cutter, caps or FractureOptions
+    // defaults change: it is hashed in, so old positive and negative caches miss.
+    constexpr uint8_t kFractureAlgorithmVersion = 1;
+    uint64_t hash = (14695981039346656037ull ^ kFractureAlgorithmVersion) * 1099511628211ull;
+    for (const auto *source : {&bytes, &skeleton})
+        for (uint8_t c : *source)
+        {
+            hash ^= c;
+            hash *= 1099511628211ull;
+        }
+    std::ostringstream hex;
+    hex << std::hex << hash;
+    const std::string folder = std::string(OPENSHIM_CHUNK_CACHE_FRACTURE_DIR) + hex.str();
+    const auto root = GetNativeChunkCacheDirectory();
+    const auto directory = root / folder;
+    std::error_code ec;
+    if (std::filesystem::is_regular_file(directory / "fracture.none", ec) && !ec)
+    {
+        NativeChunks::TouchCacheFolder(directory);
+        return false; // known not to fracture
+    }
+    std::vector<NativeChunks::CachedGib> cached;
+    int capLoops = -1, openLoops = -1;
+    bool reused = NativeChunks::ReadGibCache(directory, cached);
+    if (reused)
+    {
+        std::ifstream stats(directory / "fracture.txt");
+        int cuts = 0, fans = 0;
+        if (!(stats >> cuts >> capLoops >> fans >> openLoops))
+            capLoops = openLoops = -1;
+    }
+    else
+    {
+        std::vector<NativeChunks::GibPiece> pieces;
+        NativeChunks::FractureStats stats;
+        std::string error;
+        if (!NativeChunks::ExtractFracture(bytes, skeleton, NativeChunks::FractureOptions{}, pieces, error, &stats))
+        {
+            // Deterministic in the bytes: remember it on disk too. An
+            // out-of-memory failure is not, so it is only skipped this time.
+            if (stats.transient)
+            {
+                LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] skip mesh=%hs reason=%hs (not cached)\n",
+                                   meshName.c_str(), error.c_str());
+                return false;
+            }
+            std::filesystem::create_directories(directory, ec);
+            std::ofstream marker(directory / "fracture.none", std::ios::binary | std::ios::trunc);
+            marker << error << '\n';
+            marker.close();
+            NativeChunks::TouchCacheFolder(directory);
+            LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] skip mesh=%hs reason=%hs\n", meshName.c_str(),
+                               error.c_str());
+            return false;
+        }
+        if (!NativeChunks::WriteGibCache(directory, pieces, cached))
+        {
+            LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] cache write failed mesh=%hs dir=%hs\n", meshName.c_str(),
+                               directory.string().c_str());
+            return false;
+        }
+        std::ofstream statsFile(directory / "fracture.txt", std::ios::binary | std::ios::trunc);
+        statsFile << stats.cuts << ' ' << stats.capLoops << ' ' << stats.fanLoops << ' ' << stats.openLoops << '\n';
+        capLoops = static_cast<int>(stats.capLoops);
+        openLoops = static_cast<int>(stats.openLoops);
+    }
+    SkinnedGibModelInfo info;
+    info.source = directory.string();
+    info.capLoops = capLoops;
+    info.openLoops = openLoops;
+    uint32_t triangles = 0;
+    for (const auto &gib : cached)
+    {
+        SkinnedGibPieceInfo piece;
+        piece.resource = folder + "/" + gib.piece.name + ".mesh";
+        piece.boneName = gib.boneName;
+        piece.bone = gib.bone;
+        std::copy(gib.piece.center, gib.piece.center + 3, piece.offset);
+        piece.radius = gib.radius;
+        triangles += gib.piece.triangles;
+        info.pieces.push_back(std::move(piece));
+    }
+    entry.info = std::move(info);
+    entry.ready = entry.info.pieces.size() >= 2;
+    if (entry.ready)
+    {
+        NativeChunks::TouchCacheFolder(directory);
+        out = entry.info;
+    }
+    LogChunkDiagnostic("skinnedgibs",
+                       L"[FRACTURE] %hs mesh=%hs group=%hs pieces=%zu triangles=%u capLoops=%d openLoops=%d cache=%hs "
+                       L"prepareMs=%.3f\n",
+                       reused ? "reused" : "generated", meshName.c_str(), group.c_str(), entry.info.pieces.size(),
+                       triangles, capLoops, openLoops, entry.info.source.c_str(),
+                       std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
+    return entry.ready;
+}
+bool prepareFractureCppSafe(const std::string &meshName, const std::string &group,
+                            BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+{
+    try
+    {
+        return prepareFracture(meshName, group, out);
+    }
+    catch (...)
+    {
+        return false;
+    }
+}
+bool prepareFractureSafe(const std::string &meshName, const std::string &group,
+                         BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+{
+    __try
+    {
+        return prepareFractureCppSafe(meshName, group, out);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
 bool captureIdentityCpp(void *entity, char *outName, size_t nameCapacity, char *outGroup, size_t groupCapacity)
 {
     static auto getMesh = ResolveOgreProc<GetMesh>("?getMesh@Entity@Ogre@@QBEABV?$SharedPtr@VMesh@Ogre@@@2@XZ");
@@ -796,9 +950,18 @@ bool PrepareSkinnedGibPayloads(const std::string &meshName, const std::string &g
     std::lock_guard<std::mutex> lock(gibModelsMutex);
     return prepareGibsSafe(meshName, group, out);
 }
+bool PrepareFracturePayloads(const std::string &meshName, const std::string &group, SkinnedGibModelInfo &out)
+{
+    out = {};
+    if (meshName.empty())
+        return false;
+    std::lock_guard<std::mutex> lock(gibModelsMutex);
+    return prepareFractureSafe(meshName, group, out);
+}
 void ResetSkinnedGibPayloads()
 {
     std::lock_guard<std::mutex> lock(gibModelsMutex);
     gibModels.clear();
+    fractureModels.clear();
 }
 } // namespace BZROpenShim::Hooks

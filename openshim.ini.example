@@ -132,6 +132,22 @@ SkinnedGibsLinger = 8
 ; Multiplier for the random part of the launch velocity (0..5). Default: 1.0.
 SkinnedGibsForce = 1.0
 
+; Fracture one-piece models: when a craft or building whose model has at most
+; one vertex-driving bone (or no skeleton) is fully fragmented, the engine
+; yields at most one whole-model chunk. With this on, the model's own .mesh is
+; cut at runtime into 4..8 capped pieces (more for larger models) that are
+; thrown like debris, using the SkinnedGibs pool and the legacy launch values
+; with a heavier metal ground response. Cut faces use openshim_fracture_interior,
+; written to the cache root unless a chunk payload directory ships its own
+; openshim_fracture_interior.material. The cut pieces are cached under
+; openshim/cache/chunks/fracture. Models under 1 m, or with several driving
+; bones, are left to the engine. Visual only: the engine's own chunk
+; simulation is untouched, and 0 restores exactly the previous behaviour.
+; GOG build only. Per-spawn log lines under TraceSkinnedGibs.
+; Accepted: 0 = OFF, non-zero = ON. Default: 1.
+; Legacy env alias: OPENSHIM_DISABLE_FRACTURE
+FractureOnePiece = 1
+
 ; Shell casings: when a cannon-like weapon fires, a small brass casing is
 ; ejected from the weapon's breech, tumbles, bounces off the terrain, the
 ; firing hull and nearby objects, then lies on the ground and sinks away.

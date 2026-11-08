@@ -132,6 +132,11 @@ namespace
         Check(Mapped(ini, "OPENSHIM_DISABLE_SKINNED_GIBS") == "1", "SkinnedGibs = 0 reads as DISABLE=1");
         ini.Set("General", "SkinnedGibs", "on");
         Check(Mapped(ini, "BZR_DISABLE_SKINNED_GIBS") == "0", "SkinnedGibs = on reads as DISABLE=0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_FRACTURE") == "<none>", "unset FractureOnePiece keeps the code default");
+        ini.Set("General", "FractureOnePiece", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_FRACTURE") == "1", "FractureOnePiece = 0 reads as DISABLE=1");
+        ini.Set("General", "FractureOnePiece", "on");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_FRACTURE") == "0", "FractureOnePiece = on reads as DISABLE=0");
         ini.Set("General", "SkinnedGibsMax", "96");
         Check(Mapped(ini, "OPENSHIM_SKINNED_GIBS_MAX") == "96", "numeric gib tuning passes through raw");
 

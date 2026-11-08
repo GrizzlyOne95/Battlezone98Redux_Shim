@@ -524,6 +524,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from "
       "the posed model (visual only). Restart required." },
+    // Absent key = on (inverted env mapping OPENSHIM_DISABLE_FRACTURE), so defaultIndex 0 selects "1" (On).
+    { "Fracture One-Piece", "General", "FractureOnePiece", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "When a craft or building whose model is a single piece is fully fragmented, cut it into "
+      "several capped pieces and throw them like debris (visual only). Restart required." },
     // Absent key = on, so defaultIndex 0 selects "1" (On).
     { "GPU Skinning", "Experimental", "GpuSkinning", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -859,7 +865,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "RawMouseInput", "0" }, { "DisableControlSmoothing", "0" }, { "MouseEveryFrame", "0" },
     { "MapFilterExtras", "0" }, { "Enabled", "0" }, { "WeaponConvergence", "0" },
     { "MuzzleFlash", "0" }, { "MeshRecoil", "0" }, { "ShellCasings", "0" },
-    { "SkinnedGibs", "0" }, { "GpuSkinning", "0" }, { "PlayerReticleConvergence", "0" },
+    { "SkinnedGibs", "0" }, { "FractureOnePiece", "0" }, { "GpuSkinning", "0" }, { "PlayerReticleConvergence", "0" },
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },

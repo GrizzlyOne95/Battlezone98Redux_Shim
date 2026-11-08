@@ -205,6 +205,41 @@ std::string GibFleshZoneMaterialScript()
     return out;
 }
 
+std::string FractureInteriorMaterialHeader()
+{
+    return std::string(kFractureInteriorMaterialMarker) + " " + kGibFleshVersion + " (generated; do not edit).";
+}
+
+std::string FractureInteriorMaterialScript()
+{
+    return FractureInteriorMaterialHeader() + "\n" +
+           "// Override it with an openshim_fracture_interior.material at the top of a chunk payload\n"
+           "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
+           "import * from \"BZBase.material\"\n\n" +
+           stockMaterial(kFractureInteriorMaterialName, kFractureInteriorTextureFile, "0.30 0.28 0.26", "40");
+}
+
+std::vector<uint8_t> FractureInteriorTextureTga()
+{
+    // Near-black scorched metal: tileable mottle with a faint warm scorch.
+    constexpr unsigned Z = 64;
+    std::vector<uint8_t> rgb(static_cast<size_t>(Z) * Z * 3);
+    for (unsigned y = 0; y < Z; ++y)
+        for (unsigned x = 0; x < Z; ++x)
+        {
+            const float u = (static_cast<float>(x) + 0.5f) / Z, v = (static_cast<float>(y) + 0.5f) / Z;
+            const float blob = fbm(u, v, 4, 140);
+            const float grain = vnoise(u * 16.0f, v * 16.0f, 16, 16, 141) - 0.5f;
+            const float level = (0.055f + 0.07f * blob) * (1.0f + grain * 0.35f);
+            const float scorch = clamp01((fbm(u, v, 3, 142) - 0.45f) * 2.0f) * 0.03f;
+            uint8_t *dst = &rgb[(static_cast<size_t>(y) * Z + x) * 3];
+            dst[0] = static_cast<uint8_t>(clamp01(level + scorch) * 255.0f + 0.5f);
+            dst[1] = static_cast<uint8_t>(clamp01(level + scorch * 0.5f) * 255.0f + 0.5f);
+            dst[2] = static_cast<uint8_t>(clamp01(level) * 255.0f + 0.5f);
+        }
+    return tga24(Z, Z, rgb);
+}
+
 std::vector<GibFleshTexture> GibFleshTextures()
 {
     std::vector<GibFleshTexture> out;
