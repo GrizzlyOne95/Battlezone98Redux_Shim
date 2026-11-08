@@ -59,15 +59,17 @@ calls the governor at line 48 and then `FUN_00764a10` at line 49, which calls
 
 ## Change
 
-Each timer's `call FUN_0075FE50` is redirected to a wrapper that passes
-`max(configured, 1.5 x max peer RTT)`, capped at 10 s. The peer RTT is sampled at
-most every 500 ms from the game's own averages (`FUN_00577b50` walk +
-`FUN_00575f80`). On low ping the configured value wins, so nothing changes. One
-global value is used, so a mixed lobby waits for its slowest link. See "Per-peer
-wait" for how to make it per peer. The ini key
-`[Network] ReliableRetryAdaptToPing=0` turns it off.
+Each timer's `call FUN_0075FE50` is redirected to a naked stub that passes the
+transport peer in edx to a wrapper, which waits `max(configured, 1.5 x THIS
+peer's RTT)`, capped at 10 s. Per-peer RTTs come from a table rebuilt at most
+every 500 ms from the game's own averages (`FUN_00577b50` walk +
+`FUN_00575f80`, address read from Player+0x30). A peer with no matching Player,
+or a matched RTT of 0, falls back to the worst RTT. On low ping the configured
+value wins, so nothing changes. The ini key `[Network] ReliableRetryAdaptToPing=0`
+turns it off. The periodic log line reports matched and fallback counts, which
+show live whether the address match works.
 
-## Per-peer wait (RE only, not implemented)
+## Per-peer wait (implemented)
 
 - Both timer sites can see the transport peer record. At the interval site,
   eax holds the peer from the iterator deref at 0x0075BD0E (`call 0x0042DA60`),
@@ -84,16 +86,17 @@ wait" for how to make it per peer. The ini key
   (`FUN_0056fd20:121-128` -> `FUN_00576600:37` -> `FUN_00575920`). The
   transport peer uses the same +0x08 address and +0x28 id layout.
 - `FUN_0056f780` compares address dwords 0, 2 and 3 (dword 1 is skipped).
-- Design: at each E8 call, a naked stub loads the peer into edx (`mov edx,eax`
+- Implementation: at each E8 call, a naked stub loads the peer into edx (`mov edx,eax`
   at the interval site; `mov edx,[ebp-0x78]` at the first-retry site) and jumps
   to `W(self, peer, lo, hi)`. W looks up that peer's RTT by matching peer+0x08
   against Player+0x30 (dwords 0, 2, 3) in a table rebuilt every 500 ms, and
-  falls back to the max when no Player matches. The patterns must include the
-  frame-proving bytes (`8B 4D 88 81 C1 A4 00 00 00` before the first-retry
-  push; `C6 40 19 00` before the interval push).
+  falls back to the max when no Player matches. The resolve patterns include the
+  frame-proving bytes (`8D 8D C8 FE FF FF E8 ?? ?? ?? ??` + `C6 40 19 00` for the
+  interval site; `8B 4D 88 81 C1 A4 00 00 00 E8 ?? ?? ?? ?? 89 85 44 FF FF FF`
+  for the first-retry site) and are unique whole-image matches in the GOG exe.
 - That a member record and its transport peer hold byte-identical addresses is
   inferred from the shared layout, not traced: UNVERIFIED. The max fallback
-  covers a mismatch.
+  covers a mismatch; the matched/fallback counters will show it live.
 
 ## Not yet measured
 

@@ -534,43 +534,43 @@
   "resolves": [
     {
       "name": "P2PAdaptiveRetry::FirstRetryCall",
-      "pattern": "6A 00 68 ?? ?? ?? ?? 8D 8D FC FE FF FF E8 ?? ?? ?? ??",
-      "offset": 13,
+      "pattern": "8B 4D 88 81 C1 A4 00 00 00 E8 ?? ?? ?? ?? 89 85 44 FF FF FF 6A 00 68 ?? ?? ?? ?? 8D 8D FC FE FF FF E8 ?? ?? ?? ??",
+      "offset": 33,
       "mode": "address",
       "fallback": "0x0075C9B1",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "GOG Redux 2.2.301 P2P send FUN_0075BEB0 first-retry arm: `push 0; push 1000 (imm32 wildcarded: [Network] ReliableFirstRetryMs may rewrite it); lea ecx,[ebp-0x104]; call 0x0075FE50` at 0x0075C9A4, unique whole-image match. This is the E8 call at 0x0075C9B1; the adaptive-retry wrapper replaces it."
+      "identity": "GOG Redux 2.2.301 P2P send FUN_0075BEB0 first-retry arm: `push 0; push 1000 (imm32 wildcarded: [Network] ReliableFirstRetryMs may rewrite it); lea ecx,[ebp-0x104]; call 0x0075FE50` at 0x0075C9A4, unique whole-image match. This is the E8 call at 0x0075C9B1; the adaptive-retry stub (edx = [ebp-0x78] peer) replaces it. Pattern widened with the frame-proving prefix (interval: `lea ecx,[ebp-0x138]; call 0x0042DA60` so eax is the peer; first retry: `mov ecx,[ebp-0x78]; add ecx,0xA4; call; mov [ebp-0xBC],eax` so [ebp-0x78] is the peer); unique whole-image match, re-verified by scan."
     },
     {
       "name": "P2PAdaptiveRetry::FirstRetryHelper",
-      "pattern": "6A 00 68 ?? ?? ?? ?? 8D 8D FC FE FF FF E8 ?? ?? ?? ??",
-      "offset": 13,
+      "pattern": "8B 4D 88 81 C1 A4 00 00 00 E8 ?? ?? ?? ?? 89 85 44 FF FF FF 6A 00 68 ?? ?? ?? ?? 8D 8D FC FE FF FF E8 ?? ?? ?? ??",
+      "offset": 33,
       "mode": "rel32_target",
       "fallback": "0x0075FE50",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "GOG Redux 2.2.301 P2P send FUN_0075BEB0 first-retry arm: `push 0; push 1000 (imm32 wildcarded: [Network] ReliableFirstRetryMs may rewrite it); lea ecx,[ebp-0x104]; call 0x0075FE50` at 0x0075C9A4, unique whole-image match. Deadline helper FUN_0075FE50 (__thiscall ecx=deadline obj, uint32 lo_ms, uint32 hi_ms; disassembled `ret 8` at 0x0075FEBD; returns ecx in eax). RedirectCallTarget verifies the call still targets it."
+      "identity": "GOG Redux 2.2.301 P2P send FUN_0075BEB0 first-retry arm: `push 0; push 1000 (imm32 wildcarded: [Network] ReliableFirstRetryMs may rewrite it); lea ecx,[ebp-0x104]; call 0x0075FE50` at 0x0075C9A4, unique whole-image match. Deadline helper FUN_0075FE50 (__thiscall ecx=deadline obj, uint32 lo_ms, uint32 hi_ms; disassembled `ret 8` at 0x0075FEBD; returns ecx in eax). RedirectCallTarget verifies the call still targets it. Pattern widened with the frame-proving prefix (interval: `lea ecx,[ebp-0x138]; call 0x0042DA60` so eax is the peer; first retry: `mov ecx,[ebp-0x78]; add ecx,0xA4; call; mov [ebp-0xBC],eax` so [ebp-0x78] is the peer); unique whole-image match, re-verified by scan."
     },
     {
       "name": "P2PAdaptiveRetry::IntervalCall",
-      "pattern": "C6 40 19 00 6A 00 68 ?? ?? ?? ?? 8D 8D 1C FD FF FF E8 ?? ?? ?? ??",
-      "offset": 17,
+      "pattern": "8D 8D C8 FE FF FF E8 ?? ?? ?? ?? C6 40 19 00 6A 00 68 ?? ?? ?? ?? 8D 8D 1C FD FF FF E8 ?? ?? ?? ??",
+      "offset": 28,
       "mode": "address",
       "fallback": "0x0075BD24",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "GOG Redux 2.2.301 P2P retry pump FUN_0075AAF0 re-arm: `mov byte [eax+0x19],0; push 0; push 2500 (imm32 wildcarded: [Network] ReliableRetryIntervalMs may rewrite it); lea ecx,[ebp-0x2E4]; call 0x0075FE50` at 0x0075BD13, unique whole-image match. This is the E8 call at 0x0075BD24; the adaptive-retry wrapper replaces it."
+      "identity": "GOG Redux 2.2.301 P2P retry pump FUN_0075AAF0 re-arm: `mov byte [eax+0x19],0; push 0; push 2500 (imm32 wildcarded: [Network] ReliableRetryIntervalMs may rewrite it); lea ecx,[ebp-0x2E4]; call 0x0075FE50` at 0x0075BD13, unique whole-image match. This is the E8 call at 0x0075BD24; the adaptive-retry stub (edx = eax peer) replaces it. Pattern widened with the frame-proving prefix (interval: `lea ecx,[ebp-0x138]; call 0x0042DA60` so eax is the peer; first retry: `mov ecx,[ebp-0x78]; add ecx,0xA4; call; mov [ebp-0xBC],eax` so [ebp-0x78] is the peer); unique whole-image match, re-verified by scan."
     },
     {
       "name": "P2PAdaptiveRetry::IntervalHelper",
-      "pattern": "C6 40 19 00 6A 00 68 ?? ?? ?? ?? 8D 8D 1C FD FF FF E8 ?? ?? ?? ??",
-      "offset": 17,
+      "pattern": "8D 8D C8 FE FF FF E8 ?? ?? ?? ?? C6 40 19 00 6A 00 68 ?? ?? ?? ?? 8D 8D 1C FD FF FF E8 ?? ?? ?? ??",
+      "offset": 28,
       "mode": "rel32_target",
       "fallback": "0x0075FE50",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "GOG Redux 2.2.301 P2P retry pump FUN_0075AAF0 re-arm: `mov byte [eax+0x19],0; push 0; push 2500 (imm32 wildcarded: [Network] ReliableRetryIntervalMs may rewrite it); lea ecx,[ebp-0x2E4]; call 0x0075FE50` at 0x0075BD13, unique whole-image match. Deadline helper FUN_0075FE50 (__thiscall ecx=deadline obj, uint32 lo_ms, uint32 hi_ms; disassembled `ret 8` at 0x0075FEBD; returns ecx in eax). RedirectCallTarget verifies the call still targets it."
+      "identity": "GOG Redux 2.2.301 P2P retry pump FUN_0075AAF0 re-arm: `mov byte [eax+0x19],0; push 0; push 2500 (imm32 wildcarded: [Network] ReliableRetryIntervalMs may rewrite it); lea ecx,[ebp-0x2E4]; call 0x0075FE50` at 0x0075BD13, unique whole-image match. Deadline helper FUN_0075FE50 (__thiscall ecx=deadline obj, uint32 lo_ms, uint32 hi_ms; disassembled `ret 8` at 0x0075FEBD; returns ecx in eax). RedirectCallTarget verifies the call still targets it. Pattern widened with the frame-proving prefix (interval: `lea ecx,[ebp-0x138]; call 0x0042DA60` so eax is the peer; first retry: `mov ecx,[ebp-0x78]; add ecx,0xA4; call; mov [ebp-0xBC],eax` so [ebp-0x78] is the peer); unique whole-image match, re-verified by scan."
     },
     {
       "name": "P2PAdaptiveRetry::NextPlayer",
