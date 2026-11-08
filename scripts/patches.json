@@ -5498,6 +5498,12 @@
       "identity": "uint32 previous mission mode the restart path saves and restores"
     },
     {
+      "name": "SteamLobbyEnterRun",
+      "address": "0x00750F90",
+      "expected": "55 8B EC 83 EC 28 89 4D F0 8B 45 08 8B 48 04 51",
+      "identity": "CNetGameLobby's Steam LobbyEnter_t callback body, void __thiscall(CNetGameLobby*, LobbyEnter_t*). The CNetGameLobby ctor 0x00750900 (the Steam net singleton DAT_00945470 built by 0x00764F50) binds it to callback id 0x1F8 through 0x00752030/0x00752600. It reads m_ulSteamIDLobby at +0 and m_EChatRoomEnterResponse at +16 and calls CNetGameLobby::OnLobbyEntered 0x0073E240, which logs 'Entered room: ' and, unless the object's create flag +0x62 is set, leaves its current lobby and adopts the entered one as its game room. steam_public_listing.cpp detours the 6-byte prologue so the shim's own advert lobby never reaches it. Decompile of the 2017-03-28 Steam unpacked exe (same link as 2.2.301); GOG static bytes match. Steam runtime bytes not yet compared live."
+    },
+    {
       "name": "ShellScreenFactory",
       "address": "0x007C7AD0",
       "expected": "55 8B EC 6A FF 68 A7 23 86 00 64 A1 00 00 00 00",
