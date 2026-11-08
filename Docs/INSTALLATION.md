@@ -9,6 +9,7 @@ This guide supplements the [quick start](../README.md). It covers the complete m
 - Close Battlezone 98 Redux completely before installing, repairing, updating, or uninstalling.
 - Back up custom `openshim.ini` and `net.ini` if you have modified them. Normal Install/Update can deploy `net.ini` (backing up the previous file); Repair preserves an existing one.
 - OpenShim requires the **matched** `winmm.dll`, `bzloader.dll`, `plugins/openshim.dll`, and `scripts/patches.json` set. Installing only the proxy DLL does not enable the runtime.
+- **Windows prerequisite:** the **x86 (32-bit)** [Microsoft Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x86.exe) (`winget install --id Microsoft.VCRedist.2015+.x86 -e`). The load-chain DLLs import `MSVCP140.dll` and `VCRUNTIME140.dll`; without them the game closes as soon as you press Play and writes no `logs\openshim.log`. The x64 package does not satisfy this. The installer warns when it is missing. Proton/Wine provide these DLLs themselves.
 - The game executable is not rewritten. Supported game folders may contain `battlezone98redux.exe` (Steam) or `BZR.exe` (GOG); the Windows installer recognizes either filename.
 - Windows may warn about the unsigned setup executable or hooking DLLs. Verify the published release and SHA-256 checksum before trusting the files. Do not disable antivirus globally.
 
