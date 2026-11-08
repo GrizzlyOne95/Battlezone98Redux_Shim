@@ -4844,7 +4844,10 @@ namespace BZROpenShim
             ChunkBridgeRootProbe& probe = it->second;
             probe.seenWalk = g_ChunkBridgeRootProbeWalk;
             // One verdict per pointer serves both roles, so check the larger span.
-            if (inserted || (!probe.readable && (g_ChunkBridgeRootProbeWalk % 16) == 0))
+            // Recheck readable verdicts too: the owner's pages can be released while
+            // a chunk still points at it, and a stale "readable" would fault again
+            // under SEH every walk.
+            if (inserted || (g_ChunkBridgeRootProbeWalk % 16) == 0)
                 probe.readable = ChunkBridgeProbe::IsCandidateSpanReadable(candidate,
                     (std::max)(span, ChunkBridgeProbe::kLegacyOwnerReadSpan));
             return probe.readable;
