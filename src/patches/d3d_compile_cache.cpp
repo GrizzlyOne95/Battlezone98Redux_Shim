@@ -31,6 +31,13 @@
 // compile path. OPENSHIM_DISABLE_DXBC_CACHE (or the existing
 // OPENSHIM_DISABLE_SHADER_CACHE / BZR_DISABLE_SHADER_CACHE) leaves the
 // renderer stock. A failed cache write latches the cache off.
+//
+// Seed: a miss in shader_cache/dxbc then looks in the read-only pack
+// <game root>/openshim/renderer/enhanced/openshim_dxbc_seed.pack, shipped in
+// the renderer asset set (built by tools/build_dxbc_seed.py from a warm
+// cache). A fresh install or a cleared cache then serves those programs
+// instead of compiling them (the cold MP game room spent ~19 s compiling 188).
+// A seed hit is copied into shader_cache/dxbc. Stale seed entries simply miss.
 #include "d3d_compile_cache.h"
 #include "dxbc_cache_policy.h"
 #include "iat_patch.h"
@@ -72,6 +79,13 @@ namespace BZROpenShim
         FnD3DPreprocess g_Preprocess = nullptr;
         FnD3DCreateBlob g_CreateBlob = nullptr;
         std::wstring g_CacheDir;
+        std::wstring g_SeedPath;
+
+        // Loaded once, on the first cache miss; read-only afterwards.
+        std::vector<uint8_t> g_Seed;
+        std::vector<DxbcCachePolicy::SeedRecord> g_SeedIndex;
+        std::once_flag g_SeedOnce;
+        std::atomic<uint32_t> g_SeedHits{ 0 };
 
         std::atomic<uint32_t> g_Hits{ 0 };
         std::atomic<uint32_t> g_Misses{ 0 };
@@ -141,6 +155,59 @@ namespace BZROpenShim
                                                        preprocessedSize, &offset, &blobSize))
                 return false;
             blob.assign(data.begin() + offset, data.begin() + offset + blobSize);
+            return true;
+        }
+
+        void LoadSeed()
+        {
+            HANDLE file = CreateFileW(g_SeedPath.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                      OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+            {
+                LogShimA(LogLevel::Info, kComponent, "[DXBC] no seed pack");
+                return;
+            }
+            LARGE_INTEGER size{};
+            bool ok = GetFileSizeEx(file, &size) && size.QuadPart > 0 &&
+                      size.QuadPart <= 64ll * 1024 * 1024;
+            if (ok)
+            {
+                try
+                {
+                    // 32-bit process: an allocation failure must not reach Ogre.
+                    g_Seed.resize(static_cast<size_t>(size.QuadPart));
+                    DWORD got = 0;
+                    ok = ReadFile(file, g_Seed.data(), static_cast<DWORD>(g_Seed.size()), &got, nullptr) &&
+                         got == g_Seed.size();
+                }
+                catch (...)
+                {
+                    ok = false;
+                }
+            }
+            CloseHandle(file);
+            if (!ok || !DxbcCachePolicy::IndexSeedPack(g_Seed.data(), g_Seed.size(), g_SeedIndex))
+            {
+                g_Seed.clear();
+                g_Seed.shrink_to_fit();
+                g_SeedIndex.clear();
+                LogShimA(LogLevel::Warn, kComponent, "[DXBC] seed pack unreadable or malformed; ignored");
+                return;
+            }
+            LogShimA(LogLevel::Info, kComponent, "[DXBC] seed pack: %zu entries, %zu bytes",
+                     g_SeedIndex.size(), g_Seed.size());
+        }
+
+        bool ReadSeed(uint64_t key, size_t preprocessedSize, std::vector<uint8_t>& blob)
+        {
+            std::call_once(g_SeedOnce, LoadSeed);
+            const DxbcCachePolicy::SeedRecord* r = DxbcCachePolicy::FindSeed(g_SeedIndex, key);
+            size_t offset = 0, blobSize = 0;
+            if (!r || !DxbcCachePolicy::ValidateEntry(g_Seed.data() + r->offset, r->size, key,
+                                                      preprocessedSize, &offset, &blobSize))
+                return false;
+            const uint8_t* entry = g_Seed.data() + r->offset;
+            blob.assign(entry + offset, entry + offset + blobSize);
             return true;
         }
 
@@ -237,8 +304,9 @@ namespace BZROpenShim
             if (total % kSummaryEvery != 0)
                 return;
             LogShimA(LogLevel::Info, kComponent,
-                "[DXBC] compiles=%u hits=%u misses=%u stored=%u passthrough=%u",
-                total, g_Hits.load(), g_Misses.load(), g_Writes.load(), g_Passthrough.load());
+                "[DXBC] compiles=%u hits=%u (seed %u) misses=%u stored=%u passthrough=%u",
+                total, g_Hits.load(), g_SeedHits.load(), g_Misses.load(), g_Writes.load(),
+                g_Passthrough.load());
         }
 
         // Preprocess under SEH: a faulting include handler must not take the
@@ -293,7 +361,13 @@ namespace BZROpenShim
                 pre->GetBufferPointer(), preSize, pEntrypoint, pTarget, Flags1, Flags2);
 
             std::vector<uint8_t> blob;
-            if (ReadEntry(key, preSize, blob))
+            if (!ReadEntry(key, preSize, blob) && ReadSeed(key, preSize, blob))
+            {
+                ++g_SeedHits;
+                // Best effort: a later load then needs no seed lookup.
+                WriteEntry(key, preSize, blob.data(), blob.size());
+            }
+            if (!blob.empty())
             {
                 ID3DBlob* out = nullptr;
                 if (SUCCEEDED(g_CreateBlob(blob.size(), &out)) && out)
@@ -449,6 +523,8 @@ namespace BZROpenShim
 
             // Everything the hook reads is set once, before the patch exists.
             g_CacheDir = dir.wstring();
+            g_SeedPath = (root / L"openshim" / L"renderer" / L"enhanced" /
+                          DxbcCachePolicy::kSeedFileName).wstring();
             g_Preprocess = preprocess;
             g_CreateBlob = createBlob;
             g_RealD3DCompile = reinterpret_cast<FnD3DCompile>(original);

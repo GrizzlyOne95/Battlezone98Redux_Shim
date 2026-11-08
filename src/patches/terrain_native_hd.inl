@@ -423,15 +423,24 @@ bool InstallNativeTerrainHd()
         if (!binding->diffuseResource.empty())
         {
             if (!g_ogre.getNumTechniques(source.rep)) throw std::runtime_error("native HD source technique unavailable");
-            void* technique = g_ogre.getTechnique(source.rep, 0);
-            if (!g_ogre.getNumPasses(technique)) throw std::runtime_error("native HD source pass unavailable");
-            void* pass = g_ogre.getPass(technique, 0);
-            if (!g_ogre.getNumTextureUnitStates(pass)) throw std::runtime_error("native HD source diffuse unavailable");
-            const auto* name = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, 0));
+            // Any pass whose unit 0 is the pack atlas proves identity. Technique 0
+            // is not always the diffuse one: on stock moon maps it is the glow
+            // technique (unit 0 = black.dds), like the shadow techniques below.
             // Ogre resource names are case-insensitive; TRNs spell the atlas in either case.
-            if (!name || _stricmp(name->c_str(), binding->diffuseResource.c_str()) != 0)
+            bool atlasFound = false;
+            const std::string* firstName = nullptr;
+            for (uint16_t t = 0; t < g_ogre.getNumTechniques(source.rep) && !atlasFound; ++t)
+            for (uint16_t p = 0; p < g_ogre.getNumPasses(g_ogre.getTechnique(source.rep, t)); ++p)
+            {
+                void* pass = g_ogre.getPass(g_ogre.getTechnique(source.rep, t), p);
+                if (!g_ogre.getNumTextureUnitStates(pass)) continue;
+                const auto* name = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, 0));
+                if (!firstName) firstName = name;
+                if (name && _stricmp(name->c_str(), binding->diffuseResource.c_str()) == 0) { atlasFound = true; break; }
+            }
+            if (!atlasFound)
                 throw std::runtime_error("native HD source atlas does not match pack: expected=" +
-                    binding->diffuseResource + " actual=" + (name ? *name : "<unavailable>"));
+                    binding->diffuseResource + " actual=" + (firstName ? *firstName : "<unavailable>"));
         }
         std::optional<TerrainHdMaterialBinding> selectedBinding;
         if (binding->paint.enabled)

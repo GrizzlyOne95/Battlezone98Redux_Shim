@@ -12,6 +12,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -146,6 +147,71 @@ namespace BZROpenShim
             if (blobOffset) *blobOffset = sizeof(EntryHeader);
             if (blobSize) *blobSize = h.blobSize;
             return true;
+        }
+        // Seed pack: a read-only bundle of entries shipped with the renderer
+        // set, so a fresh install's first loads hit instead of compiling.
+        // Layout: "OSDXSEED" | u32 version | u32 count | count x (u32 size,
+        // entry bytes as in a .dxbc file). Entries must be sorted by key.
+        constexpr char kSeedMagic[8] = { 'O', 'S', 'D', 'X', 'S', 'E', 'E', 'D' };
+        constexpr uint32_t kSeedVersion = 1;
+        constexpr const char kSeedFileName[] = "openshim_dxbc_seed.pack";
+
+        struct SeedRecord
+        {
+            uint64_t key;
+            size_t offset;   // of the entry (its EntryHeader) in the pack
+            size_t size;     // entry bytes
+        };
+
+        // Builds the key index of a pack image. Any malformed record, an
+        // unsorted or duplicate key, or trailing bytes reject the whole pack.
+        inline bool IndexSeedPack(const void* pack, size_t packSize, std::vector<SeedRecord>& out)
+        {
+            out.clear();
+            const auto* p = static_cast<const uint8_t*>(pack);
+            if (!p || packSize < 16 || std::memcmp(p, kSeedMagic, 8) != 0)
+                return false;
+            uint32_t version = 0, count = 0;
+            std::memcpy(&version, p + 8, 4);
+            std::memcpy(&count, p + 12, 4);
+            if (version != kSeedVersion || count > (packSize - 16) / (4 + sizeof(EntryHeader)))
+                return false;
+            size_t at = 16;
+            out.reserve(count);
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                uint32_t size = 0;
+                if (packSize - at < 4)
+                    return out.clear(), false;
+                std::memcpy(&size, p + at, 4);
+                at += 4;
+                if (size < sizeof(EntryHeader) || packSize - at < size)
+                    return out.clear(), false;
+                EntryHeader h;
+                std::memcpy(&h, p + at, sizeof(h));
+                if (h.magic != kMagic || h.version != kEntryVersion ||
+                    (!out.empty() && h.key <= out.back().key))
+                    return out.clear(), false;
+                out.push_back({ h.key, at, size });
+                at += size;
+            }
+            if (at != packSize)
+                return out.clear(), false;
+            return true;
+        }
+
+        inline const SeedRecord* FindSeed(const std::vector<SeedRecord>& index, uint64_t key)
+        {
+            size_t lo = 0, hi = index.size();
+            while (lo < hi)
+            {
+                const size_t mid = lo + (hi - lo) / 2;
+                if (index[mid].key < key)
+                    lo = mid + 1;
+                else
+                    hi = mid;
+            }
+            return lo < index.size() && index[lo].key == key ? &index[lo] : nullptr;
         }
     }
 }

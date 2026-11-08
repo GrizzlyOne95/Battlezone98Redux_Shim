@@ -23,7 +23,15 @@ namespace BZROpenShim
         return static_cast<std::uint8_t>((1.0f - blend) * 255.0f + 0.5f);
     }
 
-    // Called at the proven RUN_STARTED mission boundary, after Redux has
-    // loaded the current TRN and constructed its shared terrain vertex buffer.
+    // RUN_STARTED fires before the world loader writes the new TRN name and
+    // builds the terrain vertex buffer, so the boundary only arms the blend.
+    // The world render queue keeps running (and still holds the previous
+    // mission's TRN name) during the load, so a render tick may apply only
+    // after the terrain proxy has selected a zone of the new world. A sim
+    // tick implies the new world is loaded and may always apply.
+    void RequestTerrainTileBlendAtFirstSimTick();
+    void NotifyTerrainTileBlendWorldReady();
+    void TerrainTileBlendSimTick();
+    void TerrainTileBlendRenderTick();
     void ApplyTerrainTileBlendForCurrentMission();
 }

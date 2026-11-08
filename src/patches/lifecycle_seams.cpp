@@ -595,7 +595,7 @@ namespace BZROpenShim
                 FogWakeNotifyMissionRunStateChanged(true);
                 GpuSkinningNotifyMissionRunStateChanged(true);
                 PilotFlashlightNotifyMissionRunStateChanged(true);
-                ApplyTerrainTileBlendForCurrentMission();
+                RequestTerrainTileBlendAtFirstSimTick();
                 ApplyPlanetEnvironmentForCurrentMission();
                 NotifyExuMissionSimulationState(true);
             }
