@@ -58,6 +58,16 @@ namespace BZROpenShim::HudPalette
     {
         return (stock & 0xFF000000u) | (color & 0xFFFFFFu);
     }
+    // Which radar role recolours a contact. Friendly is the player's own team
+    // only: an allied team keeps the native ally colour, so a single friendly
+    // colour (the Classic preset's green) never makes allies look like your own.
+    inline std::optional<Role> ContactRole(bool enemy, bool ownTeam, bool allied)
+    {
+        if (enemy) return Role::RadarEnemy;
+        if (ownTeam) return Role::RadarFriendly;
+        if (allied) return std::nullopt;
+        return Role::RadarNeutral;
+    }
     // Native radar contacts have dimmed variants as well as a separate alpha
     // animation. Preserve both instead of making a dim contact fully bright.
     inline uint32_t ContactTint(uint32_t stock, uint32_t color)
