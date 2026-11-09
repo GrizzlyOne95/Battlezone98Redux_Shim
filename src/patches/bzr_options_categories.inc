@@ -15,6 +15,7 @@ constexpr const char* kShimRowMeters = "Meter Fading";
 constexpr const char* kShimRowRadar = "Radar Fading";
 constexpr const char* kShimRowMenuTheme = "Menu Colors";
 constexpr const char* kShimRowEffects = "Visual Effects";
+constexpr const char* kShimRowBans = "Banned Players";
 
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
@@ -72,7 +73,7 @@ static const char* const kShimCategoryFixes[] = {
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions", "Map List Fixes",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
-    "MP Setup Screen", "Map Letter Jump" };
+    "MP Setup Screen", "Map Letter Jump", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
     "AutoSave", "AutoSave Interval", "AutoSave Backups", "Menu Caching" };

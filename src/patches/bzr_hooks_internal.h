@@ -915,6 +915,8 @@ namespace BZROpenShim
         std::filesystem::path GetBansConfigPath();
         void EnsureBansConfigLoaded();
         bool AddBanConfigEntry(const char* stableId, const BzrString* name, const char* source);
+        bool RemoveBanConfigEntry(const char* stableId, const char* source);
+        std::vector<BanRecord> GetBanRecordsSnapshot();
         void KickBannedPlayers(const char* source, uint32_t lobby, uint32_t member, int changes);
 
         // --- Multiplayer lobby UI (lobby_ui.cpp) -------------------------------

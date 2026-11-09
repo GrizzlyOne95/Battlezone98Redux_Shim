@@ -258,6 +258,88 @@ namespace BZROpenShim
             return true;
         }
 
+        // Drops every line of the append-only banlist.txt whose first token is
+        // the id, so an unbanned player is not resurrected by a tool that still
+        // reads the legacy file. A missing file is fine; other lines are kept.
+        static void RemoveLegacyBanListEntry(const std::string& normalizedId)
+        {
+            const std::string pathString = GetLegacyBanListPath().string();
+            std::string text;
+            if (!ReadStableIdListFile(pathString, text))
+                return;
+
+            std::string kept;
+            bool removed = false;
+            size_t pos = 0;
+            while (pos < text.size())
+            {
+                size_t end = text.find('\n', pos);
+                const bool hasNewline = end != std::string::npos;
+                if (!hasNewline)
+                    end = text.size();
+                const std::string line = text.substr(pos, end - pos);
+                pos = hasNewline ? end + 1 : end;
+
+                const size_t start = line.find_first_not_of(" \t\r");
+                const size_t tokenEnd = start == std::string::npos ? start : line.find_first_of(" \t\r", start);
+                if (start != std::string::npos &&
+                    NormalizeBanId(line.substr(start, tokenEnd == std::string::npos ? tokenEnd : tokenEnd - start).c_str()) == normalizedId)
+                {
+                    removed = true;
+                    continue;
+                }
+                kept += line;
+                if (hasNewline)
+                    kept += '\n';
+            }
+
+            if (removed && !WriteStableIdListFile(pathString, kept))
+                Log(L"[BAN] Failed to rewrite legacy banlist path=%hs\n", pathString.c_str());
+        }
+
+        // Removes a ban; returns true when an entry was removed. bans.cfg is
+        // saved here and the join check reads g_BanRecords, so it is live.
+        bool RemoveBanConfigEntry(const char* stableId, const char* source)
+        {
+            const std::string normalized = NormalizeBanId(stableId);
+            if (normalized.empty())
+                return false;
+
+            EnsureBansConfigLoaded();
+            auto existing = std::find_if(
+                g_BanRecords.begin(),
+                g_BanRecords.end(),
+                [&normalized](const BanRecord& entry) { return entry.id == normalized; });
+            if (existing == g_BanRecords.end())
+                return false;
+
+            // Erase only if the file write succeeds, so memory never says
+            // "unbanned" while bans.cfg (and the Steam tunnel gate) still bans.
+            const BanRecord removed = *existing;
+            const auto position = existing - g_BanRecords.begin();
+            g_BanRecords.erase(existing);
+            if (!SaveBansConfig())
+            {
+                g_BanRecords.insert(g_BanRecords.begin() + position, removed);
+                Log(L"[BAN] %hs could not save bans.cfg; kept stable=%hs\n",
+                    source ? source : "unban", normalized.c_str());
+                return false;
+            }
+            const std::string removedName = removed.name;
+            RemoveLegacyBanListEntry(normalized);
+            Log(L"[BAN] %hs removed entry stable=%hs name=%hs\n",
+                source ? source : "unban",
+                normalized.c_str(),
+                removedName.c_str());
+            return true;
+        }
+
+        std::vector<BanRecord> GetBanRecordsSnapshot()
+        {
+            EnsureBansConfigLoaded();
+            return g_BanRecords;
+        }
+
         // ------------------------------------------------------------------
         // Persistent per-player mute list (mutes.cfg). Mirrors the bans.cfg
         // format: <stable_id> [display name]. Stable ids use the same

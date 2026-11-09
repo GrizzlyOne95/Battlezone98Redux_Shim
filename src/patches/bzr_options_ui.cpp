@@ -2975,6 +2975,7 @@ namespace BZROpenShim
         constexpr size_t kShimPseudoRowRadar = kShimSettingsRegistryCount + 7;
         constexpr size_t kShimPseudoRowMenuTheme = kShimSettingsRegistryCount + 8;
         constexpr size_t kShimPseudoRowEffects = kShimSettingsRegistryCount + 9;
+        constexpr size_t kShimPseudoRowBans = kShimSettingsRegistryCount + 10;
         constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
@@ -3107,6 +3108,8 @@ namespace BZROpenShim
                 return kShimPseudoRowRadar;
             if (std::strcmp(label, kShimRowEffects) == 0)
                 return kShimPseudoRowEffects;
+            if (std::strcmp(label, kShimRowBans) == 0)
+                return kShimPseudoRowBans;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
                 if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
@@ -3332,7 +3335,7 @@ namespace BZROpenShim
             }
             if (row == kShimPseudoRowKeyBindings)
                 return ShimText("openshim_ui:value_edit", "Edit");
-            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme || row == kShimPseudoRowEffects)
+            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme || row == kShimPseudoRowEffects || row == kShimPseudoRowBans)
                 return ShimText("openshim_ui:value_open", "Open");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
@@ -3407,6 +3410,8 @@ namespace BZROpenShim
                 return ShimPseudoRowLabel(kShimRowRadar);
             if (row == kShimPseudoRowEffects)
                 return ShimPseudoRowLabel(kShimRowEffects);
+            if (row == kShimPseudoRowBans)
+                return ShimPseudoRowLabel(kShimRowBans);
             return ShimSettingLabel(g_ShimSettingsRegistry[row]);
         }
 
@@ -3432,6 +3437,8 @@ namespace BZROpenShim
                 return ShimText("openshim_ui:row:RadarFading:desc", "Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.");
             if (row == kShimPseudoRowEffects)
                 return ShimText("openshim_ui:row:VisualEffects:desc", "Jet flames, emissive pulse, star twinkle, death chunks, muzzle flashes and recoil, shell casings and skinned gibs.");
+            if (row == kShimPseudoRowBans)
+                return ShimText("openshim_ui:row:BannedPlayers:desc", "Lists the players you have banned as host; Unban removes one immediately.");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
@@ -3709,6 +3716,12 @@ namespace BZROpenShim
                 Shell::RequestScreen(ui.screen,MenuTheme::ScreenId);
                 return;
             }
+            if (row == kShimPseudoRowBans)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kBansScreenId);
+                return;
+            }
             if (row == kShimPseudoRowEffects)
             {
                 DisarmShimSettingsAction();
@@ -3912,6 +3925,7 @@ namespace BZROpenShim
                         return false;
                 }
                 MenuTheme::RegisterScreen();
+                RegisterBansScreen();
                 return true;
             }();
             return registered;

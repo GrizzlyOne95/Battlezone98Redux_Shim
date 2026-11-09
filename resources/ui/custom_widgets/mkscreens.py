@@ -14,7 +14,7 @@ the stock background shows through.
 The box rectangles here are the layout contract with the screen code: keep
 CAREER_LAYOUT in step with the constants in src/patches/career_screen.cpp, and
 PRELOBBY_LAYOUT with src/patches/prelobby_screen.cpp, and LAN_LAYOUT with
-src/patches/lan_screen.cpp.
+src/patches/lan_screen.cpp, and BANS_LAYOUT with src/patches/bans_screen.cpp.
 
     python mkscreens.py            # writes every osh_*_center.png and button skin
     python mkscreens.py --preview  # also writes *_preview.png over black
@@ -283,6 +283,34 @@ def lan_center():
     return img.resize((W, H), Image.LANCZOS)
 
 
+# Layout contract with src/patches/bans_screen.cpp (1440x1080 design space).
+# LIST: ten rows, each a name/id well and an Unban slot. STATUS: one text row,
+# then Prev / Next page slots. Everything ends above the frame's lower
+# chamfer (y 828 at x 208).
+BANS_LAYOUT = {
+    'title': (470, 132, 500, 56),
+    'boxes': [
+        (244, 238, 952, 500),   # List
+        (244, 754, 952, 94),    # Status
+    ],
+    'row_wells': [(272, 292 + 42 * k, 730, 40) for k in range(10)],
+    'slots': [(1018, 292 + 42 * k, 150, 40) for k in range(10)]   # Unban
+             + [(272, 796, 150, 40), (1018, 796, 150, 40)],       # Prev, Next
+}
+
+
+def bans_center():
+    img, d = new_panel()
+    title_plate(d, *BANS_LAYOUT['title'])
+    box(d, *BANS_LAYOUT['boxes'][0])
+    box(d, *BANS_LAYOUT['boxes'][1], header_h=8)
+    for well in BANS_LAYOUT['row_wells']:
+        text_well(d, *well)
+    for sl in BANS_LAYOUT['slots']:
+        slot(d, *sl)
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def text_well(d, x, y, w, h):
     """A recessed strip for a row caption."""
     d.rectangle([s(x), s(y), s(x + w), s(y + h)], fill=(0, 14, 1, 255))
@@ -444,6 +472,7 @@ def main():
         'osh_career_center.png': career_center(),
         'osh_prelobby_center.png': prelobby_center(),
         'osh_lan_center.png': lan_center(),
+        'osh_bans_center.png': bans_center(),
         'osh_options_center.png': options_center(),
         'osh_hub_center.png': hub_center(),
         'osh_category_center.png': category_center(),

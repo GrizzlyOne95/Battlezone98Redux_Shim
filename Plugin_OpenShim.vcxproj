@@ -170,6 +170,7 @@
     <ClCompile Include="src\patches\community_key_secret.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
     <ClCompile Include="src\patches\career_screen.cpp" />
+    <ClCompile Include="src\patches\bans_screen.cpp" />
     <ClCompile Include="src\patches\prelobby_screen.cpp" />
     <ClCompile Include="src\patches\lan_session.cpp" />
     <ClCompile Include="src\patches\lan_no_auth.cpp" />
