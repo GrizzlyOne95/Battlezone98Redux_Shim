@@ -83,6 +83,10 @@
 #include <cstdint>
 #include <string>
 
+namespace BZROpenShim {
+bool VehicleListPoolFallsBackToNetveh(const char* name); // vehicle_list_mod_fix.cpp
+}
+
 namespace BZROpenShim { namespace MpFactionRestrict {
 
 namespace {
@@ -114,6 +118,90 @@ FnClearBucket      g_ClearBucket = nullptr;
 // Remembers the mask we last applied so a mid-session config change can
 // invalidate the loader's own file/timestamp cache and force a rebuild.
 uint32_t g_LastAppliedMask = 0xFFFFFFFFu;
+
+// "Any Nation" OFF: restrict to the exact 1.5 netveh.odf names. See
+// SetAnyNationRestrict in the header.
+std::atomic<bool> g_AnyNationRestrict{false};
+// The list singleton, captured from the last loader call (ecx).
+std::atomic<void*> g_ListSelf{nullptr};
+constexpr uint32_t kOffCachedNameString = 0x40; // std::string, size at +0x10
+
+// The 27 entries of the 1.5 stock netveh.odf (Any Nation OFF pool):
+// NSDF 13, CCA 9, Black Dog 5, CRA 0. Source:
+// Battlezone_Source/BZ1/1.5/Battlezone_Install/stock/netveh.odf. Redux's own
+// netveh.odf lacks avtam2 and svtamp (swapped out for bsuser/cvrckt/cvtnk/
+// cvwamp), so on the shipped pool 25 of these survive; the filter only ever
+// subtracts, so those two are not added back.
+const char* const kStock15Names[] = {
+    // NSDF (13)
+    "avtump", "avltnk", "avltmp", "avlamp", "avtank", "asuser", "avtam2",
+    "avfimp", "avwalk", "avwamp", "avtamp", "avhrmp", "avrckt",
+    // CCA (9)
+    "ssuser", "svtamp", "svtank", "svfimp", "svwamp", "svhraz", "svtump",
+    "svltnk", "svrckt",
+    // Black Dog (5)
+    "bvtump", "bvltnk", "bvraz", "bvhraz", "bvtank",
+};
+
+// MSVC std::string as laid out in this build (FUN_00766F30 reads size at +0x10):
+// char buf[16] | uint32 size | uint32 res. Returns null if it looks wrong.
+const char* EntryNameChars(const uint8_t* entry)
+{
+    uint32_t size = 0, res = 0;
+    std::memcpy(&size, entry + 0x10, sizeof(size));
+    std::memcpy(&res,  entry + 0x14, sizeof(res));
+    if (size > res || res > 0x1000)
+        return nullptr;
+    if (res >= 16)
+    {
+        const char* p = nullptr;
+        std::memcpy(&p, entry, sizeof(p));
+        return p;
+    }
+    return reinterpret_cast<const char*>(entry);
+}
+
+// True when the pool being loaded is (or falls back to) the global netveh.odf.
+// 1.5's Any Nation only chose which netveh file to load; a map's own .vxt list
+// replaced it and was never filtered, so OFF prunes netveh only.
+bool IsNetvehPool(const void* poolName)
+{
+    const char* n = poolName ? EntryNameChars(static_cast<const uint8_t*>(poolName)) : nullptr;
+    if (!n)
+        return false;
+    const size_t len = strnlen(n, 0x200);
+    const size_t k = sizeof("netveh.odf") - 1;
+    if (len >= k && _stricmp(n + len - k, "netveh.odf") == 0
+        && (len == k || n[len - k - 1] == '\\' || n[len - k - 1] == '/'))
+        return true;
+    // A missing map .vxt is loaded as netveh.odf content, so treat it as netveh.
+    return VehicleListPoolFallsBackToNetveh(n);
+}
+
+bool InStock15Set(const char* name)
+{
+    if (!name)
+        return false;
+    for (const char* n : kStock15Names)
+    {
+        if (_stricmp(n, name) == 0)
+            return true;
+    }
+    return false;
+}
+
+__declspec(noinline) bool SafeCallLoad(FnLoadVehicleList fn, void* self, void* arg)
+{
+    __try
+    {
+        fn(self, nullptr, arg);
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return false;
+    }
+}
 
 // Offset of the `call clear(bucket)` inside the loader's five-iteration
 // bucket-reset loop: 0x00766A58 - 0x00766900 on exact GOG Redux 2.2.301.
@@ -303,13 +391,127 @@ void PruneToAllowedNations(void* self)
              removed, allowed, counts[0], counts[1], counts[2], counts[3], counts[4], cur);
 }
 
+// Any Nation OFF: keep only the 1.5 netveh.odf names. Compacts each bucket in
+// place. A removed entry that owns heap strings (>15 chars) is leaked rather
+// than destroyed: its destructor address is not identified, and every shipped
+// entry is short enough to live in the inline buffer.
+void PruneToStock15Names(void* self)
+{
+    if (!self)
+        return;
+
+    int counts[Nation_Count] = {};
+    int keepTotal = 0;
+    for (int n = 0; n < Nation_Count; ++n)
+    {
+        counts[n] = BucketCount(self, n);
+        if (counts[n] < 0)
+        {
+            LogShimA(LogLevel::Warn, kComponent,
+                     "[ANYNATION] bucket %d span is not a multiple of 0x60; name pruning skipped", n);
+            return;
+        }
+        uint32_t begin = 0;
+        std::memcpy(&begin, BucketAt(self, n), sizeof(begin));
+        for (int i = 0; i < counts[n]; ++i)
+        {
+            if (InStock15Set(EntryNameChars(reinterpret_cast<const uint8_t*>(begin) + i * kEntrySize)))
+                ++keepTotal;
+        }
+    }
+    if (keepTotal == 0)
+    {
+        LogShimA(LogLevel::Info, kComponent,
+                 "[ANYNATION] pool has no craft from the 1.5 netveh.odf set; leaving the full pool intact");
+        return;
+    }
+
+    // Remember the selection by ODF name so it can be found again.
+    char selName[40] = {};
+    int32_t cur = 0, sel = 0;
+    std::memcpy(&cur, static_cast<uint8_t*>(self) + kOffCurNation, sizeof(cur));
+    std::memcpy(&sel, static_cast<uint8_t*>(self) + kOffSelIndex, sizeof(sel));
+    if (cur >= 0 && cur < Nation_Count && sel >= 0 && sel < counts[cur])
+    {
+        uint32_t begin = 0;
+        std::memcpy(&begin, BucketAt(self, cur), sizeof(begin));
+        const char* nm = EntryNameChars(reinterpret_cast<const uint8_t*>(begin) + sel * kEntrySize);
+        if (nm)
+            strncpy_s(selName, sizeof(selName), nm, _TRUNCATE);
+    }
+
+    int removed = 0, leaked = 0, after[Nation_Count] = {};
+    for (int n = 0; n < Nation_Count; ++n)
+    {
+        uint8_t* vec = BucketAt(self, n);
+        uint32_t begin = 0;
+        std::memcpy(&begin, vec, sizeof(begin));
+        uint8_t* dst = reinterpret_cast<uint8_t*>(begin);
+        for (int i = 0; i < counts[n]; ++i)
+        {
+            uint8_t* src = reinterpret_cast<uint8_t*>(begin) + i * kEntrySize;
+            if (InStock15Set(EntryNameChars(src)))
+            {
+                if (dst != src)
+                    std::memmove(dst, src, kEntrySize);
+                dst += kEntrySize;
+                ++after[n];
+            }
+            else
+            {
+                ++removed;
+                for (int s = 0; s < 4; ++s)
+                {
+                    uint32_t res = 0;
+                    std::memcpy(&res, src + s * 0x18 + 0x14, sizeof(res));
+                    if (res >= 16)
+                        ++leaked;
+                }
+            }
+        }
+        const uint32_t newEnd = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(dst));
+        std::memcpy(vec + 4, &newEnd, sizeof(newEnd));
+    }
+
+    // Selection repair: same craft if it survived, else the first allowed one,
+    // staying in the same faction when that still has craft.
+    int32_t newCur = cur, newSel = 0;
+    bool found = false;
+    if (newCur >= 0 && newCur < Nation_Count && selName[0])
+    {
+        uint32_t begin = 0;
+        std::memcpy(&begin, BucketAt(self, newCur), sizeof(begin));
+        for (int i = 0; i < after[newCur]; ++i)
+        {
+            const char* nm = EntryNameChars(reinterpret_cast<const uint8_t*>(begin) + i * kEntrySize);
+            if (nm && _stricmp(nm, selName) == 0) { newSel = i; found = true; break; }
+        }
+    }
+    if (!found && !(newCur >= 0 && newCur < Nation_Count && after[newCur] > 0))
+    {
+        for (int n = 0; n < Nation_Count; ++n)
+        {
+            if (after[n] > 0) { newCur = n; break; }
+        }
+    }
+    std::memcpy(static_cast<uint8_t*>(self) + kOffCurNation, &newCur, sizeof(newCur));
+    std::memcpy(static_cast<uint8_t*>(self) + kOffSelIndex, &newSel, sizeof(newSel));
+    LogShimA(LogLevel::Info, kComponent,
+             "[ANYNATION] pruned %d craft to the 1.5 netveh.odf set (a=%d s=%d b=%d c=%d other=%d); selection '%s' %s -> nation=%d index=%d leakedHeapStrings=%d",
+             removed, after[0], after[1], after[2], after[3], after[4], selName,
+             found ? "kept" : "pruned, reset to first allowed", newCur, newSel, leaked);
+}
+
 // Replacement for the two `call FUN_00766900` sites. __fastcall places `self`
 // in ecx and leaves the single stack argument to be cleaned by us, which is the
 // same contract as the original __thiscall `ret 4`.
 void __fastcall LoadVehicleListIntercept(void* self, void* unusedEdx, void* poolName)
 {
     const bool enabled = IsEnabled();
-    const uint32_t mask = enabled ? AllowedNationMask() : 0;
+    const bool anyOff = g_AnyNationRestrict.load() && IsNetvehPool(poolName);
+    const uint32_t mask = (enabled ? AllowedNationMask() : 0) | (anyOff ? 0x100u : 0u);
+    if (self)
+        g_ListSelf.store(self);
 
     // The loader early-outs when the same file with the same timestamp is
     // already loaded. After a config change that cache would hand back the
@@ -325,6 +527,18 @@ void __fastcall LoadVehicleListIntercept(void* self, void* unusedEdx, void* pool
 
     if (enabled)
         PruneToAllowedNations(self);
+    if (anyOff)
+        PruneToStock15Names(self);
+
+    if (self)
+    {
+        int c[Nation_Count] = {};
+        int total = 0;
+        for (int n = 0; n < Nation_Count; ++n) { c[n] = BucketCount(self, n); total += c[n] > 0 ? c[n] : 0; }
+        LogShimA(LogLevel::Info, kComponent,
+                 "[ANYNATION] vehicle pool after load: total=%d (a=%d s=%d b=%d c=%d other=%d) anyNationRestrict=%u",
+                 total, c[0], c[1], c[2], c[3], c[4], anyOff ? 1u : 0u);
+    }
 
     g_LastAppliedMask = mask;
 }
@@ -437,6 +651,58 @@ void InstallMpFactionRestrictIfPossible()
              "[FACTION] installed: loader=%p clear=%p sites=0x%08X/0x%08X enabled=%u mask=0x%02X",
              netvehTarget, reinterpret_cast<void*>(clearFn), netvehCall, missionCall,
              IsEnabled() ? 1u : 0u, AllowedNationMask());
+}
+
+bool VehicleListHookReady()
+{
+    return g_Installed.load() && g_OrigLoad && g_ClearBucket;
+}
+
+bool LoadVehicleListThroughHook(void* self, void* poolName)
+{
+    if (!VehicleListHookReady())
+        return false;
+    LoadVehicleListIntercept(self, nullptr, poolName);
+    return true;
+}
+
+void SetAnyNationRestrict(bool restrict)
+{
+    g_AnyNationRestrict.store(restrict);
+}
+
+bool AnyNationRestrictActive()
+{
+    return g_AnyNationRestrict.load();
+}
+
+bool RebuildVehicleList(const char* why)
+{
+    void* self = g_ListSelf.load();
+    if (!self || !VehicleListHookReady())
+    {
+        LogShimA(LogLevel::Info, kComponent,
+                 "[ANYNATION] list rebuild (%s) skipped: no list built yet (self=%p)", why ? why : "?", self);
+        return false;
+    }
+    // The loader re-reads the file named in its cached filename string, so the
+    // cache must hold one.
+    uint32_t nameSize = 0;
+    std::memcpy(&nameSize, static_cast<uint8_t*>(self) + kOffCachedNameString + 0x10, sizeof(nameSize));
+    if (nameSize == 0 || nameSize > 0x200)
+    {
+        LogShimA(LogLevel::Warn, kComponent,
+                 "[ANYNATION] list rebuild (%s) skipped: cached pool name has size %u", why ? why : "?", nameSize);
+        return false;
+    }
+    const int64_t invalid = 0;
+    std::memcpy(static_cast<uint8_t*>(self) + kOffTimestampLo, &invalid, sizeof(invalid));
+    g_LastAppliedMask = 0xFFFFFFFEu;
+    const bool ok = SafeCallLoad(&LoadVehicleListIntercept, self,
+                                 static_cast<uint8_t*>(self) + kOffCachedNameString);
+    LogShimA(LogLevel::Info, kComponent, "[ANYNATION] list rebuild (%s) %s", why ? why : "?",
+             ok ? "done" : "FAILED (exception)");
+    return ok;
 }
 
 }} // namespace BZROpenShim::MpFactionRestrict
