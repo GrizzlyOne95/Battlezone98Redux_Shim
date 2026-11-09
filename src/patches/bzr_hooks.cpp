@@ -1030,6 +1030,7 @@ namespace BZROpenShim
         EnvSwitches::Apply(kFixKillSwitches, EnvFlagEnabled);
         RefreshProducerScriptPredicatesState();
         RefreshTugCargoPostLoadFixState();
+        RefreshSniperEjectAimFixState();
         RefreshConstructorRecycleStaleTargetFixState();
         RefreshApcAlliedTargetDeployFixState();
 

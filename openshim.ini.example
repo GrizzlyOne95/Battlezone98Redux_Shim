@@ -539,8 +539,9 @@ MagnetZeroRangeGuard = 1
 ; ejected or parachuting leaves off the reticle. This rebuilds the weapon
 ; aim so the shot follows the reticle with the body's pitch and roll
 ; removed (heading kept). Touches only the shooter's own shot orientation;
-; a level pilot is bit-identical to stock. No sync field is written, so it
-; runs in network games too. Guarded by the shipped instruction bytes.
+; a level pilot is bit-identical to stock. No sync field is written, but it
+; changes where the shot goes and is not negotiated with peers, so it is
+; single player only. Guarded by the shipped instruction bytes.
 ; Accepted: boolean. Default: ON.
 ; Env alias to force it off: OPENSHIM_DISABLE_SNIPER_EJECT_AIM_FIX
 SniperEjectAimFix = 1

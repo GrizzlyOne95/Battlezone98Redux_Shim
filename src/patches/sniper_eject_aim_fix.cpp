@@ -20,7 +20,8 @@
 // matrix, so nothing changes for a standing pilot.
 //
 // Only the local shooter's own shot orientation is touched; no sync field is
-// written (Person+0x280 is left as stock computed it).
+// written (Person+0x280 is left as stock computed it). Single player only:
+// see g_SniperEjectAimFixActive.
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "hook_engine.h"
@@ -39,6 +40,9 @@ namespace BZROpenShim
     namespace Hooks
     {
         bool g_SniperEjectAimFixEnabled = true;
+        // Changes where the shot goes and is not negotiated with peers, so it
+        // stands down in a network game like the other [Fixes] gameplay rows.
+        bool g_SniperEjectAimFixActive = true;
         bool g_SniperEjectAimFixInstalled = false;
         volatile long g_SniperEjectAimLogCount = 0;
 
@@ -152,7 +156,7 @@ namespace BZROpenShim
             {
                 float* result = reinterpret_cast<FnMatrixMul>(g_AimMatrixMulAddr)(out, a, b);
                 void* personPtr = g_CurrentPerson;
-                if (!g_SniperEjectAimFixEnabled || !personPtr)
+                if (!g_SniperEjectAimFixActive || !personPtr)
                     return result;
 
                 const uintptr_t person = reinterpret_cast<uintptr_t>(personPtr);
@@ -235,6 +239,12 @@ namespace BZROpenShim
                 g_UpdateWeaponAimOriginal(person, stackArg);
                 g_CurrentPerson = previous;
             }
+        }
+
+        void RefreshSniperEjectAimFixState()
+        {
+            g_SniperEjectAimFixActive =
+                g_SniperEjectAimFixEnabled && IsSinglePlayerSession();
         }
 
         void InstallSniperEjectAimFixIfPossible()
