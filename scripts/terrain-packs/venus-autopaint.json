@@ -14,30 +14,50 @@
       1,
       0,
       0,
+      0,
+      0,
+      0,
+      0,
       0
     ],
     "1": [
       0,
       1,
       0,
+      0,
+      0,
+      0,
+      0,
       0
     ],
     "2": [
       0,
       0,
+      0,
+      0,
       1,
+      0,
+      0,
       0
     ],
     "3": [
       0,
       0,
       1,
+      0,
+      0,
+      0,
+      0,
       0
     ],
     "4": [
       0,
       0,
       1,
+      0,
+      0,
+      0,
+      0,
       0
     ]
   },
@@ -45,31 +65,94 @@
     "cap": 0.3,
     "diagonal": 0.5
   },
+  "weightSize": 2048,
   "blurMeters": 14,
   "outsideWeights": [
     1,
     0,
     0,
+    0,
+    0,
+    0,
+    0,
     0
   ],
-  "variation": {
-    "meters": 200,
-    "amount": 0.45,
-    "types": {
-      "0": [
-        0,
-        0,
-        1,
-        0
-      ],
-      "3": [
-        1,
-        0,
-        0,
-        0
-      ]
+  "variation": [
+    {
+      "meters": 200,
+      "amount": 0.45,
+      "types": {
+        "0": [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "3": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 90,
+      "amount": 0.6,
+      "types": {
+        "0": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 130,
+      "amount": 0.6,
+      "types": {
+        "3": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 60,
+      "amount": 0.5,
+      "types": {
+        "3": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
     }
-  },
+  ],
   "shape": [
     {
       "radiusMeters": 400,
@@ -79,6 +162,10 @@
         0,
         0,
         1,
+        0,
+        0,
+        0,
+        0,
         0
       ],
       "from": [
@@ -92,13 +179,16 @@
         0,
         0,
         0.5,
-        0.5
+        0.5,
+        0,
+        0,
+        0,
+        0
       ],
       "amount": 0.5,
       "coverage": 0.05,
       "types": [
         0,
-        2,
         3,
         4
       ]
@@ -109,7 +199,11 @@
       0,
       0,
       0,
-      1
+      0.7,
+      0,
+      0,
+      0,
+      0.3
     ],
     "startDegrees": 24,
     "fullDegrees": 38
@@ -151,6 +245,67 @@
       "matchMean": "crhd_venus_ve33sa0_d.dds",
       "heightMeters": 2.6,
       "proceduralDetail": 1
+    },
+    {
+      "name": "Base pad",
+      "repeatMeters": 20,
+      "cellAligned": true,
+      "file": "crhd_venus_ve22sa0_d.dds",
+      "normal": "crhd_venus_ve22sa0_n.dds",
+      "heightMeters": 0.1,
+      "edge": {
+        "meters": 8,
+        "ragged": 0.12,
+        "raggedMeters": 12
+      }
+    },
+    {
+      "name": "Ochre sulphur",
+      "detile": true,
+      "repeatMeters": 14,
+      "archive": "sulphur_rock_vmijee1g_8k.zip",
+      "member": "Sulphur_Rock_vmijee1g_8K_BaseColor.jpg",
+      "matchMean": "crhd_venus_ve00sa0_d.dds",
+      "gain": [
+        1.1,
+        1.0,
+        0.85
+      ],
+      "contrast": 1.4,
+      "heightMeters": 0.5,
+      "proceduralDetail": 0.4
+    },
+    {
+      "name": "Dark crust",
+      "detile": true,
+      "repeatMeters": 16,
+      "archive": "rocks_ground_09_8k.zip",
+      "member": "rocks_ground_09_diff_8k.jpg",
+      "matchMean": "crhd_venus_ve33sa0_d.dds",
+      "gain": [
+        0.8,
+        0.76,
+        0.7
+      ],
+      "contrast": 1.4,
+      "heightMeters": 0.8,
+      "proceduralDetail": 0.6
+    },
+    {
+      "name": "Dark scree",
+      "detile": true,
+      "repeatMeters": 10,
+      "archive": "icelandic_rocky_ground_ve2kbizn_8k.zip",
+      "member": "Icelandic_Rocky_Ground_ve2kbizn_8K_BaseColor.jpg",
+      "matchMean": "crhd_venus_ve33sa0_d.dds",
+      "gain": [
+        0.78,
+        0.74,
+        0.68
+      ],
+      "contrast": 1.2,
+      "heightMeters": 0.6,
+      "proceduralDetail": 0.5
     }
   ],
   "heightBlend": 0.5,

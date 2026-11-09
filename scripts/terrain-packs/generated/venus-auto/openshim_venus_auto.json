@@ -2,7 +2,7 @@
   "schema": "bzr-openshim-terrain-hd-v1",
   "materials": {
     "VE_DETAIL_ATLAS": {
-      "sliceCount": 9,
+      "sliceCount": 18,
       "diffuseResource": "venus_atlas_d.dds",
       "fallback": "openshim_venus_auto_layer0.png",
       "tiles": {
@@ -10,11 +10,20 @@
         "1": "openshim_venus_auto_layer1.png",
         "2": "openshim_venus_auto_layer2.png",
         "3": "openshim_venus_auto_layer3.png",
+        "9": "openshim_venus_auto_layer4.png",
+        "10": "openshim_venus_auto_layer5.png",
+        "11": "openshim_venus_auto_layer6.png",
+        "12": "openshim_venus_auto_layer7.png",
         "4": "openshim_venus_auto_misn07_control.png",
+        "13": "openshim_venus_auto_misn07_control2.png",
         "5": "openshim_venus_auto_layer0_n.png",
         "6": "openshim_venus_auto_layer1_n.png",
         "7": "openshim_venus_auto_layer2_n.png",
-        "8": "openshim_venus_auto_layer3_n.png"
+        "8": "openshim_venus_auto_layer3_n.png",
+        "14": "openshim_venus_auto_layer4_n.png",
+        "15": "openshim_venus_auto_layer5_n.png",
+        "16": "openshim_venus_auto_layer6_n.png",
+        "17": "openshim_venus_auto_layer7_n.png"
       },
       "paint": {
         "schema": "bzr-openshim-terrain-paint-v1",
@@ -23,7 +32,11 @@
           18,
           16,
           20,
-          40
+          40,
+          20,
+          14,
+          16,
+          10
         ],
         "maps": [
           {
@@ -34,7 +47,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misn07_control.png"
+            "control": "openshim_venus_auto_misn07_control.png",
+            "control2": "openshim_venus_auto_misn07_control2.png"
           },
           {
             "terrainFingerprint": "b6671b747acc75ba",
@@ -44,7 +58,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misn07_stock_control.png"
+            "control": "openshim_venus_auto_misn07_stock_control.png",
+            "control2": "openshim_venus_auto_misn07_stock_control2.png"
           },
           {
             "terrainFingerprint": "d2c132545d75be8f",
@@ -54,7 +69,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misn08_control.png"
+            "control": "openshim_venus_auto_misn08_control.png",
+            "control2": "openshim_venus_auto_misn08_control2.png"
           },
           {
             "terrainFingerprint": "2296f12e2dc04bb2",
@@ -64,7 +80,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misn08_stock_control.png"
+            "control": "openshim_venus_auto_misn08_stock_control.png",
+            "control2": "openshim_venus_auto_misn08_stock_control2.png"
           },
           {
             "terrainFingerprint": "3ee49e58e8c11f45",
@@ -74,7 +91,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misn09_control.png"
+            "control": "openshim_venus_auto_misn09_control.png",
+            "control2": "openshim_venus_auto_misn09_control2.png"
           },
           {
             "terrainFingerprint": "c21819c07ec57d1c",
@@ -84,7 +102,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misn09_stock_control.png"
+            "control": "openshim_venus_auto_misn09_stock_control.png",
+            "control2": "openshim_venus_auto_misn09_stock_control2.png"
           },
           {
             "terrainFingerprint": "0c50d6823f069326",
@@ -94,7 +113,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misns1_control.png"
+            "control": "openshim_venus_auto_misns1_control.png",
+            "control2": "openshim_venus_auto_misns1_control2.png"
           },
           {
             "terrainFingerprint": "016d2fec6476500a",
@@ -104,7 +124,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misns1_stock_control.png"
+            "control": "openshim_venus_auto_misns1_stock_control.png",
+            "control2": "openshim_venus_auto_misns1_stock_control2.png"
           },
           {
             "terrainFingerprint": "0bd46b5f9b6d1106",
@@ -114,7 +135,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misns2_control.png"
+            "control": "openshim_venus_auto_misns2_control.png",
+            "control2": "openshim_venus_auto_misns2_control2.png"
           },
           {
             "terrainFingerprint": "4830c19f61d30220",
@@ -124,14 +146,29 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_venus_auto_misns2_stock_control.png"
+            "control": "openshim_venus_auto_misns2_stock_control.png",
+            "control2": "openshim_venus_auto_misns2_stock_control2.png"
           }
         ],
         "detile": [
           1,
           1,
           1,
+          1,
+          0,
+          1,
+          1,
           1
+        ],
+        "nearOnly": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
         ],
         "far": [
           5,
@@ -149,7 +186,11 @@
           1.2,
           0.15,
           1.0,
-          2.6
+          2.6,
+          0.1,
+          0.5,
+          0.8,
+          0.6
         ],
         "detail": [
           60,
@@ -161,7 +202,11 @@
           0.6,
           0.0,
           0.8,
-          1.0
+          1.0,
+          0.0,
+          0.4,
+          0.6,
+          0.5
         ],
         "parallax": [
           1,
