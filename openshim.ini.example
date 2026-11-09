@@ -55,6 +55,7 @@
 ;   [AutoSave]     rolling single-player recovery save
 ;   [Diagnostics]  read-only traces/probes unless explicitly noted
 ;   [Network]      BZRNet/user-facing multiplayer preferences
+;   [Mods]         mod folder mounting
 ;   [SinglePlayer] simulation-affecting improvements; forced off in MP
 ; ----------------------------------------------------------------------------
 
@@ -2319,6 +2320,15 @@ StockFactionSet = as
 ; keeps stock.
 RemoteSmoothingMs = 0
 
+
+[Mods]
+; Also mount every subfolder of an addon/mods/packaged_mods/Workshop mod folder,
+; not just its top level. Duplicate file names: the shallowest folder wins,
+; then alphabetical order (a warning is logged). In a network game a subfolder is
+; mounted only if every file in it passes the MP asset whitelist. Peers without
+; this setting do not mount the subfolders at all.
+; Accepted: 0/1. Default: 0. Restart required after changing.
+RecurseModSubfolders = 0
 
 [Gameplay]
 
