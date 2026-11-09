@@ -5,6 +5,8 @@
 param([string]$Hook = (Join-Path $PSScriptRoot 'coopflow\lobby-hooks\any-nation-observe.ps1'),
       [string]$Scenario = (Join-Path $PSScriptRoot 'coopflow\scenarios\noop.ps1'),
       [switch]$SkipPrepare,
+      # Drop the staged 1-pilot mpbugs.vxt so the map uses netveh.odf (the list Any Nation OFF prunes).
+      [switch]$NoVxt,
       [string]$ServerRepo = (Join-Path $env:USERPROFILE 'Documents\GIT\Battlezone98Redux_DedicatedServer'),
       [string]$OpenShimRepo = (Split-Path $PSScriptRoot -Parent),
       [string]$RunName = ('anynation-' + (Get-Date -Format 'yyyyMMdd-HHmmss')))
@@ -12,6 +14,7 @@ $ErrorActionPreference = 'Stop'
 $override = Join-Path 'C:\BZRCoop\runs' ($RunName + '-map')
 & python (Join-Path $PSScriptRoot 'coopflow\battleload\prepare_battle_map.py') --output $override --map mpbugs
 if ($LASTEXITCODE -ne 0) { throw 'map staging failed' }
+if ($NoVxt) { Remove-Item -LiteralPath (Join-Path $override 'mpbugs.vxt') -ErrorAction SilentlyContinue }
 $scn = Join-Path $override 'anynation-scenario.ps1'
 Copy-Item -LiteralPath $Scenario -Destination $scn
 & (Join-Path $PSScriptRoot 'Run-BZRCoopMission.ps1') -Mission mpbugs -Scenario $scn -MapListY 99 `

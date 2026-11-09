@@ -16,7 +16,7 @@ function Get-AnyNationLines($client, [string]$Pattern) {
 function Wait-AnyNation([string]$Name, $client, [string]$Pattern, [int]$Count = 1) {
     $null = Wait-Until $Name { $l = @(Get-AnyNationLines $client $Pattern); if ($l.Count -ge $Count) { $l[-1] } }
 }
-$candidates = @(@(910, 610, 'C'), @(910, 610, 'L'), @(910, 610, 'R'), @(780, 600, 'C'))
+$candidates = @(@(860, 403, 'C'), @(780, 403, 'C'), @(910, 610, 'C'))
 function Click-AnyNation([string]$expectValue) {
     $before = @(Get-AnyNationLines $hostClient 'host click').Count
     foreach ($xy in $candidates) {

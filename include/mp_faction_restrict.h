@@ -62,4 +62,10 @@ namespace BZROpenShim { namespace MpFactionRestrict {
     // installed. `why` is only for the log.
     bool RebuildVehicleList(const char* why);
 
+    // For OpenShim's own calls to the loader (vehicle_list_mod_fix.cpp calls
+    // FUN_00766900 directly, not through the two rewritten call sites). Runs
+    // the same load + prune as the redirected sites and returns true; returns
+    // false, doing nothing, when the hook is not installed.
+    bool LoadVehicleListThroughHook(void* self, void* poolName);
+
 }} // namespace BZROpenShim::MpFactionRestrict

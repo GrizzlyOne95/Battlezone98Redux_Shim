@@ -83,6 +83,10 @@
 #include <cstdint>
 #include <string>
 
+namespace BZROpenShim {
+bool VehicleListPoolFallsBackToNetveh(const char* name); // vehicle_list_mod_fix.cpp
+}
+
 namespace BZROpenShim { namespace MpFactionRestrict {
 
 namespace {
@@ -155,6 +159,23 @@ const char* EntryNameChars(const uint8_t* entry)
         return p;
     }
     return reinterpret_cast<const char*>(entry);
+}
+
+// True when the pool being loaded is (or falls back to) the global netveh.odf.
+// 1.5's Any Nation only chose which netveh file to load; a map's own .vxt list
+// replaced it and was never filtered, so OFF prunes netveh only.
+bool IsNetvehPool(const void* poolName)
+{
+    const char* n = poolName ? EntryNameChars(static_cast<const uint8_t*>(poolName)) : nullptr;
+    if (!n)
+        return false;
+    const size_t len = strnlen(n, 0x200);
+    const size_t k = sizeof("netveh.odf") - 1;
+    if (len >= k && _stricmp(n + len - k, "netveh.odf") == 0
+        && (len == k || n[len - k - 1] == '\\' || n[len - k - 1] == '/'))
+        return true;
+    // A missing map .vxt is loaded as netveh.odf content, so treat it as netveh.
+    return VehicleListPoolFallsBackToNetveh(n);
 }
 
 bool InStock15Set(const char* name)
@@ -487,7 +508,7 @@ void PruneToStock15Names(void* self)
 void __fastcall LoadVehicleListIntercept(void* self, void* unusedEdx, void* poolName)
 {
     const bool enabled = IsEnabled();
-    const bool anyOff = g_AnyNationRestrict.load();
+    const bool anyOff = g_AnyNationRestrict.load() && IsNetvehPool(poolName);
     const uint32_t mask = (enabled ? AllowedNationMask() : 0) | (anyOff ? 0x100u : 0u);
     if (self)
         g_ListSelf.store(self);
@@ -635,6 +656,14 @@ void InstallMpFactionRestrictIfPossible()
 bool VehicleListHookReady()
 {
     return g_Installed.load() && g_OrigLoad && g_ClearBucket;
+}
+
+bool LoadVehicleListThroughHook(void* self, void* poolName)
+{
+    if (!VehicleListHookReady())
+        return false;
+    LoadVehicleListIntercept(self, nullptr, poolName);
+    return true;
 }
 
 void SetAnyNationRestrict(bool restrict)
