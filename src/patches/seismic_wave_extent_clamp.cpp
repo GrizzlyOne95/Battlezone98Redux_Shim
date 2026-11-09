@@ -23,6 +23,7 @@
 #include "hook_engine.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
+#include "patcher.h"
 #include "shim_log.h"
 
 #include <cmath>
