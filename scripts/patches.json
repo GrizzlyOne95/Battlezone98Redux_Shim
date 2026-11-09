@@ -2609,6 +2609,42 @@
       "expected": "55 8B EC E8 C8 F1 FF FF 0F B6 C0 5D C3 CC CC CC"
     },
     {
+      "name": "AnyNationLobbyPublish",
+      "address": "0x0073D020",
+      "expected": "55 8B EC 6A FF 68 FC AA 85 00 64 A1 00 00 00 00",
+      "identity": "GOG Redux 2.2.301 FUN_0073D020, __fastcall(netService), plain ret: republishes the positional 'gameSettings' lobby key through lobby vtable +0x20 when it differs from vtable +0x2C (decomp lines 48-67). mp_any_nation.cpp post-hooks it (5-byte detour: push ebp / mov ebp,esp / push -1) to publish the separate 'anyNation' key. Prologue read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationLobbyRead",
+      "address": "0x00743F40",
+      "expected": "55 8B EC 6A FF 68 48 B4 85 00 64 A1 00 00 00 00",
+      "identity": "GOG Redux 2.2.301 FUN_00743F40 PopulateLobbyFromData, __thiscall(netService, info, arg2) ret 8 (ends 0x00744A4C); reads 'gameSettings' via lobby vtable +0x2C (decomp 222-248), lobby id at info+0x10. mp_any_nation.cpp post-hooks it to read 'anyNation' on clients. Prologue read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationScreenCtor",
+      "address": "0x00796880",
+      "expected": "55 8B EC 6A FF 68 78 F5 85 00 64 A1 00 00 00 00",
+      "identity": "GOG Redux 2.2.301 FUN_00796880 cUI_Multiplayer_Create screen ctor, __thiscall(this, arg) ret 4 (ends 0x0079952E). Builds the hidden AnyNationButton (decomp :306-:313; widget stored at this+0x1A0). mp_any_nation.cpp post-hooks it to show and label the button for the host. Prologue read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationButtonCallbacks",
+      "address": "0x00797ACA",
+      "expected": "68 70 5D 79 00 68 70 5D 79 00",
+      "identity": "GOG Redux 2.2.301 two `push 0x00795D70` immediates (click callbacks) passed to the AnyNationButton widget constructor 0x007C3E30 at 0x00797B26; 0x00795D70 is the nullsub thunk (cmp [0x0094555C],0 / call 0x00417C60 = push ebp,mov ebp,esp,push ecx,mov [ebp-4],ecx,mov esp,ebp,pop ebp,ret). mp_any_nation.cpp rewrites both imm32 to its own cdecl handler, exactly as the sniper button passes 0x00795ED0. Bytes read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationLobbyRecord",
+      "address": "0x0056F900",
+      "expected": "55 8B EC 51 89 4D FC 6A 00 8B 45 FC 83 C0 28",
+      "identity": "GOG Redux 2.2.301 FUN_0056F900, __thiscall(netService), plain ret: looks up the current lobby record (FindRecord(this+0x28, 0)); lobby id at record+0x10 (see NetGameLobbyFindRecordIdCompare). Called as ecx=[screen+0x1BC] at 0x0079B8BE. Bytes read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationWidgetSetText",
+      "address": "0x007C44A0",
+      "expected": "55 8B EC 6A FF 68 A8 8F 84 00 64 A1 00 00 00 00",
+      "identity": "GOG Redux 2.2.301 FUN_007C44A0, __thiscall(widget, std::string text by value) ret 0x18: forwards the text to the widget's child via vtable +0x3C. The sniper toggle labels itself with it at 0x0079BA34. Bytes read from the shipped image 2026-11-09."
+    },
+    {
       "name": "AutoLoadShellGame",
       "address": "0x004FDAB0",
       "expected": "55 8B EC 83 EC 6C A1 00 70 8E 00 33 C5 89 45 FC"
@@ -3973,6 +4009,23 @@
       "address": "0x0059DEA5",
       "expected": "0F B6 85 AE FC FF FF 85 C0 74 26",
       "identity": "Person::Simulate landing: movzx eax,[ebp-jumpHeld]; test eax,eax; je sniper-check"
+    },    {
+      "name": "PersonUpdateWeaponAim",
+      "address": "0x005A12A0",
+      "expected": "55 8B EC 81 EC 24 03 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Person::UpdateWeaponAim (vtable slot +0x98 of Person, __thiscall, ret 4): per weapon node matrix = inverse(hardpoint chain) * Rx(-Person+0x280). SniperEjectAimFix detours its entry only to record the Person"
+    },
+    {
+      "name": "PersonAimMatrixMulCall",
+      "address": "0x005A14C7",
+      "expected": "E8 94 E9 27 00 83 C4 0C B9 10 00 00 00",
+      "identity": "call FUN_0081FE60(out,inverseChain,Rx) inside Person::UpdateWeaponAim that builds the weapon node rotation; SniperEjectAimFix redirects it"
+    },
+    {
+      "name": "PersonAimMatrixMul",
+      "address": "0x0081FE60",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "FUN_0081FE60 matrix multiply (__cdecl out,a,b; row-vector convention, 3x3 rotation then 3 doubles of translation)"
     },
     {
       "name": "GameObjectSetDamageFlags",
@@ -4225,6 +4278,12 @@
       "address": "0x00820E00",
       "expected": "55 8B EC 83 EC 08 C7 45 FC 00 00 00 00",
       "identity": "Engine VFS source-table registration, cdecl bool(const char* path): case-insensitive de-dup then strncpy(0xFF) into a 0x800 x 0x100 table (DAT_02C41B08/DAT_00946730). Called with each mod folder from the mount builders FUN_0076A030..FUN_0076B7A0 (e.g. 0x0076A130, 0x0076B46A). RecurseModSubfolders detours it to also register descendant folders."
+    },
+    {
+      "name": "MpWhitelistMatch",
+      "address": "0x0076DDF0",
+      "expected": "55 8B EC 6A FF 68 18 52 84 00",
+      "identity": "cWorkshop MP asset whitelist glob matcher, cdecl (std::string* name, std::string* pattern) -> bool in AL; its only caller is the per-file loop in FUN_0076E020 (call at 0x0076E2DD). Prologue through the SEH push. AllowTgaInMultiplayerMods detours it."
     },
     {
       "name": "UnitTurboThrottleBlock",
@@ -4701,52 +4760,16 @@
       "identity": "terrain tile mix lookup; terrain proxy calls it"
     },
     {
-      "name": "BriefingScrollUpCall",
-      "address": "0x0078ED29",
-      "expected": "E8 B2 F3 03 00 5D C3 55",
-      "identity": "mission briefing scroll-up callback's call to the unguarded list scroll-up; the briefing scroll fix redirects it to the guarded one"
+      "name": "TextBlockPageProbeInitPush",
+      "address": "0x007CCEBB",
+      "expected": "68 B8 09 8A 00 8D 4D D8",
+      "identity": "`push 0x8A09B8` (the initial \"T\" literal) in cUI_TextBlock page-line probe 0x007CCE90, GOG Redux 2.2.301. The probe builds a string of N one-letter lines and measures it (0x00689CE0) until it reaches the box height; N is the scroll stride [this+0x294C]. The only reference to the literal in the exe image. Fix redirects the operand to a DLL-owned \"T\n\"."
     },
     {
-      "name": "BriefingScrollDownCall",
-      "address": "0x0078ED39",
-      "expected": "E8 D2 F3 03 00 5D C3 55",
-      "identity": "mission briefing scroll-down callback's call to the unguarded list scroll-down"
-    },
-    {
-      "name": "ArchiveScrollUpCall",
-      "address": "0x00790AF9",
-      "expected": "E8 E2 D5 03 00 5D C3 55",
-      "identity": "mission archive scroll-up callback's call to the unguarded list scroll-up"
-    },
-    {
-      "name": "ArchiveScrollDownCall",
-      "address": "0x00790B09",
-      "expected": "E8 02 D6 03 00 5D C3 55",
-      "identity": "mission archive scroll-down callback's call to the unguarded list scroll-down"
-    },
-    {
-      "name": "UiScrollUpGuarded",
-      "address": "0x007CE730",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 58 29 00 00 00",
-      "identity": "clamped list scroll-up used by the lobby/chat UI"
-    },
-    {
-      "name": "UiScrollDownGuarded",
-      "address": "0x007CE6D0",
-      "expected": "55 8B EC 83 EC 08 89 4D FC E8 82 60 F9 FF",
-      "identity": "clamped list scroll-down used by the lobby/chat UI"
-    },
-    {
-      "name": "UiScrollUpUnguarded",
-      "address": "0x007CE0E0",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
-      "identity": "unclamped list scroll-up (snaps back to the top on the last partial page)"
-    },
-    {
-      "name": "UiScrollDownUnguarded",
-      "address": "0x007CE110",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
-      "identity": "unclamped list scroll-down"
+      "name": "TextBlockPageProbeAppendPush",
+      "address": "0x007CCF53",
+      "expected": "68 B4 09 8A 00 8D 4D D8",
+      "identity": "`push 0x8A09B4` (the appended \"\nT\" literal) before the string append 0x0041F7B0 in the same probe 0x007CCE90. The only reference to that literal. Fix redirects the operand to a DLL-owned \"T\n\" so the probe text ends in a newline exactly like the page text rendered by cUI_ScrollingTextBlock 0x007CDD50 (see reverse_engineering/briefing_page_stride_20261109.md)."
     },
     {
       "name": "ThumbnailMaterialApply",
@@ -5251,6 +5274,24 @@
       "address": "0x00478F4F",
       "expected": "8B 4D FC E8 89 C8 18 00 E9 D5 04",
       "identity": "AttackTask::DoState stand state: mov ecx,[ebp-4]; call DoStand (+3). The legacy (1.4) stand zeroes closeSq for this call only, so the craft holds instead of reversing"
+    },
+    {
+      "name": "SetViewMode",
+      "address": "0x0061D120",
+      "expected": "55 8B EC 51 83 3D D8 AA 8E 00 05",
+      "identity": "void cdecl(object* player, int mode): looks mode up in the 10-entry view table at 0x008EAD18 ({mode, update fn}; mode 9 = free eye, fn 0x0061C5B0), saves the previous mode and runs the new update fn. Called by the game-key handler 0x0061DC10 and by vehicle-enter code with the object's default view"
+    },
+    {
+      "name": "GameKeyViewSetCall",
+      "address": "0x0061DDF0",
+      "expected": "8B 45 08 50 8B 4D FC 51 E8 23 F3 FF FF",
+      "identity": "Game-key handler 0x0061DC10 switch group GK 6/7/8/9/0x2A: push gk; push player; call SetViewMode (+8). Behind the handler's net-game gate, which only lets keys through in a network game while the player controls an object"
+    },
+    {
+      "name": "CurrentViewMode",
+      "address": "0x02CECEA0",
+      "kind": "data",
+      "identity": "int, the active view-table mode id (9 = free eye); SetViewMode compares against it and rewrites it"
     },
     {
       "name": "AttackTaskIsBuildingClass",
@@ -5778,6 +5819,12 @@
       "address": "0x004B1250",
       "expected": "55 8B EC 83 EC 24 89 4D FC 8B 45 FC 8B 48 14 51",
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) DefendTask::DoState (vtable 0x008785F4 slot 12): refreshes target obj [t+0x18] via GetObj([t+0x14]), then runs the state switch (2 goto, 3, 6 wander); sets next [t+0xC]. OpenShim wraps it for the opt-in Defend refresh. See Docs/NATIVE_HOLD_DEFEND_FOLLOW.md."
+    },
+    {
+      "name": "SeismicWaveUpdateExtents",
+      "address": "0x005CF100",
+      "expected": "55 8B EC 83 EC 24 89 4D FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWave::UpdateExtents (FUN_005cf100, __fastcall ecx=this): stores [this+0xE4/E8/EC/F0] = floor/ceil((pos -/+ r) * 1/Grid_Size), r = [[this+0xC]+0x78]. Restore and Simulate walk these inclusive, one delta entry per cell, against a side*side*2 buffer (side = floor(r*2*0.2)+2) allocated in the ctor FUN_005cef80, so the stock extents overrun it. OpenShim post-hooks it (9-byte prologue detour) to clamp the max edges to the buffer."
     },
     {
       "name": "SitTaskVtable",

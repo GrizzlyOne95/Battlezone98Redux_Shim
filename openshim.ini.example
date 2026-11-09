@@ -467,6 +467,20 @@ SplinterUndead = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_SPLINTER_SYNC
 SplinterSync = 1
 
+; Multiplayer "Any Nation" lobby toggle (Battlezone 1.5 parity). The host gets an
+; "Any Nation: On/Off" button in the lobby. ON (default) is the full vehicle
+; pool, as before. OFF restricts the vehicle-select pool to the 1.5 netveh.odf
+; set (27 craft: NSDF 13, CCA 9, Black Dog 5, CRA 0; craft the shipped Redux
+; pool lacks are not added back). The host's choice reaches clients through its
+; own lobby key, "anyNation" ("0" = OFF, "1" or absent = ON), never the
+; positional gameSettings string. The host's choice is kept in multi.ini.
+; Any Nation OFF only restricts players running OpenShim; stock clients still
+; see the full pool. Lobby stays compatible either way.
+; GOG Redux 2.2.301 only; stands down on any other build or byte mismatch.
+; Accepted: boolean. Default: ON (a lobby that never turns Any Nation OFF
+; publishes nothing new). 0 installs nothing.
+AnyNationToggle = 1
+
 ; Reveal the owning craft when a comet, deployed APC soldier, splinter payload
 ; or another GameObject-owned child lands a damaging hit. Redux reveals only
 ; the immediate damager in SetDamageFlags. Splinter also drops its owner while
@@ -490,6 +504,12 @@ HowitzerUndeployedRetaliation = 1
 ; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_TUG_CARGO_FIX
 TugCargoPostLoad = 1
+
+; Keep a Daywrecker SeismicWave inside its terrain-delta buffer. Stock walks
+; one row and column past the allocation, so terrain restores with garbage and
+; leaves spires or pits. Drops only cells that never move. Also applies online.
+; Accepted: boolean. Default: ON.
+SeismicWaveExtentClamp = 1
 
 ; Clear a dead constructor's remote build state from AI_UnitRemove, so the
 ; build it was told to place does not outlive it.
@@ -534,6 +554,30 @@ MusicSingleFill = 1
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
+
+; Mission briefing and mission archive text is shown a page at a time. The page
+; size (the scroll step) is measured with a probe string that ends in a letter,
+; but each page is drawn with a newline after every line, which measures
+; slightly taller. For some box heights a page then shows one line fewer than
+; the step skips: a line is lost at every page break, and a last page that is
+; exactly full hides its final line behind an enabled down arrow (authors worked
+; around this by padding with blank lines). Measures the probe the same way the
+; page is drawn. Client-local UI; cannot affect a network game.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_BRIEFING_PAGE_STRIDE_FIX
+BriefingPageStride = 1
+
+; A pilot ejected sideways or at an angle keeps that body tilt (pitch and
+; roll). Stock cancels only sin(pitch) of it, so a sniper shot fired while
+; ejected or parachuting leaves off the reticle. This rebuilds the weapon
+; aim so the shot follows the reticle with the body's pitch and roll
+; removed (heading kept). Touches only the shooter's own shot orientation;
+; a level pilot is bit-identical to stock. No sync field is written, but it
+; changes where the shot goes and is not negotiated with peers, so it is
+; single player only. Guarded by the shipped instruction bytes.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_SNIPER_EJECT_AIM_FIX
+SniperEjectAimFix = 1
 
 ; Skip the strategic-AI scrap-position query for a scavenger whose AI process
 ; is not a ScavengerProcess. A scavenger owned by a remote peer holds a
@@ -1899,6 +1943,13 @@ TracePlayerKills = 0
 ; Requires an explicit LAN selection and numeric private IPv4. Development opt-in.
 NoAuthLan = 0
 
+; Let .tga files pass the multiplayer mod asset whitelist, so a visual-only
+; (sky/texture) Workshop mod holding .tga files still mounts in a network game.
+; Peers without this setting still reject such a mod, so players can see
+; different visuals; the simulation does not read .tga files.
+; Accepted: 0/1. Default: 1. Restart required after changing.
+AllowTgaInMultiplayerMods = 1
+
 ; OpenShim's socket layer as a whole. Off installs none of it: no winsock
 ; hooks, no bandwidth governor, no auto-kick relaxation, no packet
 ; reorder/duplicate mitigation, no DSCP marking.
@@ -2167,6 +2218,13 @@ ReconnectDelaySeconds = 5
 ;                     OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE,
 ;                     BZR_DISABLE_PERSISTENT_PLAYER_MUTE, BZR_ENABLE_PERSISTENT_PLAYER_MUTE
 PersistentPlayerMute = 1
+; Ignore the free camera key (game key FREE_EYE_VIEW, Shift/Ctrl+F11 by default) in a
+; network game, so players cannot detach the camera to scout. Single player and
+; the editor are unaffected, and a camera already in free eye can still be left.
+; Accepted: boolean. Default: ON. No restart required. 0 = stock.
+; Client-local: it only stops your own game from entering free eye; a modified
+; client can bypass it, so it is a fairness aid, not anti-cheat.
+BlockFreeCamInMultiplayer = 1
 ; Sent only to community (non-official) matchmaking servers, never to
 ; Rebellion's: a per-server key that lets a server recognise you across
 ; sessions. Each server gets a different key, so servers cannot link you. The
