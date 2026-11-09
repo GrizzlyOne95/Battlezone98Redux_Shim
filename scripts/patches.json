@@ -29,9 +29,6 @@
     },
     {
       "name": "Custom Planet Video Playback",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "6A 00 8B 8D A8 0A FE FF 83 C1 7C E8 ?? ?? ?? ?? 50 8B 8D D4 0A FE FF E8 ?? ?? ?? ?? 6A 01 8B 8D D4 0A FE FF E8 ?? ?? ?? ?? EB 1A",
       "offset": 37,
       "expected_size": 4,
