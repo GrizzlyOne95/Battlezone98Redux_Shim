@@ -1432,8 +1432,8 @@ namespace BZROpenShim
         // thread: the arm hook replaces PostLoadScriptUtils' StartQuake call
         // and the fade tick runs from the EarthQuake::Simulate entry detour.
         using FnEarthQuakeSimulate = void(__fastcall*)(void* thisPtr, void* edx, float dt);
-        extern bool g_BriefingScrollFixEnabled;
-        extern bool g_BriefingScrollFixInstalled;
+        extern bool g_BriefingPageStrideFixEnabled;
+        extern bool g_BriefingPageStrideFixInstalled;
         extern bool g_CinematicSatelliteZoomFixEnabled;
         extern bool g_CinematicSatelliteZoomFixInstalled;
         extern volatile long g_CinematicSatelliteZoomLogBudget;
@@ -1450,12 +1450,19 @@ namespace BZROpenShim
         extern volatile long g_TargetCamSatelliteLogBudget;
         extern bool g_ThumbnailBmpGuardEnabled;
         extern bool g_ThumbnailBmpGuardInstalled;
-        void InstallBriefingScrollFixIfPossible();
+        void InstallBriefingPageStrideFixIfPossible();
         void InstallMultiRenderCountClampIfPossible();
         void InstallThumbnailBmpGuardIfPossible();
         extern FnEarthQuakeSimulate g_BzrFn_EarthQuakeSimulateOriginal;
         void InstallQuakeReplayFadeIfPossible();
         void InstallTargetCamSatelliteFixIfPossible();
+        // sniper_eject_aim_fix.cpp: keeps a tilted (ejected) pilot's shot on the reticle.
+        extern bool g_SniperEjectAimFixEnabled;
+        extern bool g_SniperEjectAimFixActive;
+        void RefreshSniperEjectAimFixState();
+        extern bool g_SniperEjectAimFixInstalled;
+        extern volatile long g_SniperEjectAimLogCount;
+        void InstallSniperEjectAimFixIfPossible();
         void InstallCinematicSatelliteZoomFixIfPossible();
         void InstallPlayerFovIfPossible();
 
@@ -2084,6 +2091,8 @@ namespace BZROpenShim
 
         // --- MP free camera block (mp_block_freecam.cpp) ---------------------
         void InitializeMpBlockFreeCam();
+        // --- SeismicWave extent clamp (seismic_wave_extent_clamp.cpp) --------
+        void InitializeSeismicWaveExtentClampConfig();
 
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;

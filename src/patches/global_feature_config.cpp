@@ -711,6 +711,8 @@ namespace BZROpenShim
               nullptr, &RefreshSplinterUndeadFixState },
             { "HowitzerUndeployedRetaliation", FeatureTier::SinglePlayer,
               nullptr, &RefreshHowitzerUndeployedRetaliationFixState },
+            { "SniperEjectAimFix", FeatureTier::SinglePlayer,
+              nullptr, &RefreshSniperEjectAimFixState },
             { "OwnedObjectReveal", FeatureTier::SinglePlayer,
               nullptr, &RefreshOwnedObjectRevealFixState },
             { "TugCargoPostLoad", FeatureTier::SinglePlayer,

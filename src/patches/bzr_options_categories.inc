@@ -67,7 +67,7 @@ static const char* const kShimCategoryGameplay[] = {
     "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };
 static const char* const kShimCategoryFixes[] = {
     "AI Multi-Producer", "APC Allied Deploy", "Splinter Fix", "Howitzer Fix",
-    "Tug Cargo Deploy", "Recycle Fix", "Builder Cleanup", "Material Guard",
+    "Tug Cargo Deploy", "Recycle Fix", "Builder Cleanup", "Material Guard", "Sniper Eject Aim",
     "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
     "Effect Sort", "Map List Fixes" };
 static const char* const kShimCategoryNetwork[] = {

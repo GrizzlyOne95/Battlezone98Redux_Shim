@@ -215,6 +215,7 @@
     <ClInclude Include="include\iat_patch.h" />
     <ClInclude Include="include\lobby_team_commands.h" />
     <ClInclude Include="include\mp_faction_restrict.h" />
+    <ClInclude Include="include\mp_any_nation.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />
     <ClInclude Include="include\odf_compat.h" />
     <ClInclude Include="include\odf_item_hooks.h" />
