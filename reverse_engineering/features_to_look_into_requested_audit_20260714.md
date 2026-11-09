@@ -121,8 +121,7 @@ callbacks from the unguarded stock scroll routines to the guarded variants
 already used elsewhere by the game. The four exact call sites are
 `0x0078ED29`, `0x0078ED39`, `0x00790AF9`, and `0x00790B09`.
 
-Opt-out: `OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX=1` or
-`BZR_DISABLE_BRIEFING_SCROLL_FIX=1`.
+Removed 2026-11-09: this redirect applied chat-block methods to the briefing and was replaced by `BriefingPageStride` (see briefing_page_stride_20261109.md).
 
 ## Partially present
 

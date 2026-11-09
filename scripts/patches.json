@@ -4748,52 +4748,16 @@
       "identity": "terrain tile mix lookup; terrain proxy calls it"
     },
     {
-      "name": "BriefingScrollUpCall",
-      "address": "0x0078ED29",
-      "expected": "E8 B2 F3 03 00 5D C3 55",
-      "identity": "mission briefing scroll-up callback's call to the unguarded list scroll-up; the briefing scroll fix redirects it to the guarded one"
+      "name": "TextBlockPageProbeInitPush",
+      "address": "0x007CCEBB",
+      "expected": "68 B8 09 8A 00 8D 4D D8",
+      "identity": "`push 0x8A09B8` (the initial \"T\" literal) in cUI_TextBlock page-line probe 0x007CCE90, GOG Redux 2.2.301. The probe builds a string of N one-letter lines and measures it (0x00689CE0) until it reaches the box height; N is the scroll stride [this+0x294C]. The only reference to the literal in the exe image. Fix redirects the operand to a DLL-owned \"T\n\"."
     },
     {
-      "name": "BriefingScrollDownCall",
-      "address": "0x0078ED39",
-      "expected": "E8 D2 F3 03 00 5D C3 55",
-      "identity": "mission briefing scroll-down callback's call to the unguarded list scroll-down"
-    },
-    {
-      "name": "ArchiveScrollUpCall",
-      "address": "0x00790AF9",
-      "expected": "E8 E2 D5 03 00 5D C3 55",
-      "identity": "mission archive scroll-up callback's call to the unguarded list scroll-up"
-    },
-    {
-      "name": "ArchiveScrollDownCall",
-      "address": "0x00790B09",
-      "expected": "E8 02 D6 03 00 5D C3 55",
-      "identity": "mission archive scroll-down callback's call to the unguarded list scroll-down"
-    },
-    {
-      "name": "UiScrollUpGuarded",
-      "address": "0x007CE730",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 58 29 00 00 00",
-      "identity": "clamped list scroll-up used by the lobby/chat UI"
-    },
-    {
-      "name": "UiScrollDownGuarded",
-      "address": "0x007CE6D0",
-      "expected": "55 8B EC 83 EC 08 89 4D FC E8 82 60 F9 FF",
-      "identity": "clamped list scroll-down used by the lobby/chat UI"
-    },
-    {
-      "name": "UiScrollUpUnguarded",
-      "address": "0x007CE0E0",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
-      "identity": "unclamped list scroll-up (snaps back to the top on the last partial page)"
-    },
-    {
-      "name": "UiScrollDownUnguarded",
-      "address": "0x007CE110",
-      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
-      "identity": "unclamped list scroll-down"
+      "name": "TextBlockPageProbeAppendPush",
+      "address": "0x007CCF53",
+      "expected": "68 B4 09 8A 00 8D 4D D8",
+      "identity": "`push 0x8A09B4` (the appended \"\nT\" literal) before the string append 0x0041F7B0 in the same probe 0x007CCE90. The only reference to that literal. Fix redirects the operand to a DLL-owned \"T\n\" so the probe text ends in a newline exactly like the page text rendered by cUI_ScrollingTextBlock 0x007CDD50 (see reverse_engineering/briefing_page_stride_20261109.md)."
     },
     {
       "name": "ThumbnailMaterialApply",

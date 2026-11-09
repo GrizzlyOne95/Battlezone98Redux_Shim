@@ -219,6 +219,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Skips a music decode that Play overwrites before it is heard; audio only.
     "Fixes/MusicSingleFill",
     "Fixes/MagnetZeroRangeGuard",
+    # Client-local text-block scroll stride repair (briefing/archive/chat).
+    "Fixes/BriefingPageStride",
     # Local-only: rebuilds the shooter's own sniper aim for a tilted (ejected) pilot;
     # identical to stock for a level pilot, no sync field written.
     "Fixes/SniperEjectAimFix",
@@ -495,6 +497,7 @@ $shippingPolicyChecks = @{
     "Fixes/PreciseTimestep" = "1"
     "Fixes/MusicSingleFill" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
+    "Fixes/BriefingPageStride" = "1"
     "Fixes/SniperEjectAimFix" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"
