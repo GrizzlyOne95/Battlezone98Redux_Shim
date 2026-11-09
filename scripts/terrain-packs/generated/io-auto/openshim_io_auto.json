@@ -2,7 +2,7 @@
   "schema": "bzr-openshim-terrain-hd-v1",
   "materials": {
     "IO_DETAIL_ATLAS": {
-      "sliceCount": 9,
+      "sliceCount": 18,
       "diffuseResource": "io_atlas_d.dds",
       "fallback": "openshim_io_auto_layer0.png",
       "tiles": {
@@ -10,11 +10,20 @@
         "1": "openshim_io_auto_layer1.png",
         "2": "openshim_io_auto_layer2.png",
         "3": "openshim_io_auto_layer3.png",
+        "9": "openshim_io_auto_layer4.png",
+        "10": "openshim_io_auto_layer5.png",
+        "11": "openshim_io_auto_layer6.png",
+        "12": "openshim_io_auto_layer7.png",
         "4": "openshim_io_auto_misn10_control.png",
+        "13": "openshim_io_auto_misn10_control2.png",
         "5": "openshim_io_auto_layer0_n.png",
         "6": "openshim_io_auto_layer1_n.png",
         "7": "openshim_io_auto_layer2_n.png",
-        "8": "openshim_io_auto_layer3_n.png"
+        "8": "openshim_io_auto_layer3_n.png",
+        "14": "openshim_io_auto_layer4_n.png",
+        "15": "openshim_io_auto_layer5_n.png",
+        "16": "openshim_io_auto_layer6_n.png",
+        "17": "openshim_io_auto_layer7_n.png"
       },
       "paint": {
         "schema": "bzr-openshim-terrain-paint-v1",
@@ -23,7 +32,11 @@
           20,
           18,
           18,
-          20
+          20,
+          20,
+          16,
+          14,
+          10
         ],
         "maps": [
           {
@@ -34,7 +47,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_io_auto_misn10_control.png"
+            "control": "openshim_io_auto_misn10_control.png",
+            "control2": "openshim_io_auto_misn10_control2.png"
           },
           {
             "terrainFingerprint": "064a152ebc9da197",
@@ -44,7 +58,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_io_auto_misn10_stock_control.png"
+            "control": "openshim_io_auto_misn10_stock_control.png",
+            "control2": "openshim_io_auto_misn10_stock_control2.png"
           },
           {
             "terrainFingerprint": "13d07782c2f02faf",
@@ -54,7 +69,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_io_auto_misn11_control.png"
+            "control": "openshim_io_auto_misn11_control.png",
+            "control2": "openshim_io_auto_misn11_control2.png"
           },
           {
             "terrainFingerprint": "6f3bd72a26e5959b",
@@ -64,7 +80,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_io_auto_misn11_stock_control.png"
+            "control": "openshim_io_auto_misn11_stock_control.png",
+            "control2": "openshim_io_auto_misn11_stock_control2.png"
           },
           {
             "terrainFingerprint": "cd30e736082dfec5",
@@ -74,7 +91,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_io_auto_misns3_control.png"
+            "control": "openshim_io_auto_misns3_control.png",
+            "control2": "openshim_io_auto_misns3_control2.png"
           },
           {
             "terrainFingerprint": "c3da7fa2475e1f5e",
@@ -84,7 +102,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_io_auto_misns3_stock_control.png"
+            "control": "openshim_io_auto_misns3_stock_control.png",
+            "control2": "openshim_io_auto_misns3_stock_control2.png"
           },
           {
             "terrainFingerprint": "d6e25d9d88429904",
@@ -94,7 +113,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_io_auto_misns4_control.png"
+            "control": "openshim_io_auto_misns4_control.png",
+            "control2": "openshim_io_auto_misns4_control2.png"
           },
           {
             "terrainFingerprint": "5956950c3c9623f6",
@@ -104,14 +124,29 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_io_auto_misns4_stock_control.png"
+            "control": "openshim_io_auto_misns4_stock_control.png",
+            "control2": "openshim_io_auto_misns4_stock_control2.png"
           }
         ],
         "detile": [
           1,
           1,
           1,
+          1,
+          0,
+          1,
+          1,
           1
+        ],
+        "nearOnly": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
         ],
         "far": [
           5,
@@ -129,7 +164,11 @@
           0.8,
           0.15,
           0.8,
-          1.0
+          1.0,
+          0.1,
+          0.9,
+          1.0,
+          0.6
         ]
       }
     }

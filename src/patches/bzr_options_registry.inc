@@ -713,6 +713,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Stop an undeployed howitzer counter-sniping its attacker. Single player only. Restart required." },
+    { "Sniper Eject Aim", "Fixes", "SniperEjectAimFix", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Keep an ejected or tilted pilot's shot on the reticle. Single player only. Restart required." },
     { "Tug Cargo Deploy", "Fixes", "TugCargoPostLoad", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -815,6 +819,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Nickname field and route readout in the waiting-room left column. "
       "Does not cover BZP's faction picker. Restart required." },
+    // defaultIndex 0 selects "1": the block ships on; 0 is the stock kill switch.
+    { "Block Free Camera", "Network", "BlockFreeCamInMultiplayer", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::ReadOnNextUse,
+      "Ignore the free camera key (Shift/Ctrl+F11) in multiplayer so nobody scouts with it. "
+      "Off is stock. Enforced by your own game only." },
     // Re-read on every nickname apply; no process restart is required
     // for the next OK / /nickname to take the new value.
     { "Live Nickname", "Network", "ReauthOnNicknameChange", nullptr, 0,
@@ -925,7 +935,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "RemoteSmoothingMs", "0" }, { "MapListLetterJump", "0" },
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
-    { "LobbyReadouts", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
+    { "LobbyReadouts", "0" }, { "BlockFreeCamInMultiplayer", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
     { "SkipRebellionLauncher", "0" },
 };
 
@@ -942,7 +952,7 @@ static const char* const kShimSettingsStockKeepKeys[] =
     "MusicGlobalFocus", "OgreMaterialCollisionGuard", "MapRefreshFixes",
     "EditorOverheadPlacementOrder", "JumpSnipeCrouch", "AiMultiProducerMakers",
     "SatelliteVisibilityFix", "UnfocusedMouseRelease", "ApcAlliedTargetDeploy", "SplinterUndead",
-    "HowitzerUndeployedRetaliation", "TugCargoPostLoad", "ConstructorRecycleStaleTarget",
+    "HowitzerUndeployedRetaliation", "SniperEjectAimFix", "TugCargoPostLoad", "ConstructorRecycleStaleTarget",
     "PreciseTimestep", "MusicSingleFill", "ConstructorRemoteBuild", "RestoreCraftBounds",
     "NetImprovements", "ReliableRetryAdaptToPing",
     "ThreadScheduling", "DynamicGeometryPieceReuse", "DynamicGeometryFastSort",

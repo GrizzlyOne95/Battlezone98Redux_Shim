@@ -163,6 +163,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # the name field is the one lobby chrome that is allowed on.
     "Network/LobbyReadouts",
 
+    # Client-local anti-scouting: ignores the free camera key (GK 9) while in a
+    # network game. Ships ON by request; set to 0 for stock behaviour.
+    "Network/BlockFreeCamInMultiplayer",
+
     # Purely local presentation: nothing is sent to the host or the muted
     # player, and it changes no simulation or wire traffic. It ships ON only
     # because persistence has been the shipped behaviour since 1.0.0.28 --
@@ -213,9 +217,17 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Whole-millisecond sim step quantisation; replaces only the float step,
     # never the game clock, and stands down in network games.
     "Fixes/PreciseTimestep",
+    # Clamps SeismicWave (Daywrecker) terrain-delta extents to the allocated
+    # buffer; drops only zero-delta cells, so the simulation is unchanged.
+    "Fixes/SeismicWaveExtentClamp",
     # Skips a music decode that Play overwrites before it is heard; audio only.
     "Fixes/MusicSingleFill",
     "Fixes/MagnetZeroRangeGuard",
+    # Client-local text-block scroll stride repair (briefing/archive/chat).
+    "Fixes/BriefingPageStride",
+    # Local-only: rebuilds the shooter's own sniper aim for a tilted (ejected) pilot;
+    # identical to stock for a level pilot, no sync field written.
+    "Fixes/SniperEjectAimFix",
     # Heap-corruption guard (a remote scavenger's NetProcess is not a
     # ScavengerProcess); active in network games, which is where it matters.
     "Fixes/ScavengerNetProcessGuard",
@@ -240,6 +252,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # that stock peers ignore. SplinterUndead also runs in a network game
     # while this is on.
     "Fixes/SplinterSync",
+    # Host-side Any Nation lobby toggle (1.5 parity). Inert until the host turns
+    # it OFF; clients without the patch ignore the separate lobby key.
+    "Fixes/AnyNationToggle",
     # Multiplayer host leave: keeps the departed host's objects and suppresses
     # the lone-player Game Over it causes. Network sessions only.
     "Fixes/HostLeave",
@@ -490,6 +505,8 @@ $shippingPolicyChecks = @{
     "Fixes/PreciseTimestep" = "1"
     "Fixes/MusicSingleFill" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
+    "Fixes/BriefingPageStride" = "1"
+    "Fixes/SniperEjectAimFix" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"
     "Fixes/LuaGetIndependenceGuard" = "1"
@@ -498,6 +515,7 @@ $shippingPolicyChecks = @{
     "Fixes/DaywreckerArmoryCollision" = "1"
     "Fixes/InvitePassword" = "1"
     "Fixes/SplinterSync" = "1"
+    "Fixes/AnyNationToggle" = "1"
     "Fixes/HostLeave" = "1"
     "Fixes/SyncJoinDefaultOn" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"

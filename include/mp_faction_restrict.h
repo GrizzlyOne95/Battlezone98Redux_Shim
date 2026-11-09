@@ -44,4 +44,28 @@ namespace BZROpenShim { namespace MpFactionRestrict {
     // than once; fails closed and logs when anything does not verify.
     void InstallMpFactionRestrictIfPossible();
 
+    // True once the loader hook and bucket clear are verified and installed.
+    bool VehicleListHookReady();
+
+    // "Any Nation" OFF, exact 1.5 netveh.odf pool (mp_any_nation.cpp drives
+    // this). When restrict is true every craft whose ODF name is not one of
+    // the 27 stock 1.5 netveh.odf entries is pruned from the five buckets
+    // after the loader builds them. Subtract-only, like the nation mask, and
+    // it never empties the list. Takes effect on the next list build; call
+    // RebuildVehicleList() to apply it to an already-built list.
+    void SetAnyNationRestrict(bool restrict);
+    bool AnyNationRestrictActive();
+
+    // Forces the engine loader to rebuild the singleton list from the file it
+    // already loaded (cache key zeroed), then re-prunes and repairs the
+    // selection. False when no list has been built yet or the hook is not
+    // installed. `why` is only for the log.
+    bool RebuildVehicleList(const char* why);
+
+    // For OpenShim's own calls to the loader (vehicle_list_mod_fix.cpp calls
+    // FUN_00766900 directly, not through the two rewritten call sites). Runs
+    // the same load + prune as the redirected sites and returns true; returns
+    // false, doing nothing, when the hook is not installed.
+    bool LoadVehicleListThroughHook(void* self, void* poolName);
+
 }} // namespace BZROpenShim::MpFactionRestrict

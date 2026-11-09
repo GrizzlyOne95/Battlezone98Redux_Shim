@@ -22,6 +22,10 @@ param(
     [int]$MapListScroll = 0,
     [string]$MapBzn = '',
     [switch]$SyncJoin,
+    # Optional script dot-sourced after every guest has joined and before they
+    # ready (lobby-state tests, e.g. Any Nation). Sees $hostClient, $guestClients,
+    # Click, Wait-Until, Find-LogLine, Write-Step and $UI.
+    [string]$HookScript = '',
     [switch]$Launch
 )
 
@@ -275,6 +279,8 @@ foreach ($guestClient in $guestClients) {
     $assignments += @{ client = $guestClient.index; name = $guestDisplayName; team = [int]$assigned.Groups[2].Value; playerId = [int]$assigned.Groups[3].Value }
     $null = Wait-Until "c$($guestClient.index)-p2p-connected" { Find-LogLine $guestClient 'BZRNet P2P Completed (RELAY|DIRECT|LAN|WAN)\S* Connect For Client' }
 }
+
+if ($HookScript) { . $HookScript }
 
 # 5. Every guest ready, after all joins and settings changes.
 foreach ($guestClient in $guestClients) {

@@ -2,7 +2,7 @@
   "schema": "bzr-openshim-terrain-hd-v1",
   "materials": {
     "EU_DETAIL_ATLAS": {
-      "sliceCount": 9,
+      "sliceCount": 18,
       "diffuseResource": "europa_atlas_d.dds",
       "fallback": "openshim_europa_auto_layer0.png",
       "tiles": {
@@ -10,11 +10,20 @@
         "1": "openshim_europa_auto_layer1.png",
         "2": "openshim_europa_auto_layer2.png",
         "3": "openshim_europa_auto_layer3.png",
+        "9": "openshim_europa_auto_layer4.png",
+        "10": "openshim_europa_auto_layer5.png",
+        "11": "openshim_europa_auto_layer6.png",
+        "12": "openshim_europa_auto_layer7.png",
         "4": "openshim_europa_auto_misn12_control.png",
+        "13": "openshim_europa_auto_misn12_control2.png",
         "5": "openshim_europa_auto_layer0_n.png",
         "6": "openshim_europa_auto_layer1_n.png",
         "7": "openshim_europa_auto_layer2_n.png",
-        "8": "openshim_europa_auto_layer3_n.png"
+        "8": "openshim_europa_auto_layer3_n.png",
+        "14": "openshim_europa_auto_layer4_n.png",
+        "15": "openshim_europa_auto_layer5_n.png",
+        "16": "openshim_europa_auto_layer6_n.png",
+        "17": "openshim_europa_auto_layer7_n.png"
       },
       "paint": {
         "schema": "bzr-openshim-terrain-paint-v1",
@@ -23,7 +32,11 @@
           24,
           16,
           16,
-          48
+          48,
+          20,
+          18,
+          16,
+          10
         ],
         "maps": [
           {
@@ -34,7 +47,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_europa_auto_misn12_control.png"
+            "control": "openshim_europa_auto_misn12_control.png",
+            "control2": "openshim_europa_auto_misn12_control2.png"
           },
           {
             "terrainFingerprint": "becac6427a58ab6e",
@@ -44,7 +58,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_europa_auto_misn12_stock_control.png"
+            "control": "openshim_europa_auto_misn12_stock_control.png",
+            "control2": "openshim_europa_auto_misn12_stock_control2.png"
           },
           {
             "terrainFingerprint": "f8f8399777baffea",
@@ -54,7 +69,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_europa_auto_misn13_control.png"
+            "control": "openshim_europa_auto_misn13_control.png",
+            "control2": "openshim_europa_auto_misn13_control2.png"
           },
           {
             "terrainFingerprint": "7e9dd58dc80601a6",
@@ -64,7 +80,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_europa_auto_misn13_stock_control.png"
+            "control": "openshim_europa_auto_misn13_stock_control.png",
+            "control2": "openshim_europa_auto_misn13_stock_control2.png"
           },
           {
             "terrainFingerprint": "3798161283f33625",
@@ -74,14 +91,29 @@
               2570.0,
               2550.0
             ],
-            "control": "openshim_europa_auto_chmisn07_control.png"
+            "control": "openshim_europa_auto_chmisn07_control.png",
+            "control2": "openshim_europa_auto_chmisn07_control2.png"
           }
         ],
         "detile": [
           1,
           1,
           1,
+          1,
+          0,
+          1,
+          1,
           1
+        ],
+        "nearOnly": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
         ],
         "far": [
           5,
@@ -99,7 +131,11 @@
           0.4,
           0.3,
           1.0,
-          1.2
+          1.2,
+          0.1,
+          0.4,
+          1.0,
+          0.7
         ]
       }
     }
