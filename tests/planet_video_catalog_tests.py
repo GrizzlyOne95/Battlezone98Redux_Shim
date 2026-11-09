@@ -29,7 +29,7 @@ class CatalogTests(unittest.TestCase):
     def test_only_the_custom_call_operand_is_replaced(self):
         row = next(r for r in self.catalog["patches"] if r["name"] == "Custom Planet Video Playback")
         pattern = row["pattern"].split()
-        self.assertEqual(row["platforms"], ["gog"])
+        self.assertNotIn("platforms", row)  # GOG and Steam share the settled image
         self.assertEqual(row["expected_size"], 4)
         self.assertEqual(pattern[row["offset"] - 1], "E8")
         self.assertEqual(pattern[row["offset"]:row["offset"] + 4], ["??"] * 4)

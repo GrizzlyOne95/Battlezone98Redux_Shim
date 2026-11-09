@@ -1,8 +1,9 @@
 # Custom campaign planet videos
 
-Development feature: opt-in intro and loop timing for custom campaign OGVs.
-The initial hook is restricted to the released GOG Redux 2.2.301 executable.
-Steam, Proton, and Wine qualification remains pending. This is not a release.
+Opt-in intro and loop timing for custom campaign OGVs. The hook runs on GOG
+and Steam: once SteamStub has settled, the Steam image matches the signatures
+the GOG 2.2.301 executable was qualified against. Matching signatures prove the
+addresses, not the behaviour: the runtime checks below have run on GOG only.
 
 Keep the standard campaign INI fields:
 

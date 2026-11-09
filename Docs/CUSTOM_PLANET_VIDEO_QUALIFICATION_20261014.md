@@ -62,7 +62,8 @@ binding's signature. No screen or clip pointer is retained across calls.
 ## Remaining lanes
 
 DX9, Windows Steam, Proton and Wine remain unverified. They require their own
-qualification before release; the patch is currently restricted to the GOG
-distribution. Fresh 30/60 fps planet art, loop-seam review and sustained frame
+qualification before release; at the time of this record the patch was restricted
+to the GOG distribution (the restriction has since been lifted; see
+`CUSTOM_PLANET_VIDEOS.md`). Fresh 30/60 fps planet art, loop-seam review and sustained frame
 pacing remain content/integration work. The main game installation and
 Campaign Reimagined content were not changed by this workstream.
