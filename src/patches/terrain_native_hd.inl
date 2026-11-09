@@ -769,8 +769,11 @@ bool InstallNativeTerrainHd()
                 throw std::runtime_error("HD material shader contract unavailable");
             if (pixel && !TerrainHdMaterial::SpecializeDetail(generated, binding->detail))
                 throw std::runtime_error("HD detail tuning shader contract unavailable");
-            if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint))
-                throw std::runtime_error("native paint shader specialization declined");
+            std::string paintWhy;
+            if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint, &paintWhy))
+                throw std::runtime_error("native paint shader specialization declined (" + std::string(pixel ? "PS " : "VS ") + key + ": " + paintWhy + ")");
+            if (!paintWhy.empty())
+                LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] %s %s: %s", pixel ? "PS" : "VS", key.c_str(), paintWhy.c_str());
             // Content-only name: the microcode cache must hit on every run.
             const std::string name = "OpenShim/TerrainNativeHD/" + SourceHashSuffix(key + generated + defines);
             ForgetGeneratedProgram(g_ogre.getHighLevelProgramManager(), name);
