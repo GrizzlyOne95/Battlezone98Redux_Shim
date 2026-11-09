@@ -2088,6 +2088,8 @@ namespace BZROpenShim
         void InitializeNoDamageSlowdownConfig();
         void ReloadNoDamageSlowdownConfig();
         void RefreshNoDamageSlowdownState();
+        void InitializeMpWhitelistTgaConfig();
+        void ReloadMpWhitelistTgaConfig();
 
         // --- MP free camera block (mp_block_freecam.cpp) ---------------------
         void InitializeMpBlockFreeCam();

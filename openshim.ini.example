@@ -1942,6 +1942,13 @@ TracePlayerKills = 0
 ; Requires an explicit LAN selection and numeric private IPv4. Development opt-in.
 NoAuthLan = 0
 
+; Let .tga files pass the multiplayer mod asset whitelist, so a visual-only
+; (sky/texture) Workshop mod holding .tga files still mounts in a network game.
+; Peers without this setting still reject such a mod, so players can see
+; different visuals; the simulation does not read .tga files.
+; Accepted: 0/1. Default: 1. Restart required after changing.
+AllowTgaInMultiplayerMods = 1
+
 ; OpenShim's socket layer as a whole. Off installs none of it: no winsock
 ; hooks, no bandwidth governor, no auto-kick relaxation, no packet
 ; reorder/duplicate mitigation, no DSCP marking.

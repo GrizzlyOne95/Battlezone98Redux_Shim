@@ -1609,6 +1609,7 @@ namespace BZROpenShim
             {"InitializeTargetReticlePopupConfig", &InitializeTargetReticlePopupConfig},
             {"InitializeGlobalTurboConfig", &InitializeGlobalTurboConfig},
             {"InitializeNoDamageSlowdownConfig", &InitializeNoDamageSlowdownConfig},
+            {"InitializeMpWhitelistTgaConfig", &InitializeMpWhitelistTgaConfig},
             {"InitializeMpBlockFreeCam", &InitializeMpBlockFreeCam},
             {"InitializeSeismicWaveExtentClampConfig", &InitializeSeismicWaveExtentClampConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
