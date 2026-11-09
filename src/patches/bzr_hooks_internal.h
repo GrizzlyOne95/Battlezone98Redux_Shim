@@ -2089,6 +2089,8 @@ namespace BZROpenShim
         void ReloadNoDamageSlowdownConfig();
         void RefreshNoDamageSlowdownState();
 
+        // --- MP free camera block (mp_block_freecam.cpp) ---------------------
+        void InitializeMpBlockFreeCam();
         // --- SeismicWave extent clamp (seismic_wave_extent_clamp.cpp) --------
         void InitializeSeismicWaveExtentClampConfig();
 

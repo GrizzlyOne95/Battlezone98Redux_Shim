@@ -2210,6 +2210,13 @@ ReconnectDelaySeconds = 5
 ;                     OPENSHIM_ENABLE_PERSISTENT_PLAYER_MUTE,
 ;                     BZR_DISABLE_PERSISTENT_PLAYER_MUTE, BZR_ENABLE_PERSISTENT_PLAYER_MUTE
 PersistentPlayerMute = 1
+; Ignore the free camera key (game key FREE_EYE_VIEW, Shift/Ctrl+F11 by default) in a
+; network game, so players cannot detach the camera to scout. Single player and
+; the editor are unaffected, and a camera already in free eye can still be left.
+; Accepted: boolean. Default: ON. No restart required. 0 = stock.
+; Client-local: it only stops your own game from entering free eye; a modified
+; client can bypass it, so it is a fairness aid, not anti-cheat.
+BlockFreeCamInMultiplayer = 1
 ; Sent only to community (non-official) matchmaking servers, never to
 ; Rebellion's: a per-server key that lets a server recognise you across
 ; sessions. Each server gets a different key, so servers cannot link you. The
