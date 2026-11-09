@@ -240,6 +240,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # that stock peers ignore. SplinterUndead also runs in a network game
     # while this is on.
     "Fixes/SplinterSync",
+    # Host-side Any Nation lobby toggle (1.5 parity). Inert until the host turns
+    # it OFF; clients without the patch ignore the separate lobby key.
+    "Fixes/AnyNationToggle",
     # Multiplayer host leave: keeps the departed host's objects and suppresses
     # the lone-player Game Over it causes. Network sessions only.
     "Fixes/HostLeave",
@@ -494,6 +497,7 @@ $shippingPolicyChecks = @{
     "Fixes/DaywreckerArmoryCollision" = "1"
     "Fixes/InvitePassword" = "1"
     "Fixes/SplinterSync" = "1"
+    "Fixes/AnyNationToggle" = "1"
     "Fixes/HostLeave" = "1"
     "Fixes/SyncJoinDefaultOn" = "1"
     "Fixes/UnfocusedMouseRelease" = "1"
