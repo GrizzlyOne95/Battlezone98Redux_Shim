@@ -161,6 +161,7 @@ namespace BZROpenShim
         JetFlames,
         UnitVo,
         GlobalTurbo,
+        NoDamageSlowdown,
         Headlights,         // latched initializer; the lights are restored to
                             // their captured stock values, then the latch is
                             // cleared and re-run

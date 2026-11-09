@@ -62,7 +62,7 @@ static const char* const kShimCategoryControls[] = {
     "Run in Background" };
 static const char* const kShimCategoryGameplay[] = {
     "Aim Convergence", "Reticle Converge", "Reticle Range", "Ordnance Velocity",
-    "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog", "Attack Neutrals",
+    "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
     "Smart Scavengers", "Turret AA Pitch", "Legacy Tank AI", "Howitzer Volley",
     "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };
 static const char* const kShimCategoryFixes[] = {
