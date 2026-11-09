@@ -3197,13 +3197,47 @@ namespace BZROpenShim
         static ShimHubUi g_ShimHubUi;
         static ShimCategoryUi g_ShimCategoryUi;
 
+        // openshim.dll's release version (version.rc FILEVERSION), e.g. "1.0.0.75".
+        // GetShimVersion() is the plugin API level, not something users can match
+        // to a release.
+        static std::string ShimBuildVersion()
+        {
+            static std::string cached;
+            if (!cached.empty())
+                return cached;
+            cached = "?";
+
+            HMODULE self = nullptr;
+            wchar_t path[MAX_PATH] = {};
+            if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    reinterpret_cast<LPCWSTR>(&cached), &self) ||
+                GetModuleFileNameW(self, path, MAX_PATH) == 0)
+                return cached;
+            DWORD ignored = 0;
+            const DWORD size = GetFileVersionInfoSizeW(path, &ignored);
+            if (size == 0)
+                return cached;
+            std::vector<BYTE> data(size);
+            VS_FIXEDFILEINFO* info = nullptr;
+            UINT infoSize = 0;
+            if (!GetFileVersionInfoW(path, 0, size, data.data()) ||
+                !VerQueryValueW(data.data(), L"\\", reinterpret_cast<void**>(&info), &infoSize) || !info ||
+                infoSize < sizeof(*info))
+                return cached;
+            char text[32] = {};
+            std::snprintf(text, sizeof(text), "%u.%u.%u.%u", HIWORD(info->dwFileVersionMS),
+                          LOWORD(info->dwFileVersionMS), HIWORD(info->dwFileVersionLS), LOWORD(info->dwFileVersionLS));
+            cached = text;
+            return cached;
+        }
+
         static std::string ShimRuntimeLine()
         {
             const BZROpenShim::BzrDistribution dist = BZROpenShim::GetBzrDistribution();
             const char* distName = (dist == BZROpenShim::BzrDistribution::Steam) ? "Steam"
                                  : (dist == BZROpenShim::BzrDistribution::GOG)   ? "GOG"
                                                                                  : "Unknown";
-            return "OpenShim " + std::to_string(GetShimVersion()) + "   Game: " + distName + " 2.2.301";
+            return "OpenShim " + ShimBuildVersion() + "   Game: " + distName + " 2.2.301";
         }
 
         static void SetShimInfoText(void* const (&info)[3], const char* text, float width)
