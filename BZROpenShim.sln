@@ -9,6 +9,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Plugin_OpenShimOgreProbe", 
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BZLoader", "BZLoader.vcxproj", "{73BC83C6-C400-4D4D-9E8D-381E594A7116}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LauncherProxy", "LauncherProxy.vcxproj", "{C4E1D9A2-6B3F-4E58-9A71-2D8F0B6C5E33}"
+EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Plugin_OpenShim", "Plugin_OpenShim.vcxproj", "{5E2C1A77-9B34-4F21-8D6E-7C0A5B9D3E14}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Plugin_BZLoaderTest", "Plugin_BZLoaderTest.vcxproj", "{B86AE723-BE19-4C0E-B7A3-FAE86DBF7BE2}"
@@ -53,6 +55,10 @@ Global
 		{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}.Debug|Win32.Build.0 = Debug|Win32
 		{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}.Release|Win32.ActiveCfg = Release|Win32
 		{3D0F6B52-8A1E-4C77-9B4A-2E5C7F91A6D3}.Release|Win32.Build.0 = Release|Win32
+		{C4E1D9A2-6B3F-4E58-9A71-2D8F0B6C5E33}.Debug|Win32.ActiveCfg = Debug|Win32
+		{C4E1D9A2-6B3F-4E58-9A71-2D8F0B6C5E33}.Debug|Win32.Build.0 = Debug|Win32
+		{C4E1D9A2-6B3F-4E58-9A71-2D8F0B6C5E33}.Release|Win32.ActiveCfg = Release|Win32
+		{C4E1D9A2-6B3F-4E58-9A71-2D8F0B6C5E33}.Release|Win32.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

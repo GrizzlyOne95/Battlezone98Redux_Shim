@@ -478,6 +478,11 @@ foreach ($gameDir in $gamePaths) {
             "plugins\openshim.dll", "plugins\openshim.dll.previous")) {
         Remove-OpenShimBinary (Join-Path $gameDir $relative)
     }
+    # Steam launcher skip proxy (Settings > System > Skip Launcher), and the copy
+    # it renames aside while the launcher holds it. Only OpenShim-built files go.
+    foreach ($relative in @("Launcher\d3d9.dll", "Launcher\d3d9.dll.openshim-old")) {
+        Remove-OpenShimBinary (Join-Path $gameDir $relative)
+    }
     foreach ($relative in @("winmm.dll", "bzloader.dll", "plugins\openshim.dll")) {
         Remove-Backups -Path (Join-Path $gameDir $relative) -IdentityChecked
     }

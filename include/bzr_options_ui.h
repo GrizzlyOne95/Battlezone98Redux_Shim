@@ -178,6 +178,7 @@ namespace BZROpenShim
         ReadOnNextUse,      // saved now; the feature reads the key when its
                             // next user action occurs
         RestartRequired,    // no live path; takes effect next launch
+        SteamLauncher,      // SyncSteamLauncherProxy writes or removes Launcher\d3d9.dll
         // Action rows. These have no ini key: clicking runs something instead
         // of cycling a value, and the row's two "values" are the unarmed and
         // armed states of a confirmation, not settings. See

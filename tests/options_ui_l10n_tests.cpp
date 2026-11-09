@@ -30,6 +30,7 @@ namespace Registry
         NoDamageSlowdown,
         Headlights, PilotFlashlight, AutoSave, HudFeedback, HudPalette, ContextualHud,
         BzrNetRoute, RenderProfile, LiveEngineToggle, ReadOnNextUse, RestartRequired,
+        SteamLauncher,
         CareerStatsReset, ResetToStock, TroubleshootingBundle,
     };
 

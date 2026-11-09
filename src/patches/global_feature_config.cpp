@@ -23,6 +23,7 @@
 #include "fog_wake_feature.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
+#include "steam_launcher_skip.h"
 #include "x86_length.h"
 #include "ogre_shader_cache.h"
 #include "ogre_enhanced_light_selection.h"
@@ -874,6 +875,9 @@ namespace BZROpenShim
             InitializeSatelliteVisibilityFixConfig(false);
             SunFlash::ReloadConfig();
             ScreenFlash::ReloadConfig();
+            break;
+        case ShimSettingApplyGroup::SteamLauncher:
+            SyncSteamLauncherProxy();
             break;
         case ShimSettingApplyGroup::ReadOnNextUse:
         case ShimSettingApplyGroup::RestartRequired:

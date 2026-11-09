@@ -93,7 +93,9 @@ The **opt-in test-crew uploader** is separate from normal installation. When a w
 
 ### Skipping the Rebellion launcher on Steam (optional)
 
-Steam opens Rebellion's launcher window before the game. To start the game directly, set **Steam → Battlezone 98 Redux → Properties → Launch Options** to the game executable followed by `%command%`, for example:
+Steam opens Rebellion's launcher window before the game. The simplest way to start the game directly is **OpenShim Settings → System → Skip Launcher** (`[Steam] SkipRebellionLauncher = 1` in `openshim.ini`). OpenShim then places a small `Launcher\d3d9.dll` that starts the game instead of showing the launcher; turning the option off removes it, and so does the uninstaller. Hold **Shift** while pressing Play to see the launcher once. The very first launch (before `Ogre.cfg` exists) always shows it. Steam on Windows only: GOG installs never get the file, and it does nothing under Proton/Wine.
+
+Alternatively, set **Steam → Battlezone 98 Redux → Properties → Launch Options** to the game executable followed by `%command%`, for example:
 
 ```
 "C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux\battlezone98redux.exe" %command%
