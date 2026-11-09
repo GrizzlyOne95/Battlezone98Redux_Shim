@@ -534,6 +534,17 @@ MusicSingleFill = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
 
+; A pilot ejected sideways or at an angle keeps that body tilt (pitch and
+; roll). Stock cancels only sin(pitch) of it, so a sniper shot fired while
+; ejected or parachuting leaves off the reticle. This rebuilds the weapon
+; aim so the shot follows the reticle with the body's pitch and roll
+; removed (heading kept). Touches only the shooter's own shot orientation;
+; a level pilot is bit-identical to stock. No sync field is written, so it
+; runs in network games too. Guarded by the shipped instruction bytes.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_SNIPER_EJECT_AIM_FIX
+SniperEjectAimFix = 1
+
 ; Skip the strategic-AI scrap-position query for a scavenger whose AI process
 ; is not a ScavengerProcess. A scavenger owned by a remote peer holds a
 ; NetProcess, and stock AI_Team_Compute_Other calls ScavengerProcess::

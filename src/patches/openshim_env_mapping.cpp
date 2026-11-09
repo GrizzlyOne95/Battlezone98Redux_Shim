@@ -266,6 +266,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "ConstructorRemoteBuild", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_SNIPER_EJECT_AIM_FIX") ||
+            Equals(name, "BZR_DISABLE_SNIPER_EJECT_AIM_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SniperEjectAimFix", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX") ||
             Equals(name, "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"))
         {

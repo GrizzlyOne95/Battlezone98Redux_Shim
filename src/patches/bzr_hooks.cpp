@@ -443,6 +443,8 @@ namespace BZROpenShim
 			: nullptr;
 		g_TargetCamSatelliteFixInstalled = false;
 		g_TargetCamSatelliteLogBudget = 8;
+		g_SniperEjectAimFixInstalled = false;
+		g_SniperEjectAimLogCount = 0;
 		g_CinematicSatelliteZoomFixInstalled = false;
 		g_CinematicSatelliteZoomLogBudget = 8;
 		g_SprayBuildingSimulateHookInstalled = false;
@@ -1022,6 +1024,8 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_TARGETCAM_FIX", "BZR_DISABLE_TARGETCAM_FIX"},
             {&g_CinematicSatelliteZoomFixEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_CINECAM_FIX", "BZR_DISABLE_CINECAM_FIX"},
+            {&g_SniperEjectAimFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_SNIPER_EJECT_AIM_FIX", "BZR_DISABLE_SNIPER_EJECT_AIM_FIX"},
         };
         EnvSwitches::Apply(kFixKillSwitches, EnvFlagEnabled);
         RefreshProducerScriptPredicatesState();
@@ -1071,6 +1075,7 @@ namespace BZROpenShim
             {"InstallApcAlliedTargetDeployFixIfPossible", &InstallApcAlliedTargetDeployFixIfPossible},
             {"InstallQuakeReplayFadeIfPossible", &InstallQuakeReplayFadeIfPossible},
             {"InstallTargetCamSatelliteFixIfPossible", &InstallTargetCamSatelliteFixIfPossible},
+            {"InstallSniperEjectAimFixIfPossible", &InstallSniperEjectAimFixIfPossible},
             {"InstallCinematicSatelliteZoomFixIfPossible", &InstallCinematicSatelliteZoomFixIfPossible},
             {"InstallPlayerFovIfPossible", &InstallPlayerFovIfPossible},
             {"InstallUnfocusedMouseReleaseIfPossible", &InstallUnfocusedMouseReleaseIfPossible},
@@ -1690,6 +1695,7 @@ namespace BZROpenShim
 		InstallApcAlliedTargetDeployFixIfPossible();
 		InstallQuakeReplayFadeIfPossible();
 		InstallTargetCamSatelliteFixIfPossible();
+		InstallSniperEjectAimFixIfPossible();
 		InstallCinematicSatelliteZoomFixIfPossible();
 		InstallPlayerFovIfPossible();
 		InstallUnfocusedMouseReleaseIfPossible();

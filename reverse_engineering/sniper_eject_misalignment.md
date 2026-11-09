@@ -1,6 +1,6 @@
 # Sniper reticle misaligned after eject (roadmap item 317) - static RE note
 
-Status: NO ROOT CAUSE PROVEN. Static lead only. No patch written (not confident).
+Status: Lead A implemented as `[Fixes] SniperEjectAimFix` (src/patches/sniper_eject_aim_fix.cpp). NOT run live; camera-side assumption below is UNVERIFIED.
 Date: 2026-11-09. Build: GOG Redux exe. Nothing here was run live.
 
 Decomp dir (D) = `Battlezone_Source\BZ1\Redux\openshim_re_corpus\bzr_gog_best_effort\ghidrecomp\results\bins\battlezone98redux.exe-6777ca\decomps\`
@@ -35,3 +35,22 @@ C. Rejected: stale `weapon+0x28` (refreshed every Simulate, item 7); stale FOV/z
 - Did not locate the FP camera orientation writer for a Person (the POV bone chain is in `walker_cockpit_trace.cpp`); without it A's "camera is level" is an assumption (UNVERIFIED).
 - The meaning of entity flag 0x10 (`BuildObject` param, FUN_004e1190:77) and `DAT_0094672c+0x30 & 0x10` is unconfirmed; if both are true for the local pilot the compensation applies, if not, no compensation at all (an even larger error). UNVERIFIED.
 - No patch: nothing proven; a speculative leveling patch would change pilot physics and MP determinism.
+
+## Update 2026-11-09: fix for lead A (user confirmed: pilot is ejected at any angle and the body follows it in pitch AND roll)
+
+D = the same decomp dir as above. Exe facts below were read from the shipping GOG exe with rizin; decompile cites are D/<file>:<line>.
+
+Cited facts used by the fix:
+- Compensation gate and subtraction: D/FUN_0059d340-0059d340.c:1115-1120 (gate at 1116-1117, subtraction at 1119). Gate = `(entity+0x14 & 0x10) && FUN_004e96a0()` OR `(FUN_004b9830() && controls+0x114 & 0x1000)`. `FUN_004e96a0` = `[0x94672C]+0x30 & 0x10` (D/FUN_004e96a0-004e96a0.c:4), so it tests a play-options/profile bit, not "is local player". `FUN_004b9830` is `*(char*)(ecx+0x68)==2` (D/FUN_004b9830-004b9830.c:4); the exe passes ecx = Person+0x18 (0x005A0A03: `add ecx,0x18; call 0x4b9830`, exe bytes, no decompile line because the decompiler dropped the argument).
+- Only pitch is compensated, with front.y = `entity+0x3C` (D/FUN_0059d340-0059d340.c:1119). Roll is never compensated.
+- Node matrix per weapon = inverse(hardpoint chain rotation) x Rx(-Person+0x280): D/FUN_005a12a0-005a12a0.c:45 (Rx), 69-71 (chain via `FUN_0062e070`), 88 (`FUN_008203f0` inverse, translation zeroed), 115 (`FUN_0081fe60(out, inverseChain, Rx)`, result stored into node+0x20 afterwards). `ret 4` / call site bytes: `call 0x81fe60` at 0x005A14C7 (exe, rizin).
+- Matrix multiply convention (row vectors, 3x3 floats then 3 doubles of translation): D/FUN_0081fe60-0081fe60.c:22-30. Rx builder: D/FUN_0081ec40-0081ec40.c:24-30 (the sin/cos source `FUN_008205a0` is not decompiled here: the shim re-derives Rx(-p) at runtime and stands down if it differs from the engine's matrix by >1e-3, so that part is self-checked, not assumed).
+- Fire matrix = node matrix x hardpoint chain (D/FUN_00611770-00611770.c:15-16, D/FUN_006116a0-006116a0.c:23-44), then x owner matrix (D/FUN_0048efe0-0048efe0.c:76 fire matrix, 94-113 owner product). Muzzle translation is not touched by the fix.
+
+Root cause (lead A, now the working cause): shot world orientation = Rx(-(0.5*pitchInput - sin(bodyPitch))) in the tilted body frame. For a body pitched by theta that is off by `theta - sin(theta)` plus the whole roll, so the shot diverges from a level reticle. Lead B (GC1 muzzle position following clips) is NOT changed: the muzzle origin staying on the gun is the required behaviour, and it only shifts the origin by the clip's GC1 offset (parallax), not the direction.
+
+Fix: redirect the multiply at 0x005A14C7 (PersonAimMatrixMulCall). When the stock gate above holds and the body is tilted (|front.y|>1e-4 or |up.y-1|>1e-4), the node matrix becomes `inv(C) * Rx(-p0) * C * Level * Own^T * C^T` (C = hardpoint chain rotation, Own = owner rotation, Level = yaw-only basis of Own, p0 = Person+0x280 + front.y = the stock pre-compensation pitch), i.e. shot world orientation = Rx(-p0) in the heading-only frame. Level body = stock matrix unchanged. Person+0x280 is NOT written (D/FUN_004ae3b0-004ae3b0.c:73 and FUN_004ae6f0:41 read +0x280 for a net sync, UNVERIFIED which class), so no wire change.
+
+Assumptions still UNVERIFIED (need a live check, not done): (1) the reticle/FP camera of an ejected pilot is level (heading + pitch input), i.e. the stock compensation exists to cancel body tilt; (2) the chain used for the owner product at fire time (weapon+0x18 owner) equals the chain built here (stop node Person+0xF4); (3) which of the two gate arms is true for an ejected local pilot.
+
+Manual test: eject sideways (e.g. roll the craft 60-90 degrees, or eject in a steep dive), aim the reticle at a fixed target, fire the sniper with `SniperEjectAimFix=1` then `=0`, and compare impact point. The log shows `[SNIPEJECT] corrected aim ...` on corrections.

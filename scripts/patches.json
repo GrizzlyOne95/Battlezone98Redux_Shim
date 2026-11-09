@@ -3973,6 +3973,23 @@
       "address": "0x0059DEA5",
       "expected": "0F B6 85 AE FC FF FF 85 C0 74 26",
       "identity": "Person::Simulate landing: movzx eax,[ebp-jumpHeld]; test eax,eax; je sniper-check"
+    },    {
+      "name": "PersonUpdateWeaponAim",
+      "address": "0x005A12A0",
+      "expected": "55 8B EC 81 EC 24 03 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Person::UpdateWeaponAim (vtable slot +0x98 of Person, __thiscall, ret 4): per weapon node matrix = inverse(hardpoint chain) * Rx(-Person+0x280). SniperEjectAimFix detours its entry only to record the Person"
+    },
+    {
+      "name": "PersonAimMatrixMulCall",
+      "address": "0x005A14C7",
+      "expected": "E8 94 E9 27 00 83 C4 0C B9 10 00 00 00",
+      "identity": "call FUN_0081FE60(out,inverseChain,Rx) inside Person::UpdateWeaponAim that builds the weapon node rotation; SniperEjectAimFix redirects it"
+    },
+    {
+      "name": "PersonAimMatrixMul",
+      "address": "0x0081FE60",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "FUN_0081FE60 matrix multiply (__cdecl out,a,b; row-vector convention, 3x3 rotation then 3 doubles of translation)"
     },
     {
       "name": "GameObjectSetDamageFlags",
