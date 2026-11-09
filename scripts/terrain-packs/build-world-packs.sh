@@ -21,11 +21,11 @@ declare -A MAPS=(
   [moon]="misn01 misn02 misn02b misn03 crsetup"
   [mars]="misn04 misn05 misn06"
   [ganymede]="evolve_3 evolve_4 bdmisn01 bdmisn02 bdmisn03 bdmisn04 bdmisn05 bdmisn06 bdmisn08 bdmisn12 bdmisn13 bdmisn14 bdmisn15 chmisn01 chmisn02 chmisn03 chmisn04 chmisn08"
-  [elysium]="evolve_1 evolve_2 evolve_5 bdmisn07 bdmisn09 bdmisn10 bdmisn11 chmisn05 chmisn06"
+  [elysium]="evolve_1 evolve_2 evolve_5 bdmisn07 bdmisn09 bdmisn10 bdmisn11 chmisn05 chmisn06 sammy__1"
   [venus]="misn07 misn08 misn09 misns1 misns2"
-  [io]="misn10 misn11 misns4"
-  [europa]="misn12 misn13"
-  [titan]="misn14 misn15 misn16 misn15b misn16b"
+  [io]="misn10 misn11 misns3 misns4"
+  [europa]="misn12 misn13 chmisn07"
+  [titan]="misn14 misn15 misn16 misn15b misn16b misns5 misns6 misns7 misns8"
   [achilles]="misn17 misn18"
 )
 for w in ${@:-moon mars venus io europa titan achilles ganymede elysium}; do
@@ -41,6 +41,8 @@ for w in ${@:-moon mars venus io europa titan achilles ganymede elysium}; do
     fi
     [ -f "$STOCK/$m.mat" ] && args+=(--map "${m}_stock=$STOCK/$m")
     if [ ! -f "$STOCK/$m.mat" ]; then
+      # tro_cam has no sammy__1 HG2 (CR ships the real heightmap), so CR's entry alone covers it.
+      [ -f "$CR/$m.hg2" ] && [ ! -f "$TRO/$m.hg2" ] && { echo "note: $m has no TRO_DIR hg2; built from the CR copy only" >&2; continue; }
       [ -f "$TRO/$m.mat" ] || { echo "error: $m has no CR, stock or TRO_DIR ($TRO) map files" >&2; exit 1; }
       args+=(--map "$m=$TRO/$m")
     fi
