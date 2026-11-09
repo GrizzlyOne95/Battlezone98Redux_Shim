@@ -2081,6 +2081,8 @@ namespace BZROpenShim
         void InitializeNoDamageSlowdownConfig();
         void ReloadNoDamageSlowdownConfig();
         void RefreshNoDamageSlowdownState();
+        void InitializeModSubfoldersConfig();
+        void ReloadModSubfoldersConfig();
 
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;
