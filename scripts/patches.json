@@ -4218,6 +4218,12 @@
       "identity": "NetPlayer::RecordDeath(killedTeam, killerTeam) __cdecl; reads netPlayerByTeam[] at +0x1B"
     },
     {
+      "name": "GetPerformanceHealthGate",
+      "address": "0x004E9610",
+      "expected": "55 8B EC 83 EC 08 F3 0F 10 45 08 0F 2F 05 84 25 8A 00 72 06 D9 E8 EB 5A",
+      "identity": "GetPerformance(float healthRatio) cdecl, result in ST0 (1.5 decompile name; called from the Hover, Producer, SAV, Torpedo, TurretCraft, TurretTank and Walker Simulate paths with [this+0x200]). Entry through comiss [0.5] and the jb at +0x12 that skips fld1. Unique in the GOG 2.2.301 exe. NoDamageSlowdown NOPs the jb."
+    },
+    {
       "name": "UnitTurboThrottleBlock",
       "address": "0x00601C92",
       "expected": "8B 45 90 D9 58 08 8B 4D 90 F3 0F 10 41 0C 0F 2F 05 04 26 8A 00 72 1A F3 0F 10 05 C8 25 8A 00 0F 2F 45 AC 76 0C C7 85 78 FF FF FF 01 00 00 00 EB 0A C7 85 78 FF FF FF 00 00 00 00 8B 55 90 8B 85 78 FF FF FF",

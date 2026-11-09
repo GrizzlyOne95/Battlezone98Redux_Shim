@@ -27,6 +27,7 @@ namespace Registry
     enum class ShimSettingApplyGroup
     {
         GlobalImprovement, UnderAttackAlert, TargetReticle, JetFlames, UnitVo, GlobalTurbo,
+        NoDamageSlowdown,
         Headlights, PilotFlashlight, AutoSave, HudFeedback, HudPalette, ContextualHud,
         BzrNetRoute, RenderProfile, LiveEngineToggle, ReadOnNextUse, RestartRequired,
         CareerStatsReset, ResetToStock, TroubleshootingBundle,

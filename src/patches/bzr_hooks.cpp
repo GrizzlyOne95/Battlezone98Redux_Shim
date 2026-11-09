@@ -1602,6 +1602,7 @@ namespace BZROpenShim
             {"InitializeUnderAttackAlertConfig", &InitializeUnderAttackAlertConfig},
             {"InitializeTargetReticlePopupConfig", &InitializeTargetReticlePopupConfig},
             {"InitializeGlobalTurboConfig", &InitializeGlobalTurboConfig},
+            {"InitializeNoDamageSlowdownConfig", &InitializeNoDamageSlowdownConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},

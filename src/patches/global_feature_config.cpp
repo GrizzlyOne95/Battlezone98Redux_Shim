@@ -661,6 +661,9 @@ namespace BZROpenShim
               &RevertSatelliteViewToBaseline, &RefreshSatelliteViewState },
             { "GlobalTurbo", FeatureTier::SinglePlayer,
               &RevertGlobalTurboToBaseline, &RefreshGlobalTurboPatchState },
+            // One static byte patch; refresh also restores stock bytes online.
+            { "NoDamageSlowdown", FeatureTier::SinglePlayer,
+              nullptr, &RefreshNoDamageSlowdownState },
             // Local Ogre lights; applied everywhere, including MP. The refresh
             // function is their per-tick driver, not a gate.
             { "Headlights", FeatureTier::Display,
@@ -837,6 +840,9 @@ namespace BZROpenShim
         case ShimSettingApplyGroup::GlobalTurbo:
             g_GlobalTurboConfigInitialized = false;
             InitializeGlobalTurboConfig();
+            break;
+        case ShimSettingApplyGroup::NoDamageSlowdown:
+            ReloadNoDamageSlowdownConfig();
             break;
         case ShimSettingApplyGroup::Headlights:
             ReapplyHeadlightConfigFromUserConfig();

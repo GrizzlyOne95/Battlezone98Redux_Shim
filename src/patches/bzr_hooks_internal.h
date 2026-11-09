@@ -2075,6 +2075,11 @@ namespace BZROpenShim
         void RefreshGlobalTurboPatchState();
         void RevertGlobalTurboToBaseline();
 
+        // --- No damage slowdown (no_damage_slowdown.cpp) ---------------------
+        void InitializeNoDamageSlowdownConfig();
+        void ReloadNoDamageSlowdownConfig();
+        void RefreshNoDamageSlowdownState();
+
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;
         void InitializeUnitVoConfig();
