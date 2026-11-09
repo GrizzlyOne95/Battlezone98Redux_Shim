@@ -2081,6 +2081,8 @@ namespace BZROpenShim
         void InitializeNoDamageSlowdownConfig();
         void ReloadNoDamageSlowdownConfig();
         void RefreshNoDamageSlowdownState();
+        void InitializeMpWhitelistTgaConfig();
+        void ReloadMpWhitelistTgaConfig();
 
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;
