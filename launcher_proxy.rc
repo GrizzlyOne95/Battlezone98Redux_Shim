@@ -1,0 +1,8 @@
+#include "include/launcher_proxy_resources.h"
+#include <windows.h>
+
+// The Steam launcher skip proxy, built by LauncherProxy.vcxproj into
+// bin\<Configuration>\launcher\d3d9.dll. Plugin_OpenShim.vcxproj adds
+// bin\<Configuration> to this file's include path and builds the proxy first.
+// src/patches/steam_launcher_skip.cpp writes it to <game>\Launcher\d3d9.dll.
+IDR_OPENSHIM_LAUNCHER_PROXY RCDATA "launcher/d3d9.dll"

@@ -675,6 +675,9 @@ openshim_add_test(openshim_auto_update_tests STD 20 SOURCES
     ../src/patches/openshim_auto_update.cpp
 )
 
+# Steam launcher skip proxy (Launcher\d3d9.dll): the gates and argv parsing.
+openshim_add_test(launcher_proxy_logic_tests STD 17 SOURCES launcher_proxy_logic_tests.cpp)
+
 # The OPENSHIM_*/BZR_* environment redirect: which openshim.ini key each
 # legacy name reads, how values are normalised, and the INI-before-launch-
 # environment order (audit P2-7). The Win32 readers stay in

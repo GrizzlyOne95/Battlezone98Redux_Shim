@@ -336,6 +336,8 @@ openshim_opt:PreLobby:label~MP Setup Screen~~~~~~
 openshim_opt:PreLobby:desc~Multiplayer opens a setup screen first (nickname, flag, server: Rebellion, Custom or Local); those pickers leave the lobby. Read when Multiplayer is clicked.~~~~~~
 openshim_opt:AutoStage:label~Auto-Install~~~~~~
 openshim_opt:AutoStage:desc~Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim to install when you quit. Never runs in multiplayer.~~~~~~
+openshim_opt:SkipRebellionLauncher:label~Skip Launcher~~~~~~
+openshim_opt:SkipRebellionLauncher:desc~Steam only: start the game directly instead of Rebellion's launcher. Hold Shift while launching to see the launcher. The first launch still shows it.~~~~~~
 openshim_opt:StatsTracking:label~Career Stats~~~~~~
 openshim_opt:StatsTracking:desc~Record kills, deaths and missions played to career_stats.cfg across single player and multiplayer. Local file only; nothing is uploaded, and no mission script is required.~~~~~~
 openshim_opt:ResetCareer:label~Reset Career~~~~~~

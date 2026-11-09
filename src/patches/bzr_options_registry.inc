@@ -834,6 +834,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::ReadOnNextUse,
       "Check the Steam Workshop once when the main menu first appears and stage a newer OpenShim "
       "to install when you quit. Never runs in multiplayer." },
+    // Steam on Windows only: writes or removes Launcher\d3d9.dll (steam_launcher_skip.cpp).
+    { "Skip Launcher", "Steam", "SkipRebellionLauncher", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::SteamLauncher,
+      "Steam only: start the game directly instead of Rebellion's launcher. Hold Shift while "
+      "launching to see the launcher. The first launch still shows it." },
     // defaultIndex 0 selects "1", which is what an absent key does: the
     // native tracker has always run, and turning the row off must be a
     // deliberate choice rather than the effect of a missing ini key.
@@ -920,6 +926,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
+    { "SkipRebellionLauncher", "0" },
 };
 
 // Rows Reset to Stock leaves alone:

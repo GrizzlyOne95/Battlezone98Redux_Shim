@@ -170,7 +170,8 @@ uninstall_from() {
     echo "Game folder: $game_dir"
 
     # Load chain, plus the previous-version copy the Workshop updater keeps.
-    for relative in winmm.dll winmm.dll.previous bzloader.dll plugins/openshim.dll; do
+    for relative in winmm.dll winmm.dll.previous bzloader.dll plugins/openshim.dll \
+            Launcher/d3d9.dll Launcher/d3d9.dll.openshim-old; do
         remove_openshim_binary "$game_dir/$relative"
     done
     for relative in winmm.dll bzloader.dll plugins/openshim.dll; do

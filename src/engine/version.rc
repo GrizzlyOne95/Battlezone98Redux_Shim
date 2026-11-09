@@ -13,6 +13,9 @@
 #if defined(OPENSHIM_MODULE_BZLOADER)
 #  define OSM_FILENAME "bzloader.dll"
 #  define OSM_DESC     "BZR Open Shim - BZLoader plugin host"
+#elif defined(OPENSHIM_MODULE_LAUNCHERPROXY)
+#  define OSM_FILENAME "d3d9.dll"
+#  define OSM_DESC     "BZR Open Shim - Steam launcher skip"
 #elif defined(OPENSHIM_MODULE_PLUGIN)
 #  define OSM_FILENAME "openshim.dll"
 #  define OSM_DESC     "BZR Open Shim - runtime plugin"

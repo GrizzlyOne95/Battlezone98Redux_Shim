@@ -27,6 +27,7 @@
 #include "patcher.h"
 #include "render_profile_runtime.h"
 #include "shim_log.h"
+#include "steam_launcher_skip.h"
 #include "troubleshooting_bundle.h"
 #include "ui_decor.h"
 #include "BZROpenShim.h"
@@ -3591,6 +3592,8 @@ namespace BZROpenShim
                 return ContextualHud::ReloadConfig();
             case ShimSettingApplyGroup::HudPalette:
                 return HudPalette::ReloadConfig();
+            case ShimSettingApplyGroup::SteamLauncher:
+                return SyncSteamLauncherProxy();
             default:
                 ApplyShimSettingLive(group);
                 return true;
@@ -5872,6 +5875,13 @@ namespace BZROpenShim
             // First title menu of the process: start the automatic update
             // check. Latched inside; later passes return immediately.
             TickOpenShimAutoStage(&OnAutoStageNotice);
+            // Once per process: match Launcher\d3d9.dll to [Steam] SkipRebellionLauncher.
+            static bool s_LauncherProxySynced = false;
+            if (!s_LauncherProxySynced)
+            {
+                s_LauncherProxySynced = true;
+                SyncSteamLauncherProxy();
+            }
         }
 
         // The staging finishes seconds after the menu is up and no constructor

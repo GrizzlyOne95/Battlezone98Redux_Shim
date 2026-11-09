@@ -253,6 +253,7 @@
     <ClCompile Include="src\patches\weapon_presentation_native.cpp" />
     <ClCompile Include="src\patches\weapon_presentation_call_bridges.cpp" />
     <ClCompile Include="src\patches\bzr_options_ui.cpp" />
+    <ClCompile Include="src\patches\steam_launcher_skip.cpp" />
     <ClCompile Include="src\patches\options_ui_l10n.cpp" />
     <ClCompile Include="src\patches\bzrnet_instrumentation.cpp" />
     <ClCompile Include="src\patches\bzrnet_protocol.cpp" />
@@ -416,6 +417,9 @@
     <ClInclude Include="include\weapon_presentation_call_bridges.h" />
     <ClInclude Include="include\pond_class_label.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
+    <ClInclude Include="include\steam_launcher_skip.h" />
+    <ClInclude Include="include\launcher_proxy_logic.h" />
+    <ClInclude Include="include\launcher_proxy_resources.h" />
     <ClInclude Include="include\cli_multiparam_parser.h" />
     <ClInclude Include="include\terrain_atlas_rect_repair.h" />
     <ClInclude Include="include\planet_environment.h" />
@@ -562,12 +566,23 @@
     </ResourceCompile>
     <ResourceCompile Include="dx11_enhanced_fxaa.rc" />
     <ResourceCompile Include="options_ui_l10n.rc" />
+    <ResourceCompile Include="launcher_proxy.rc">
+      <AdditionalIncludeDirectories>$(SolutionDir)bin\$(Configuration);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
     <None Include="src\winmm.def" />
     <None Include="shaders\dx11_enhanced_fxaa.hlsl" />
     <None Include="src\patches\bzr_options_registry.inc" />
     <None Include="src\patches\bzr_options_categories.inc" />
     <None Include="resources\localization\openshim_localization.csv" />
     <None Include="README.md" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Builds Launcher\d3d9.dll first so launcher_proxy.rc can embed it. -->
+    <ProjectReference Include="LauncherProxy.vcxproj">
+      <Project>{C4E1D9A2-6B3F-4E58-9A71-2D8F0B6C5E33}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="FetchSteamTunnelHeaders" BeforeTargets="ClCompile">

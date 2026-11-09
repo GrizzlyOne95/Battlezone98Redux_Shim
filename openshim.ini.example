@@ -2278,6 +2278,10 @@ AllowNeutralAttackOrders = 0
 ; Stage a newer OpenShim from the Steam Workshop when the main menu first appears (Steam builds, never in multiplayer); it installs when you quit. 0 = manual "Check for Updates" only. Default: 1.
 AutoStage = 1
 
+[Steam]
+; Start the game directly instead of Rebellion's launcher (Steam on Windows only). OpenShim writes Launcher\d3d9.dll while this is 1 and removes it at 0. Hold Shift while launching to see the launcher; the first launch (no Ogre.cfg yet) always shows it. Default: 0.
+SkipRebellionLauncher = 0
+
 [Career]
 
 ; Career statistics tracking. Records kills, deaths and missions played to

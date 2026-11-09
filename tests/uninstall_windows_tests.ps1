@@ -52,6 +52,10 @@ function New-GameFixture {
     Write-Fixture $Root "plugins\openshim.dll.previous" $openShimMarker
     Write-Fixture $Root "plugins\openshim.dll.bak-20260101-000000" $openShimMarker
 
+    # Steam launcher skip proxy beside Rebellion's own launcher (which stays).
+    Write-Fixture $Root "Launcher\d3d9.dll" $openShimMarker
+    Write-Fixture $Root "Launcher\BZLauncher.exe" "launcher"
+
     # patches.json family.
     Write-Fixture $Root "scripts\patches.json" "{}"
     Write-Fixture $Root "scripts\patches.json.previous" "{}"
@@ -149,6 +153,7 @@ try {
         "bzloader.dll", "bzloader.dll.previous", "bzloader.dll.bak-20260101-000000",
         "plugins\openshim.dll", "plugins\openshim.dll.previous",
         "plugins\openshim.dll.bak-20260101-000000", "plugins",
+        "Launcher\d3d9.dll",
         "scripts\patches.json", "scripts\patches.json.previous", "scripts\patches.json.bak-20260101-000000",
         "openshim\renderer\enhanced\resources.version", "openshim\renderer\enhanced", "openshim\renderer",
         "openshim\OpenShimAssets.ini", "openshim",
@@ -162,6 +167,7 @@ try {
     $kept = @(
         "battlezone98redux.exe",
         "winmm.dll.bak-20260102-000000",
+        "Launcher\BZLauncher.exe",
         "scripts\stock_mission.lua", "scripts",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png", "BZ_ASSETS_CORE\common\ui\CustomWidgets",
         "openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
