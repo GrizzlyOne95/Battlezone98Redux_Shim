@@ -114,6 +114,23 @@ Other leak paths into the same counter, in order of how often they can happen:
   only when uc was 0 and only for flagged units. Meaning of +0xA8 not established
   (UNVERIFIED); 1.5 uses it for scripted special forces, so likely rare.
 - 1d. Producer::StartBuild result ignored. See candidate 3.
+- 1e. REFUTED LIVE: "producer-built TURR/FACT/RCYC/ARMR never End".
+  - Static reading (kept for reference): the unit iterator filter FUN_006a3ad0
+    rejects FACT/RCYC/ARMR (R:006a3ad0.c:15, R:006a07e0.c:6) and TURR
+    (R:006a3ad0.c:19); those objects get a BuildAttachment whose ctor only calls
+    PREREQ_Add (R:006a1820.c:28).
+  - Live ledger, ccak bench, 380 s, 2026-11-09, repair off and on: every svturr
+    (prereq 21, 4 builds) and the svmuf build (prereq 33) Begin at 0x00691123
+    and End at 0x0068FAFF, the UnitAttachment path (R:0068fac0.c:6). The
+    turrettank class does not carry the TURR sig, and a freshly built factory
+    is still a unit when its attachment is made.
+  - Deploying the recycler and factory Begins building prereqs 46/47 (kind=1)
+    that stock never Ends. An experimental BuildAttachment ctor detour ended
+    them (1 -> 0), but the AI's behaviour did not change, so it was not kept.
+  - Same bench, both runs: after the Defense account filled (T+117) the AI never
+    started svtank (Offense, 10 wanted) in the remaining 260 s, with or without
+    the repair. Cause not found; it may be specific to this AIP and fixture.
+    UNVERIFIED as the same bug as the 60-minute report.
 
 ### 2. Reserved-area slot leak on successful crew builds (32 slots per team). Confidence: verified mechanism, impact UNVERIFIED
 
