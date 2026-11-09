@@ -28,6 +28,7 @@
 #include "terrain_hd_texture_copy.h"
 #include "terrain_hd_material.h"
 #include "terrain_paint.h"
+#include "terrain_live_paint.h"
 #include "terrain_tess_defines.h"
 #include "frame_bridge_native_geometry.h"
 #include "frame_bridge_native_mesh.h"
@@ -36,6 +37,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -378,6 +381,8 @@ namespace BZROpenShim
             std::string heightTexture;
             std::vector<TerrainHdMaterial::RectBinding> tileRects;
             std::array<TerrainHdChannel, 3> channels;
+            // paint.live: autopaint recipe for maps without a baked entry (terrain-live-paint.md).
+            nlohmann::json livePaint;
         };
         std::array<std::string, 3> g_hdChannelResources;
         // Borrowed from the owned Ogre arrays; cleared before removing them.
@@ -1269,6 +1274,14 @@ namespace BZROpenShim
                             binding.paint.bounds = paint.at("boundsMeters").get<std::array<float, 4>>();
                         }
                         binding.paint.Validate();
+                        if (paint.contains("live"))
+                        {
+                            const auto& live = paint.at("live");
+                            if (binding.paint.maps.empty() || !live.is_object() || !live.contains("typeWeights") ||
+                                !live.contains("layers") || live.at("layers").size() != binding.paint.Layers())
+                                throw std::runtime_error("paint live needs the multi-map form and a recipe with one layer per paint layer");
+                            binding.livePaint = live;
+                        }
                     }
                     parsed.materials.emplace(materialIt.key(), std::move(binding));
                 }

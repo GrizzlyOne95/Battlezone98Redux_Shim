@@ -1,0 +1,22 @@
+{
+  "schema": "bzr-openshim-terrain-autopaint-v1",
+  "typeWeights": {"0": [1, 0, 0, 0, 0, 0, 0, 0], "3": [0, 1, 0, 0, 0, 0, 0, 0]},
+  "undefinedTypeWeights": [0, 0, 1, 0, 0, 0, 0, 0],
+  "transition": {"cap": 0.3, "diagonal": 0.5},
+  "outsideWeights": [1, 0, 0, 0, 0, 0, 0, 0],
+  "blurMeters": 14,
+  "weightSize": 128,
+  "variation": {"meters": 220, "amount": 0.6, "types": {"0": [0, 0, 1, 0, 0, 0, 0, 0], "3": [0, 0, 0, 1, 0, 0, 0, 0]}},
+  "shape": [
+    {"radiusMeters": 400, "rangeMeters": 6, "amount": 0.9, "ridge": [0, 1, 0, 0, 0, 0, 0, 0], "from": [0]},
+    {"radiusMeters": 120, "rangeMeters": 3, "amount": 0.5, "hollow": [0, 0, 0, 0, 0, 1, 0, 0], "types": [0]}
+  ],
+  "erosion": {
+    "talus": {"weights": [0, 0, 0, 1, 0, 0, 0, 0], "amount": 0.5, "coverage": 0.05},
+    "channel": {"weights": [0, 0, 1, 0, 0, 0, 0, 0], "amount": 0.5, "startHectares": 3, "fullHectares": 30, "types": [3]},
+    "deposit": {"weights": [0, 0, 0, 0, 0, 0, 1, 0], "amount": 0.5, "coverage": 0.1},
+    "scour": {"weights": [0, 0, 0, 0, 0, 0, 0, 1], "amount": 0.5, "coverage": 0.1}
+  },
+  "slope": {"weights": [0, 1, 0, 0, 0, 0, 0, 0], "startDegrees": 24, "fullDegrees": 38},
+  "layers": [{}, {}, {}, {}, {"edge": {"meters": 6, "ragged": 0.2}}, {}, {}, {}]
+}
