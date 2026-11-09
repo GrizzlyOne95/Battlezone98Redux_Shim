@@ -299,6 +299,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # mounts and the MP game room still rebuild in full.
     "General/FastMenuTransitions",
 
+    # Local mount decision only: a .tga-holding visual mod counts as MP safe on
+    # this client; no wire message, so peers without it just see stock visuals.
+    "Network/AllowTgaInMultiplayerMods",
+
     # Qualified socket/netcode baseline.
     "Network/NetImprovements",
     # Sender-side native netcode fix: same wire format, so no mixed-client

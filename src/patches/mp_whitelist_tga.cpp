@@ -11,8 +11,8 @@
 // clears mod+0x90, after which a network game will not mount the mod.
 //
 // This detours the matcher (its only caller is that loop): when the original
-// says no, a name ending in ".tga" is accepted. Off unless
-// [Network] AllowTgaInMultiplayerMods = 1.
+// says no, a name ending in ".tga" is accepted. On by default; off with
+// [Network] AllowTgaInMultiplayerMods = 0.
 //
 // Multiplayer consistency: the whitelist is evaluated by each client for its
 // own installed copy. Peers that do not enable this still treat a mod that
@@ -132,8 +132,9 @@ namespace BZROpenShim
             if (g_ConfigInitialized)
                 return;
             g_ConfigInitialized = true;
-            bool cfg = false;
-            const bool on = TryGetUserConfigBool(kUserConfigNetworkSection, "AllowTgaInMultiplayerMods", cfg) && cfg;
+            bool cfg = true;
+            TryGetUserConfigBool(kUserConfigNetworkSection, "AllowTgaInMultiplayerMods", cfg);
+            const bool on = cfg;
             g_AllowTga = on;
             Log(L"[MPTGA] AllowTgaInMultiplayerMods=%hs\n", on ? "on" : "off");
             if (on)
