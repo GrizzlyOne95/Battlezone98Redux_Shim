@@ -4221,6 +4221,36 @@
       "identity": "GetPerformance(float healthRatio) cdecl, result in ST0 (1.5 decompile name; called from the Hover, Producer, SAV, Torpedo, TurretCraft, TurretTank and Walker Simulate paths with [this+0x200]). Entry through comiss [0.5] and the jb at +0x12 that skips fld1. Unique in the GOG 2.2.301 exe. NoDamageSlowdown NOPs the jb."
     },
     {
+      "name": "AiBuildConstructUnit",
+      "address": "0x006A4230",
+      "expected": "55 8B EC 83 EC 08 8B 45 08 C7 40 1C 03 00 00 00",
+      "identity": "Build_ConstructUnit(record, typeInfo) cdecl (FUN_006a4230): sets record+0x1C = 3, End on failure, returns 1 after charging credits. typeInfo+0x5A is the prereq id. Called only by FUN_006919a0. AIConstructionCounterRepair hook; first 9 bytes relocated."
+    },
+    {
+      "name": "AiBuildConstructBuild",
+      "address": "0x006A4380",
+      "expected": "55 8B EC 83 EC 08 8B 45 08 C7 40 1C 03 00 00 00",
+      "identity": "Build_ConstructBuild(record, typeInfo) cdecl (FUN_006a4380): sibling of AiBuildConstructUnit for non-unit prereqs; the prereq id is the ushort at typeInfo+0. AIConstructionCounterRepair hook."
+    },
+    {
+      "name": "AiBuildAttachmentDtor",
+      "address": "0x006A1940",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 00 F4 4E 89 00",
+      "identity": "BuildAttachment destructor (FUN_006a1940, thiscall, sets the vftable at 0x00894EF4). Record = this+4 (team int at +4, cached order state at +0x20). Stock has no ConstructionEnd here, unlike the 1.5 AI_BuildingRemove order==3 clause. AIConstructionCounterRepair hook."
+    },
+    {
+      "name": "AiConstructionCounts",
+      "address": "0x00930FC0",
+      "kind": "data",
+      "identity": "number_under_construction: int* [16], one calloc'd int table per team indexed by prereq id (FUN_00690630 allocates, FUN_006906b0 frees)."
+    },
+    {
+      "name": "AiConstructionAllocated",
+      "address": "0x00930F80",
+      "kind": "data",
+      "identity": "int [16]: 1 while the team's AiConstructionCounts table is allocated (AIBuild_ConstructionNew/Delete)."
+    },
+    {
       "name": "UnitTurboThrottleBlock",
       "address": "0x00601C92",
       "expected": "8B 45 90 D9 58 08 8B 4D 90 F3 0F 10 41 0C 0F 2F 05 04 26 8A 00 72 1A F3 0F 10 05 C8 25 8A 00 0F 2F 45 AC 76 0C C7 85 78 FF FF FF 01 00 00 00 EB 0A C7 85 78 FF FF FF 00 00 00 00 8B 55 90 8B 85 78 FF FF FF",

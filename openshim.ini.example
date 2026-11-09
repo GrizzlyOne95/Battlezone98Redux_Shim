@@ -495,6 +495,13 @@ TugCargoPostLoad = 1
 ; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_CONSTRUCTOR_REMOTE_BUILD_FIX
 ConstructorRemoteBuild = 1
+; Producer destroyed mid-build never ends the AI's per-team, per-type "under
+; construction" count (BuildAttachment destructor lacks the 1.5 order==3
+; ConstructionEnd), so the AI can stop building that type for the rest of the
+; mission. Ends the count once when it happens. Single player only; default OFF
+; until live-verified (repro: kill a factory while the AI is building).
+; Log tag [AICOUNTER]. Env override to disable: OPENSHIM_DISABLE_AI_CONSTRUCTION_COUNTER_REPAIR
+AIConstructionCounterRepair = 0
 
 ; Release a constructor from its deployed state when another constructor
 ; finishes recycling the same target first. Stock leaves the losing

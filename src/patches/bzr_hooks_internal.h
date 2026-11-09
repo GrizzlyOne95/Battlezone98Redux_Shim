@@ -2082,6 +2082,9 @@ namespace BZROpenShim
         void ReloadNoDamageSlowdownConfig();
         void RefreshNoDamageSlowdownState();
 
+        // --- AI construction counter repair (ai_construction_counter_repair.cpp)
+        void InitializeAiConstructionCounterRepairConfig();
+
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;
         void InitializeUnitVoConfig();
