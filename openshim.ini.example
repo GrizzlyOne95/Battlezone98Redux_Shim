@@ -2519,6 +2519,12 @@ Turbo = 0
 ; Legacy env alias: OPENSHIM_GLOBAL_TURBO_TOLERANCE
 TurboTolerance = 0.9
 
+; Remove the low-health performance penalty: damaged vehicles keep full speed,
+; acceleration and turning (BZ 1.4 and earlier appear not to have it). Affects
+; all units. Single player only; network games always use the stock behaviour.
+; Accepted: boolean. Default: OFF.
+NoDamageSlowdown = 0
+
 ; Native stock headlight control. These change only local Ogre lights, so they
 ; also run in network games.
 ; Kept under [SinglePlayer] so existing openshim.ini files keep their values.

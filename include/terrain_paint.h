@@ -926,14 +926,16 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
         }
         return reads > 0 && reads == shared;
     }
-    inline bool Specialize(std::string& source, bool pixel, const Config& config)
+    // why, when given, names the check that declined, or a liquid skip on success.
+    inline bool Specialize(std::string& source, bool pixel, const Config& config, std::string* why = nullptr)
     {
+        const auto decline = [&](std::string reason) { if (why) *why = std::move(reason); return false; };
         config.Validate();
         if (pixel)
         {
             const std::string token = "diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice))";
             const auto offset = source.find(token);
-            if (offset == std::string::npos) return false;
+            if (offset == std::string::npos) return decline("diffuse sample token missing");
             source.replace(offset, token.size(), "OpenShimSampleTerrainPaint(diffuseMap, diffuseSam, OPENSHIM_PAINT_GEO)");
             if (config.Material())
             {
@@ -956,7 +958,7 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
                 for (const auto& swap : swaps)
                 {
                     const auto at = source.find(swap.from);
-                    if (at == std::string::npos) { if (swap.use && source.find(swap.use) != std::string::npos) return false; continue; }
+                    if (at == std::string::npos) { if (swap.use && source.find(swap.use) != std::string::npos) return decline(std::string("material swap source missing: ") + swap.from); continue; }
                     source.replace(at, std::strlen(swap.from), swap.to);
                 }
             }
@@ -977,12 +979,24 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
                 source.find("in float vDepth") != std::string::npos;
             constants << "#define OPENSHIM_PAINT_PARALLAX " << (parallax ? 1 : 0) << "\n";
             constants << "#define OPENSHIM_PAINT_ONE_GEO " << (OneGeometry(source) ? 1 : 0) << "\n";
-            // Glow rides the emissive sum just before final lighting; a pass
-            // without that line declines.
-            const bool liquid = config.liquid != std::array<float, 8>{};
-            const std::string anchor = "    oColor.xyz = aerialSurface * surfaceTransmission";
+            // Glow rides the enhanced emissive sum just before final lighting,
+            // or, in stock BZR programs, the colour just before fog. A pass
+            // with neither line skips liquid rather than declining the map.
+            const std::string enhancedAnchor = "    oColor.xyz = aerialSurface * surfaceTransmission";
+            const std::string stockAnchor = "float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);";
             const std::string entry = "void terrain_fragment(";
-            if (liquid && (source.find(anchor) == std::string::npos || source.find(entry) == std::string::npos)) return false;
+            const bool enhanced = source.find(enhancedAnchor) != std::string::npos;
+            // Start of the stock fog line; its indentation varies.
+            const auto stockLine = [&] {
+                const auto at = source.find(stockAnchor);
+                const auto nl = source.rfind('\n', at);
+                return nl == std::string::npos ? 0 : nl + 1; };
+            bool liquid = config.liquid != std::array<float, 8>{};
+            if (liquid && ((!enhanced && source.find(stockAnchor) == std::string::npos) || source.find(entry) == std::string::npos))
+            {
+                liquid = false;
+                if (why) *why = "liquid skipped: no emissive anchor or entry point";
+            }
             constants << "#define OPENSHIM_PAINT_LIQUID " << (liquid ? 1 : 0) << "\n";
             if (liquid) constants << "#define OPENSHIM_PAINT_TIME " << kTimeUniform << "\n";
             const auto vector = [&](const char* name, const float* v, int n) {
@@ -1000,9 +1014,13 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             {
                 source.insert(source.find(entry) + entry.size(), std::string("uniform float ") + kTimeUniform + ", ");
                 // Re-found: the swaps above moved the text.
-                source.insert(source.find(anchor),"#if OPENSHIM_PAINT_LIQUID\n#if OSE_LINEAR_LIGHT_ACTIVE\n"
-                    "    openShimPaintGlowColour = srgb_to_linear(openShimPaintGlowColour);\n#endif\n"
-                    "    emissiveContribution += openShimPaintGlowColour * openShimPaintGlowAmount;\n#endif\n");
+                if (enhanced)
+                    source.insert(source.find(enhancedAnchor), "#if OPENSHIM_PAINT_LIQUID\n#if OSE_LINEAR_LIGHT_ACTIVE\n"
+                        "    openShimPaintGlowColour = srgb_to_linear(openShimPaintGlowColour);\n#endif\n"
+                        "    emissiveContribution += openShimPaintGlowColour * openShimPaintGlowAmount;\n#endif\n");
+                else
+                    source.insert(stockLine(), "#if OPENSHIM_PAINT_LIQUID\n"
+                        "    oColor.xyz += openShimPaintGlowColour * openShimPaintGlowAmount;\n#endif\n");
             }
             source.insert(0, constants.str() + LayerHlsl(config) + DetileHlsl() + CraterHlsl() + BlendHlsl());
         }
@@ -1010,7 +1028,7 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
         {
             const auto begin = source.find("    float2 openShimOrientedUV =");
             const auto end = source.find(';', source.find("    vTexCoord =", begin));
-            if (begin == std::string::npos || end == std::string::npos) return false;
+            if (begin == std::string::npos || end == std::string::npos) return decline("vertex UV block missing");
             // localUV carries audited native world XZ in paint mode, and the
             // unused atlas rect's x carries native world Y on to the pixel
             // shader in the unused slice index, for triplanar. Auxiliary maps

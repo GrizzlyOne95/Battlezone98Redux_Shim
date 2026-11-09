@@ -258,6 +258,8 @@ openshim_opt:AllowNeutralAttackOrders:label~Attack Neutrals~~~~~~
 openshim_opt:AllowNeutralAttackOrders:desc~Allow explicit player attack orders against team-0 neutral objects. Diplomacy and autonomous targeting remain stock.~~~~~~
 openshim_opt:Turbo:label~Global Turbo~~~~~~
 openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~~~~~~
+openshim_opt:NoDamageSlowdown:label~No Damage Slowdown~~~~~~
+openshim_opt:NoDamageSlowdown:desc~Damaged vehicles keep full speed, acceleration and turning, as in BZ 1.4 and earlier. Affects all units. Single player only.~~~~~~
 openshim_opt:SatelliteVisibilityFix:label~Satellite Fog~~~~~~
 openshim_opt:SatelliteVisibilityFix:desc~In satellite view, hide enemies your team has not lit up, as BZ 1.5 did. Also applies online, where you then see less than players without it.~~~~~~
 openshim_opt:Headlights:label~Player Headlight~~~~~~
@@ -463,6 +465,7 @@ openshim_ui:row:MeterFading:label~Meter Fading~~~~~~
 openshim_ui:row:RadarFading:label~Radar Fading~~~~~~
 openshim_ui:row:MenuColors:label~Menu Colors~~~~~~
 openshim_ui:row:VisualEffects:label~Visual Effects~~~~~~
+openshim_ui:row:BannedPlayers:label~Banned Players~~~~~~
 openshim_cat:Video:name~Video~~~~~~
 openshim_cat:Video:title~VIDEO~~~~~~
 openshim_cat:Video:blurb~Renderer, render profile, the DX11 Enhanced passes, shadows and terrain; visual effects open from here.~~~~~~
@@ -533,6 +536,7 @@ openshim_ui:row:MeterFading:desc~Fade cockpit hull and ammo independently, inclu
 openshim_ui:row:MenuColors:desc~Live RGB sliders for the main menu image artwork. Apply saves; Stock restores original colors.~~~~~~
 openshim_ui:row:RadarFading:desc~Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.~~~~~~
 openshim_ui:row:VisualEffects:desc~Jet flames, emissive pulse, star twinkle, death chunks, muzzle flashes and recoil, shell casings and skinned gibs.~~~~~~
+openshim_ui:row:BannedPlayers:desc~Lists the players you have banned as host; Unban removes one immediately.~~~~~~
 openshim_ui:render_profile_dx9_desc~Enhanced requires DX11; on DX9 it falls back to Redux (Stock). Retro and Redux work on both. Your choice is kept for DX11.~~~~~~
 openshim_ui:category_hint~Click a value to change it. Point at a setting to read what it does.~~~~~~
 openshim_ui:restart_note~* Takes effect after restarting Battlezone.~~~~~~
@@ -566,3 +570,4 @@ openshim_ui:career_already_empty~Career statistics were already empty; nothing c
 openshim_ui:career_reset_failed~Career reset failed; existing statistics were kept - see openshim.log~~~~~~
 openshim_ui:action_unwired~%s: no action is wired up for this row.~~~~~~
 openshim_ui:options_button~OpenShim Options~~~~~~
+openshim_ui:update_notice_title~OpenShim update ready~~~~~~

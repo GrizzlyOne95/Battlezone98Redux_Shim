@@ -15,6 +15,7 @@ constexpr const char* kShimRowMeters = "Meter Fading";
 constexpr const char* kShimRowRadar = "Radar Fading";
 constexpr const char* kShimRowMenuTheme = "Menu Colors";
 constexpr const char* kShimRowEffects = "Visual Effects";
+constexpr const char* kShimRowBans = "Banned Players";
 
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
@@ -61,7 +62,7 @@ static const char* const kShimCategoryControls[] = {
     "Run in Background" };
 static const char* const kShimCategoryGameplay[] = {
     "Aim Convergence", "Reticle Converge", "Reticle Range", "Ordnance Velocity",
-    "Jump-Snipe Crouch", "Global Turbo", "Satellite Fog", "Attack Neutrals",
+    "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
     "Smart Scavengers", "Turret AA Pitch", "Legacy Tank AI", "Howitzer Volley",
     "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };
 static const char* const kShimCategoryFixes[] = {
@@ -72,7 +73,7 @@ static const char* const kShimCategoryFixes[] = {
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions", "Map List Fixes",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
-    "MP Setup Screen", "Map Letter Jump" };
+    "MP Setup Screen", "Map Letter Jump", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
     "AutoSave", "AutoSave Interval", "AutoSave Backups", "Menu Caching" };

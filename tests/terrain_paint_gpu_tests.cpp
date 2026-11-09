@@ -392,6 +392,46 @@ RWStructuredBuffer<float4> testResults : register(u0);
             if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
             ok(compiled);
         }
+        // Stock BZR terrain programs have no emissive sum: the glow lands on
+        // the colour just before fog. A pass with no anchor at all skips
+        // liquid and still specializes, so the map keeps its paint.
+        {
+            TerrainPaint::Config lava = varied;
+            lava.liquid = {1.5f, 0, 0, 0}; lava.liquidFlow = {1.5f, 40, 4, 0.5f};
+            std::string stockSource = triplanarRaw;
+            const std::string tail = "  return diffuseMap.Sample(";
+            stockSource.replace(stockSource.find(tail), tail.size(),
+                "  float4 oColor = diffuseMap.Sample(diffuseSam, float3(openShimHdUV, 0));\n"
+                "\tfloat fogValue = saturate((vDepth - fogParams.y) * fogParams.w);\n"
+                "\toColor.xyz = lerp(oColor.xyz, float3(1,1,1), fogValue);\n  oTarget = oColor + diffuseMap.Sample(");
+            const std::string signature = "float4 PixelMain(";
+            stockSource.replace(stockSource.find(signature), signature.size(), "void terrain_fragment(out float4 oTarget : SV_TARGET, ");
+            const std::string target = ") : SV_TARGET";
+            stockSource.replace(stockSource.find(target), target.size(), ")");
+            const std::string slice = "float openShimTileSlice : TEXCOORD10";
+            stockSource.replace(stockSource.find(slice), slice.size(), slice + ", in float vDepth : TEXCOORD5, in float3 vViewPosition : TEXCOORD4");
+            std::string bare = stockSource;
+            std::string why;
+            check(TerrainPaint::Specialize(stockSource, true, lava, &why) && why.empty() &&
+                stockSource.find("#define OPENSHIM_PAINT_LIQUID 1") != std::string::npos &&
+                stockSource.find("    oColor.xyz += openShimPaintGlowColour * openShimPaintGlowAmount;\n#endif\n\tfloat fogValue") != std::string::npos,
+                "stock liquid PS specialization failed");
+            stockSource = "#define IBL_ENABLED\nstatic float4 fogParams = 0;\n" + frame + stockSource;
+            compiled = D3DCompile(stockSource.data(),stockSource.size(),nullptr,nullptr,nullptr,"terrain_fragment","ps_4_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+            const std::string fog = "\tfloat fogValue = saturate((vDepth - fogParams.y) * fogParams.w);\n";
+            bare.erase(bare.find(fog), fog.size());
+            bare.replace(bare.find("fogValue);"), 10, "0.0);");
+            check(TerrainPaint::Specialize(bare, true, lava, &why) && why == "liquid skipped: no emissive anchor or entry point" &&
+                bare.find("#define OPENSHIM_PAINT_LIQUID 0") != std::string::npos &&
+                bare.find(TerrainPaint::kTimeUniform + std::string(", ")) == std::string::npos,
+                "anchorless liquid PS did not skip liquid");
+            bare = "#define IBL_ENABLED\n" + frame + bare;
+            compiled = D3DCompile(bare.data(),bare.size(),nullptr,nullptr,nullptr,"terrain_fragment","ps_4_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+        }
         // Parallax: layer 0's height is a checker at mip 0 and flat 0.5 above,
         // so the fine-minus-coarse relief is the checker alone. Looking
         // straight down, beyond the fade or at a wall leaves the point; an

@@ -481,8 +481,11 @@ in `tro_cam.zfs`: extract their hg2, mat and trn files (Modding Toolbox
 takes them as plain map names. The fingerprint comes from the HG2 content, so
 maps with identical files (bdmisn10 with evolve_2) share an entry (chmisn08 only
 resembles evolve_3 and gets its own), and the co-op copies (`bdmisnNNcr`, `chmisn0Ncr`) match through the
-stock files they reuse. chmisn07 is a Europa map and `sammy__1` has no HG2;
-neither is covered.
+stock files they reuse. chmisn07 is built in the Europa pack. `sammy__1`
+(CR's Evolve co-op map) has no HG2 in `tro_cam.zfs`, so only the CR copy gets an
+entry. The Soviet maps are built in their own worlds: misns1-2 on Venus, misns3
+on Io, misns5-8 on Titan. They get a stock-file and a CR-file entry wherever
+their files differ.
 
 A Ganymede or Elysium map with no entry in the pack (a user map, or one whose
 HG2 differs) is declined at load: the shim logs `paint pack has no map entry

@@ -170,6 +170,7 @@
     <ClCompile Include="src\patches\community_key_secret.cpp" />
     <ClCompile Include="src\patches\career_stats.cpp" />
     <ClCompile Include="src\patches\career_screen.cpp" />
+    <ClCompile Include="src\patches\bans_screen.cpp" />
     <ClCompile Include="src\patches\prelobby_screen.cpp" />
     <ClCompile Include="src\patches\lan_session.cpp" />
     <ClCompile Include="src\patches\lan_no_auth.cpp" />
@@ -199,6 +200,7 @@
     <ClCompile Include="src\patches\game_object_helpers.cpp" />
     <ClCompile Include="src\patches\global_feature_config.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
+    <ClCompile Include="src\patches\no_damage_slowdown.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\hook_patch_helpers.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />

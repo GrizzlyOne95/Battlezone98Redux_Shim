@@ -115,6 +115,86 @@
               3190.0
             ],
             "control": "openshim_titan_auto_misn16b_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "1b74fa99c2dd83b5",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misns5_control.png"
+          },
+          {
+            "terrainFingerprint": "49a2f27eaa377ce9",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misns5_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "68e624ac666edfd9",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misns6_control.png"
+          },
+          {
+            "terrainFingerprint": "2b5c882b45430fed",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misns6_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "fd598c4fa0943854",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misns7_control.png"
+          },
+          {
+            "terrainFingerprint": "8449ef029f2880e4",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misns7_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "5fab8b4195da7a3e",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misns8_control.png"
+          },
+          {
+            "terrainFingerprint": "ed8835aba182ff00",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_titan_auto_misns8_stock_control.png"
           }
         ],
         "detile": [

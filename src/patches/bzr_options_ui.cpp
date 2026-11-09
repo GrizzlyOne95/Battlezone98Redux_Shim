@@ -2975,6 +2975,7 @@ namespace BZROpenShim
         constexpr size_t kShimPseudoRowRadar = kShimSettingsRegistryCount + 7;
         constexpr size_t kShimPseudoRowMenuTheme = kShimSettingsRegistryCount + 8;
         constexpr size_t kShimPseudoRowEffects = kShimSettingsRegistryCount + 9;
+        constexpr size_t kShimPseudoRowBans = kShimSettingsRegistryCount + 10;
         constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
@@ -3107,6 +3108,8 @@ namespace BZROpenShim
                 return kShimPseudoRowRadar;
             if (std::strcmp(label, kShimRowEffects) == 0)
                 return kShimPseudoRowEffects;
+            if (std::strcmp(label, kShimRowBans) == 0)
+                return kShimPseudoRowBans;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
                 if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
@@ -3332,7 +3335,7 @@ namespace BZROpenShim
             }
             if (row == kShimPseudoRowKeyBindings)
                 return ShimText("openshim_ui:value_edit", "Edit");
-            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme || row == kShimPseudoRowEffects)
+            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme || row == kShimPseudoRowEffects || row == kShimPseudoRowBans)
                 return ShimText("openshim_ui:value_open", "Open");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
@@ -3407,6 +3410,8 @@ namespace BZROpenShim
                 return ShimPseudoRowLabel(kShimRowRadar);
             if (row == kShimPseudoRowEffects)
                 return ShimPseudoRowLabel(kShimRowEffects);
+            if (row == kShimPseudoRowBans)
+                return ShimPseudoRowLabel(kShimRowBans);
             return ShimSettingLabel(g_ShimSettingsRegistry[row]);
         }
 
@@ -3432,6 +3437,8 @@ namespace BZROpenShim
                 return ShimText("openshim_ui:row:RadarFading:desc", "Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.");
             if (row == kShimPseudoRowEffects)
                 return ShimText("openshim_ui:row:VisualEffects:desc", "Jet flames, emissive pulse, star twinkle, death chunks, muzzle flashes and recoil, shell casings and skinned gibs.");
+            if (row == kShimPseudoRowBans)
+                return ShimText("openshim_ui:row:BannedPlayers:desc", "Lists the players you have banned as host; Unban removes one immediately.");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
@@ -3709,6 +3716,12 @@ namespace BZROpenShim
                 Shell::RequestScreen(ui.screen,MenuTheme::ScreenId);
                 return;
             }
+            if (row == kShimPseudoRowBans)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kBansScreenId);
+                return;
+            }
             if (row == kShimPseudoRowEffects)
             {
                 DisarmShimSettingsAction();
@@ -3912,6 +3925,7 @@ namespace BZROpenShim
                         return false;
                 }
                 MenuTheme::RegisterScreen();
+                RegisterBansScreen();
                 return true;
             }();
             return registered;
@@ -5409,8 +5423,18 @@ namespace BZROpenShim
         static void* g_CareerUiMainScreen = nullptr;
         static void* g_CareerUiOverlay = nullptr;
         static void* g_CareerUiButton = nullptr;
-        // Non-blocking line under the Career button once an update is staged.
-        static void* g_CareerUiUpdateNotice = nullptr;
+        // Non-blocking framed box under the Career button once an update is
+        // staged: fill plate, four border bars, a title and one text line.
+        // Index 0 is the probe for "still in the overlay's child tree".
+        enum UpdateNoticePart : size_t
+        {
+            kUpdateNoticeFill = 0,
+            kUpdateNoticeBorder0,
+            kUpdateNoticeTitle = kUpdateNoticeBorder0 + kUiDecorMaxPanelPieces,
+            kUpdateNoticeBody,
+            kUpdateNoticePartCount
+        };
+        static std::array<void*, kUpdateNoticePartCount> g_CareerUiUpdateNotice = {};
         static void OnAutoStageNotice();
 
         static void ResetCareerUiState();
@@ -5613,7 +5637,7 @@ namespace BZROpenShim
             g_CareerUiMainScreen = nullptr;
             g_CareerUiOverlay = nullptr;
             g_CareerUiButton = nullptr;
-            g_CareerUiUpdateNotice = nullptr;
+            g_CareerUiUpdateNotice.fill(nullptr);
         }
 
         // Runs from the MainScreen destructor detour after the engine's
@@ -5693,20 +5717,94 @@ namespace BZROpenShim
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_CareerUiButton)));
         }
 
-        // Shows (or refreshes) the staged-update line on the title menu. The
-        // label is parented like the Career button, so it shares its lifetime
-        // rules: ResetCareerUiState drops it with the rest.
+        // Shows (or refreshes) the staged-update box on the title menu. Every
+        // part is parented like the Career button, so it shares its lifetime
+        // rules: ResetCareerUiState drops it with the rest. Plates and bars
+        // are created before the labels so they draw behind the text, and
+        // their buttons are disabled (+0x148) so the hit walk skips them and
+        // nothing under the box loses its clicks.
         static void EnsureUpdateNotice()
         {
             std::string text;
             if (!g_CareerUiOverlay || !GetOpenShimAutoStageNotice(text))
                 return;
-            if (g_CareerUiUpdateNotice && !UiViewHasChild(g_CareerUiOverlay, g_CareerUiUpdateNotice))
-                g_CareerUiUpdateNotice = nullptr;
-            if (!CreateInputBindingUiLabel(g_CareerUiUpdateNotice, g_CareerUiOverlay,
-                                           "OpenShimUpdateNotice_MainScreen", text.c_str(),
-                                           220.0f, 84.0f, 1000.0f, 40.0f))
-                Log(L"[UPDATER] could not show the staged-update notice on the title screen\n");
+            if (g_CareerUiUpdateNotice[kUpdateNoticeFill] &&
+                !UiViewHasChild(g_CareerUiOverlay, g_CareerUiUpdateNotice[kUpdateNoticeFill]))
+                g_CareerUiUpdateNotice.fill(nullptr);
+
+            // Already built for this text: nothing to re-apply this tick.
+            static std::string s_builtText;
+            const bool allBuilt = std::all_of(g_CareerUiUpdateNotice.begin(), g_CareerUiUpdateNotice.end(),
+                                              [](void* part) { return part != nullptr; });
+            if (allBuilt && text == s_builtText)
+                return;
+
+            // Fits the strip between the Career button (bottom ~72) and the
+            // Single/Multi Player panels (top ~160, measured at 1920x1080).
+            constexpr float kBoxW = 640.0f;
+            constexpr float kBoxH = 70.0f;
+            constexpr float kBoxX = 720.0f - kBoxW * 0.5f;
+            constexpr float kBoxY = kCareerButtonY + kCareerButtonH + 6.0f;
+            constexpr float kTextInset = 24.0f;
+            constexpr float kTextW = kBoxW - 2.0f * kTextInset;
+            constexpr size_t kButtonEnabledOffset = 0x148;
+
+            size_t requested = 0;
+            size_t created = 0;
+            auto disableHit = [](void* plate) {
+                if (plate)
+                    reinterpret_cast<uint8_t*>(plate)[kButtonEnabledOffset] = 0;
+            };
+
+            ++requested;
+            if (CreateInputBindingUiPlate(g_CareerUiUpdateNotice[kUpdateNoticeFill], g_CareerUiOverlay,
+                                          "OpenShimUpdateNotice_Fill", kBoxX, kBoxY, kBoxW, kBoxH))
+            {
+                ++created;
+                disableHit(g_CareerUiUpdateNotice[kUpdateNoticeFill]);
+            }
+
+            UiDecorPanelDesc panel = {};
+            panel.rect = { kBoxX, kBoxY, kBoxW, kBoxH };
+            UiDecorPiece pieces[kUiDecorMaxPanelPieces] = {};
+            const size_t pieceCount = BuildUiDecorPanel(panel, pieces, kUiDecorMaxPanelPieces);
+            for (size_t index = 0; index < pieceCount; ++index)
+            {
+                char name[64] = {};
+                std::snprintf(name, sizeof(name), "OpenShimUpdateNotice_Border%u",
+                              static_cast<unsigned>(index));
+                void*& slot = g_CareerUiUpdateNotice[kUpdateNoticeBorder0 + index];
+                ++requested;
+                if (CreateInputBindingUiDecorPiece(slot, g_CareerUiOverlay, name, pieces[index].texture,
+                                                   pieces[index].rect.x, pieces[index].rect.y,
+                                                   pieces[index].rect.width, pieces[index].rect.height))
+                {
+                    ++created;
+                    disableHit(slot);
+                }
+            }
+
+            const std::string body =
+                FitUiTextToWidth(text.c_str(), kTextW, 1.0f, kInputBindingUiLabelCharWidth);
+            const struct { size_t part; const char* name; const char* text; float y; } labels[] = {
+                { kUpdateNoticeTitle, "OpenShimUpdateNotice_Title",
+                  ShimText("openshim_ui:update_notice_title", "OpenShim update ready"), kBoxY + 8.0f },
+                { kUpdateNoticeBody, "OpenShimUpdateNotice_Body", body.c_str(), kBoxY + 36.0f },
+            };
+            for (const auto& label : labels)
+            {
+                ++requested;
+                if (CreateInputBindingUiLabel(g_CareerUiUpdateNotice[label.part], g_CareerUiOverlay,
+                                              label.name, label.text,
+                                              kBoxX + kTextInset, label.y, kTextW, 28.0f))
+                    ++created;
+            }
+
+            if (created == requested)
+                s_builtText = text;
+            else
+                Log(L"[UPDATER] staged-update notice built %u/%u parts on the title screen\n",
+                    static_cast<unsigned>(created), static_cast<unsigned>(requested));
         }
 
         // Poll tick. Cheap by design: one guarded pointer read in the common

@@ -25,7 +25,7 @@ namespace BZROpenShim
 
     std::string FormatAutoStageNotice(const std::string& version)
     {
-        return "OpenShim " + version + " is ready and will install when you quit the game.";
+        return "Version " + version + " installs when you quit the game.";
     }
 
     bool BuildUpdateRestartWatcherScript(const std::wstring& statusFile,

@@ -161,6 +161,7 @@ namespace BZROpenShim
         JetFlames,
         UnitVo,
         GlobalTurbo,
+        NoDamageSlowdown,
         Headlights,         // latched initializer; the lights are restored to
                             // their captured stock values, then the latch is
                             // cleared and re-run
@@ -202,6 +203,10 @@ namespace BZROpenShim
     // The Career shell screen (career_screen.cpp). False when this build
     // cannot host OpenShim screens.
     bool RegisterCareerScreen();
+
+    // The Banned Players shell screen (bans_screen.cpp), opened from the
+    // Network options page.
+    bool RegisterBansScreen();
 
     // The multiplayer pre-lobby shell screen and its Click_MultiPlayer entry
     // hooks (prelobby_screen.cpp). False when this build cannot host OpenShim

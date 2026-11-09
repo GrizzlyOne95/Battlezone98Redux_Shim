@@ -176,7 +176,11 @@ int main(int argc, char** argv)
         check(solid.find("#define OPENSHIM_PAINT_LIQUID 0") != std::string::npos &&
             solid.find("openShimPaintGlowColour = srgb_to_linear") == std::string::npos &&
             solid.find("openShimPaintTime") == std::string::npos, "solid pack got the glow block or the time parameter");
-        check(!TerrainPaint::Specialize(wetNoEntry, true, lava), "liquid paint accepted a pass without the entry point");
+        // A pass missing the entry point or the anchor skips liquid, not the map.
+        std::string skipWhy;
+        check(TerrainPaint::Specialize(wetNoEntry, true, lava, &skipWhy) && skipWhy == "liquid skipped: no emissive anchor or entry point" &&
+            wetNoEntry.find("#define OPENSHIM_PAINT_LIQUID 0") != std::string::npos &&
+            wetNoEntry.find("openShimPaintTime") == std::string::npos, "liquid pass without the entry point did not skip liquid");
         check(wet.find("void terrain_fragment(uniform float openShimPaintTime, out float4 oTarget") != std::string::npos,
             "liquid time is not an entry-point parameter");
         check(wet.find("#define OPENSHIM_PAINT_LIQUID 1") != std::string::npos &&
@@ -184,7 +188,10 @@ int main(int argc, char** argv)
                 "    emissiveContribution += openShimPaintGlowColour * openShimPaintGlowAmount;\n#endif\n    oColor.xyz = aerialSurface * surfaceTransmission") != std::string::npos &&
             wet.find("openShimPaintLiquid[4] = {0.000000000e+00,2.000000000e+00,0.000000000e+00,0.000000000e+00}") != std::string::npos,
             "liquid pack missed the glow block");
-        check(!TerrainPaint::Specialize(wetNoAnchor, true, lava), "liquid paint accepted a pass without the glow anchor");
+        skipWhy.clear();
+        check(TerrainPaint::Specialize(wetNoAnchor, true, lava, &skipWhy) && skipWhy == "liquid skipped: no emissive anchor or entry point" &&
+            wetNoAnchor.find("#define OPENSHIM_PAINT_LIQUID 0") != std::string::npos &&
+            wetNoAnchor.find("openShimPaintTime") == std::string::npos, "liquid pass without the glow anchor did not skip liquid");
         std::string wide = pixelSource;
         check(TerrainPaint::Specialize(wide, true, eight) && wide.find("#define OPENSHIM_PAINT_LAYERS 8") != std::string::npos &&
             wide.find("openShimPaintRepeats[8]") != std::string::npos, "eight-layer specialization failed");

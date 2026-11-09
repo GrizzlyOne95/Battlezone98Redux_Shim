@@ -125,6 +125,10 @@ if(Python3_Interpreter_FOUND)
         if(OPENSHIM_NUMPY_IMPORT_RESULT EQUAL 0)
             add_test(NAME terrain_autopaint_tests
                 COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_autopaint_tests.py")
+            # The C++ live generator against the Python builder on a synthetic map.
+            add_test(NAME terrain_live_paint_parity
+                COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_live_paint_parity.py"
+                    --generator $<TARGET_FILE:terrain_live_paint_tests>)
         endif()
         add_test(NAME terrain_hd_pack_tests
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/terrain_hd_pack_tests.py")
@@ -240,6 +244,7 @@ openshim_add_test(ogre_entity_reload_tests STD 17 SOURCES
 )
 openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
 openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
+openshim_add_test(terrain_live_paint_tests STD 17 SOURCES terrain_live_paint_tests.cpp)
 openshim_add_test(terrain_tess_defines_tests STD 17 SOURCES terrain_tess_defines_tests.cpp)
 openshim_add_test(options_ui_l10n_tests STD 17 SOURCES options_ui_l10n_tests.cpp ../src/patches/options_ui_l10n.cpp)
 target_compile_definitions(options_ui_l10n_tests PRIVATE

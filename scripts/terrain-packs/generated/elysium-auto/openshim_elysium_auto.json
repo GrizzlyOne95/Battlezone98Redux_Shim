@@ -126,6 +126,17 @@
             ],
             "control": "openshim_elysium_auto_chmisn06_control.png",
             "control2": "openshim_elysium_auto_chmisn06_control2.png"
+          },
+          {
+            "terrainFingerprint": "60d1036af24e4784",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_elysium_auto_sammy__1_control.png",
+            "control2": "openshim_elysium_auto_sammy__1_control2.png"
           }
         ],
         "detile": [
