@@ -4233,6 +4233,12 @@
       "identity": "Build_ConstructBuild(record, typeInfo) cdecl (FUN_006a4380): sibling of AiBuildConstructUnit for non-unit prereqs; the prereq id is the ushort at typeInfo+0. AIConstructionCounterRepair hook."
     },
     {
+      "name": "AiBuildCnstDoneCCAddCall",
+      "address": "0x006A35E0",
+      "expected": "8B 55 A8 52 8B 45 A8 0F BE 48 10 8B 15 04 0F 92 00 8B 04 8A 50 E8",
+      "identity": "FUN_006a3490 CNST idle check, 'building placed' branch (record +0x38 != 0): push rec; push teamAI[(char)rec+0x10]; call AIBuild_UnassignedCCAdd at +0x15. No ConstructionEnd on this path (the stalled branch gets it via FUN_0068fe40). AIConstructionCounterRepair redirects the call."
+    },
+    {
       "name": "AiBuildAttachmentDtor",
       "address": "0x006A1940",
       "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 00 F4 4E 89 00",

@@ -27,6 +27,18 @@
 // FUN_006a1590) still reads 3, call the engine's own ConstructionEnd once. The
 // call is skipped when the table entry is already 0, so it cannot go negative.
 //
+// Second leak (constructor buildings): the per-tick CNST check in
+// FUN_006a3490 (decompile lines 37-48) releases a constructor once it goes
+// idle. When the building was never placed (+0x38 == 0) it calls
+// AI_BuildingStalled (FUN_0068fe40), which ends the count (FUN_0068fe40.c:8).
+// When the building was placed (+0x38 != 0) it only calls
+// AIBuild_UnassignedCCAdd (FUN_00690770) and clears the record, so every
+// successful AI building leaves its count, and facilities_under_construction,
+// at +1 for the rest of the mission (seen live with TraceAIBuildLedger: Begin
+// for kind=1 prereqs with no End). Fix: redirect that call (0x006A35F5) to a
+// stub that ends the count for (team = rec+0x10, prereq = rec+0x30) with the
+// same guards, then calls the stock AIBuild_UnassignedCCAdd.
+//
 // Multiplayer: AI planning is part of the simulation and is not negotiated
 // with peers, so the fix stands down in a network game like the other
 // simulation-affecting [Fixes] entries.
@@ -56,6 +68,8 @@ namespace BZROpenShim
             using FnConstructEnd = void(__cdecl*)(int team, int prereq);
             using FnConstruct = int(__cdecl*)(void* record, void* typeInfo);
             using FnAttachDtor = void(__fastcall*)(void* self, void* edx);
+            using FnCCAdd = void(__cdecl*)(void* teamAI, void* record);
+            constexpr uintptr_t kCnstDoneCallOffset = 0x15;  // row start -> E8 of the CCAdd call
 
             // Prologues from the shipping exe; the guard rows in patches.json
             // pin the same bytes.
@@ -71,6 +85,7 @@ namespace BZROpenShim
             uint32_t g_ControlAddr = 0;     // char [16*0x1E0]  (0x02CE9B18)
             uint32_t g_TeamTableAddr = 0;   // pointer variable (0x00920F04), non-null once AI exists
             uint32_t g_EndAddr = 0;
+            uint32_t g_CCAddAddr = 0;       // AIBuild_UnassignedCCAdd (0x00690770)
 
             InlineDetour32 g_UnitDetour;
             InlineDetour32 g_BuildDetour;
@@ -112,6 +127,62 @@ namespace BZROpenShim
                 return result;
             }
 
+            // Ends one construction count with the guards both repairs share.
+            // Returns the count before the call, or -1 when nothing was ended.
+            int EndConstructionGuarded(int team, uint32_t prereq)
+            {
+                if (team < 0 || team >= static_cast<int>(kTeamCount) || prereq > 0xFFFFu)
+                    return -1;
+                // AI exists, this team is AI-controlled and its table is live.
+                if (*reinterpret_cast<const uint32_t*>(g_TeamTableAddr) == 0)
+                    return -1;
+                if (*reinterpret_cast<const uint8_t*>(g_ControlAddr + static_cast<uintptr_t>(team) * kTeamControlStride) == 0)
+                    return -1;
+                if (reinterpret_cast<const int*>(g_AllocatedAddr)[team] != 1)
+                    return -1;
+                int* table = reinterpret_cast<int* const*>(g_CountsAddr)[team];
+                if (!table || table[prereq] <= 0)
+                    return -1;
+                const int before = table[prereq];
+                reinterpret_cast<FnConstructEnd>(g_EndAddr)(team, static_cast<int>(prereq));
+                ++g_Corrections;
+                return before;
+            }
+
+            void LogCorrection(const wchar_t* what, int team, uint32_t prereq, int before)
+            {
+                const DWORD now = GetTickCount();
+                if (g_LastLogTick == 0 || now - g_LastLogTick >= kLogIntervalMs)
+                {
+                    const int after = reinterpret_cast<int* const*>(g_CountsAddr)[team][prereq];
+                    Log(L"[AICOUNTER] %ls: ended construction team=%d prereq=%u count %d -> %d (corrections=%u, +%u since last log)\n",
+                        what, team, static_cast<unsigned>(prereq), before, after, g_Corrections, g_SuppressedSinceLog);
+                    g_LastLogTick = now;
+                    g_SuppressedSinceLog = 0;
+                }
+                else
+                {
+                    ++g_SuppressedSinceLog;
+                }
+            }
+
+            // Replaces the call to AIBuild_UnassignedCCAdd(teamAI, record) on
+            // the "building placed" branch of the CNST idle check. Same cdecl
+            // signature; the caller cleans the two arguments.
+            void __cdecl ConstructorDoneCCAddHook(void* teamAI, void* record)
+            {
+                if (record && Active())
+                {
+                    const auto* rec = static_cast<const uint8_t*>(record);
+                    const int team = static_cast<int>(*reinterpret_cast<const int8_t*>(rec + 0x10));
+                    const uint32_t prereq = *reinterpret_cast<const uint32_t*>(rec + 0x30);
+                    const int before = EndConstructionGuarded(team, prereq);
+                    if (before >= 0)
+                        LogCorrection(L"Constructor finished building", team, prereq, before);
+                }
+                reinterpret_cast<FnCCAdd>(g_CCAddAddr)(teamAI, record);
+            }
+
             void RepairForRecord(void* attachment)
             {
                 auto* base = static_cast<uint8_t*>(attachment);
@@ -124,35 +195,9 @@ namespace BZROpenShim
                 if (*reinterpret_cast<const int*>(base + kRecordStateOffset) != kStateBuilding)
                     return;
                 const int team = *reinterpret_cast<const int*>(base + 4);
-                if (team < 0 || team >= static_cast<int>(kTeamCount))
-                    return;
-                // AI exists, this team is AI-controlled and its table is live.
-                if (*reinterpret_cast<const uint32_t*>(g_TeamTableAddr) == 0)
-                    return;
-                if (*reinterpret_cast<const uint8_t*>(g_ControlAddr + static_cast<uintptr_t>(team) * kTeamControlStride) == 0)
-                    return;
-                if (reinterpret_cast<const int*>(g_AllocatedAddr)[team] != 1)
-                    return;
-                int* table = reinterpret_cast<int* const*>(g_CountsAddr)[team];
-                if (!table || table[prereq] <= 0)
-                    return;
-
-                const int before = table[prereq];
-                reinterpret_cast<FnConstructEnd>(g_EndAddr)(team, prereq);
-                ++g_Corrections;
-
-                const DWORD now = GetTickCount();
-                if (g_LastLogTick == 0 || now - g_LastLogTick >= kLogIntervalMs)
-                {
-                    Log(L"[AICOUNTER] Producer destroyed mid-build: ended construction team=%d prereq=%u count %d -> %d (corrections=%u, +%u since last log)\n",
-                        team, static_cast<unsigned>(prereq), before, table[prereq], g_Corrections, g_SuppressedSinceLog);
-                    g_LastLogTick = now;
-                    g_SuppressedSinceLog = 0;
-                }
-                else
-                {
-                    ++g_SuppressedSinceLog;
-                }
+                const int before = EndConstructionGuarded(team, prereq);
+                if (before >= 0)
+                    LogCorrection(L"Producer destroyed mid-build", team, prereq, before);
             }
 
             void __fastcall AttachDtorHook(void* self, void* edx)
@@ -172,7 +217,7 @@ namespace BZROpenShim
                 if (g_Installed)
                     return true;
 
-                uint32_t fnUnit = 0, fnBuild = 0, fnDtor = 0;
+                uint32_t fnUnit = 0, fnBuild = 0, fnDtor = 0, cnstDone = 0;
                 const HookEngine::EngineRow rows[] = {
                     { "AiBuildConstructUnit", &fnUnit },
                     { "AiBuildConstructBuild", &fnBuild },
@@ -182,6 +227,8 @@ namespace BZROpenShim
                     { "AiConstructionAllocated", &g_AllocatedAddr },
                     { "AiTeamData", &g_ControlAddr },
                     { "AiTeamTable", &g_TeamTableAddr },
+                    { "AIBuildUnassignedCCAdd", &g_CCAddAddr },
+                    { "AiBuildCnstDoneCCAddCall", &cnstDone },
                 };
                 if (!HookEngine::BindEngineRows("AI construction counter repair", rows))
                     return false;
@@ -195,6 +242,8 @@ namespace BZROpenShim
                 ok = ok && InstallInlineDetour32(g_DtorDetour, fnDtor, reinterpret_cast<void*>(AttachDtorHook),
                                                  sizeof(kDtorPrologue), kDtorPrologue, sizeof(kDtorPrologue),
                                                  reinterpret_cast<void* volatile*>(&g_OrigDtor));
+                ok = ok && RedirectCallTarget(cnstDone + kCnstDoneCallOffset, g_CCAddAddr,
+                                              reinterpret_cast<uintptr_t>(&ConstructorDoneCCAddHook));
                 if (!ok)
                 {
                     // A detour that did install keeps forwarding to its own
@@ -221,7 +270,7 @@ namespace BZROpenShim
                 g_Enabled = false;
             if (g_Enabled && !InstallHooks())
                 g_Enabled = false;
-            Log(L"[AICOUNTER] AI construction counter repair %hs (single-player only; ends the per-team per-type count when a producer dies mid-build)\n",
+            Log(L"[AICOUNTER] AI construction counter repair %hs (single-player only; ends the per-team per-type count when a producer dies mid-build or a constructor finishes a building)\n",
                 g_Enabled ? "active" : "off");
         }
     }

@@ -36,7 +36,27 @@ Everything time-based (below) checks out clean.
 
 ## Ranked candidates
 
-### 1. Begin without a matching End, per completed building-type node (uc leak). Confidence: structure verified, behaviour UNVERIFIED, one conflict with the report
+### 1. Begin without a matching End, per completed building-type node (uc leak). Confidence: static path verified; live UNVERIFIED
+
+Status (2026-11-09):
+- Static: the CNST idle check FUN_006a3490 (R:006a3490.c:37-48) takes the success
+  branch at 0x006A35E0 and calls `AIBuild_UnassignedCCAdd` (0x00690770) at
+  0x006A35F5 with no `AIBuild_ConstructionEnd` before it. The stalled-crew path
+  is the only crew path that Ends (R:0068fe40.c:11, `End(team, *(undefined4*)(rec+0x30))`),
+  so the prereq is a 4-byte read.
+- Live (inconclusive): in two 7-minute ccak runs with `TraceAIBuildLedger=1`
+  (baseline and with the fix), kind=1 prereqs 46/47 logged a Begin and no End,
+  but the constructor never finished a building in either run (no building
+  BUILT event, 400 scrap unused), so neither End path (FUN_006a3490 line 41 or
+  line 44) was reached and the hook did not fire. A run where a constructor
+  actually completes a building is still needed: look for
+  `[AICOUNTER] Constructor finished building` in openshim.log.
+- Side finding (UNVERIFIED cause): in the ccak case the constructor holds its
+  prereq for minutes without building, which by itself pins uc=1 for that type.
+- Fix (PR #772): `AiBuildCnstDoneCCAddCall` redirects the call at 0x006A35F5 to
+  a hook that Ends once (guarded: team range, prereq <= 0xFFFF, count > 0) and
+  then forwards to `UnassignedCCAdd`. The stalled path's own call site is not
+  redirected, so there is no double End.
 
 Verified facts:
 - `AIBuild_ConstructionBegin` is called from exactly one place, the shared node
@@ -197,7 +217,7 @@ Detour `0x005AECB0` (thiscall, producer in ECX, class in stack) and log
 the caller is `0x006A4230`/`0x006A4380` (check return address). Zero lines in a
 long run rules candidate 3 out.
 
-## Shape of the fixes (do not implement before D1 confirms)
+## Shape of the fixes (building-node fix implemented in PR #772: call-site redirect at 0x006A35F5)
 
 Candidate 1 (exact pairing, preferred over the PR's cached-state approach):
 - Building nodes: on the crew success branch (R:006a3490.c:44) call
