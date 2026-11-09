@@ -581,6 +581,7 @@ private:
             for (const auto& item : variation.at("types").items())
             {
                 const int index = std::stoi(item.key());
+                if (index < 0 || index >= 16) throw std::runtime_error("variation type out of range");
                 BlendToward(weights, Weights(item.value()), [&](int r, int c) { return patches.at(r, c) * amount * share.at(r, c, index); });
             }
         }
@@ -598,6 +599,8 @@ private:
                         Smoothstep(0, shape.at("rangeMeters").get<double>(), sign * (cells.at(r, c) - around.at(r, c))) : 0.0; };
                 if (!shape.contains("from")) { BlendToward(weights, target, t); continue; }
                 const auto source = shape["from"].get<std::vector<int>>();
+                for (const int s : source)
+                    if (s < 0 || std::size_t(s) >= n_) throw std::runtime_error("shape from layer out of range");
                 for (int r = 0; r < rows_; ++r)
                 for (int c = 0; c < cols_; ++c)
                 {
@@ -665,5 +668,23 @@ inline std::vector<std::vector<uint8_t>> Generate(const nlohmann::json& recipe, 
 {
     const int weightSize = (std::min)(recipe.value("weightSize", 1024), size);
     return Generator::Upscale(Generator(recipe, input).Rasterize(weightSize), weightSize, size);
+}
+
+// Throws if the recipe cannot paint `layers` layers: runs it once on a small
+// 1x1-zone map that uses every MAT type, so a bad recipe is caught when the
+// manifest loads instead of at mission load.
+inline void ValidateRecipe(const nlohmann::json& recipe, std::size_t layers)
+{
+    if (!recipe.is_object() || recipe.value("layers", nlohmann::json::array()).size() != layers)
+        throw std::runtime_error("live paint recipe needs one layer per paint layer");
+    Input input;
+    input.zonesX = input.zonesZ = 1;
+    input.cells.resize(64 * 64);
+    for (std::size_t i = 0; i < input.cells.size(); ++i)
+        input.cells[i] = uint16_t((i % 16) << 12 | ((i / 16) % 16) << 8 | (i % 2) << 7);
+    input.plane.resize(256 * 256);
+    for (std::size_t i = 0; i < input.plane.size(); ++i) input.plane[i] = uint16_t((i % 256) * (i / 256) % 4000);
+    input.bounds = {-640.0f, -640.0f, 640.0f, 640.0f};
+    Generate(recipe, input, 64);
 }
 }

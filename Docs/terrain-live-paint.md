@@ -8,11 +8,18 @@ builder uses. It is a **fallback only**: a baked entry always wins.
 
 Off by default. Two things turn it on:
 
-1. The material's `paint` block carries a `live` autopaint recipe
-   (`scripts/terrain-packs/<world>-autopaint.json`). The recipe must have one
-   layer per paint layer, and the pack must use the multi-map form.
-   `scripts/Add-LivePaintRecipe.py <manifest> <output>` adds them to a copy of a
-   manifest, matching worlds by `diffuseResource`.
+1. The material's `paint` block carries a `live` autopaint recipe. The recipe
+   must have one layer per paint layer, and the pack must use the multi-map
+   form. `scripts/Add-LivePaintRecipe.py <manifest> <output>` adds them to a
+   copy of a manifest, matching worlds by `diffuseResource` and preferring
+   `scripts/terrain-packs/<world>-autopaint-<N>layer.json` (N = the pack's layer
+   count) over `<world>-autopaint.json`. CR's 4-layer Mars pack uses
+   `mars-autopaint-4layer.json`, the recipe it was baked with.
+   The manifest loader test-runs each recipe on a tiny map. A recipe that fails
+   (wrong layer count, short weight rows, out-of-range layer or type
+   indices, bad JSON shape) logs
+   `[TERRAIN-PAINT] live paint recipe ignored for <material>: ...` and is
+   dropped. The material's baked entries still load.
 2. The environment variable `OPENSHIM_TERRAIN_PAINT_LIVE=1`.
 
 `OPENSHIM_TERRAIN_PAINT_LIVE_DUMP=<dir>` also writes `live_<fingerprint>.bin`
@@ -35,13 +42,22 @@ map is complete (so the same retry/deferral rules still apply):
 3. The binding takes the captured fingerprint and bounds, so the existing
    `map accepted` check and log run unchanged. The first baked entry's control
    PNGs stand in for slices 4 and 13 while the texture array is built.
-4. After `BuildTerrainHdTextureArray`, `TerrainLivePaint::Generate` runs at the
-   array's width and `UploadLivePaint` overwrites slices 4 (and 13 for eight
-   layers) at every mip with `UpdateSubresource`. It requires an uncompressed
-   8-bit square array; B8G8R8A8 is swizzled, sRGB gets raw bytes like the PNG path.
+4. After `BuildTerrainHdTextureArray`, `UploadLivePaint` overwrites slices 4
+   (and 13 for eight layers) at every mip with `UpdateSubresource`, first with
+   a flat placeholder from the recipe's `outsideWeights` so the other map's
+   control never shows. A detached worker thread then runs
+   `TerrainLivePaint::Generate` at the array's width. The upload requires an
+   uncompressed 8-bit square array; B8G8R8A8 is swizzled, sRGB gets raw bytes
+   like the PNG path.
+5. `UpdateNativeTerrainHdProfile`, which the render tick calls under the proxy
+   mutex, picks up the finished job (`FinishLivePaint`) and uploads it. A job
+   from a mission that has since been torn down is dropped: the install owns it
+   through a `shared_ptr`, and `RestoreNativeTerrainHd` resets that.
 
-Any failure throws into the installer's existing catch, which restores the
-stock material and logs `native tiles declined: ...`.
+A failure during install throws into the installer's existing catch, which
+restores the stock material and logs `native tiles declined: ...`. A failure
+in the worker logs `live paint declined: ...` and declines HD, as a failed
+refresh does.
 
 ## Recipe and parity
 
@@ -67,11 +83,14 @@ why live output is not a replacement for a baked entry, only a fallback.
 
 ## Load-time cost
 
-Generation runs once per mission, on the loading thread, after the texture
-array is built. Offline (CLI, including process start), 4x4 file zones at
+Generation runs once per mission, on a worker thread, after the texture array
+is built; loading carries on meanwhile. Offline (CLI, including process start), 4x4 file zones at
 1024 px take about 1.2 s. In game, 4x4 file zones at the 2048 px array width
-took 1367 ms and 1425 ms (two runs), logged as the `ms=` field of
-`[TERRAIN-PAINT] live paint generated`.
+took 1367 ms and 1425 ms on the loading thread (two runs), and 1346 ms on the
+worker, logged as the `ms=` field of `[TERRAIN-PAINT] live paint generated`.
+In the worker run the array was ready at 09:00.735, the worker finished at
+02.210, and the upload landed at the first world frame at 03.271. In between,
+the rest of the load ran (`terrain-tess` setup at 03.230).
 
 ## Live result
 
@@ -91,8 +110,22 @@ orientation are correct. A frame capture at 4 s shows the painted terrain with
 no seams or stock-atlas tiles; that is a visual spot check, not a comparison
 against a baked pack.
 
-CR's Mars pack is 4-layer while `mars-autopaint.json` has 8 layers, so the
-script leaves Mars without a live recipe; Mars needs a 4-layer recipe first.
+The worker build repeated that run on `multdm05`: worker generation on its own
+thread, upload on the render thread, and the dump again 0/0 with a
+byte-identical CLI image. That run captured no frame (only the listener
+installed), so the frame check above is from the loading-thread build.
+
+Mars: `mars-autopaint-4layer.json` against `Build-TerrainAutoPaint.py`, no
+noise: `mult01` max 2, mean 0.0003; `misn04` max 0. With variation, layer
+shares agree within 0.001.
+
+Stock `mult01` resolves to the Venus material, not Mars. Live paint selected
+it and the map was accepted, but the install then declined with
+`native paint shader specialization declined`. Venus's pack enables liquid
+glow, and `TerrainPaint::Specialize` declines a terrain program without the
+liquid anchor line. That step uses only the program source and the material's
+paint settings, not live data. The baked Venus mission `misn07` loads with the
+same DLL and does not decline.
 
 ## Known gaps
 
@@ -101,6 +134,9 @@ script leaves Mars without a live recipe; Mars needs a 4-layer recipe first.
 - Noise is hash-based, not PCG64 (above).
 - Single-map packs (`paint.maps` empty) are not supported: they already name
   one map.
-- Generation is single-threaded and blocks loading for its duration.
+- For about 1.4 s after the first world frame, a map shows the flat
+  placeholder paint until the worker finishes.
+- Stock `mult01` (Venus material) declines in the shared paint shader step,
+  not in live paint (above).
 - Memory caps for the 32-bit process: maps over 64 file zones and arrays wider
   than 2048 px decline (the slope fields and the upscale grow with both).

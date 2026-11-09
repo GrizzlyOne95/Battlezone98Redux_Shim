@@ -16,6 +16,18 @@ bool g_HdActive = false, g_HdDeclined = false;
 bool g_HdProfileSuspended = false;
 // Zones seen when paint last waited for a partial terrain; 0 when not waiting.
 std::size_t g_HdPaintDeferredZones = 0;
+// Live paint runs on a worker thread; the render tick uploads its result.
+// Dropping the pointer abandons a job (the worker still owns its copy).
+struct LivePaintJob
+{
+    std::atomic<bool> done{false};
+    std::vector<std::vector<uint8_t>> images;
+    std::string error;
+    long long ms = 0;
+    int zonesX = 0, zonesZ = 0;
+    UINT size = 0;
+};
+std::shared_ptr<LivePaintJob> g_LivePaintJob;
 std::array<bool, 256> g_HdTileMapped{};
 std::array<uint8_t, 256> g_HdSliceRemap = TerrainHdMaterial::IdentityRemap();
 std::array<bool, 3> g_HdChannelEnabled{};
@@ -123,6 +135,7 @@ void CopyHdPrograms(void* destination, void* source,
 void RestoreNativeTerrainHd()
 {
     g_HdActive = false;
+    g_LivePaintJob.reset();
     g_HdPaint = {};
     OgreSharedPtr source, backup;
     bool materialRestored = g_HdSourceMaterial.empty();
@@ -514,6 +527,65 @@ void UploadLivePaint(const std::vector<std::vector<uint8_t>>& images, UINT size)
     }
 }
 
+// Uniform control images from the recipe's outsideWeights (default: layer 0).
+std::vector<std::vector<uint8_t>> LivePaintPlaceholder(const nlohmann::json& recipe, UINT size)
+{
+    const std::size_t layers = recipe.at("layers").size();
+    std::vector<double> weights(layers, 0.0);
+    weights[0] = 1;
+    if (recipe.contains("outsideWeights")) weights = recipe.at("outsideWeights").get<std::vector<double>>();
+    if (weights.size() != layers) throw std::runtime_error("live paint outsideWeights need one value per layer");
+    double total = 0;
+    for (const double w : weights) total += (std::max)(w, 0.0);
+    if (total <= 0) { weights.assign(layers, 0.0); weights[0] = total = 1; }
+    std::vector<std::vector<uint8_t>> images(layers / 4, std::vector<uint8_t>(std::size_t(size) * size * 4));
+    for (std::size_t i = 0; i < images.size(); ++i)
+    for (std::size_t p = 0; p < images[i].size(); ++p)
+        images[i][p] = uint8_t(std::lround(255 * (std::max)(weights[i * 4 + p % 4], 0.0) / total));
+    return images;
+}
+
+void StartLivePaint(const nlohmann::json& recipe, TerrainLivePaint::Input input, const std::string& fingerprint, UINT size)
+{
+    auto job = std::make_shared<LivePaintJob>();
+    job->zonesX = input.zonesX; job->zonesZ = input.zonesZ; job->size = size;
+    std::thread([job, recipe, input = std::move(input), fingerprint, size]() {
+        const auto start = std::chrono::steady_clock::now();
+        try
+        {
+            job->images = TerrainLivePaint::Generate(recipe, input, int(size));
+            DumpLivePaint(input, job->images, fingerprint, int(size));
+        }
+        catch (const std::exception& error) { job->images.clear(); job->error = error.what(); }
+        catch (...) { job->images.clear(); job->error = "unknown error"; }
+        job->ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        job->done.store(true, std::memory_order_release);
+    }).detach();
+    g_LivePaintJob = job;
+}
+
+// Render tick, under g_mutex: upload a finished job; a failed one declines HD
+// like any refresh failure.
+void FinishLivePaint()
+{
+    if (!g_LivePaintJob || !g_LivePaintJob->done.load(std::memory_order_acquire)) return;
+    const auto job = std::move(g_LivePaintJob);
+    if (!g_HdActive) return;
+    try
+    {
+        if (!job->error.empty()) throw std::runtime_error(job->error);
+        UploadLivePaint(job->images, job->size);
+        LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] live paint generated fileZones=%dx%d size=%u images=%zu ms=%lld",
+            job->zonesX, job->zonesZ, job->size, job->images.size(), job->ms);
+    }
+    catch (const std::exception& error)
+    {
+        LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-PAINT] live paint declined: %s", error.what());
+        RestoreNativeTerrainTessellationTest(); RestoreNativeTerrainHd();
+        g_HdDeclined = true;
+    }
+}
+
 bool InstallNativeTerrainHd()
 {
     // Cleared before every early return: a stale deferral would keep
@@ -660,15 +732,12 @@ bool InstallNativeTerrainHd()
         if (!BuildTerrainHdTextureArray(*binding, array)) throw std::runtime_error("native HD texture array declined");
         if (liveInput)
         {
-            const auto start = std::chrono::steady_clock::now();
             if (g_proxy.hdWidth > kLivePaintMaxSize)
                 throw std::runtime_error("live paint array too wide: " + std::to_string(g_proxy.hdWidth));
-            const auto images = TerrainLivePaint::Generate(binding->livePaint, *liveInput, int(g_proxy.hdWidth));
-            DumpLivePaint(*liveInput, images, binding->paint.fingerprint, int(g_proxy.hdWidth));
-            UploadLivePaint(images, g_proxy.hdWidth);
-            LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] live paint generated fileZones=%dx%d size=%u images=%zu ms=%lld",
-                liveInput->zonesX, liveInput->zonesZ, g_proxy.hdWidth, images.size(),
-                (long long)std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count());
+            // The baked placeholder belongs to another map: cover it with the
+            // recipe's outside weights until the worker finishes.
+            UploadLivePaint(LivePaintPlaceholder(binding->livePaint, g_proxy.hdWidth), g_proxy.hdWidth);
+            StartLivePaint(binding->livePaint, std::move(*liveInput), binding->paint.fingerprint, g_proxy.hdWidth);
         }
         for (unsigned c = 0; c < 3; ++c)
         {
@@ -810,6 +879,7 @@ bool InstallNativeTerrainHd()
 void UpdateNativeTerrainHdProfile()
 {
     if (!g_config.hdEnabled || g_proxy.tearingDown) return;
+    FinishLivePaint();
     if (!HdProfileAllowed())
     {
         if (!g_HdActive) return;

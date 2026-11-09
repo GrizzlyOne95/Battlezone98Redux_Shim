@@ -47,12 +47,14 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -1274,13 +1276,20 @@ namespace BZROpenShim
                             binding.paint.bounds = paint.at("boundsMeters").get<std::array<float, 4>>();
                         }
                         binding.paint.Validate();
+                        // A bad live recipe only loses live paint; the baked entries still load.
                         if (paint.contains("live"))
                         {
-                            const auto& live = paint.at("live");
-                            if (binding.paint.maps.empty() || !live.is_object() || !live.contains("typeWeights") ||
-                                !live.contains("layers") || live.at("layers").size() != binding.paint.Layers())
-                                throw std::runtime_error("paint live needs the multi-map form and a recipe with one layer per paint layer");
-                            binding.livePaint = live;
+                            try
+                            {
+                                if (binding.paint.maps.empty()) throw std::runtime_error("live paint needs the multi-map form");
+                                TerrainLivePaint::ValidateRecipe(paint.at("live"), binding.paint.Layers());
+                                binding.livePaint = paint.at("live");
+                            }
+                            catch (const std::exception& error)
+                            {
+                                LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-PAINT] live paint recipe ignored for %s: %s",
+                                    materialIt.key().c_str(), error.what());
+                            }
                         }
                     }
                     parsed.materials.emplace(materialIt.key(), std::move(binding));

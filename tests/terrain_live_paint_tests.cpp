@@ -95,6 +95,24 @@ int main(int argc, char** argv)
         // The skirt outside the file takes outsideWeights (layer 0).
         check(images[0][0] == 255, "skirt corner is the outside layer");
 
+        // Manifest-load validation: a good recipe passes; short weights or a
+        // wrong layer count throw instead of reading past a vector.
+        TerrainLivePaint::ValidateRecipe(recipe, 4);
+        const auto throws = [](const nlohmann::json& bad, std::size_t layers) {
+            try { TerrainLivePaint::ValidateRecipe(bad, layers); } catch (const std::exception&) { return true; }
+            return false;
+        };
+        check(throws(recipe, 8), "layer count mismatch is rejected");
+        auto shortRow = recipe; shortRow["typeWeights"]["3"] = {0, 1};
+        check(throws(shortRow, 4), "short typeWeights row is rejected");
+        auto shortTarget = recipe; shortTarget["variation"]["types"]["0"] = {0, 0, 1};
+        check(throws(shortTarget, 4), "short variation target is rejected");
+        check(throws(nlohmann::json::array(), 4), "non-object recipe is rejected");
+        auto badFrom = recipe; badFrom["shape"] = nlohmann::json::array({nlohmann::json::object({{"radiusMeters", 40}, {"rangeMeters", 5}, {"ridge", {1, 0, 0, 0}}, {"from", nlohmann::json::array({5})}})});
+        check(throws(badFrom, 4), "shape from index past the layers is rejected");
+        auto badType = recipe; badType["variation"]["types"] = nlohmann::json::object({{"16", {1, 0, 0, 0}}});
+        check(throws(badType, 4), "variation type past 15 is rejected");
+
         auto eight = recipe;
         eight["layers"] = nlohmann::json::array({{}, {}, {}, {}, {{"edge", {{"meters", 4}}}}, {}, {}, {}});
         for (auto* key : {"outsideWeights"}) eight[key] = {1, 0, 0, 0, 0, 0, 0, 0};
