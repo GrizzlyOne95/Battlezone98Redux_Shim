@@ -5247,6 +5247,24 @@
       "identity": "AttackTask::DoState stand state: mov ecx,[ebp-4]; call DoStand (+3). The legacy (1.4) stand zeroes closeSq for this call only, so the craft holds instead of reversing"
     },
     {
+      "name": "SetViewMode",
+      "address": "0x0061D120",
+      "expected": "55 8B EC 51 83 3D D8 AA 8E 00 05",
+      "identity": "void cdecl(object* player, int mode): looks mode up in the 10-entry view table at 0x008EAD18 ({mode, update fn}; mode 9 = free eye, fn 0x0061C5B0), saves the previous mode and runs the new update fn. Called by the game-key handler 0x0061DC10 and by vehicle-enter code with the object's default view"
+    },
+    {
+      "name": "GameKeyViewSetCall",
+      "address": "0x0061DDF0",
+      "expected": "8B 45 08 50 8B 4D FC 51 E8 23 F3 FF FF",
+      "identity": "Game-key handler 0x0061DC10 switch group GK 6/7/8/9/0x2A: push gk; push player; call SetViewMode (+8). Behind the handler's net-game gate, which only lets keys through in a network game while the player controls an object"
+    },
+    {
+      "name": "CurrentViewMode",
+      "address": "0x02CECEA0",
+      "kind": "data",
+      "identity": "int, the active view-table mode id (9 = free eye); SetViewMode compares against it and rewrites it"
+    },
+    {
       "name": "AttackTaskIsBuildingClass",
       "address": "0x00477D70",
       "expected": "55 8B EC 51 8B 45 08 8B 88 84 00 00",

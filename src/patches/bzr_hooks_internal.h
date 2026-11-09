@@ -2082,6 +2082,9 @@ namespace BZROpenShim
         void ReloadNoDamageSlowdownConfig();
         void RefreshNoDamageSlowdownState();
 
+        // --- MP free camera block (mp_block_freecam.cpp) ---------------------
+        void InitializeMpBlockFreeCam();
+
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;
         void InitializeUnitVoConfig();

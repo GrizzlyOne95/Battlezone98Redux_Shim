@@ -330,6 +330,8 @@ openshim_opt:PersistentPlayerMute:label~Persistent Mutes~~~~~~
 openshim_opt:PersistentPlayerMute:desc~Remember muted players across sessions by stable identity, so a rename or reconnect does not undo it. Off is stock: mutes last the session; your list is kept.~~~~~~
 openshim_opt:LobbyReadouts:label~Lobby Readouts~~~~~~
 openshim_opt:LobbyReadouts:desc~Nickname field and route readout in the waiting-room left column. Does not cover BZP's faction picker. Restart required.~~~~~~
+openshim_opt:BlockFreeCamInMultiplayer:label~Block Free Camera~~~~~~
+openshim_opt:BlockFreeCamInMultiplayer:desc~Ignore the free camera key (Shift/Ctrl+F11) in multiplayer so nobody scouts with it. Off is stock. Enforced by your own game only.~~~~~~
 openshim_opt:ReauthOnNicknameChange:label~Live Nickname~~~~~~
 openshim_opt:ReauthOnNicknameChange:desc~Experimental: after a nickname edit, reconnect the lounge so the new name is authorized. Expect a brief drop or Not Ready flicker. In a match it is only saved.~~~~~~
 openshim_opt:PreLobby:label~MP Setup Screen~~~~~~

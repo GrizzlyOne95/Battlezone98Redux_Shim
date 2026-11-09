@@ -163,6 +163,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # the name field is the one lobby chrome that is allowed on.
     "Network/LobbyReadouts",
 
+    # Client-local anti-scouting: ignores the free camera key (GK 9) while in a
+    # network game. Ships ON by request; set to 0 for stock behaviour.
+    "Network/BlockFreeCamInMultiplayer",
+
     # Purely local presentation: nothing is sent to the host or the muted
     # player, and it changes no simulation or wire traffic. It ships ON only
     # because persistence has been the shipped behaviour since 1.0.0.28 --
