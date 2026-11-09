@@ -463,6 +463,7 @@ openshim_ui:row:MeterFading:label~Meter Fading~~~~~~
 openshim_ui:row:RadarFading:label~Radar Fading~~~~~~
 openshim_ui:row:MenuColors:label~Menu Colors~~~~~~
 openshim_ui:row:VisualEffects:label~Visual Effects~~~~~~
+openshim_ui:row:BannedPlayers:label~Banned Players~~~~~~
 openshim_cat:Video:name~Video~~~~~~
 openshim_cat:Video:title~VIDEO~~~~~~
 openshim_cat:Video:blurb~Renderer, render profile, the DX11 Enhanced passes, shadows and terrain; visual effects open from here.~~~~~~
@@ -533,6 +534,7 @@ openshim_ui:row:MeterFading:desc~Fade cockpit hull and ammo independently, inclu
 openshim_ui:row:MenuColors:desc~Live RGB sliders for the main menu image artwork. Apply saves; Stock restores original colors.~~~~~~
 openshim_ui:row:RadarFading:desc~Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.~~~~~~
 openshim_ui:row:VisualEffects:desc~Jet flames, emissive pulse, star twinkle, death chunks, muzzle flashes and recoil, shell casings and skinned gibs.~~~~~~
+openshim_ui:row:BannedPlayers:desc~Lists the players you have banned as host; Unban removes one immediately.~~~~~~
 openshim_ui:render_profile_dx9_desc~Enhanced requires DX11; on DX9 it falls back to Redux (Stock). Retro and Redux work on both. Your choice is kept for DX11.~~~~~~
 openshim_ui:category_hint~Click a value to change it. Point at a setting to read what it does.~~~~~~
 openshim_ui:restart_note~* Takes effect after restarting Battlezone.~~~~~~

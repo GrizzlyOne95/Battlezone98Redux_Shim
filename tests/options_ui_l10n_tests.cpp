@@ -105,6 +105,7 @@ static void CheckShippedTable()
         Registry::kShimRowUpdateCheck, Registry::kShimRowKeyBindings, Registry::kShimRowReticle,
         Registry::kShimRowPalette, Registry::kShimRowDamage, Registry::kShimRowFading,
         Registry::kShimRowMeters, Registry::kShimRowRadar, Registry::kShimRowMenuTheme, Registry::kShimRowEffects,
+        Registry::kShimRowBans,
     };
     for (const char* row : pseudoRows)
     {
@@ -214,6 +215,7 @@ static void CheckCategoryCoverage()
         Registry::kShimRowUpdateCheck, Registry::kShimRowKeyBindings, Registry::kShimRowReticle,
         Registry::kShimRowPalette, Registry::kShimRowDamage, Registry::kShimRowFading,
         Registry::kShimRowMeters, Registry::kShimRowRadar, Registry::kShimRowMenuTheme, Registry::kShimRowEffects,
+        Registry::kShimRowBans,
     };
     std::set<std::string> registryLabels;
     for (const auto& setting : Registry::g_ShimSettingsRegistry)

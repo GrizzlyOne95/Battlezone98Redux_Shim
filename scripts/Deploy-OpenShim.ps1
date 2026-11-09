@@ -159,6 +159,7 @@ $uiFiles = @(
     'osh_career_center.png',
     'osh_prelobby_center.png',
     'osh_lan_center.png',
+    'osh_bans_center.png',
     'osh_options_center.png',
     'osh_hub_center.png',
     'osh_category_center.png',

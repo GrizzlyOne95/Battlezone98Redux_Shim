@@ -203,6 +203,10 @@ namespace BZROpenShim
     // cannot host OpenShim screens.
     bool RegisterCareerScreen();
 
+    // The Banned Players shell screen (bans_screen.cpp), opened from the
+    // Network options page.
+    bool RegisterBansScreen();
+
     // The multiplayer pre-lobby shell screen and its Click_MultiPlayer entry
     // hooks (prelobby_screen.cpp). False when this build cannot host OpenShim
     // screens; the stock Multiplayer button is then untouched.
