@@ -67,6 +67,26 @@
             "control": "openshim_io_auto_misn11_stock_control.png"
           },
           {
+            "terrainFingerprint": "cd30e736082dfec5",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_io_auto_misns3_control.png"
+          },
+          {
+            "terrainFingerprint": "c3da7fa2475e1f5e",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_io_auto_misns3_stock_control.png"
+          },
+          {
             "terrainFingerprint": "d6e25d9d88429904",
             "boundsMeters": [
               -3190.0,
