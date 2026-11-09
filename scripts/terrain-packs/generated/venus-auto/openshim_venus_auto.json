@@ -85,6 +85,46 @@
               3190.0
             ],
             "control": "openshim_venus_auto_misn09_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "0c50d6823f069326",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misns1_control.png"
+          },
+          {
+            "terrainFingerprint": "016d2fec6476500a",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misns1_stock_control.png"
+          },
+          {
+            "terrainFingerprint": "0bd46b5f9b6d1106",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misns2_control.png"
+          },
+          {
+            "terrainFingerprint": "4830c19f61d30220",
+            "boundsMeters": [
+              -3190.0,
+              -3210.0,
+              3210.0,
+              3190.0
+            ],
+            "control": "openshim_venus_auto_misns2_stock_control.png"
           }
         ],
         "detile": [
@@ -106,10 +146,27 @@
         ],
         "heightBlend": 0.5,
         "heightMeters": [
-          0.8,
+          1.2,
           0.15,
+          1.0,
+          2.6
+        ],
+        "detail": [
+          60,
+          1.5,
+          4,
+          1
+        ],
+        "detailLayers": [
           0.6,
-          1.8
+          0.0,
+          0.8,
+          1.0
+        ],
+        "parallax": [
+          1,
+          30,
+          12
         ]
       }
     }
