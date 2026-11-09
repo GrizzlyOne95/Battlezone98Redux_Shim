@@ -2609,6 +2609,42 @@
       "expected": "55 8B EC E8 C8 F1 FF FF 0F B6 C0 5D C3 CC CC CC"
     },
     {
+      "name": "AnyNationLobbyPublish",
+      "address": "0x0073D020",
+      "expected": "55 8B EC 6A FF 68 FC AA 85 00 64 A1 00 00 00 00",
+      "identity": "GOG Redux 2.2.301 FUN_0073D020, __fastcall(netService), plain ret: republishes the positional 'gameSettings' lobby key through lobby vtable +0x20 when it differs from vtable +0x2C (decomp lines 48-67). mp_any_nation.cpp post-hooks it (5-byte detour: push ebp / mov ebp,esp / push -1) to publish the separate 'anyNation' key. Prologue read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationLobbyRead",
+      "address": "0x00743F40",
+      "expected": "55 8B EC 6A FF 68 48 B4 85 00 64 A1 00 00 00 00",
+      "identity": "GOG Redux 2.2.301 FUN_00743F40 PopulateLobbyFromData, __thiscall(netService, info, arg2) ret 8 (ends 0x00744A4C); reads 'gameSettings' via lobby vtable +0x2C (decomp 222-248), lobby id at info+0x10. mp_any_nation.cpp post-hooks it to read 'anyNation' on clients. Prologue read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationScreenCtor",
+      "address": "0x00796880",
+      "expected": "55 8B EC 6A FF 68 78 F5 85 00 64 A1 00 00 00 00",
+      "identity": "GOG Redux 2.2.301 FUN_00796880 cUI_Multiplayer_Create screen ctor, __thiscall(this, arg) ret 4 (ends 0x0079952E). Builds the hidden AnyNationButton (decomp :306-:313; widget stored at this+0x1A0). mp_any_nation.cpp post-hooks it to show and label the button for the host. Prologue read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationButtonCallbacks",
+      "address": "0x00797ACA",
+      "expected": "68 70 5D 79 00 68 70 5D 79 00",
+      "identity": "GOG Redux 2.2.301 two `push 0x00795D70` immediates (click callbacks) passed to the AnyNationButton widget constructor 0x007C3E30 at 0x00797B26; 0x00795D70 is the nullsub thunk (cmp [0x0094555C],0 / call 0x00417C60 = push ebp,mov ebp,esp,push ecx,mov [ebp-4],ecx,mov esp,ebp,pop ebp,ret). mp_any_nation.cpp rewrites both imm32 to its own cdecl handler, exactly as the sniper button passes 0x00795ED0. Bytes read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationLobbyRecord",
+      "address": "0x0056F900",
+      "expected": "55 8B EC 51 89 4D FC 6A 00 8B 45 FC 83 C0 28",
+      "identity": "GOG Redux 2.2.301 FUN_0056F900, __thiscall(netService), plain ret: looks up the current lobby record (FindRecord(this+0x28, 0)); lobby id at record+0x10 (see NetGameLobbyFindRecordIdCompare). Called as ecx=[screen+0x1BC] at 0x0079B8BE. Bytes read from the shipped image 2026-11-09."
+    },
+    {
+      "name": "AnyNationWidgetSetText",
+      "address": "0x007C44A0",
+      "expected": "55 8B EC 6A FF 68 A8 8F 84 00 64 A1 00 00 00 00",
+      "identity": "GOG Redux 2.2.301 FUN_007C44A0, __thiscall(widget, std::string text by value) ret 0x18: forwards the text to the widget's child via vtable +0x3C. The sniper toggle labels itself with it at 0x0079BA34. Bytes read from the shipped image 2026-11-09."
+    },
+    {
       "name": "AutoLoadShellGame",
       "address": "0x004FDAB0",
       "expected": "55 8B EC 83 EC 6C A1 00 70 8E 00 33 C5 89 45 FC"

@@ -570,6 +570,8 @@ namespace
         // is sent as, and a stock receiver reads that exactly as before.
         if (Equals(name, "OPENSHIM_LUA_MAPOBJECT_HANDLES"))
             return TryReadMappedBool(ini, "Network", "LuaMapObjectHandles", false, out);
+        if (Equals(name, "OPENSHIM_ANY_NATION_TOGGLE"))
+            return TryReadMappedBool(ini, "Fixes", "AnyNationToggle", true, out);
         if (Equals(name, "OPENSHIM_STOCK_FACTIONS_ONLY"))
             return TryReadMappedBool(ini, "Network", "StockFactionsOnly", false, out);
         if (Equals(name, "OPENSHIM_STOCK_FACTION_SET"))

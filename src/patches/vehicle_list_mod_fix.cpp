@@ -18,6 +18,7 @@
 #include "patcher.h"
 #include "fog_wake_feature.h"
 #include "mp_vehicle_preview_fix.h"
+#include "mp_faction_restrict.h"
 #include "shim_log.h"
 #include "x86_length.h"
 #include "ogre_shader_cache.h"
@@ -207,7 +208,10 @@ namespace BZROpenShim
 
             __try
             {
-                g_BzrFn_VehicleListLoad(mgrThis, assetName);
+                // Through the faction/Any Nation hook when it is installed:
+                // this direct call bypasses the two call sites it rewrites.
+                if (!MpFactionRestrict::LoadVehicleListThroughHook(mgrThis, assetName))
+                    g_BzrFn_VehicleListLoad(mgrThis, assetName);
             }
             __except (FilterVehicleAssetDebugException(GetExceptionCode(), stage, assetName))
             {
@@ -253,6 +257,16 @@ namespace BZROpenShim
         if (OdfItemHooksInstalled() && MapFolderItems::CanServe(name))
             return g_VxtIndexStandIn;
         return nullptr;
+    }
+
+    // True when the vehicle list loader would swap this pool name for
+    // netveh.odf: an index miss loads "netveh.odf" instead
+    // (FUN_00766900-00766900.c:60-64). Unknown (hook not installed): false.
+    bool VehicleListPoolFallsBackToNetveh(const char* name)
+    {
+        if (!g_OrigVxtIndexCheck || !name)
+            return false;
+        return !EngineIndexHas(name) && !(OdfItemHooksInstalled() && MapFolderItems::CanServe(name));
     }
 
     static void InstallVxtIndexCheckOnce()
