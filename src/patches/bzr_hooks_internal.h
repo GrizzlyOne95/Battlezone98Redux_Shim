@@ -2085,6 +2085,11 @@ namespace BZROpenShim
         // --- AI construction counter repair (ai_construction_counter_repair.cpp)
         void InitializeAiConstructionCounterRepairConfig();
 
+        // --- AI build ledger trace (ai_build_ledger_trace.cpp) ---------------
+        // [Diagnostics] TraceAIBuildLedger, default OFF, read-only.
+        void InitializeAiBuildLedgerTraceConfig();
+        void TickAiBuildLedgerTrace();
+
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;
         void InitializeUnitVoConfig();

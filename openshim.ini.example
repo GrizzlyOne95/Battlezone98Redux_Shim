@@ -1513,6 +1513,14 @@ TraceShellCasings = 0
 ; Legacy env alias: OPENSHIM_TRACE_PATH_BLOCK
 TracePathBlock = 0
 
+; AI build ledger: one [AIBUILD] line per AIBuild_ConstructionBegin/End call
+; (team, prereq, counter after, caller), a per-team counter and reserved-area
+; dump every 10 s, and Producer::StartBuild failures from the AI. Read-only;
+; capped at 20000 lines. Used to test the "AI stops building after ~60 minutes"
+; counter-leak hypothesis (reverse_engineering/ai_long_game_build_stall_20261109.md).
+; Accepted: boolean. Default: OFF.
+TraceAIBuildLedger = 0
+
 ; Explain a "Not Ready" multiplayer entry on the main menu. The stock shell has
 ; no way to say why: its readiness getter returns only ready/not-ready, so the
 ; "no inet" and "no auth" tooltips it carries are unreachable and every cause --

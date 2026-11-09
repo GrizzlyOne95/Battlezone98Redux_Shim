@@ -4251,6 +4251,60 @@
       "identity": "int [16]: 1 while the team's AiConstructionCounts table is allocated (AIBuild_ConstructionNew/Delete)."
     },
     {
+      "name": "AIBuildConstructionBegin",
+      "address": "0x00690570",
+      "expected": "55 8B EC 8B 45 08 8B 0C 85 C0 0F 93 00 8B 55 0C",
+      "identity": "AIBuild_ConstructionBegin(team, prereq) cdecl (FUN_00690570): ++number_under_construction[team][prereq], and ++facilities_under_construction[team] for building prereqs. Sibling of AIBuildConstructionEnd (same prologue). TraceAIBuildLedger hook; first 6 bytes relocated."
+    },
+    {
+      "name": "ProducerStartBuild",
+      "address": "0x005AECB0",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC 83 B8 00 03",
+      "identity": "Producer::StartBuild(typeInfo) thiscall (FUN_005aecb0): returns 0 when the producer is busy (+0x300) or scrap/pilots are short. TraceAIBuildLedger logs failures called from Build_ConstructUnit/Build; first 6 bytes relocated."
+    },
+    {
+      "name": "AiFacilitiesUnderConstruction",
+      "address": "0x02BFDFB0",
+      "kind": "data",
+      "identity": "int [16]: facilities_under_construction per team, moved with the counter table by AIBuild_ConstructionBegin/End (FUN_00690570/FUN_006905d0)."
+    },
+    {
+      "name": "AiReservedAreaFlags",
+      "address": "0x02BFDDB0",
+      "kind": "data",
+      "identity": "char [16*0x20]: reserved-area slot in-use flags, 32 per team (FUN_00690870 AIBuild_ReservedAreaAdd)."
+    },
+    {
+      "name": "AiPrereqTable",
+      "address": "0x02CEB7E8",
+      "kind": "data",
+      "identity": "pointer to the calloc'd prereq table, stride 0x9C, kind byte (0 unit, 1 building) at +0 (FUN_0069f030, FUN_006a05c0)."
+    },
+    {
+      "name": "AiPrereqCount",
+      "address": "0x02CEB7FC",
+      "kind": "data",
+      "identity": "int: next free prereq id (valid ids are 1..count-1; FUN_0069f030 starts it at 1 and increments per assigned prereq)."
+    },
+    {
+      "name": "AiCountsTableSizeA",
+      "address": "0x009310C4",
+      "kind": "data",
+      "identity": "int: first term of the per-team counts table size; FUN_00690630 callocs (this + 1 + AiCountsTableSizeB) ints."
+    },
+    {
+      "name": "AiCountsTableSizeB",
+      "address": "0x02C00ABC",
+      "kind": "data",
+      "identity": "int: second term of the per-team counts table size (returned by FUN_006a4030)."
+    },
+    {
+      "name": "AiTickCounter",
+      "address": "0x00931014",
+      "kind": "data",
+      "identity": "int AI tick counter, incremented once per AISchedule_Simulate tick (FUN_006a3490)."
+    },
+    {
       "name": "UnitTurboThrottleBlock",
       "address": "0x00601C92",
       "expected": "8B 45 90 D9 58 08 8B 4D 90 F3 0F 10 41 0C 0F 2F 05 04 26 8A 00 72 1A F3 0F 10 05 C8 25 8A 00 0F 2F 45 AC 76 0C C7 85 78 FF FF FF 01 00 00 00 EB 0A C7 85 78 FF FF FF 00 00 00 00 8B 55 90 8B 85 78 FF FF FF",

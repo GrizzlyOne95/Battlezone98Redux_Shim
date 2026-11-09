@@ -271,6 +271,7 @@ namespace BZROpenShim
         static void TickOpenShimEventLayer()
         {
             TickCareerSessionState();
+            TickAiBuildLedgerTrace();
             TickOdfIndexWorldEdge();
             TickCareerPendingVictims();
             DispatchPendingEvents();
@@ -1604,6 +1605,7 @@ namespace BZROpenShim
             {"InitializeGlobalTurboConfig", &InitializeGlobalTurboConfig},
             {"InitializeNoDamageSlowdownConfig", &InitializeNoDamageSlowdownConfig},
             {"InitializeAiConstructionCounterRepairConfig", &InitializeAiConstructionCounterRepairConfig},
+            {"InitializeAiBuildLedgerTraceConfig", &InitializeAiBuildLedgerTraceConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},
