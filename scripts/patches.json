@@ -4743,6 +4743,18 @@
       "identity": "unclamped list scroll-down"
     },
     {
+      "name": "TextBlockPageProbeInitPush",
+      "address": "0x007CCEBB",
+      "expected": "68 B8 09 8A 00 8D 4D D8",
+      "identity": "`push 0x8A09B8` (the initial \"T\" literal) in cUI_TextBlock page-line probe 0x007CCE90, GOG Redux 2.2.301. The probe builds a string of N one-letter lines and measures it (0x00689CE0) until it reaches the box height; N is the scroll stride [this+0x294C]. The only reference to the literal in the exe image. Fix redirects the operand to a DLL-owned \"T\n\"."
+    },
+    {
+      "name": "TextBlockPageProbeAppendPush",
+      "address": "0x007CCF53",
+      "expected": "68 B4 09 8A 00 8D 4D D8",
+      "identity": "`push 0x8A09B4` (the appended \"\nT\" literal) before the string append 0x0041F7B0 in the same probe 0x007CCE90. The only reference to that literal. Fix redirects the operand to a DLL-owned \"T\n\" so the probe text ends in a newline exactly like the page text rendered by cUI_ScrollingTextBlock 0x007CDD50 (see reverse_engineering/briefing_page_stride_20261109.md)."
+    },
+    {
       "name": "ThumbnailMaterialApply",
       "address": "0x007D3FF0",
       "expected": "55 8B EC 6A FF 68 E1 2C 86 00 64 A1 00 00 00 00",

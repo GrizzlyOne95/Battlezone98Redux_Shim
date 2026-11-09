@@ -271,6 +271,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_BRIEFING_PAGE_STRIDE_FIX") ||
+            Equals(name, "BZR_DISABLE_BRIEFING_PAGE_STRIDE_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "BriefingPageStride", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_DG_PIECE_REUSE") ||
             Equals(name, "BZR_DISABLE_DG_PIECE_REUSE"))
         {

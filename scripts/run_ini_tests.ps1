@@ -216,6 +216,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Skips a music decode that Play overwrites before it is heard; audio only.
     "Fixes/MusicSingleFill",
     "Fixes/MagnetZeroRangeGuard",
+    # Client-local text-block scroll stride repair (briefing/archive/chat).
+    "Fixes/BriefingPageStride",
     # Heap-corruption guard (a remote scavenger's NetProcess is not a
     # ScavengerProcess); active in network games, which is where it matters.
     "Fixes/ScavengerNetProcessGuard",
@@ -486,6 +488,7 @@ $shippingPolicyChecks = @{
     "Fixes/PreciseTimestep" = "1"
     "Fixes/MusicSingleFill" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
+    "Fixes/BriefingPageStride" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"
     "Fixes/LuaGetIndependenceGuard" = "1"

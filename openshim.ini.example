@@ -534,6 +534,18 @@ MusicSingleFill = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
 
+; Mission briefing and mission archive text is shown a page at a time. The page
+; size (the scroll step) is measured with a probe string that ends in a letter,
+; but each page is drawn with a newline after every line, which measures
+; slightly taller. For some box heights a page then shows one line fewer than
+; the step skips: a line is lost at every page break, and a last page that is
+; exactly full hides its final line behind an enabled down arrow (authors worked
+; around this by padding with blank lines). Measures the probe the same way the
+; page is drawn. Client-local UI; cannot affect a network game.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_BRIEFING_PAGE_STRIDE_FIX
+BriefingPageStride = 1
+
 ; Skip the strategic-AI scrap-position query for a scavenger whose AI process
 ; is not a ScavengerProcess. A scavenger owned by a remote peer holds a
 ; NetProcess, and stock AI_Team_Compute_Other calls ScavengerProcess::
