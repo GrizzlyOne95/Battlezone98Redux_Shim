@@ -200,7 +200,10 @@
     <ClCompile Include="src\patches\game_object_helpers.cpp" />
     <ClCompile Include="src\patches\global_feature_config.cpp" />
     <ClCompile Include="src\patches\global_turbo.cpp" />
+    <ClCompile Include="src\patches\mp_whitelist_tga.cpp" />
     <ClCompile Include="src\patches\no_damage_slowdown.cpp" />
+    <ClCompile Include="src\patches\mp_block_freecam.cpp" />
+    <ClCompile Include="src\patches\seismic_wave_extent_clamp.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\hook_patch_helpers.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
@@ -238,6 +241,7 @@
     <ClCompile Include="src\patches\lobby_drop_keeps_match.cpp" />
     <ClCompile Include="src\patches\p2p_reliable_send_fix.cpp" />
     <ClCompile Include="src\patches\team_filter_mines.cpp" />
+    <ClCompile Include="src\patches\sniper_eject_aim_fix.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
     <ClCompile Include="src\patches\planet_video.cpp" />
     <ClCompile Include="src\patches\tro_menu_movie.cpp" />
@@ -293,6 +297,7 @@
     <ClCompile Include="src\patches\mp_daywrecker_armory_collision.cpp" />
     <ClCompile Include="src\patches\lua_handle_sync.cpp" />
     <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
+    <ClCompile Include="src\patches\mp_any_nation.cpp" />
     <ClCompile Include="src\patches\mp_ready_diagnostic.cpp" />
     <ClCompile Include="src\patches\mp_map_filter_extras.cpp" />
     <ClCompile Include="src\patches\mp_vehicle_preview_fix.cpp" />
@@ -531,6 +536,7 @@
     <ClInclude Include="include\lua_handle_sync_install.h" />
     <ClInclude Include="include\lobby_team_commands.h" />
     <ClInclude Include="include\mp_faction_restrict.h" />
+    <ClInclude Include="include\mp_any_nation.h" />
     <ClInclude Include="include\mp_ready_diagnostic.h" />
     <ClInclude Include="include\odf_compat.h" />
     <ClInclude Include="include\map_folder_items.h" />

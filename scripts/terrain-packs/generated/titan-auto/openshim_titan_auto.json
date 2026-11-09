@@ -2,7 +2,7 @@
   "schema": "bzr-openshim-terrain-hd-v1",
   "materials": {
     "TI_DETAIL_ATLAS": {
-      "sliceCount": 9,
+      "sliceCount": 18,
       "diffuseResource": "titan_atlas_d.dds",
       "fallback": "openshim_titan_auto_layer0.png",
       "tiles": {
@@ -10,11 +10,20 @@
         "1": "openshim_titan_auto_layer1.png",
         "2": "openshim_titan_auto_layer2.png",
         "3": "openshim_titan_auto_layer3.png",
+        "9": "openshim_titan_auto_layer4.png",
+        "10": "openshim_titan_auto_layer5.png",
+        "11": "openshim_titan_auto_layer6.png",
+        "12": "openshim_titan_auto_layer7.png",
         "4": "openshim_titan_auto_misn14_control.png",
+        "13": "openshim_titan_auto_misn14_control2.png",
         "5": "openshim_titan_auto_layer0_n.png",
         "6": "openshim_titan_auto_layer1_n.png",
         "7": "openshim_titan_auto_layer2_n.png",
-        "8": "openshim_titan_auto_layer3_n.png"
+        "8": "openshim_titan_auto_layer3_n.png",
+        "14": "openshim_titan_auto_layer4_n.png",
+        "15": "openshim_titan_auto_layer5_n.png",
+        "16": "openshim_titan_auto_layer6_n.png",
+        "17": "openshim_titan_auto_layer7_n.png"
       },
       "paint": {
         "schema": "bzr-openshim-terrain-paint-v1",
@@ -23,7 +32,11 @@
           20,
           20,
           40,
-          36
+          36,
+          20,
+          18,
+          14,
+          10
         ],
         "maps": [
           {
@@ -34,7 +47,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn14_control.png"
+            "control": "openshim_titan_auto_misn14_control.png",
+            "control2": "openshim_titan_auto_misn14_control2.png"
           },
           {
             "terrainFingerprint": "bdce4fb1e689b169",
@@ -44,7 +58,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn14_stock_control.png"
+            "control": "openshim_titan_auto_misn14_stock_control.png",
+            "control2": "openshim_titan_auto_misn14_stock_control2.png"
           },
           {
             "terrainFingerprint": "092514bdd5a255c9",
@@ -54,7 +69,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn15_control.png"
+            "control": "openshim_titan_auto_misn15_control.png",
+            "control2": "openshim_titan_auto_misn15_control2.png"
           },
           {
             "terrainFingerprint": "9e1f4d6b9543cb1d",
@@ -64,7 +80,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn15_stock_control.png"
+            "control": "openshim_titan_auto_misn15_stock_control.png",
+            "control2": "openshim_titan_auto_misn15_stock_control2.png"
           },
           {
             "terrainFingerprint": "1d1e0af4edb38b16",
@@ -74,7 +91,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn16_control.png"
+            "control": "openshim_titan_auto_misn16_control.png",
+            "control2": "openshim_titan_auto_misn16_control2.png"
           },
           {
             "terrainFingerprint": "08adc2abf76fd176",
@@ -84,7 +102,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn16_stock_control.png"
+            "control": "openshim_titan_auto_misn16_stock_control.png",
+            "control2": "openshim_titan_auto_misn16_stock_control2.png"
           },
           {
             "terrainFingerprint": "787e1d63d79eeb3e",
@@ -94,7 +113,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn15b_stock_control.png"
+            "control": "openshim_titan_auto_misn15b_stock_control.png",
+            "control2": "openshim_titan_auto_misn15b_stock_control2.png"
           },
           {
             "terrainFingerprint": "a7edee74b712cfd6",
@@ -104,7 +124,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn16b_control.png"
+            "control": "openshim_titan_auto_misn16b_control.png",
+            "control2": "openshim_titan_auto_misn16b_control2.png"
           },
           {
             "terrainFingerprint": "deee6ea8f9e3aa7e",
@@ -114,7 +135,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misn16b_stock_control.png"
+            "control": "openshim_titan_auto_misn16b_stock_control.png",
+            "control2": "openshim_titan_auto_misn16b_stock_control2.png"
           },
           {
             "terrainFingerprint": "1b74fa99c2dd83b5",
@@ -124,7 +146,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misns5_control.png"
+            "control": "openshim_titan_auto_misns5_control.png",
+            "control2": "openshim_titan_auto_misns5_control2.png"
           },
           {
             "terrainFingerprint": "49a2f27eaa377ce9",
@@ -134,7 +157,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misns5_stock_control.png"
+            "control": "openshim_titan_auto_misns5_stock_control.png",
+            "control2": "openshim_titan_auto_misns5_stock_control2.png"
           },
           {
             "terrainFingerprint": "68e624ac666edfd9",
@@ -144,7 +168,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misns6_control.png"
+            "control": "openshim_titan_auto_misns6_control.png",
+            "control2": "openshim_titan_auto_misns6_control2.png"
           },
           {
             "terrainFingerprint": "2b5c882b45430fed",
@@ -154,7 +179,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misns6_stock_control.png"
+            "control": "openshim_titan_auto_misns6_stock_control.png",
+            "control2": "openshim_titan_auto_misns6_stock_control2.png"
           },
           {
             "terrainFingerprint": "fd598c4fa0943854",
@@ -164,7 +190,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misns7_control.png"
+            "control": "openshim_titan_auto_misns7_control.png",
+            "control2": "openshim_titan_auto_misns7_control2.png"
           },
           {
             "terrainFingerprint": "8449ef029f2880e4",
@@ -174,7 +201,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misns7_stock_control.png"
+            "control": "openshim_titan_auto_misns7_stock_control.png",
+            "control2": "openshim_titan_auto_misns7_stock_control2.png"
           },
           {
             "terrainFingerprint": "5fab8b4195da7a3e",
@@ -184,7 +212,8 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misns8_control.png"
+            "control": "openshim_titan_auto_misns8_control.png",
+            "control2": "openshim_titan_auto_misns8_control2.png"
           },
           {
             "terrainFingerprint": "ed8835aba182ff00",
@@ -194,14 +223,29 @@
               3210.0,
               3190.0
             ],
-            "control": "openshim_titan_auto_misns8_stock_control.png"
+            "control": "openshim_titan_auto_misns8_stock_control.png",
+            "control2": "openshim_titan_auto_misns8_stock_control2.png"
           }
         ],
         "detile": [
           1,
           1,
           1,
+          1,
+          0,
+          1,
+          1,
           1
+        ],
+        "nearOnly": [
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
         ],
         "far": [
           5,
@@ -219,7 +263,11 @@
           0.35,
           1.4,
           0.8,
-          1.2
+          1.2,
+          0.1,
+          0.5,
+          1.0,
+          0.7
         ]
       }
     }

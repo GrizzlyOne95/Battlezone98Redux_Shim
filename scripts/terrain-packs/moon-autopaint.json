@@ -29,29 +29,49 @@
       1,
       0,
       0,
+      0,
+      0,
+      0,
+      0,
       0
     ],
     "3": [
       0,
       1,
       0,
+      0,
+      0,
+      0,
+      0,
       0
     ],
     "4": [
       0,
+      0,
+      0,
+      0,
       1,
+      0,
       0,
       0
     ],
     "5": [
       0,
+      0,
+      0,
+      0,
       1,
+      0,
       0,
       0
     ],
     "6": [
       0,
+      0,
+      0,
+      0,
       1,
+      0,
       0,
       0
     ]
@@ -60,31 +80,94 @@
     "cap": 0.3,
     "diagonal": 0.5
   },
+  "weightSize": 2048,
   "blurMeters": 14,
   "outsideWeights": [
     1,
     0,
     0,
+    0,
+    0,
+    0,
+    0,
     0
   ],
-  "variation": {
-    "meters": 220,
-    "amount": 0.7,
-    "types": {
-      "0": [
-        0,
-        0,
-        1,
-        0
-      ],
-      "3": [
-        0,
-        0,
-        0,
-        1
-      ]
+  "variation": [
+    {
+      "meters": 220,
+      "amount": 0.7,
+      "types": {
+        "0": [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "3": [
+          0,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 90,
+      "amount": 0.6,
+      "types": {
+        "0": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 130,
+      "amount": 0.6,
+      "types": {
+        "3": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0
+        ]
+      }
+    },
+    {
+      "meters": 60,
+      "amount": 0.5,
+      "types": {
+        "3": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
     }
-  },
+  ],
   "shape": [
     {
       "radiusMeters": 400,
@@ -93,6 +176,10 @@
       "ridge": [
         0,
         1,
+        0,
+        0,
+        0,
+        0,
         0,
         0
       ],
@@ -107,7 +194,11 @@
         0,
         0,
         0,
-        1
+        1,
+        0,
+        0,
+        0,
+        0
       ],
       "amount": 0.5,
       "coverage": 0.05,
@@ -121,7 +212,11 @@
       0,
       0,
       0,
-      1
+      0.7,
+      0,
+      0,
+      0,
+      0.3
     ],
     "startDegrees": 24,
     "fullDegrees": 38
@@ -176,6 +271,58 @@
       "saturation": 0.15,
       "matchMean": "crhd_moon_mn33sa0_d.dds",
       "heightMeters": 1.6
+    },
+    {
+      "name": "Base pad",
+      "repeatMeters": 20,
+      "cellAligned": true,
+      "file": "crhd_moon_mn44sa0_d.dds",
+      "normal": "crhd_moon_mn44sa0_n.dds",
+      "heightMeters": 0.1,
+      "edge": {
+        "meters": 8,
+        "ragged": 0.12,
+        "raggedMeters": 12
+      }
+    },
+    {
+      "name": "Regolith",
+      "detile": true,
+      "repeatMeters": 30,
+      "file": "moon_dusted_01_diff_2k.png",
+      "matchMean": "crhd_moon_mn00sa0_d.dds",
+      "gain": [
+        1.06,
+        1.06,
+        1.06
+      ],
+      "contrast": 1.4,
+      "heightMeters": 0.5
+    },
+    {
+      "name": "Meteor rubble",
+      "detile": true,
+      "repeatMeters": 22,
+      "file": "moon_meteor_02_diff_2k.png",
+      "matchMean": "crhd_moon_mn33sa0_d.dds",
+      "contrast": 1.5,
+      "heightMeters": 0.9
+    },
+    {
+      "name": "Dark basalt",
+      "detile": true,
+      "repeatMeters": 14,
+      "archive": "dark_rock_02_8k.zip",
+      "member": "dark_rock_02_diff_8k.jpg",
+      "saturation": 0.2,
+      "matchMean": "crhd_moon_mn33sa0_d.dds",
+      "gain": [
+        0.78,
+        0.78,
+        0.8
+      ],
+      "contrast": 1.3,
+      "heightMeters": 1.0
     }
   ],
   "heightBlend": 0.5,

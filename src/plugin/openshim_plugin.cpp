@@ -71,6 +71,7 @@
 #include "mp_daywrecker_armory_collision_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
+#include "mp_any_nation.h"
 #include "mp_ready_diagnostic.h"
 #include "BZROpenShim.h"
 #include "openshim_sdk_provider.h"
@@ -160,6 +161,11 @@ static unsigned __stdcall PatchThreadProc(void*)
     // inert until [Network] StockFactionsOnly is turned on, and the loader it
     // intercepts only runs when a multiplayer screen builds its vehicle list.
     PATCH_STAGE(BZROpenShim::MpFactionRestrict::InstallMpFactionRestrictIfPossible());
+
+    // Any Nation lobby toggle (1.5 parity). Rides on the vehicle-list hook above:
+    // host button, a separate "anyNation" lobby key, client-side list rebuild.
+    // [Fixes] AnyNationToggle = 0 installs nothing.
+    PATCH_STAGE(BZROpenShim::AnyNation::InstallAnyNationToggleIfPossible());
 
     // Shorter options-screen resolution list. Needs the patches.json
     // resolves, so it runs after the patcher; the options screen is built

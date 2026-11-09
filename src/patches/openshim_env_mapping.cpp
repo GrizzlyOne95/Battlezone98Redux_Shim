@@ -266,10 +266,20 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "ConstructorRemoteBuild", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_SNIPER_EJECT_AIM_FIX") ||
+            Equals(name, "BZR_DISABLE_SNIPER_EJECT_AIM_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SniperEjectAimFix", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX") ||
             Equals(name, "BZR_DISABLE_MAGNET_ZERO_RANGE_FIX"))
         {
             return TryReadMappedBool(ini, "Fixes", "MagnetZeroRangeGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_BRIEFING_PAGE_STRIDE_FIX") ||
+            Equals(name, "BZR_DISABLE_BRIEFING_PAGE_STRIDE_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "BriefingPageStride", true, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_DG_PIECE_REUSE") ||
             Equals(name, "BZR_DISABLE_DG_PIECE_REUSE"))
@@ -570,6 +580,8 @@ namespace
         // is sent as, and a stock receiver reads that exactly as before.
         if (Equals(name, "OPENSHIM_LUA_MAPOBJECT_HANDLES"))
             return TryReadMappedBool(ini, "Network", "LuaMapObjectHandles", false, out);
+        if (Equals(name, "OPENSHIM_ANY_NATION_TOGGLE"))
+            return TryReadMappedBool(ini, "Fixes", "AnyNationToggle", true, out);
         if (Equals(name, "OPENSHIM_STOCK_FACTIONS_ONLY"))
             return TryReadMappedBool(ini, "Network", "StockFactionsOnly", false, out);
         if (Equals(name, "OPENSHIM_STOCK_FACTION_SET"))
