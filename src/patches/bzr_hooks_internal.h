@@ -2082,6 +2082,9 @@ namespace BZROpenShim
         void ReloadNoDamageSlowdownConfig();
         void RefreshNoDamageSlowdownState();
 
+        // --- SeismicWave extent clamp (seismic_wave_extent_clamp.cpp) --------
+        void InitializeSeismicWaveExtentClampConfig();
+
         // --- Unit VO queue policy (unit_vo.cpp) ------------------------------
         extern bool g_UnitVoConfigInitialized;
         void InitializeUnitVoConfig();
