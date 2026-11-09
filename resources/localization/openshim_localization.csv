@@ -566,3 +566,4 @@ openshim_ui:career_already_empty~Career statistics were already empty; nothing c
 openshim_ui:career_reset_failed~Career reset failed; existing statistics were kept - see openshim.log~~~~~~
 openshim_ui:action_unwired~%s: no action is wired up for this row.~~~~~~
 openshim_ui:options_button~OpenShim Options~~~~~~
+openshim_ui:update_notice_title~OpenShim update ready~~~~~~

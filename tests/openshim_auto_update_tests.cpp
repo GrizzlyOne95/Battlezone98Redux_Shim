@@ -27,7 +27,7 @@ int main()
     Check(!ShouldAutoStageUpdate(again), "only once per process");
 
     Check(FormatAutoStageNotice("1.2.3.4") ==
-              "OpenShim 1.2.3.4 is ready and will install when you quit the game.",
+              "Version 1.2.3.4 installs when you quit the game.",
           "notice text");
 
     std::wstring script;
