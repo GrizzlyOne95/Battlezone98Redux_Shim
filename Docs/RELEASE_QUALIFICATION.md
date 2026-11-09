@@ -90,17 +90,21 @@ powershell -File reverse_engineering\Run-BZRDisplayStress.ps1 -Cycles 10 -Report
 ```
 
 Each cycle sends Alt-Tab, Alt-Enter, the fullscreen/windowed toggle key if the build has one
-(`-ToggleVk <vk>`; skipped by default) and Shift-F9, waits, and reports per step: process exit
+(`-ToggleVk <vk>`; skipped by default) and, with `-EditMode`, Shift-F9, waits, and reports per step: process exit
 (CRASH), not responding for `-HangSeconds` (HANG), a new `.dmp` or new crash lines in
 `openshim.log` (CRASH-LOG). The script never launches the game, caps at one process, closes it
 with WM_CLOSE at the end or on timeout, and never force-kills it (AGENTS.md display-stack rule),
 so a game that ignores WM_CLOSE must be closed by hand.
 
+Shift-F9 only works in `/edit` mode (the editor). Launch the test game with `/edit` and pass `-EditMode`;
+the script checks the running game's command line for `/edit` and refuses otherwise. Without `-EditMode`
+the Shift-F9 step is skipped and the script says so.
+
 Acceptance:
 
 - 10 cycles complete with no CRASH, HANG or CRASH-LOG on the Alt-Tab, Alt-Enter and toggle steps
 - the game still renders and responds to input afterwards, and exits cleanly
-- a failure on the Shift-F9 step is reported as `KNOWN-300`: it is the open editor task-mode crash
+- with `-EditMode`, a failure on the Shift-F9 step is reported as `KNOWN-300`: it is the open editor task-mode crash
   (`Docs/ROADMAP_CODE_VALIDATION_20261007.md`, item 300), not a new regression. It does not fail
   the gate (the run stops there with `Known300Stop` set, so run the remaining cycles on a relaunched game if needed), but any change in its behavior from the previous candidate needs explaining
 

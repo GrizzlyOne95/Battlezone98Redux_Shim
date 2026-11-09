@@ -1909,20 +1909,6 @@ TracePlayerKills = 0
 ; Legacy env aliases: OPENSHIM_TRACE_KILL_CREDIT, BZR_TRACE_KILL_CREDIT
 TraceKillCredit = 0
 
-; Splinter duplicate-shell trace (log only).
-;
-; Reports say splinter shells appear twice in multiplayer (not reproduced).
-; With this on, each splinter shell logs one [SPLSPAWN] line the first time it
-; simulates (class, source player id, ordnance id, local or network origin,
-; position, velocity), and a [SPLSPAWN] WARNING when two shells with the same
-; source, class and position appear within one sim tick. Budgeted (512 lines)
-; and OFF by default.
-;
-; Accepted: boolean. Default: OFF.
-; Budget override: OPENSHIM_TRACE_SPLINTER_SPAWNS_BUDGET (max 4096)
-; Legacy env aliases: OPENSHIM_TRACE_SPLINTER_SPAWNS, BZR_TRACE_SPLINTER_SPAWNS
-TraceSplinterSpawns = 0
-
 [Network]
 ; In-process LAN host and local identities; no Steam/Galaxy sign-in or helper.
 ; Requires an explicit LAN selection and numeric private IPv4. Development opt-in.

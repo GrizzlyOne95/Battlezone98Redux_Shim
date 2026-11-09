@@ -1034,7 +1034,6 @@ namespace BZROpenShim
         const char* BoolText(bool value);
         bool TryGetEnvLong(const char* name, long& outValue);
         extern bool g_MpauthEnabled;
-        extern bool g_TraceSplinterSpawns;
         extern bool g_MpauthHooksInstalled;
         extern thread_local bool g_MpauthInOrdnanceReceive;
         extern volatile long g_MpauthInstallRetryBudget;

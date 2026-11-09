@@ -1,6 +1,6 @@
 # Display stress for pre-Workshop release qualification (Docs/RELEASE_QUALIFICATION.md,
 # "Display stress"). Drives an ALREADY-RUNNING test game through N cycles of
-# Alt-Tab, Alt-Enter, an optional fullscreen/windowed toggle key, and Shift-F9, and
+# Alt-Tab, Alt-Enter, an optional fullscreen/windowed toggle key, and (with -EditMode) Shift-F9, and
 # reports crash / hang / new crash-dump / new crash-log lines per step.
 #
 # This script never launches the game. Launch it first with the normal harness
@@ -8,7 +8,9 @@
 # run this against it. One game process only: refuses to run if more than one exists.
 #
 # Windows PowerShell 5.1 (BZRWindowInput.ps1 needs System.Drawing).
-# Shift-F9 is the editor toggle; its task-mode crash is already a known open
+# Shift-F9 only works in /edit mode (the editor), so it runs only with -EditMode, and the
+# already-running game must have been launched with /edit (the script checks its command
+# line and refuses otherwise). Without -EditMode the step is skipped. Its task-mode crash is already a known open
 # roadmap item (Docs/ROADMAP_CODE_VALIDATION_20261007.md, item 300), so a failure on
 # that step is reported as KNOWN-300 and does not by itself fail the run.
 #
@@ -24,6 +26,8 @@ param([ValidateRange(1,200)][int]$Cycles = 10,
       [ValidateRange(200,10000)][int]$StepWaitMs = 1500,
       [ValidateRange(5,120)][int]$HangSeconds = 15,
       [ValidateRange(30,7200)][int]$HardTimeoutSeconds = 900,
+      # Run the Shift-F9 step. Requires the running game to have been launched with /edit.
+      [switch]$EditMode,
       [string]$ReportPath = '')
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\BZRHarness.ps1"
@@ -58,6 +62,12 @@ $games = @(Get-Process -Name $script:BZRGameProcessName -ErrorAction SilentlyCon
 if ($games.Count -eq 0) { throw 'No running game. Launch the test game first via the BZRHarness.ps1 helpers; this script does not launch.' }
 if ($games.Count -gt 1) { throw "More than one game process running ($($games.Id -join ', ')); this stress test caps at one." }
 $game = $games[0]
+if ($EditMode) {
+    $cmd = [string](Get-CimInstance Win32_Process -Filter "ProcessId=$($game.Id)").CommandLine
+    if ($cmd -notmatch '(^|\s)/edit(\s|$)') { throw "-EditMode needs the game launched with /edit; command line is: $cmd" }
+} else {
+    Write-Host 'Shift-F9 step skipped: it only works in /edit mode (relaunch with /edit and pass -EditMode to include it).'
+}
 if ($ProcessId -and $ProcessId -ne $game.Id) { throw "-ProcessId $ProcessId is not the running game (pid $($game.Id))." }
 $procId = $game.Id
 $gameDir = try { Split-Path -Parent $game.MainModule.FileName } catch { '' }
@@ -133,7 +143,7 @@ try {
             @{ N = 'Alt-Enter'; A = { [void][BZRStress.Keys]::Focus($hwnd); Start-Sleep -Milliseconds 150; [BZRStress.Keys]::Chord([byte[]]@($VK_MENU), [byte]$VK_RETURN, 120) } }
         )
         if ($ToggleVk) { $steps += @{ N = 'Toggle'; A = { [void][BZRStress.Keys]::Focus($hwnd); Start-Sleep -Milliseconds 150; [BZRStress.Keys]::Chord([byte[]]@(), [byte]$ToggleVk, 120) } } }
-        $steps += @{ N = 'Shift-F9'; A = { [void][BZRStress.Keys]::Focus($hwnd); Start-Sleep -Milliseconds 150; [BZRStress.Keys]::Chord([byte[]]@($VK_SHIFT), [byte]$VK_F9, 120) } }
+        if ($EditMode) { $steps += @{ N = 'Shift-F9'; A = { [void][BZRStress.Keys]::Focus($hwnd); Start-Sleep -Milliseconds 150; [BZRStress.Keys]::Chord([byte[]]@($VK_SHIFT), [byte]$VK_F9, 120) } } }
         foreach ($s in $steps) {
             $healthy = Invoke-Step $c $s.N $s.A
             if ($script:aborted) { break }

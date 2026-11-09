@@ -1871,7 +1871,7 @@ namespace BZROpenShim
         }
         if (g_TraceKillCredit)
             InstallKillCreditTraceHooksIfPossible();
-        if ((g_MpauthEnabled || g_TraceSplinterSpawns) && !g_MpauthHooksInstalled)
+        if (g_MpauthEnabled && !g_MpauthHooksInstalled)
         {
             HookEngine::FrameThreadSitesScope frameSites;
             InstallMpauthHooksIfPossible();
