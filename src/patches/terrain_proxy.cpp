@@ -28,6 +28,7 @@
 #include "terrain_hd_texture_copy.h"
 #include "terrain_hd_material.h"
 #include "terrain_paint.h"
+#include "terrain_live_paint.h"
 #include "terrain_tess_defines.h"
 #include "frame_bridge_native_geometry.h"
 #include "frame_bridge_native_mesh.h"
@@ -36,6 +37,8 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -44,12 +47,14 @@
 #include <fstream>
 #include <iomanip>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -378,6 +383,8 @@ namespace BZROpenShim
             std::string heightTexture;
             std::vector<TerrainHdMaterial::RectBinding> tileRects;
             std::array<TerrainHdChannel, 3> channels;
+            // paint.live: autopaint recipe for maps without a baked entry (terrain-live-paint.md).
+            nlohmann::json livePaint;
         };
         std::array<std::string, 3> g_hdChannelResources;
         // Borrowed from the owned Ogre arrays; cleared before removing them.
@@ -1269,6 +1276,21 @@ namespace BZROpenShim
                             binding.paint.bounds = paint.at("boundsMeters").get<std::array<float, 4>>();
                         }
                         binding.paint.Validate();
+                        // A bad live recipe only loses live paint; the baked entries still load.
+                        if (paint.contains("live"))
+                        {
+                            try
+                            {
+                                if (binding.paint.maps.empty()) throw std::runtime_error("live paint needs the multi-map form");
+                                TerrainLivePaint::ValidateRecipe(paint.at("live"), binding.paint.Layers());
+                                binding.livePaint = paint.at("live");
+                            }
+                            catch (const std::exception& error)
+                            {
+                                LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-PAINT] live paint recipe ignored for %s: %s",
+                                    materialIt.key().c_str(), error.what());
+                            }
+                        }
                     }
                     parsed.materials.emplace(materialIt.key(), std::move(binding));
                 }

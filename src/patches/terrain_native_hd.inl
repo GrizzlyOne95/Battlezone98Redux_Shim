@@ -16,6 +16,18 @@ bool g_HdActive = false, g_HdDeclined = false;
 bool g_HdProfileSuspended = false;
 // Zones seen when paint last waited for a partial terrain; 0 when not waiting.
 std::size_t g_HdPaintDeferredZones = 0;
+// Live paint runs on a worker thread; the render tick uploads its result.
+// Dropping the pointer abandons a job (the worker still owns its copy).
+struct LivePaintJob
+{
+    std::atomic<bool> done{false};
+    std::vector<std::vector<uint8_t>> images;
+    std::string error;
+    long long ms = 0;
+    int zonesX = 0, zonesZ = 0;
+    UINT size = 0;
+};
+std::shared_ptr<LivePaintJob> g_LivePaintJob;
 std::array<bool, 256> g_HdTileMapped{};
 std::array<uint8_t, 256> g_HdSliceRemap = TerrainHdMaterial::IdentityRemap();
 std::array<bool, 3> g_HdChannelEnabled{};
@@ -123,6 +135,7 @@ void CopyHdPrograms(void* destination, void* source,
 void RestoreNativeTerrainHd()
 {
     g_HdActive = false;
+    g_LivePaintJob.reset();
     g_HdPaint = {};
     OgreSharedPtr source, backup;
     bool materialRestored = g_HdSourceMaterial.empty();
@@ -368,6 +381,211 @@ void RefreshNativeTerrainHd(void* zone, bool dirty)
     catch (...) { RestoreNativeTerrainTessellationTest(); RestoreNativeTerrainHd(); g_HdDeclined = true; }
 }
 
+// Live paint (OPENSHIM_TERRAIN_PAINT_LIVE=1): a multi-map pack whose paint
+// carries a "live" autopaint recipe generates control images for missions
+// with no baked entry. Baked entries always win. See Docs/terrain-live-paint.md.
+bool LivePaintRequested()
+{
+    char value[8] = {};
+    const DWORD length = GetEnvironmentVariableA("OPENSHIM_TERRAIN_PAINT_LIVE", value, sizeof(value));
+    return length == 1 && value[0] == '1';
+}
+
+bool ReadLivePaintWord(int x, int z, uint16_t& word)
+{
+    __try
+    {
+        const uint16_t* p = g_terrainWordAt(x, z);
+        if (!p) return false;
+        word = *p;
+        return true;
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+bool ReadLivePaintHeight(int x, int z, uint16_t& height)
+{
+    __try { height = uint16_t(g_heightAt(x, z) & 0x1FFF); return true; }
+    __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+}
+
+// Memory caps for the 32-bit process: the slope fields are doubles at full
+// height resolution and the upscale holds every layer at the array width.
+constexpr int kLivePaintMaxFileZones = 64;
+constexpr unsigned kLivePaintMaxSize = 2048;
+
+// The HG2/MAT rectangle as the engine holds it: one runtime zone more per axis
+// than the file, the file starting at the centre of the lowest zone.
+TerrainLivePaint::Input ReadLivePaintInput(const nlohmann::json& map, const nlohmann::json& recipe)
+{
+    int originX = 0, originZ = 0;
+    if (!g_heightAt || !g_terrainWordAt || !SafeReadIntAddress(g_terrainOriginXVa, originX) ||
+        !SafeReadIntAddress(g_terrainOriginZVa, originZ))
+        throw std::runtime_error("live paint terrain readers unavailable");
+    std::set<std::pair<int, int>> zones;
+    int minX = INT_MAX, minZ = INT_MAX, maxX = INT_MIN, maxZ = INT_MIN;
+    for (const auto& zone : g_zoneOrdinals)
+    {
+        int x = 0, z = 0;
+        if (!SafeReadZoneInt(zone.first, kZoneXOffset, x) || !SafeReadZoneInt(zone.first, kZoneZOffset, z))
+            throw std::runtime_error("live paint zone identity invalid");
+        zones.emplace(x, z);
+        minX = (std::min)(minX, x); maxX = (std::max)(maxX, x);
+        minZ = (std::min)(minZ, z); maxZ = (std::max)(maxZ, z);
+    }
+    if (zones.empty()) throw std::runtime_error("live paint has no zones");
+    const int columns = maxX - minX + 1, rows = maxZ - minZ + 1;
+    if (columns < 2 || rows < 2 || std::size_t(columns) * rows != zones.size())
+        throw std::runtime_error("live paint needs a full rectangle of at least 2x2 zones");
+    if ((columns - 1) * (rows - 1) > kLivePaintMaxFileZones)
+        throw std::runtime_error("live paint map too large: " + std::to_string(columns - 1) + "x" + std::to_string(rows - 1) + " file zones");
+    TerrainLivePaint::Input input;
+    input.zonesX = columns - 1; input.zonesZ = rows - 1;
+    const int baseX = minX * 256 + originX, baseZ = minZ * 256 + originZ;
+    const int width = input.zonesX * 256, depth = input.zonesZ * 256;
+    input.plane.resize(std::size_t(width) * depth);
+    for (int z = 0; z < depth; ++z)
+    for (int x = 0; x < width; ++x)
+        if (!ReadLivePaintHeight(baseX + x, baseZ + z, input.plane[std::size_t(z) * width + x]))
+            throw std::runtime_error("live paint height unreadable");
+    const int cellsX = input.zonesX * 64, cellsZ = input.zonesZ * 64;
+    input.cells.resize(std::size_t(cellsX) * cellsZ);
+    for (int z = 0; z < cellsZ; ++z)
+    for (int x = 0; x < cellsX; ++x)
+        if (!ReadLivePaintWord(baseX + 4 * x, baseZ + 4 * z, input.cells[std::size_t(z) * cellsX + x]))
+            throw std::runtime_error("live paint material word unreadable");
+    input.bounds = map.at("boundsMeters").get<std::array<float, 4>>();
+    input.seed = TerrainLivePaint::Generator::Seed(recipe, map.at("terrainFingerprint").get<std::string>());
+    return input;
+}
+
+// Optional offline check: the generator CLI input (tests/terrain_live_paint_tests.cpp)
+// and its RGBA output, for tests/terrain_live_paint_parity.py --dump.
+void DumpLivePaint(const TerrainLivePaint::Input& input, const std::vector<std::vector<uint8_t>>& images,
+    const std::string& fingerprint, int size)
+{
+    char dir[MAX_PATH] = {};
+    const DWORD length = GetEnvironmentVariableA("OPENSHIM_TERRAIN_PAINT_LIVE_DUMP", dir, sizeof(dir));
+    if (!length || length >= sizeof(dir)) return;
+    const std::string base = (std::filesystem::path(dir) / ("live_" + fingerprint)).string();
+    std::ofstream bin(base + ".bin", std::ios::binary);
+    const int32_t zones[2] = {input.zonesX, input.zonesZ};
+    bin.write(reinterpret_cast<const char*>(zones), 8);
+    bin.write(reinterpret_cast<const char*>(input.bounds.data()), 16);
+    bin.write(reinterpret_cast<const char*>(&input.seed), 4);
+    bin.write(reinterpret_cast<const char*>(input.cells.data()), std::streamsize(input.cells.size() * 2));
+    bin.write(reinterpret_cast<const char*>(input.plane.data()), std::streamsize(input.plane.size() * 2));
+    std::ofstream rgba(base + ".rgba", std::ios::binary);
+    for (const auto& image : images) rgba.write(reinterpret_cast<const char*>(image.data()), std::streamsize(image.size()));
+    LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] live paint dumped \"%s\" size=%d ok=%d",
+        base.c_str(), size, int(bin.good() && rgba.good()));
+}
+
+// Overwrite the placeholder control slices (4, and 13 for eight layers) of the
+// built diffuse array, every mip. Bytes go in raw like the PNG path; Ogre loads
+// PNGs as BGRA, so swizzle for a B8G8R8A8 array.
+void UploadLivePaint(const std::vector<std::vector<uint8_t>>& images, UINT size)
+{
+    ID3D11Texture2D* texture = g_hdDiffuseNativeTexture;
+    if (!texture) throw std::runtime_error("live paint diffuse array unavailable");
+    D3D11_TEXTURE2D_DESC desc = {};
+    texture->GetDesc(&desc);
+    const bool bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM || desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+    const bool rgba = desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+    if ((!bgra && !rgba) || desc.Width != size || desc.Height != size || desc.Usage != D3D11_USAGE_DEFAULT ||
+        desc.ArraySize < (images.size() > 1 ? 14u : 5u))
+        throw std::runtime_error("live paint needs an uncompressed square default-usage diffuse array: format=" +
+            std::to_string(int(desc.Format)) + " size=" + std::to_string(desc.Width) + "x" + std::to_string(desc.Height));
+    Microsoft::WRL::ComPtr<ID3D11Device> device;
+    Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
+    texture->GetDevice(device.GetAddressOf());
+    if (device) device->GetImmediateContext(context.GetAddressOf());
+    if (!context) throw std::runtime_error("live paint device context unavailable");
+    const UINT slices[2] = {4, 13};
+    for (std::size_t i = 0; i < images.size() && i < 2; ++i)
+    {
+        std::vector<uint8_t> level = images[i];
+        if (bgra) for (std::size_t p = 0; p < level.size(); p += 4) std::swap(level[p], level[p + 2]);
+        UINT w = size;
+        for (UINT mip = 0; mip < desc.MipLevels; ++mip)
+        {
+            context->UpdateSubresource(texture, D3D11CalcSubresource(mip, slices[i], desc.MipLevels), nullptr,
+                level.data(), w * 4, 0);
+            if (w == 1) break;
+            const UINT half = w / 2;
+            std::vector<uint8_t> next(std::size_t(half) * half * 4);
+            for (UINT y = 0; y < half; ++y)
+            for (UINT x = 0; x < half; ++x)
+            for (UINT k = 0; k < 4; ++k)
+            {
+                const auto at = [&](UINT px, UINT py) { return UINT(level[(std::size_t(py) * w + px) * 4 + k]); };
+                next[(std::size_t(y) * half + x) * 4 + k] =
+                    uint8_t((at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) + at(2 * x, 2 * y + 1) + at(2 * x + 1, 2 * y + 1) + 2) / 4);
+            }
+            level.swap(next); w = half;
+        }
+    }
+}
+
+// Uniform control images from the recipe's outsideWeights (default: layer 0).
+std::vector<std::vector<uint8_t>> LivePaintPlaceholder(const nlohmann::json& recipe, UINT size)
+{
+    const std::size_t layers = recipe.at("layers").size();
+    std::vector<double> weights(layers, 0.0);
+    weights[0] = 1;
+    if (recipe.contains("outsideWeights")) weights = recipe.at("outsideWeights").get<std::vector<double>>();
+    if (weights.size() != layers) throw std::runtime_error("live paint outsideWeights need one value per layer");
+    double total = 0;
+    for (const double w : weights) total += (std::max)(w, 0.0);
+    if (total <= 0) { weights.assign(layers, 0.0); weights[0] = total = 1; }
+    std::vector<std::vector<uint8_t>> images(layers / 4, std::vector<uint8_t>(std::size_t(size) * size * 4));
+    for (std::size_t i = 0; i < images.size(); ++i)
+    for (std::size_t p = 0; p < images[i].size(); ++p)
+        images[i][p] = uint8_t(std::lround(255 * (std::max)(weights[i * 4 + p % 4], 0.0) / total));
+    return images;
+}
+
+void StartLivePaint(const nlohmann::json& recipe, TerrainLivePaint::Input input, const std::string& fingerprint, UINT size)
+{
+    auto job = std::make_shared<LivePaintJob>();
+    job->zonesX = input.zonesX; job->zonesZ = input.zonesZ; job->size = size;
+    std::thread([job, recipe, input = std::move(input), fingerprint, size]() {
+        const auto start = std::chrono::steady_clock::now();
+        try
+        {
+            job->images = TerrainLivePaint::Generate(recipe, input, int(size));
+            DumpLivePaint(input, job->images, fingerprint, int(size));
+        }
+        catch (const std::exception& error) { job->images.clear(); job->error = error.what(); }
+        catch (...) { job->images.clear(); job->error = "unknown error"; }
+        job->ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        job->done.store(true, std::memory_order_release);
+    }).detach();
+    g_LivePaintJob = job;
+}
+
+// Render tick, under g_mutex: upload a finished job; a failed one declines HD
+// like any refresh failure.
+void FinishLivePaint()
+{
+    if (!g_LivePaintJob || !g_LivePaintJob->done.load(std::memory_order_acquire)) return;
+    const auto job = std::move(g_LivePaintJob);
+    if (!g_HdActive) return;
+    try
+    {
+        if (!job->error.empty()) throw std::runtime_error(job->error);
+        UploadLivePaint(job->images, job->size);
+        LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] live paint generated fileZones=%dx%d size=%u images=%zu ms=%lld",
+            job->zonesX, job->zonesZ, job->size, job->images.size(), job->ms);
+    }
+    catch (const std::exception& error)
+    {
+        LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-PAINT] live paint declined: %s", error.what());
+        RestoreNativeTerrainTessellationTest(); RestoreNativeTerrainHd();
+        g_HdDeclined = true;
+    }
+}
+
 bool InstallNativeTerrainHd()
 {
     // Cleared before every early return: a stale deferral would keep
@@ -443,6 +661,7 @@ bool InstallNativeTerrainHd()
                     binding->diffuseResource + " actual=" + (firstName ? *firstName : "<unavailable>"));
         }
         std::optional<TerrainHdMaterialBinding> selectedBinding;
+        std::optional<TerrainLivePaint::Input> liveInput;
         if (binding->paint.enabled)
         {
             const auto map = CaptureTerrainPaintMap();
@@ -461,17 +680,37 @@ bool InstallNativeTerrainHd()
                         g_HdPaintDeferredZones = g_zoneOrdinals.size();
                         throw std::runtime_error("paint map incomplete, retrying as zones are built: actual=" + map.dump());
                     }
-                    throw std::runtime_error("paint pack has no map entry for this mission: actual=" + map.dump());
+                    if (!binding->livePaint.is_object() || !LivePaintRequested())
+                        throw std::runtime_error("paint pack has no map entry for this mission: actual=" + map.dump());
+                    liveInput = ReadLivePaintInput(map, binding->livePaint);
+                    const double undefined = TerrainLivePaint::Generator(binding->livePaint, *liveInput).UndefinedShare();
+                    if (undefined > 0.01)
+                        throw std::runtime_error("live paint recipe leaves " + std::to_string(int(undefined * 100 + 0.5)) +
+                            "% of material cells unmapped (another world's map?): actual=" + map.dump());
+                    // The first baked entry's tiles stand in until the array exists; UploadLivePaint replaces them.
+                    const auto& placeholder = binding->paint.maps.front();
+                    selectedBinding = *binding;
+                    selectedBinding->tiles[4] = placeholder.control;
+                    if (!placeholder.control2.empty()) selectedBinding->tiles[13] = placeholder.control2;
+                    selectedBinding->paint.fingerprint = map.at("terrainFingerprint").get<std::string>();
+                    selectedBinding->paint.bounds = map.at("boundsMeters").get<std::array<float, 4>>();
+                    selectedBinding->paint.maps.clear();
+                    binding = &*selectedBinding;
+                    LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] live paint selected fingerprint=%s fileZones=%dx%d undefined=%.4f",
+                        binding->paint.fingerprint.c_str(), liveInput->zonesX, liveInput->zonesZ, undefined);
                 }
-                selectedBinding = *binding;
-                selectedBinding->tiles[4] = entry->control;
-                if (!entry->control2.empty()) selectedBinding->tiles[13] = entry->control2;
-                selectedBinding->paint.fingerprint = entry->fingerprint;
-                selectedBinding->paint.bounds = entry->bounds;
-                selectedBinding->paint.maps.clear();
-                binding = &*selectedBinding;
-                LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] multi-map entry selected fingerprint=%s control=\"%s\"",
-                    entry->fingerprint.c_str(), entry->control.c_str());
+                else
+                {
+                    selectedBinding = *binding;
+                    selectedBinding->tiles[4] = entry->control;
+                    if (!entry->control2.empty()) selectedBinding->tiles[13] = entry->control2;
+                    selectedBinding->paint.fingerprint = entry->fingerprint;
+                    selectedBinding->paint.bounds = entry->bounds;
+                    selectedBinding->paint.maps.clear();
+                    binding = &*selectedBinding;
+                    LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-PAINT] multi-map entry selected fingerprint=%s control=\"%s\"",
+                        entry->fingerprint.c_str(), entry->control.c_str());
+                }
             }
             if (map.at("terrainFingerprint").get<std::string>() != binding->paint.fingerprint ||
                 map.at("boundsMeters").get<std::array<float, 4>>() != binding->paint.bounds)
@@ -491,6 +730,15 @@ bool InstallNativeTerrainHd()
             !TerrainSemantic::BuildVertices(ProvideNativeHdCell, &selected, g_proxy.semanticVertices))
             throw std::runtime_error("native HD selected tile semantics unavailable");
         if (!BuildTerrainHdTextureArray(*binding, array)) throw std::runtime_error("native HD texture array declined");
+        if (liveInput)
+        {
+            if (g_proxy.hdWidth > kLivePaintMaxSize)
+                throw std::runtime_error("live paint array too wide: " + std::to_string(g_proxy.hdWidth));
+            // The baked placeholder belongs to another map: cover it with the
+            // recipe's outside weights until the worker finishes.
+            UploadLivePaint(LivePaintPlaceholder(binding->livePaint, g_proxy.hdWidth), g_proxy.hdWidth);
+            StartLivePaint(binding->livePaint, std::move(*liveInput), binding->paint.fingerprint, g_proxy.hdWidth);
+        }
         for (unsigned c = 0; c < 3; ++c)
         {
             if (!g_HdChannelEnabled[c]) continue;
@@ -521,8 +769,11 @@ bool InstallNativeTerrainHd()
                 throw std::runtime_error("HD material shader contract unavailable");
             if (pixel && !TerrainHdMaterial::SpecializeDetail(generated, binding->detail))
                 throw std::runtime_error("HD detail tuning shader contract unavailable");
-            if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint))
-                throw std::runtime_error("native paint shader specialization declined");
+            std::string paintWhy;
+            if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint, &paintWhy))
+                throw std::runtime_error("native paint shader specialization declined (" + std::string(pixel ? "PS " : "VS ") + key + ": " + paintWhy + ")");
+            if (!paintWhy.empty())
+                LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] %s %s: %s", pixel ? "PS" : "VS", key.c_str(), paintWhy.c_str());
             // Content-only name: the microcode cache must hit on every run.
             const std::string name = "OpenShim/TerrainNativeHD/" + SourceHashSuffix(key + generated + defines);
             ForgetGeneratedProgram(g_ogre.getHighLevelProgramManager(), name);
@@ -631,6 +882,7 @@ bool InstallNativeTerrainHd()
 void UpdateNativeTerrainHdProfile()
 {
     if (!g_config.hdEnabled || g_proxy.tearingDown) return;
+    FinishLivePaint();
     if (!HdProfileAllowed())
     {
         if (!g_HdActive) return;
