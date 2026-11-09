@@ -18,6 +18,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed units that two producers can build only being buildable from the first one the engine found. Stock keeps only the first producer found for each buildable unit. [i](SP)[/i]
 [*] Fixed a crash from magnet mines whose ODF range is zero or invalid. Stock tries to attract with a zero or non-finite range, which faults.
 [*] Fixed ODF and TRN decimals such as 0.8 reading as 0 on non-English Windows locales. Stock switches number parsing to the game language's locale, where the decimal separator is a comma.
+[*] Fixed a Daywrecker blast leaving terrain spires and pits behind. Stock's shockwave covers one more terrain cell per axis than its buffer holds when the blast is not aligned to the grid, so it writes past the end of its memory.
 [/list]
 
 [h2]Multiplayer and Lua[/h2]
@@ -78,7 +79,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed an earthquake's shake and rumble looping forever after loading a save made mid-quake. Stock restarts a saved quake on load with nothing left to stop it.
 [*] Fixed the target camera picture-in-picture freezing on screen in satellite or F9 view. Stock's enabled flag stays latched because its updater stops running in those views.
 [*] Fixed cinematic cameras rendering zoomed in when triggered from satellite view. Stock reuses the satellite view's zoom for the cinematic camera.
-[*] Fixed briefing and archive text snapping back to the top when scrolling to the last page. Stock's briefing and archive pages use scroll code that wraps to the top on a final partial page.
+[*] Fixed briefing and archive text losing a line at each page break, and hiding the last line of a final page that is exactly full. Stock measures the scroll step and the drawn page differently, so a page can show one line fewer than the step skips.
 [*] Fixed mouse-look pinning the Windows cursor while the game is minimized or in the background. Stock re-clips and recentres the cursor every frame with a focus test that a minimized game still passes.
 [*] Fixed editor object placement doing nothing in the Shift+F10 overhead view. Redux swapped two draw-order priorities from 1.5, so the placement code read a position cleared earlier that frame.
 [*] Fixed .trn files growing an extra line-ending byte on every save. Stock saves in text mode over data that already has carriage returns, so each save adds another.
