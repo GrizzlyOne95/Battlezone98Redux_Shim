@@ -67,13 +67,13 @@ static const char* const kShimCategoryGameplay[] = {
     "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };
 static const char* const kShimCategoryFixes[] = {
     "AI Multi-Producer", "APC Allied Deploy", "Splinter Fix", "Howitzer Fix",
-    "Tug Cargo Deploy", "Recycle Fix", "Builder Cleanup", "Material Guard",
+    "Tug Cargo Deploy", "Recycle Fix", "Builder Cleanup", "Material Guard", "Sniper Eject Aim",
     "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
-    "Effect Sort" };
+    "Effect Sort", "Map List Fixes" };
 static const char* const kShimCategoryNetwork[] = {
-    "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions", "Map List Fixes",
+    "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
-    "MP Setup Screen", "Map Letter Jump", kShimRowBans };
+    "MP Setup Screen", "Map Letter Jump", "Block Free Camera", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install", "Skip Launcher", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
     "AutoSave", "AutoSave Interval", "AutoSave Backups", "Menu Caching" };

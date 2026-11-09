@@ -43,6 +43,8 @@ param(
     [string]$ContentOverride = '',
     # Reuse prepared instances (the probe is still reinstalled).
     [switch]$SkipPrepare,
+    # Script dot-sourced by BZRCoopLobby.ps1 after the guests join, before ready.
+    [string]$LobbyHook = '',
     # Leave clients and server running afterwards for manual inspection.
     [switch]$KeepRunning,
     # Run the scenario against the session a -Scenario play run left in the
@@ -291,8 +293,8 @@ try {
     $outcome = ''
     try {
         Invoke-CRFlowStep 'lobby: create, join, map, sync join, ready, launch' {
-            Invoke-Child 'BZRCoopLobby.ps1' @('-BZRCoopRoot', $BZRCoopRoot, '-ServerLog', $serverLog,
-                '-MapListY', "$MapListY", '-MapListScroll', "$MapListScroll", '-MapBzn', "$Mission.bzn", '-SyncJoin', '-Launch')
+            Invoke-Child 'BZRCoopLobby.ps1' (@('-BZRCoopRoot', $BZRCoopRoot, '-ServerLog', $serverLog,
+                '-MapListY', "$MapListY", '-MapListScroll', "$MapListScroll", '-MapBzn', "$Mission.bzn", '-SyncJoin', '-Launch') + $(if ($LobbyHook) { @('-HookScript', $LobbyHook) } else { @() }))
             "$Mission.bzn"
         } | Out-Null
         Test-CRFlowRoster -ExpectedClients $Clients

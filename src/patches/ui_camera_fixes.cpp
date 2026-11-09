@@ -73,8 +73,8 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
-        bool g_BriefingScrollFixInstalled = false;
-        bool g_BriefingScrollFixEnabled = true;
+        bool g_BriefingPageStrideFixInstalled = false;
+        bool g_BriefingPageStrideFixEnabled = true;
         bool g_MultiRenderCountClampInstalled = false;
         bool g_MultiRenderCountClampEnabled = true;
         volatile long g_MultiRenderCountClampLogBudget = 8;
@@ -92,25 +92,28 @@ namespace BZROpenShim
         bool g_CinematicSatelliteZoomFixEnabled = true;
         volatile long g_CinematicSatelliteZoomLogBudget = 8;
 
-        // Mission briefing and mission archive callbacks use the unguarded
-        // scrolling methods. Redirect just those four calls to the guarded
-        // variants already used by the lobby/chat UI so the final partial page
-        // is clamped instead of snapping back to the top.
-        uint32_t g_BriefingScrollUpCallAddr = 0;
+        // Scroll stride vs. rendered page (briefing text cut off). cUI_TextBlock
+        // 0x007CCE90 measures how many lines fit the box by growing a probe
+        // string "T", "T\nT", ... until 0x00689CE0 reports at least the box
+        // height; that count is the page stride [this+0x294C]. The scrolling
+        // text block renders a page (0x007CDD50) from "line\n" per line, and
+        // 0x00689AB0 adds one trailing line step only when the last line is
+        // non-empty, so the page text measures 2*yScale taller than the same
+        // number of probe lines. When the box height falls in that window a page
+        // shows stride-1 lines but the next page skips `stride` lines: one line
+        // is lost per page break, and a final page of exactly `stride` lines
+        // hides its last line behind an enabled down arrow. The fix makes the
+        // probe end each line with "\n" like the page text, so stride == lines
+        // shown. Two `push imm32` operands are retargeted to DLL-owned strings.
+        uint32_t g_TextBlockPageProbeInitPushAddr = 0;
 
-        uint32_t g_BriefingScrollDownCallAddr = 0;
+        uint32_t g_TextBlockPageProbeAppendPushAddr = 0;
 
-        uint32_t g_ArchiveScrollUpCallAddr = 0;
+        constexpr uint32_t kTextBlockProbeInitLiteralVa = 0x008A09B8;   // "T"
 
-        uint32_t g_ArchiveScrollDownCallAddr = 0;
+        constexpr uint32_t kTextBlockProbeAppendLiteralVa = 0x008A09B4; // "\nT"
 
-        uint32_t g_GuardedScrollUpAddr = 0;
-
-        uint32_t g_GuardedScrollDownAddr = 0;
-
-        uint32_t g_UnguardedScrollUpAddr = 0;
-
-        uint32_t g_UnguardedScrollDownAddr = 0;
+        static const char kTextBlockProbeLine[] = "T\n";
 
         // renderCount allocation crash (#65). The MultiRenderClass constructor
         // (0x0044D7B0, selected by [Render] renderBase="draw_multi") reads the
@@ -249,47 +252,54 @@ namespace BZROpenShim
             return state > 0;
         }
 
-        void InstallBriefingScrollFixIfPossible()
+        // Reads the `68 imm32` push at `site` and, only if its operand still
+        // equals `expected`, rewrites it to `replacement`. Returns false and
+        // leaves the code untouched on any mismatch.
+        static bool RetargetPushImm32(uint32_t site, uint32_t expected, uint32_t replacement)
         {
-            if (!g_BriefingScrollFixEnabled || g_BriefingScrollFixInstalled)
+            uint8_t cur[5] = {};
+            SIZE_T read = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(site),
+                                   cur, sizeof(cur), &read) ||
+                read != sizeof(cur) || cur[0] != 0x68)
+                return false;
+            uint32_t imm = 0;
+            std::memcpy(&imm, cur + 1, sizeof(imm));
+            if (imm == replacement)
+                return true;
+            if (imm != expected)
+                return false;
+            std::memcpy(cur + 1, &replacement, sizeof(replacement));
+            return WritePatchBytes(site, cur, sizeof(cur));
+        }
+
+        void InstallBriefingPageStrideFixIfPossible()
+        {
+            if (!g_BriefingPageStrideFixEnabled || g_BriefingPageStrideFixInstalled)
                 return;
             static int s_bound = 0;
             const HookEngine::EngineRow rows[] = {
-                { "BriefingScrollUpCall", &g_BriefingScrollUpCallAddr },
-                { "BriefingScrollDownCall", &g_BriefingScrollDownCallAddr },
-                { "ArchiveScrollUpCall", &g_ArchiveScrollUpCallAddr },
-                { "ArchiveScrollDownCall", &g_ArchiveScrollDownCallAddr },
-                { "UiScrollUpGuarded", &g_GuardedScrollUpAddr },
-                { "UiScrollDownGuarded", &g_GuardedScrollDownAddr },
-                { "UiScrollUpUnguarded", &g_UnguardedScrollUpAddr },
-                { "UiScrollDownUnguarded", &g_UnguardedScrollDownAddr },
+                { "TextBlockPageProbeInitPush", &g_TextBlockPageProbeInitPushAddr },
+                { "TextBlockPageProbeAppendPush", &g_TextBlockPageProbeAppendPushAddr },
             };
-            if (!BindUiCameraRows("Briefing scroll fix", rows, s_bound))
+            if (!BindUiCameraRows("Briefing page stride fix", rows, s_bound))
                 return;
 
-            const bool briefingUp = RedirectCallTarget(
-                g_BriefingScrollUpCallAddr,
-                g_UnguardedScrollUpAddr,
-                g_GuardedScrollUpAddr);
-            const bool briefingDown = RedirectCallTarget(
-                g_BriefingScrollDownCallAddr,
-                g_UnguardedScrollDownAddr,
-                g_GuardedScrollDownAddr);
-            const bool archiveUp = RedirectCallTarget(
-                g_ArchiveScrollUpCallAddr,
-                g_UnguardedScrollUpAddr,
-                g_GuardedScrollUpAddr);
-            const bool archiveDown = RedirectCallTarget(
-                g_ArchiveScrollDownCallAddr,
-                g_UnguardedScrollDownAddr,
-                g_GuardedScrollDownAddr);
-
-            g_BriefingScrollFixInstalled =
-                briefingUp && briefingDown && archiveUp && archiveDown;
-            if (g_BriefingScrollFixInstalled)
+            const uint32_t probe = reinterpret_cast<uint32_t>(&kTextBlockProbeLine[0]);
+            // Both operands, or neither: a half-patched probe would count lines
+            // the wrong way.
+            if (!RetargetPushImm32(g_TextBlockPageProbeInitPushAddr,
+                                   kTextBlockProbeInitLiteralVa, probe))
+                return;
+            if (!RetargetPushImm32(g_TextBlockPageProbeAppendPushAddr,
+                                   kTextBlockProbeAppendLiteralVa, probe))
             {
-                Log(L"[BRIEFSCROLL] Redirected mission briefing/archive callbacks to guarded scroll handlers\n");
+                RetargetPushImm32(g_TextBlockPageProbeInitPushAddr, probe,
+                                  kTextBlockProbeInitLiteralVa);
+                return;
             }
+            g_BriefingPageStrideFixInstalled = true;
+            Log(L"[BRIEFSTRIDE] Text block page probe now measures newline-terminated lines (scroll stride matches rendered page)\n");
         }
 
         // renderCount clamp (#65) helpers. The naked detour below runs between

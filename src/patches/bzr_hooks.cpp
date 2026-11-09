@@ -434,7 +434,7 @@ namespace BZROpenShim
             : nullptr;
         g_ProducerScriptPredicateHooksInstalled =
             g_BzrFn_ScriptCanBuildOriginal && g_BzrFn_ScriptIsBusyOriginal;
-		g_BriefingScrollFixInstalled = false;
+		g_BriefingPageStrideFixInstalled = false;
 		g_MultiRenderCountClampLogBudget = 8;
 		g_MagnetZeroRangeLogBudget = 8;
 		g_QuakeReplayFadeInstalled = false;
@@ -444,6 +444,8 @@ namespace BZROpenShim
 			: nullptr;
 		g_TargetCamSatelliteFixInstalled = false;
 		g_TargetCamSatelliteLogBudget = 8;
+		g_SniperEjectAimFixInstalled = false;
+		g_SniperEjectAimLogCount = 0;
 		g_CinematicSatelliteZoomFixInstalled = false;
 		g_CinematicSatelliteZoomLogBudget = 8;
 		g_SprayBuildingSimulateHookInstalled = false;
@@ -610,9 +612,9 @@ namespace BZROpenShim
 		Log(L"[ARTYDEPLOY] Undeployed howitzer sniper-retaliation fix: %hs offensiveSubTaskHook=%hs\n",
 			g_HowitzerUndeployedRetaliationFixEnabled ? "enabled" : "disabled",
 			g_RetargetPeriodHooksInstalled ? "installed" : "pending");
-        Log(L"[BRIEFSCROLL] Mission briefing/archive scroll fix: %hs hook=%hs\n",
-            g_BriefingScrollFixEnabled ? "enabled" : "disabled",
-            g_BriefingScrollFixInstalled ? "installed" : "pending");
+        Log(L"[BRIEFSTRIDE] Text block scroll-stride fix: %hs hook=%hs\n",
+            g_BriefingPageStrideFixEnabled ? "enabled" : "disabled",
+            g_BriefingPageStrideFixInstalled ? "installed" : "pending");
         Log(L"[RENDERCOUNT] draw_multi renderCount clamp: %hs hook=%hs max=%d\n",
             g_MultiRenderCountClampEnabled ? "enabled" : "disabled",
             g_MultiRenderCountClampInstalled ? "installed" : "pending",
@@ -1003,8 +1005,8 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE", "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"},
             {&g_ScavengerNetProcessGuardEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_SCAVENGER_NETPROCESS_GUARD", "BZR_DISABLE_SCAVENGER_NETPROCESS_GUARD"},
-            {&g_BriefingScrollFixEnabled, EnvSwitches::Kind::KillSwitch,
-             "OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX", "BZR_DISABLE_BRIEFING_SCROLL_FIX"},
+            {&g_BriefingPageStrideFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_BRIEFING_PAGE_STRIDE_FIX", "BZR_DISABLE_BRIEFING_PAGE_STRIDE_FIX"},
             {&g_MultiRenderCountClampEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_RENDERCOUNT_CLAMP", "BZR_DISABLE_RENDERCOUNT_CLAMP"},
             {&g_ThumbnailBmpGuardEnabled, EnvSwitches::Kind::KillSwitch,
@@ -1023,10 +1025,13 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_TARGETCAM_FIX", "BZR_DISABLE_TARGETCAM_FIX"},
             {&g_CinematicSatelliteZoomFixEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_CINECAM_FIX", "BZR_DISABLE_CINECAM_FIX"},
+            {&g_SniperEjectAimFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_SNIPER_EJECT_AIM_FIX", "BZR_DISABLE_SNIPER_EJECT_AIM_FIX"},
         };
         EnvSwitches::Apply(kFixKillSwitches, EnvFlagEnabled);
         RefreshProducerScriptPredicatesState();
         RefreshTugCargoPostLoadFixState();
+        RefreshSniperEjectAimFixState();
         RefreshConstructorRecycleStaleTargetFixState();
         RefreshApcAlliedTargetDeployFixState();
 
@@ -1062,7 +1067,7 @@ namespace BZROpenShim
         // down and applied by RefreshSplinterUndeadFixState().
         static const InitStep kFixInstallSteps[] = {
             {"InstallProducerScriptPredicateHooksIfPossible", &InstallProducerScriptPredicateHooksIfPossible},
-            {"InstallBriefingScrollFixIfPossible", &InstallBriefingScrollFixIfPossible},
+            {"InstallBriefingPageStrideFixIfPossible", &InstallBriefingPageStrideFixIfPossible},
             {"InstallMultiRenderCountClampIfPossible", &InstallMultiRenderCountClampIfPossible},
             {"InstallThumbnailBmpGuardIfPossible", &InstallThumbnailBmpGuardIfPossible},
             {"InstallSplinterUndeadFixIfPossible", &InstallSplinterUndeadFixIfPossible},
@@ -1072,6 +1077,7 @@ namespace BZROpenShim
             {"InstallApcAlliedTargetDeployFixIfPossible", &InstallApcAlliedTargetDeployFixIfPossible},
             {"InstallQuakeReplayFadeIfPossible", &InstallQuakeReplayFadeIfPossible},
             {"InstallTargetCamSatelliteFixIfPossible", &InstallTargetCamSatelliteFixIfPossible},
+            {"InstallSniperEjectAimFixIfPossible", &InstallSniperEjectAimFixIfPossible},
             {"InstallCinematicSatelliteZoomFixIfPossible", &InstallCinematicSatelliteZoomFixIfPossible},
             {"InstallPlayerFovIfPossible", &InstallPlayerFovIfPossible},
             {"InstallUnfocusedMouseReleaseIfPossible", &InstallUnfocusedMouseReleaseIfPossible},
@@ -1606,6 +1612,9 @@ namespace BZROpenShim
             {"InitializeNoDamageSlowdownConfig", &InitializeNoDamageSlowdownConfig},
             {"InitializeAiConstructionCounterRepairConfig", &InitializeAiConstructionCounterRepairConfig},
             {"InitializeAiBuildLedgerTraceConfig", &InitializeAiBuildLedgerTraceConfig},
+            {"InitializeMpWhitelistTgaConfig", &InitializeMpWhitelistTgaConfig},
+            {"InitializeMpBlockFreeCam", &InitializeMpBlockFreeCam},
+            {"InitializeSeismicWaveExtentClampConfig", &InitializeSeismicWaveExtentClampConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},
@@ -1685,7 +1694,7 @@ namespace BZROpenShim
         InstallShieldTowerTeamFilterHookIfPossible();
         InstallMineTeamFilterHooksIfPossible();
         InstallProducerScriptPredicateHooksIfPossible();
-		InstallBriefingScrollFixIfPossible();
+		InstallBriefingPageStrideFixIfPossible();
 		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();
@@ -1693,6 +1702,7 @@ namespace BZROpenShim
 		InstallApcAlliedTargetDeployFixIfPossible();
 		InstallQuakeReplayFadeIfPossible();
 		InstallTargetCamSatelliteFixIfPossible();
+		InstallSniperEjectAimFixIfPossible();
 		InstallCinematicSatelliteZoomFixIfPossible();
 		InstallPlayerFovIfPossible();
 		InstallUnfocusedMouseReleaseIfPossible();
