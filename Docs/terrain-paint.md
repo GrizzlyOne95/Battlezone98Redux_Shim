@@ -473,6 +473,28 @@ gravel, cracked boulder rock and dark rock detail, plus dark streaks, lava stone
 crust and scree. The base pads have no art normal; it is derived from their
 height.
 
+Moon, Venus, Io, Europa and Titan have the same eight layers: their four
+original layers, the base pad at layer 4 and three variety layers (5 to 7),
+each matched to a CR tile of the world, with weight maps of 2048. Only the
+Base type moves to the pad (Moon types 4, 5 and 6; Venus 2; Io 5; Europa 4;
+Titan 1). Venus Hardened Sulphur and Geyser, and Io Hardened Lava, keep their
+layers. The pads are `mn44sa0`, `ve22sa0`, `eu44sa0` and `ti11sa0`, picked to
+match the style of each world's stock base tile. No CR Io tile matches stock
+Io's dark tech grid, so Io's pad is FreePBR `futuristic-panels1` (colour,
+normal and height, from the Substance Painter asset library, copied into the
+art folder as `freepbr_futuristic_panels1_*.png`), darkened to near black.
+Each world adds three variation rules (90, 130 and
+60 m) and sends 30% of steep slopes to the last variety layer. Variety art:
+
+- Moon: regolith (Poly Haven moon dusted), meteor rubble (moon meteor) and dark basalt;
+- Venus: ochre sulphur rock, dark crust (rocks ground) and dark scree;
+- Io: dark lava rock, pale sulphur crust (cracked boulder, warmed) and ash scree;
+- Europa: frost crust (marble rock), dark ice rock and icy scree (jagged rock);
+- Titan: dark shore mud, dark basalt (dark rock detail) and rock rubble.
+
+Titan's `typeNames` now also lists type 1 as Base (or unnamed, as some maps
+leave it). Europa's layers 0 and 3 still share the glacier art.
+
 Map lists. Ganymede: evolve_3, evolve_4, bdmisn01-06, 08, 12-15 and chmisn01-04,
 08. Elysium: evolve_1, evolve_2, evolve_5, bdmisn07, 09, 10, 11 and chmisn05,
 06. CR does not override any of them. The Black Dog and Chinese maps exist only
