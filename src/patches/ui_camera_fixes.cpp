@@ -73,8 +73,6 @@ namespace BZROpenShim
 {
     namespace Hooks
     {
-        bool g_BriefingScrollFixInstalled = false;
-        bool g_BriefingScrollFixEnabled = true;
         bool g_BriefingPageStrideFixInstalled = false;
         bool g_BriefingPageStrideFixEnabled = true;
         bool g_MultiRenderCountClampInstalled = false;
@@ -93,26 +91,6 @@ namespace BZROpenShim
         bool g_CinematicSatelliteZoomFixInstalled = false;
         bool g_CinematicSatelliteZoomFixEnabled = true;
         volatile long g_CinematicSatelliteZoomLogBudget = 8;
-
-        // Mission briefing and mission archive callbacks use the unguarded
-        // scrolling methods. Redirect just those four calls to the guarded
-        // variants already used by the lobby/chat UI so the final partial page
-        // is clamped instead of snapping back to the top.
-        uint32_t g_BriefingScrollUpCallAddr = 0;
-
-        uint32_t g_BriefingScrollDownCallAddr = 0;
-
-        uint32_t g_ArchiveScrollUpCallAddr = 0;
-
-        uint32_t g_ArchiveScrollDownCallAddr = 0;
-
-        uint32_t g_GuardedScrollUpAddr = 0;
-
-        uint32_t g_GuardedScrollDownAddr = 0;
-
-        uint32_t g_UnguardedScrollUpAddr = 0;
-
-        uint32_t g_UnguardedScrollDownAddr = 0;
 
         // Scroll stride vs. rendered page (briefing text cut off). cUI_TextBlock
         // 0x007CCE90 measures how many lines fit the box by growing a probe
@@ -272,49 +250,6 @@ namespace BZROpenShim
             if (state == 0)
                 state = HookEngine::BindEngineRows(feature, rows) ? 1 : -1;
             return state > 0;
-        }
-
-        void InstallBriefingScrollFixIfPossible()
-        {
-            if (!g_BriefingScrollFixEnabled || g_BriefingScrollFixInstalled)
-                return;
-            static int s_bound = 0;
-            const HookEngine::EngineRow rows[] = {
-                { "BriefingScrollUpCall", &g_BriefingScrollUpCallAddr },
-                { "BriefingScrollDownCall", &g_BriefingScrollDownCallAddr },
-                { "ArchiveScrollUpCall", &g_ArchiveScrollUpCallAddr },
-                { "ArchiveScrollDownCall", &g_ArchiveScrollDownCallAddr },
-                { "UiScrollUpGuarded", &g_GuardedScrollUpAddr },
-                { "UiScrollDownGuarded", &g_GuardedScrollDownAddr },
-                { "UiScrollUpUnguarded", &g_UnguardedScrollUpAddr },
-                { "UiScrollDownUnguarded", &g_UnguardedScrollDownAddr },
-            };
-            if (!BindUiCameraRows("Briefing scroll fix", rows, s_bound))
-                return;
-
-            const bool briefingUp = RedirectCallTarget(
-                g_BriefingScrollUpCallAddr,
-                g_UnguardedScrollUpAddr,
-                g_GuardedScrollUpAddr);
-            const bool briefingDown = RedirectCallTarget(
-                g_BriefingScrollDownCallAddr,
-                g_UnguardedScrollDownAddr,
-                g_GuardedScrollDownAddr);
-            const bool archiveUp = RedirectCallTarget(
-                g_ArchiveScrollUpCallAddr,
-                g_UnguardedScrollUpAddr,
-                g_GuardedScrollUpAddr);
-            const bool archiveDown = RedirectCallTarget(
-                g_ArchiveScrollDownCallAddr,
-                g_UnguardedScrollDownAddr,
-                g_GuardedScrollDownAddr);
-
-            g_BriefingScrollFixInstalled =
-                briefingUp && briefingDown && archiveUp && archiveDown;
-            if (g_BriefingScrollFixInstalled)
-            {
-                Log(L"[BRIEFSCROLL] Redirected mission briefing/archive callbacks to guarded scroll handlers\n");
-            }
         }
 
         // Reads the `68 imm32` push at `site` and, only if its operand still

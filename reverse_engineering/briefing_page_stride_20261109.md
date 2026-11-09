@@ -4,32 +4,56 @@ Build: GOG Redux 2.2.301. Decompile citations are files under
 `Battlezone_Source/BZ1/Redux/openshim_re_corpus/bzr_gog_best_effort/ghidrecomp/results/bins/battlezone98redux.exe-6777ca/decomps/` (called `D/` below). Addresses were
 also disassembled from the shipping exe. Not live-tested.
 
-## Relationship to the existing BRIEFSCROLL fix
+## BRIEFSCROLL removed (2026-11-09)
 
-`[BRIEFSCROLL]` (`ui_camera_fixes.cpp`) is installed (openshim.log, 2026-11-09 shows
-`hook=installed`). It redirects the briefing/archive up/down callbacks from
-`FUN_007ce0e0/007ce110` to `FUN_007ce730/007ce6d0`. This is a different defect from
-the one fixed here, and the premise of that fix is doubtful:
+`D/` = the decomps dir named above. The earlier `[BRIEFSCROLL]` fix redirected the
+briefing/archive up/down callbacks (`0x0078ED29/39`, `0x00790AF9/B09`) from
+`FUN_007ce0e0/007ce110` to `FUN_007ce730/007ce6d0`. It is removed in this branch.
 
+What it tried to fix (`mission_briefing_scroll_cutoff_notes_20260320.md`): the last
+part of a long briefing is unreachable and authors pad the `.des` with 10-15 blank
+lines. That symptom is the one explained below by the stride/page mismatch; the old
+note guessed a clamp/reset path instead.
+
+Why the premise is wrong:
 - The briefing body is a `cUI_ScrollingTextBlock` (`D/FUN_0078f030:293-303`,
-  `operator_new(0x295c)` + `FUN_007cd8d0`; vftable at `D/FUN_007cd8d0:36`).
-- `FUN_007ce6d0/007ce730/007ce580` are `cUI_ChatBlock` methods: the chat block ctor
-  `D/FUN_007ce140:36` sets `cUI_ChatBlock::vftable`, and its callbacks
-  `FUN_00795c50 -> FUN_007ce6d0` are wired to the "chatText" widgets
-  (`D/FUN_00796880:484-490`, `D/FUN_0079ea90:548-554`).
-- Those methods bound the scroll by the length of the global session chat list
-  (`FUN_00764760` returns `DAT_00945470`, `FUN_004b3210` = `+0xc`, `FUN_004170c0` =
-  `+0x10`; `D/FUN_007ce6d0`, `D/FUN_007ce580` lines 22-29). The `+0x2958` offset is
-  shared by both classes, which is why the swap "works" mechanically.
-- The note `mission_briefing_scroll_cutoff_notes_20260320.md` called `FUN_007ce580`
-  the scrolling block's clamp; it is the chat block's refresh. The stock
-  `FUN_007ce110` scroll-down only does `++[this+0x2958]` and rebuilds
-  (`D/FUN_007ce110`); `FUN_007cdd50` (the scrolling block render) hides the down
-  arrow when nothing overflows (`D/FUN_007cdd50:41-45, 75-116`) and has no reset-to-0.
-- UNVERIFIED (needs a live run): with the redirect, down-scroll advances only when
-  `chatLines - page >= [this+0x294c]`, so a briefing may fail to scroll in single
-  player when the chat list is short. If so, turn `[BRIEFSCROLL]` off
-  (`OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX=1`) when testing this fix.
+  `FUN_007cd8d0` sets `cUI_ScrollingTextBlock::vftable` at `D/FUN_007cd8d0:36`).
+- `FUN_007ce6d0/007ce730/007ce580` are `cUI_ChatBlock` methods (ctor
+  `D/FUN_007ce140:36`; callbacks wired to "chatText": `D/FUN_00796880:484-490`).
+  They bound the scroll by the global chat list length (`D/FUN_007ce6d0:8-11`,
+  `D/FUN_007ce580:20-23`), and `FUN_007ce580` zeroes `+0x2958` when that list is
+  empty (`D/FUN_007ce580:23-24`) and refreshes the chat widgets' arrows
+  (`D/FUN_007ce580:26-28`). Applied to a briefing in single player (empty chat
+  list) the redirect can pin the page at 0 or stop the page advancing: UNVERIFIED
+  live, but it is a sufficient reason not to keep it.
+- The note's "refresh resets to 0" is the chat block's `FUN_007ce580`, not code the
+  scrolling block runs. The stock scroll-down only does `++[this+0x2958]` and
+  rebuilds (`D/FUN_007ce110:5-6`; up is `D/FUN_007ce0e0:5-6`).
+
+Does a bound still matter once the stride is right? The page render has no reset
+and, past the end, just skips every line and shows nothing
+(`D/FUN_007cdd50:60-64`, loop ends when the list is empty). The only things that
+stop the player going past the end are the arrows: `FUN_007cdd50` hides the down
+arrow (`+0x2954`) at the top of every render (`:42`) and re-shows it only when the
+page text still overflows the box (`:75-81`). With `BriefingPageStride`, `P` is the
+true fit count, so the last page that holds <= `P` lines fits, the down arrow stays
+hidden, and the offset cannot pass the end by clicking. Without it, a final page of
+exactly `P` lines overflows, shows the arrow, and the next click lands on an empty
+page (see below). Whether those arrows are click-disabled when hidden (vtable
+`+0x24` is assumed to be SetVisible) is UNVERIFIED; no other writer of `+0x2958`
+exists except the ctor (`D/FUN_007cd8d0:37`) and reset `D/FUN_007ce0b0:5`
+(grep of `0x2958` over `D/`).
+
+A native page-count clamp was not added: the line list is a local of the render
+function (`D/FUN_007cdd50:46-74`), so the block has no stored page count to clamp
+against, and a clamp hook cannot be validated without launching the game. If a live
+test shows overscroll still reaches an empty page, add the clamp inside the render
+(re-derive the list size and cap `+0x2958` at `ceil(lines/P) - 1`).
+
+Removed: the four call-site redirects, ini-less switch
+`OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX` / `BZR_DISABLE_BRIEFING_SCROLL_FIX` (it never
+had an ini key), the `[BRIEFSCROLL]` log lines and eight `patches.json` rows
+(`BriefingScroll*Call`, `ArchiveScroll*Call`, `UiScroll*Guarded/Unguarded`).
 
 ## Root cause fixed here: stride probe vs page text
 
@@ -88,5 +112,5 @@ wired like the briefing's), so it is covered by the same fix.
 2. A/B with `BriefingPageStride=0` at a resolution where the old build drops a
    numbered line at a page break. Confirm the old build reproduces first.
 3. Repeat from the mission archive screen.
-4. Test once with `OPENSHIM_DISABLE_BRIEFING_SCROLL_FIX=1` to see whether the
-   BRIEFSCROLL redirect changes the result.
+4. Compare against the previous build (which still had BRIEFSCROLL) once, long
+   unpadded `.des`, both scroll directions, in the briefing and the archive.
