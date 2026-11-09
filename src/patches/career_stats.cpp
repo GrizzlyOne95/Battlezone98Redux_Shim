@@ -89,6 +89,14 @@ namespace BZROpenShim
         // for victim and damager. No career-stats behavior is changed.
         bool g_TracePlayerKills = false;
         volatile long g_PlayerKillTraceBudget = 0;
+        // Kill-credit diagnostic ([Diagnostics] TraceKillCredit). Log only.
+        // Records who the engine credits for a multiplayer kill: the victim and
+        // killer teams, the player id owning each team, the local id, whether the
+        // credit stayed local (Increment_Player_Kills) or was sent to the killer's
+        // peer (SendKill), and whether the death arrived through the snipe ('ns')
+        // handler. Budgeted; default OFF.
+        bool g_TraceKillCredit = false;
+        volatile long g_KillCreditTraceBudget = 0;
 
         // ====================================================================
         // CAREER STATISTICS ON THE NATIVE EVENT LAYER
@@ -1952,10 +1960,169 @@ namespace BZROpenShim
             return CareerStatsResetResult::Cleared;
         }
 
+        // --- Kill-credit trace (log only) ------------------------------------
+        //
+        // Decompile (Redux, battlezone98redux.exe-6777ca/decomps):
+        //   RecordDeath FUN_00577290.c:2-30. Param 1 is the killed team, param 2
+        //     the killer team. Line 10-11: the victim's player record is
+        //     DAT_009180e8[killedTeam] and its player id is the short at +0x28.
+        //     Line 19-27: the killer's record is DAT_009180e8[killerTeam]; when its
+        //     id (+0x28) equals the local id (FUN_00572d90.c:5 returns DAT_009180d4)
+        //     Increment_Player_Kills FUN_00625f90 runs locally (line 21), otherwise
+        //     SendKill FUN_00573090 is sent to the killer's peer (line 24).
+        //   SendKill FUN_00573090.c:2-21: message tag 0x4b50 ('PK') plus the killer
+        //     team byte, sent to peer param_2 (line 12-16).
+        //   'PK' receive: FUN_00570500.c:162-166 calls FUN_00625f90 (credits the
+        //     local player) when FUN_0045ca50() is non-zero. The message's team
+        //     byte is not read there.
+        //   Snipe: FUN_005d6e00.c:68-76 sends 'ns' (0x736e, FUN_00573bb0.c:14); the
+        //     receiver FUN_00573ae0.c:12-21 (dispatched at FUN_00570500.c:281-283,
+        //     remote senders only) calls FUN_004b9ba0 (score notify,
+        //     FUN_004b9ba0.c:8), the sole caller of RecordDeath.
+        // UNVERIFIED: what FUN_005e1310(killedTeam) tests (FUN_00577290.c:18-19; a
+        // non-zero result skips the kill credit), and how the host's own snipe is
+        // scored (FUN_00573bb0.c:23-29 only sends when FUN_004b9800 returns a peer).
+        static uintptr_t g_SnipeNotifyAddr = 0;
+        static uintptr_t g_IncrementKillsAddr = 0;
+        static InlineDetour32 g_SnipeNotifyDetour = {};
+        static InlineDetour32 g_IncrementKillsDetour = {};
+        using FnSnipeNotify = void(__cdecl*)(uint32_t senderId, uint32_t* msg);
+        using FnIncrementKills = void(__cdecl*)();
+        static FnSnipeNotify g_BzrFn_SnipeNotify = nullptr;
+        static FnIncrementKills g_BzrFn_IncrementKills = nullptr;
+        static bool g_KillCreditHooksInstalled = false;
+        static bool g_KillCreditHooksGaveUp = false;
+        static int g_KillCreditInstallAttempts = 0;
+        static thread_local int g_KillCreditSnipeDepth = 0;
+        static thread_local int g_KillCreditCtxVictimTeam = -1;
+        static thread_local int g_KillCreditCtxKillerTeam = -1;
+
+        static bool ShouldTraceKillCredit()
+        {
+            return g_TraceKillCredit && g_KillCreditTraceBudget > 0;
+        }
+
+        static void __cdecl SnipeNotifyHook(uint32_t senderId, uint32_t* msg)
+        {
+            if (ShouldTraceKillCredit() && InterlockedDecrement(&g_KillCreditTraceBudget) >= 0)
+            {
+                uint32_t victimHandle = 0, scoreArg = 0;
+                __try { victimHandle = msg[0]; scoreArg = msg[1]; } __except(EXCEPTION_EXECUTE_HANDLER) {}
+                Log(L"[KILLCREDIT] snipe-notify sender=0x%04X local=0x%04X victimHandle=%d arg1=0x%08X\n",
+                    (unsigned)(senderId & 0xFFFF), (unsigned)ReadLocalPlayerNetIdValue(),
+                    (int)victimHandle, scoreArg);
+            }
+            ++g_KillCreditSnipeDepth;
+            if (g_BzrFn_SnipeNotify)
+                g_BzrFn_SnipeNotify(senderId, msg);
+            --g_KillCreditSnipeDepth;
+        }
+
+        static void __cdecl IncrementKillsHook()
+        {
+            if (ShouldTraceKillCredit() && InterlockedDecrement(&g_KillCreditTraceBudget) >= 0)
+            {
+                Log(L"[KILLCREDIT] credit-local local=0x%04X via=%hs ctxVictimTeam=%d ctxKillerTeam=%d snipe=%d ret=0x%08X\n",
+                    (unsigned)ReadLocalPlayerNetIdValue(),
+                    g_KillCreditCtxKillerTeam >= 0 ? "RecordDeath" : "PK-message",
+                    g_KillCreditCtxVictimTeam, g_KillCreditCtxKillerTeam,
+                    g_KillCreditSnipeDepth > 0 ? 1 : 0,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(_ReturnAddress())));
+            }
+            if (g_BzrFn_IncrementKills)
+                g_BzrFn_IncrementKills();
+        }
+
+        void InstallKillCreditTraceHooksIfPossible()
+        {
+            HookEngine::FrameThreadSitesScope frameSites;
+            if (g_KillCreditHooksInstalled || g_KillCreditHooksGaveUp || !g_TraceKillCredit)
+                return;
+            static const bool bound = [] {
+                const HookEngine::EngineRow rows[] = {
+                    { "SnipeNotifyReceive", &g_SnipeNotifyAddr },
+                    { "IncrementPlayerKills", &g_IncrementKillsAddr },
+                };
+                return HookEngine::BindEngineRows("Kill-credit trace", rows);
+            }();
+            if (!bound)
+            {
+                g_KillCreditHooksGaveUp = true;
+                return;
+            }
+            if (++g_KillCreditInstallAttempts > 20)
+            {
+                g_KillCreditHooksGaveUp = true;
+                Log(L"[KILLCREDIT] hook bytes never matched; trace limited to the RecordDeath line\n");
+                return;
+            }
+            // Same prologues as the engine_addresses rows (read from the GOG 2.2.301 image).
+            static const uint8_t kSnipeBytes[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10 };
+            static const uint8_t kIncBytes[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C };
+            if (!g_BzrFn_SnipeNotify &&
+                InstallInlineDetour32(g_SnipeNotifyDetour, g_SnipeNotifyAddr,
+                                      reinterpret_cast<void*>(SnipeNotifyHook), sizeof(kSnipeBytes),
+                                      kSnipeBytes, sizeof(kSnipeBytes)))
+                g_BzrFn_SnipeNotify = reinterpret_cast<FnSnipeNotify>(g_SnipeNotifyDetour.trampoline);
+            if (!g_BzrFn_IncrementKills &&
+                InstallInlineDetour32(g_IncrementKillsDetour, g_IncrementKillsAddr,
+                                      reinterpret_cast<void*>(IncrementKillsHook), sizeof(kIncBytes),
+                                      kIncBytes, sizeof(kIncBytes)))
+                g_BzrFn_IncrementKills = reinterpret_cast<FnIncrementKills>(g_IncrementKillsDetour.trampoline);
+            if (g_BzrFn_SnipeNotify && g_BzrFn_IncrementKills)
+            {
+                g_KillCreditHooksInstalled = true;
+                Log(L"[KILLCREDIT] Installed snipe-notify 0x%08X and Increment_Player_Kills 0x%08X trace hooks\n",
+                    static_cast<uint32_t>(g_SnipeNotifyAddr), static_cast<uint32_t>(g_IncrementKillsAddr));
+            }
+        }
+
+        // Called from RecordDeathHook after the original has run.
+        static void TraceKillCreditRecordDeath(int killedTeam, int killerTeam)
+        {
+            if (!ShouldTraceKillCredit()) return;
+            if (InterlockedDecrement(&g_KillCreditTraceBudget) < 0) return;
+            const uint16_t victimPeer = GetNetPlayerIdForTeam(killedTeam);
+            const uint16_t killerPeer = GetNetPlayerIdForTeam(killerTeam);
+            const uint16_t localId = ReadLocalPlayerNetIdValue();
+            // Mirrors FUN_00577290.c:19-25; the FUN_005e1310 gate on line 19 is not modeled.
+            const char* route = "none";
+            if (killerTeam > 0 && killerPeer != PlayerKillTrace::kNetPlayerIdUnread)
+                route = (killerPeer == localId) ? "local-increment" : "SendKill-to-killer-peer";
+            else if (killerTeam > 0)
+                route = "killer-team-has-no-player";
+            Log(L"[KILLCREDIT] record-death victimTeam=%d victimPeer=0x%04X killerTeam=%d killerPeer=0x%04X "
+                L"local=0x%04X route=%hs snipe=%d victimLocal=%d\n",
+                killedTeam, (unsigned)victimPeer, killerTeam, (unsigned)killerPeer, (unsigned)localId,
+                route, g_KillCreditSnipeDepth > 0 ? 1 : 0,
+                (victimPeer != PlayerKillTrace::kNetPlayerIdUnread && victimPeer == localId) ? 1 : 0);
+            // Pending-damage attribution for the same victim, if the career layer saw it.
+            for (auto& e : g_CareerPendingVictims)
+            {
+                if (e.inUse && e.victimTeam == killedTeam)
+                {
+                    Log(L"[KILLCREDIT]   pending victimH=%d damagerH=%d damagerTeam=%d distinctDamagers=%d\n",
+                        e.victimHandle, e.damagerHandle, e.damagerTeam, e.distinctDamagers);
+                    break;
+                }
+            }
+        }
+
         void __cdecl RecordDeathHook(int killedTeam, int killerTeam)
         {
+            if (g_TraceKillCredit)
+            {
+                g_KillCreditCtxVictimTeam = killedTeam;
+                g_KillCreditCtxKillerTeam = killerTeam;
+            }
             if (g_BzrFn_RecordDeath)
                 g_BzrFn_RecordDeath(killedTeam, killerTeam);
+            if (g_TraceKillCredit)
+            {
+                g_KillCreditCtxVictimTeam = -1;
+                g_KillCreditCtxKillerTeam = -1;
+                TraceKillCreditRecordDeath(killedTeam, killerTeam);
+            }
             // Research trace for sniper/GameObject* path coverage (NetPlayer layer)
             TraceNetPlayerRecordDeath(killedTeam, killerTeam);
 

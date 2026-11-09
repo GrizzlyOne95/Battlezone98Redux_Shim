@@ -517,8 +517,145 @@ namespace BZROpenShim
             else if (g_SprayBombHitDetour.trampoline)
                 reinterpret_cast<FnMpauthSprayHit>(g_SprayBombHitDetour.trampoline)(thisPtr, a, b);
         }
+        // --- Splinter spawn trace ([Diagnostics] TraceSplinterSpawns) -------------
+        //
+        // Reports say splinter shells appear twice in multiplayer (not
+        // reproduced). Log only: one line per SprayBomb the first time it
+        // simulates, plus a warning when two shells with the same owner, class
+        // and position appear within one sim tick.
+        //
+        // Where the spawn is observed. Every ordnance object is initialised by
+        // the base Ordnance::Init FUN_00480340 (FUN_00480340.c:19 base init,
+        // :30-32 velocity vec3 stored at this+0x30..0x38, :33 speed from the
+        // class at [this+0xC]+0x54), which per-class wrappers call (e.g.
+        // FUN_005d6de0.c:5). A network-created shell is built by
+        // Ordnance_Receive 0x00584620 (hooked above). The SprayBomb's own
+        // per-tick entry is SprayBomb::Simulate FUN_004e7d30.c:2-23 (velocity at
+        // +0x30..0x38, line 8-12). The SprayBomb vtable holds Simulate at slot 4
+        // and Hit (FUN_005db080) at slot 5 (read from the .rdata image at
+        // 0x008881D4 / 0x008881D8), so this hook only ever sees SprayBombs and
+        // needs no extra class test. Observing the first Simulate rather than
+        // detouring Ordnance::Init keeps this to the hook that already exists.
+        // UNVERIFIED: which per-class wrapper is SprayBomb's own Init.
+        //
+        // Field offsets: source u16 +0x7C and ordid u16 +0x7E (MpauthReadOrdnanceFields,
+        // shared with the Ordnance_Receive key), class pointer +0x0C and the
+        // obj76 pointer +0x14 (FUN_00480340.c:20,25). The position doubles at
+        // obj76+0x48 are the MAT_3D posit used for the SprayBuilding in
+        // mp_splinter_sync.cpp; that they also hold for an ordnance obj76 is
+        // UNVERIFIED, so a failed or implausible read falls back to velocity.
+        bool g_TraceSplinterSpawns = false;
+        volatile long g_SplinterSpawnTraceBudget = 0;
+        constexpr long kSplinterSpawnTraceBudgetDefault = 512;
+        constexpr ULONGLONG kSplinterDupWindowMs = 50; // about one sim tick; no frame counter is bound
+        constexpr size_t kSplinterSeenMax = 4096;
+        constexpr size_t kSplinterRecentMax = 16;
+
+        struct SplinterSpawnRecord
+        {
+            ULONGLONG tickMs = 0;
+            uint32_t ptr = 0;
+            uint16_t src = 0;
+            uint16_t ordid = 0;
+            uint32_t classPtr = 0;
+            double pos[3] = {};
+            bool havePos = false;
+            float vel[3] = {};
+        };
+        static std::unordered_map<uint32_t, uint32_t> g_SplinterSeen = {};
+        static SplinterSpawnRecord g_SplinterRecent[kSplinterRecentMax] = {};
+        static size_t g_SplinterRecentNext = 0;
+        static volatile long g_SplinterSpawnCount = 0;
+        static volatile long g_SplinterDupCount = 0;
+
+        static bool SplinterReadSpawn(void* ordPtr, SplinterSpawnRecord& r)
+        {
+            __try
+            {
+                uint8_t* p = (uint8_t*)ordPtr;
+                r.ptr = (uint32_t)(uintptr_t)ordPtr;
+                r.src = *(uint16_t*)(p + kMpauthOrdnanceSourceOffset);
+                r.ordid = *(uint16_t*)(p + kMpauthOrdnanceOrdIdOffset);
+                r.classPtr = *(uint32_t*)(p + 0x0C);
+                r.vel[0] = *(float*)(p + 0x30);
+                r.vel[1] = *(float*)(p + 0x34);
+                r.vel[2] = *(float*)(p + 0x38);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+            __try
+            {
+                uint8_t* obj = *(uint8_t**)((uint8_t*)ordPtr + kOrdnanceObjOffset);
+                if (obj)
+                {
+                    r.pos[0] = *(double*)(obj + 0x48);
+                    r.pos[1] = *(double*)(obj + 0x50);
+                    r.pos[2] = *(double*)(obj + 0x58);
+                    r.havePos = std::isfinite(r.pos[0]) && std::isfinite(r.pos[1]) && std::isfinite(r.pos[2]);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { r.havePos = false; }
+            r.tickMs = GetTickCount64();
+            return true;
+        }
+
+        static bool SplinterSameShell(const SplinterSpawnRecord& a, const SplinterSpawnRecord& b)
+        {
+            if (a.ptr == b.ptr || a.src != b.src || a.classPtr != b.classPtr) return false;
+            if (a.havePos && b.havePos)
+            {
+                const double dx = a.pos[0] - b.pos[0], dy = a.pos[1] - b.pos[1], dz = a.pos[2] - b.pos[2];
+                return dx * dx + dy * dy + dz * dz < 0.25 * 0.25;
+            }
+            return a.vel[0] == b.vel[0] && a.vel[1] == b.vel[1] && a.vel[2] == b.vel[2];
+        }
+
+        static void TraceSplinterSpawn(void* ordPtr, bool inReceive)
+        {
+            if (!g_TraceSplinterSpawns) return;
+            SplinterSpawnRecord r;
+            if (!SplinterReadSpawn(ordPtr, r)) return;
+            const uint32_t key = r.ptr;
+            const uint32_t id = ((uint32_t)r.src << 16) | r.ordid;
+            auto it = g_SplinterSeen.find(key);
+            if (it != g_SplinterSeen.end() && it->second == id) return; // already reported
+            if (g_SplinterSeen.size() >= kSplinterSeenMax) return; // stop tracking rather than re-report live shells
+            g_SplinterSeen[key] = id;
+
+            const uint16_t localId = MpauthLocalNetId();
+            const bool local = (r.src == localId);
+            const long n = InterlockedIncrement(&g_SplinterSpawnCount);
+            if (InterlockedDecrement(&g_SplinterSpawnTraceBudget) >= 0)
+            {
+                Log(L"[SPLSPAWN] n=%ld peer=%hs class=0x%08X source=0x%04X ordid=0x%04X origin=%hs inRecv=%d ptr=0x%08X pos=%hs(%.2f,%.2f,%.2f) vel=(%.2f,%.2f,%.2f)\n",
+                    n, MpauthPeerRole(), r.classPtr, (unsigned)r.src, (unsigned)r.ordid,
+                    local ? "local" : "network", inReceive ? 1 : 0, r.ptr,
+                    r.havePos ? "" : "unread", r.pos[0], r.pos[1], r.pos[2], r.vel[0], r.vel[1], r.vel[2]);
+            }
+            else
+            {
+                InterlockedIncrement(&g_SplinterSpawnTraceBudget);
+            }
+
+            for (const SplinterSpawnRecord& o : g_SplinterRecent)
+            {
+                if (o.tickMs == 0 || r.tickMs - o.tickMs > kSplinterDupWindowMs) continue;
+                if (!SplinterSameShell(r, o)) continue;
+                const long d = InterlockedIncrement(&g_SplinterDupCount);
+                // Duplicates are the finding, so they are not budget-limited beyond a hard cap.
+                if (d <= 256)
+                    Log(L"[SPLSPAWN] WARNING duplicate shell #%ld: source=0x%04X class=0x%08X new ptr=0x%08X ordid=0x%04X vs ptr=0x%08X ordid=0x%04X within %llums origin=%hs\n",
+                        d, (unsigned)r.src, r.classPtr, r.ptr, (unsigned)r.ordid, o.ptr, (unsigned)o.ordid,
+                        (unsigned long long)(r.tickMs - o.tickMs), local ? "local" : "network");
+                break;
+            }
+            g_SplinterRecent[g_SplinterRecentNext] = r;
+            g_SplinterRecentNext = (g_SplinterRecentNext + 1) % kSplinterRecentMax;
+        }
+
         void __fastcall MpauthSprayBombSimulateHook(void* thisPtr, void* /*edx*/, float dt)
         {
+            if (g_TraceSplinterSpawns)
+                TraceSplinterSpawn(thisPtr, g_MpauthInOrdnanceReceive);
             if (g_MpauthInOrdnanceReceive && ShouldTraceMpauthSpl())
             {
                 uint16_t src = 0xFFFF, ord = 0xFFFF; int32_t bSend = -1; uint32_t flags = 0; float curDt = 0.0f;
@@ -694,6 +831,24 @@ namespace BZROpenShim
             if (budgetSpl > kMpauthTraceBudgetMax) budgetSpl = kMpauthTraceBudgetMax;
             g_MpauthDwTraceBudget = budgetDw;
             g_MpauthSplTraceBudget = budgetSpl;
+            {
+                bool spawns = false;
+                if (TryGetUserConfigBool("Diagnostics", "TraceSplinterSpawns", spawns))
+                    g_TraceSplinterSpawns = spawns;
+                else
+                    g_TraceSplinterSpawns = EnvFlagEnabled("OPENSHIM_TRACE_SPLINTER_SPAWNS") ||
+                                            EnvFlagEnabled("BZR_TRACE_SPLINTER_SPAWNS");
+                long spawnBudget = kSplinterSpawnTraceBudgetDefault;
+                if (TryGetEnvLong("OPENSHIM_TRACE_SPLINTER_SPAWNS_BUDGET", spawnBudget) ||
+                    TryGetEnvLong("BZR_TRACE_SPLINTER_SPAWNS_BUDGET", spawnBudget))
+                {
+                    if (spawnBudget < 0) spawnBudget = 0;
+                    if (spawnBudget > kMpauthTraceBudgetMax) spawnBudget = kMpauthTraceBudgetMax;
+                }
+                g_SplinterSpawnTraceBudget = spawnBudget;
+                if (g_TraceSplinterSpawns)
+                    Log(L"[SPLSPAWN] Splinter spawn trace enabled budget=%ld\n", spawnBudget);
+            }
             if (g_MpauthEnabled)
                 Log(L"[MPAUTH] Trace enabled dw=%hs spl=%hs dwBudget=%ld splBudget=%ld\n",
                     BoolText(g_MpauthDwEnabled), BoolText(g_MpauthSplEnabled), budgetDw, budgetSpl);
@@ -701,12 +856,13 @@ namespace BZROpenShim
 
         void InstallMpauthHooksIfPossible()
         {
-            if (!g_MpauthEnabled)
+            if (!g_MpauthEnabled && !g_TraceSplinterSpawns)
                 return;
             if (g_MpauthHooksInstalled)
                 return;
             if (!MpauthAddressesBound())
                 return;
+            if (g_MpauthEnabled)
             {
                 // push ebp; mov ebp,esp; sub esp,0x4C: steal all three (GOG 2.2.301).
                 static const uint8_t kExpectedDwSim[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x4C };
@@ -729,6 +885,7 @@ namespace BZROpenShim
                         Log(L"[MPAUTH] bytes: %02X %02X %02X %02X %02X %02X\n", b[0],b[1],b[2],b[3],b[4],b[5]); } __except(EXCEPTION_EXECUTE_HANDLER) {}
                 }
             }
+            if (g_MpauthEnabled)
             {
                 static const uint8_t kExpectedDwExplode[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x4C };
                 if (ExpectedBytesMatchAt(g_DayWreckerExplodeAddr, kExpectedDwExplode, sizeof(kExpectedDwExplode)))
@@ -744,6 +901,7 @@ namespace BZROpenShim
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
                     Log(L"[MPAUTH] DayWrecker::Explode bytes mismatch at 0x%08X\n", (uint32_t)g_DayWreckerExplodeAddr);
             }
+            if (g_MpauthEnabled)
             {
                 static const uint8_t kExpectedGoRemove[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x38 };
                 if (ExpectedBytesMatchAt(g_GameObjectRemoveAddr, kExpectedGoRemove, sizeof(kExpectedGoRemove)))
@@ -758,6 +916,7 @@ namespace BZROpenShim
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
                     Log(L"[MPAUTH] GameObject::Remove bytes mismatch at 0x%08X\n", (uint32_t)g_GameObjectRemoveAddr);
             }
+            if (g_MpauthEnabled)
             {
                 static const uint8_t kExpectedSetRemote[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x20 };
                 if (ExpectedBytesMatchAt(g_DayWreckerSetRemoteAddr, kExpectedSetRemote, sizeof(kExpectedSetRemote)))
@@ -772,6 +931,7 @@ namespace BZROpenShim
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
                     Log(L"[MPAUTH] SetRemote bytes mismatch at 0x%08X\n", (uint32_t)g_DayWreckerSetRemoteAddr);
             }
+            if (g_MpauthEnabled)
             {
                 // push ebp; mov ebp,esp; sub esp,0x150 (imm32 form): boundary at 9.
                 static const uint8_t kExpectedOrdnRecv[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x50, 0x01, 0x00, 0x00 };
@@ -791,6 +951,7 @@ namespace BZROpenShim
                         Log(L"[MPAUTH] ordn recv bytes: %02X %02X %02X %02X %02X %02X\n", b[0],b[1],b[2],b[3],b[4],b[5]); } __except(EXCEPTION_EXECUTE_HANDLER) {}
                 }
             }
+            if (g_MpauthEnabled)
             {
                 static const uint8_t kExpectedHit[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x08, 0x03, 0x00, 0x00 };
                 if (ExpectedBytesMatchAt(g_SprayBombHitAddr, kExpectedHit, sizeof(kExpectedHit)))
@@ -820,6 +981,7 @@ namespace BZROpenShim
                     Log(L"[MPAUTH] SprayBomb::Simulate bytes mismatch at 0x%08X\n", (uint32_t)g_SprayBombSimulateAddr);
             }
             // Ordinary state reader (004B8590) — daywrecker revive path, GOG 2.2.301 only
+            if (g_MpauthEnabled)
             {
                 // push ebp; mov ebp,esp; sub esp,0x160 (imm32 form): boundary at 9.
                 static const uint8_t kExpectedOrdinary[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x60, 0x01, 0x00, 0x00 };
@@ -836,6 +998,7 @@ namespace BZROpenShim
                     Log(L"[MPAUTH] Ordinary reader bytes mismatch at 0x%08X\n", (uint32_t)g_OrdinaryStateReaderAddr);
             }
             // Permanent state reader (004B8FA0)
+            if (g_MpauthEnabled)
             {
                 static const uint8_t kExpectedPermanent[6] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x68 };
                 if (ExpectedBytesMatchAt(g_PermanentStateReaderAddr, kExpectedPermanent, sizeof(kExpectedPermanent)))
@@ -850,7 +1013,7 @@ namespace BZROpenShim
                 else if (InterlockedDecrement(&g_MpauthInstallRetryBudget) >= 0)
                     Log(L"[MPAUTH] Permanent reader bytes mismatch at 0x%08X\n", (uint32_t)g_PermanentStateReaderAddr);
             }
-            g_MpauthHooksInstalled = g_MpauthDwSimOrig || g_MpauthDwExplodeOrig || g_MpauthGoRemoveOrig || g_MpauthSetRemoteOrig || g_MpauthOrdnReceiveOrig || g_MpauthSprayHitOrig;
+            g_MpauthHooksInstalled = g_MpauthDwSimOrig || g_MpauthDwExplodeOrig || g_MpauthGoRemoveOrig || g_MpauthSetRemoteOrig || g_MpauthOrdnReceiveOrig || g_MpauthSprayHitOrig || g_MpauthSpraySimOrig;
             if (g_MpauthHooksInstalled)
                 Log(L"[MPAUTH] Hooks installed dwSim=%hs explode=%hs remove=%hs setRemote=%hs ordRecv=%hs hit=%hs sim=%hs\n",
                     BoolText(g_MpauthDwSimOrig!=nullptr), BoolText(g_MpauthDwExplodeOrig!=nullptr), BoolText(g_MpauthGoRemoveOrig!=nullptr),

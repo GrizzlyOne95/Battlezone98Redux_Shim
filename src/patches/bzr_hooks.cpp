@@ -1381,6 +1381,28 @@ namespace BZROpenShim
                 Log(L"[PKTRACE] Player-kill trace enabled budget=%ld\n", budget);
         }
 
+        // Kill-credit diagnostic (log only): [Diagnostics] TraceKillCredit, env
+        // OPENSHIM_TRACE_KILL_CREDIT / BZR_TRACE_KILL_CREDIT, budget env
+        // OPENSHIM_TRACE_KILL_CREDIT_BUDGET.
+        {
+            bool cfg = false;
+            if (TryGetUserConfigBool("Diagnostics", "TraceKillCredit", cfg))
+                g_TraceKillCredit = cfg;
+            else
+                g_TraceKillCredit = EnvFlagEnabled("OPENSHIM_TRACE_KILL_CREDIT") ||
+                                    EnvFlagEnabled("BZR_TRACE_KILL_CREDIT");
+            long budget = 512;
+            if (TryGetEnvLong("OPENSHIM_TRACE_KILL_CREDIT_BUDGET", budget) ||
+                TryGetEnvLong("BZR_TRACE_KILL_CREDIT_BUDGET", budget))
+            {
+                if (budget < 0) budget = 0;
+                if (budget > 4096) budget = 4096;
+            }
+            g_KillCreditTraceBudget = budget;
+            if (g_TraceKillCredit)
+                Log(L"[KILLCREDIT] Kill-credit trace enabled budget=%ld\n", budget);
+        }
+
         InitializeCareerStatsConfig();
 
         InitializeHopOutAttackAlertConfig();
@@ -1847,7 +1869,9 @@ namespace BZROpenShim
             HookEngine::FrameThreadSitesScope frameSites;
             InstallDistributedRecordDeathIntHookIfPossible();
         }
-        if (g_MpauthEnabled && !g_MpauthHooksInstalled)
+        if (g_TraceKillCredit)
+            InstallKillCreditTraceHooksIfPossible();
+        if ((g_MpauthEnabled || g_TraceSplinterSpawns) && !g_MpauthHooksInstalled)
         {
             HookEngine::FrameThreadSitesScope frameSites;
             InstallMpauthHooksIfPossible();

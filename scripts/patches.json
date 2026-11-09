@@ -4215,6 +4215,18 @@
       "identity": "NetPlayer::RecordDeath(killedTeam, killerTeam) __cdecl; reads netPlayerByTeam[] at +0x1B"
     },
     {
+      "name": "IncrementPlayerKills",
+      "address": "0x00625F90",
+      "expected": "55 8B EC 83 EC 0C 0F B7 05 D4 80 91 00 50 E8 0D 12 F5 FF 83 C4 04",
+      "identity": "Increment_Player_Kills() __cdecl, no arguments: bumps the LOCAL player's kill stat (stat 0xF of the player record keyed by the local id at DAT_009180D4). Called from NetPlayer::RecordDeath when the killer team's player id is the local id, and from the 'PK' message handler in the Net::Receive dispatcher. Bytes read from the shipped GOG 2.2.301 image 2026-11-09. Kill-credit trace detour only."
+    },
+    {
+      "name": "SnipeNotifyReceive",
+      "address": "0x00573AE0",
+      "expected": "55 8B EC 83 EC 10 8B 45 0C 8B 08 51 E8 BF 5F F4 FF 83 C4 04",
+      "identity": "Snipe ('ns', 0x736E) notification receive handler, __cdecl(senderId, msg*), plain `ret`; called only from the Net::Receive dispatcher for a remote sender. It reaches the score-notify helper 0x004B9BA0, the sole caller of NetPlayer::RecordDeath. Bytes read from the shipped GOG 2.2.301 image 2026-11-09. Kill-credit trace detour only."
+    },
+    {
       "name": "GetPerformanceHealthGate",
       "address": "0x004E9610",
       "expected": "55 8B EC 83 EC 08 F3 0F 10 45 08 0F 2F 05 84 25 8A 00 72 06 D9 E8 EB 5A",

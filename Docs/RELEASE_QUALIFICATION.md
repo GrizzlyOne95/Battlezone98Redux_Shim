@@ -79,6 +79,31 @@ Acceptance:
 - bounded `[BMPFIX]` handling
 - no stale/half-created material after navigation/reopen/reselect
 
+### Display stress
+
+Run once per candidate on a throwaway profile, on DX9 and DX11, windowed first and then
+fullscreen. Launch one test game with the harness helpers (`reverse_engineering/BZRHarness.ps1`),
+then:
+
+```powershell
+powershell -File reverse_engineering\Run-BZRDisplayStress.ps1 -Cycles 10 -ReportPath $env:TEMP\display-stress.json
+```
+
+Each cycle sends Alt-Tab, Alt-Enter, the fullscreen/windowed toggle key if the build has one
+(`-ToggleVk <vk>`; skipped by default) and Shift-F9, waits, and reports per step: process exit
+(CRASH), not responding for `-HangSeconds` (HANG), a new `.dmp` or new crash lines in
+`openshim.log` (CRASH-LOG). The script never launches the game, caps at one process, closes it
+with WM_CLOSE at the end or on timeout, and never force-kills it (AGENTS.md display-stack rule),
+so a game that ignores WM_CLOSE must be closed by hand.
+
+Acceptance:
+
+- 10 cycles complete with no CRASH, HANG or CRASH-LOG on the Alt-Tab, Alt-Enter and toggle steps
+- the game still renders and responds to input afterwards, and exits cleanly
+- a failure on the Shift-F9 step is reported as `KNOWN-300`: it is the open editor task-mode crash
+  (`Docs/ROADMAP_CODE_VALIDATION_20261007.md`, item 300), not a new regression. It does not fail
+  the gate (the run stops there with `Known300Stop` set, so run the remaining cycles on a relaunched game if needed), but any change in its behavior from the previous candidate needs explaining
+
 ## Steam 2.2.301
 
 Test the exact same release candidate files on the supported Steam executable.
