@@ -216,6 +216,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Skips a music decode that Play overwrites before it is heard; audio only.
     "Fixes/MusicSingleFill",
     "Fixes/MagnetZeroRangeGuard",
+    # Local-only: rebuilds the shooter's own sniper aim for a tilted (ejected) pilot;
+    # identical to stock for a level pilot, no sync field written.
+    "Fixes/SniperEjectAimFix",
     # Heap-corruption guard (a remote scavenger's NetProcess is not a
     # ScavengerProcess); active in network games, which is where it matters.
     "Fixes/ScavengerNetProcessGuard",
@@ -489,6 +492,7 @@ $shippingPolicyChecks = @{
     "Fixes/PreciseTimestep" = "1"
     "Fixes/MusicSingleFill" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
+    "Fixes/SniperEjectAimFix" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"
     "Fixes/LuaGetIndependenceGuard" = "1"

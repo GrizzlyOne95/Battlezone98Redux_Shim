@@ -1456,6 +1456,13 @@ namespace BZROpenShim
         extern FnEarthQuakeSimulate g_BzrFn_EarthQuakeSimulateOriginal;
         void InstallQuakeReplayFadeIfPossible();
         void InstallTargetCamSatelliteFixIfPossible();
+        // sniper_eject_aim_fix.cpp: keeps a tilted (ejected) pilot's shot on the reticle.
+        extern bool g_SniperEjectAimFixEnabled;
+        extern bool g_SniperEjectAimFixActive;
+        void RefreshSniperEjectAimFixState();
+        extern bool g_SniperEjectAimFixInstalled;
+        extern volatile long g_SniperEjectAimLogCount;
+        void InstallSniperEjectAimFixIfPossible();
         void InstallCinematicSatelliteZoomFixIfPossible();
         void InstallPlayerFovIfPossible();
 
