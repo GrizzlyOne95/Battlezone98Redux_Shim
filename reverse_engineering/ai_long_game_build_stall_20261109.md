@@ -129,8 +129,11 @@ Other leak paths into the same counter, in order of how often they can happen:
     them (1 -> 0), but the AI's behaviour did not change, so it was not kept.
   - Same bench, both runs: after the Defense account filled (T+117) the AI never
     started svtank (Offense, 10 wanted) in the remaining 260 s, with or without
-    the repair. Cause not found; it may be specific to this AIP and fixture.
-    UNVERIFIED as the same bug as the 60-minute report.
+    the repair. The census rules out resources and deployment (every POLL to
+    T+379: scrap=400 pilots=50 recycler/factory deployed), and the earlier
+    builds rule out a missing AIP or AI control. Most likely bench content
+    (e.g. a plan entry such as svslf that cannot be built blocks the order).
+    Not evidence about the 60-minute stall: no bench has run past 6 minutes.
 
 ### 2. Reserved-area slot leak on successful crew builds (32 slots per team). Confidence: verified mechanism, impact UNVERIFIED
 
