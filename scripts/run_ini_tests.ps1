@@ -213,6 +213,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Whole-millisecond sim step quantisation; replaces only the float step,
     # never the game clock, and stands down in network games.
     "Fixes/PreciseTimestep",
+    # Clamps SeismicWave (Daywrecker) terrain-delta extents to the allocated
+    # buffer; drops only zero-delta cells, so the simulation is unchanged.
+    "Fixes/SeismicWaveExtentClamp",
     # Skips a music decode that Play overwrites before it is heard; audio only.
     "Fixes/MusicSingleFill",
     "Fixes/MagnetZeroRangeGuard",

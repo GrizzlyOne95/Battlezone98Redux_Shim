@@ -504,6 +504,12 @@ HowitzerUndeployedRetaliation = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_TUG_CARGO_FIX
 TugCargoPostLoad = 1
 
+; Keep a Daywrecker SeismicWave inside its terrain-delta buffer. Stock walks
+; one row and column past the allocation, so terrain restores with garbage and
+; leaves spires or pits. Drops only cells that never move. Also applies online.
+; Accepted: boolean. Default: ON.
+SeismicWaveExtentClamp = 1
+
 ; Clear a dead constructor's remote build state from AI_UnitRemove, so the
 ; build it was told to place does not outlive it.
 ; Accepted: boolean. Default: ON. Stands down in a network game.

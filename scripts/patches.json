@@ -5827,6 +5827,12 @@
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) DefendTask::DoState (vtable 0x008785F4 slot 12): refreshes target obj [t+0x18] via GetObj([t+0x14]), then runs the state switch (2 goto, 3, 6 wander); sets next [t+0xC]. OpenShim wraps it for the opt-in Defend refresh. See Docs/NATIVE_HOLD_DEFEND_FOLLOW.md."
     },
     {
+      "name": "SeismicWaveUpdateExtents",
+      "address": "0x005CF100",
+      "expected": "55 8B EC 83 EC 24 89 4D FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWave::UpdateExtents (FUN_005cf100, __fastcall ecx=this): stores [this+0xE4/E8/EC/F0] = floor/ceil((pos -/+ r) * 1/Grid_Size), r = [[this+0xC]+0x78]. Restore and Simulate walk these inclusive, one delta entry per cell, against a side*side*2 buffer (side = floor(r*2*0.2)+2) allocated in the ctor FUN_005cef80, so the stock extents overrun it. OpenShim post-hooks it (9-byte prologue detour) to clamp the max edges to the buffer."
+    },
+    {
       "name": "SitTaskVtable",
       "address": "0x00889F50",
       "kind": "data",
