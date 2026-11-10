@@ -779,7 +779,11 @@ namespace BZROpenShim
 
             const HMODULE renderer = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
             if (!renderer)
-                return;  // DX9 or not loaded: nothing to guard.
+                return;  // Not loaded: nothing to guard.
+            // The DX11 DLL is also mapped in DX9 sessions. Stand down only on
+            // a positive DX9 answer, so an unknown answer still guards DX11.
+            if (RenderProfiles::IdentifyActiveRenderSystem() == 2)
+                return;
 
             uint32_t thunk = 0, body = 0, lastTextureDtor = 0;
             const HookEngine::EngineRow rows[] = {
