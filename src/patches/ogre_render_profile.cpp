@@ -2235,6 +2235,7 @@ namespace BZROpenShim::RenderProfiles
         enum SynthStage : int
         {
             kStageEntry = 0,
+            kStageRetargetInPlace,
             kStageCreated,
             kStageAssigned,
             kStageSchemed,
@@ -2250,6 +2251,7 @@ namespace BZROpenShim::RenderProfiles
             switch (stage)
             {
             case kStageEntry: return "entry";
+            case kStageRetargetInPlace: return "retarget-in-place";
             case kStageCreated: return "createTechnique";
             case kStageAssigned: return "technique-assign";
             case kStageSchemed: return "setSchemeName";
@@ -2284,6 +2286,17 @@ namespace BZROpenShim::RenderProfiles
                 return false;
             }
             return true;
+        }
+
+        // Ogre creates these materials per transparent renderable and later
+        // pairs their techniques with the source material by index. Appending
+        // a compatibility technique to one of these clones breaks that
+        // invariant and can make the engine read past the source technique
+        // vector while copying transparency state.
+        bool IsEntityTransparencyMaterial(const std::string& materialName)
+        {
+            constexpr char kPrefix[] = "EntityTransparencyMaterial_";
+            return materialName.compare(0, sizeof(kPrefix) - 1, kPrefix) == 0;
         }
 
         // Does a GPU program of this name actually exist?
@@ -2384,7 +2397,8 @@ namespace BZROpenShim::RenderProfiles
             Dx11Compat::CompatPath path,
             const Dx11Compat::LegacyPassDesc& desc,
             const std::string& materialName,
-            const Dx11Compat::VertexInputs& inputs)
+            const Dx11Compat::VertexInputs& inputs,
+            bool preserveTechniqueCount)
         {
             if (material == nullptr || sourceTechnique == nullptr)
             {
@@ -2400,10 +2414,12 @@ namespace BZROpenShim::RenderProfiles
                 return nullptr;
             }
 
-            // First implementation slice: one-pass techniques only. The clone
-            // is deep, so all render state and texture units survive unchanged;
-            // multi-pass conversion needs per-pass classification before it is
-            // safe to retarget and is deliberately left for the next slice.
+            // First implementation slice: one-pass techniques only. The
+            // ordinary generated technique is a deep clone, so all render
+            // state and texture units survive unchanged. Entity-transparency
+            // materials instead retarget their existing technique to preserve
+            // Ogre's source/clone technique-index parity. Multi-pass
+            // conversion needs per-pass classification before it is safe.
             // Suppression is the exception: it binds the same draw-nothing
             // pair on every pass, which needs no per-pass classification.
             const bool suppress = path == Dx11Compat::CompatPath::SuppressPass;
@@ -2487,24 +2503,32 @@ namespace BZROpenShim::RenderProfiles
                 return nullptr;
             }
 
-            const unsigned short createdIndex = techApi.getNumTechniques(material);
-            void* generated = nullptr;
+            const unsigned short createdIndex =
+                preserveTechniqueCount ? 0 : techApi.getNumTechniques(material);
+            void* generated = preserveTechniqueCount ? sourceTechnique : nullptr;
             int stage = kStageEntry;
             try
             {
-                generated = mutate.createTechnique(material);
-                if (generated == nullptr)
+                if (preserveTechniqueCount)
                 {
-                    return nullptr;
+                    stage = kStageRetargetInPlace;
                 }
-                stage = kStageCreated;
+                else
+                {
+                    generated = mutate.createTechnique(material);
+                    if (generated == nullptr)
+                    {
+                        return nullptr;
+                    }
+                    stage = kStageCreated;
 
-                // Ogre 1.10's own RTSS uses this exact construction pattern:
-                // createTechnique(); *dst = *src; then retarget the clone.
-                // Technique::operator= deep-copies every Pass and each Pass
-                // deep-copies its TextureUnitStates and render state.
-                mutate.assignTechnique(generated, sourceTechnique);
-                stage = kStageAssigned;
+                    // Ogre 1.10's own RTSS uses this exact construction pattern:
+                    // createTechnique(); *dst = *src; then retarget the clone.
+                    // Technique::operator= deep-copies every Pass and each Pass
+                    // deep-copies its TextureUnitStates and render state.
+                    mutate.assignTechnique(generated, sourceTechnique);
+                    stage = kStageAssigned;
+                }
                 mutate.setSchemeName(generated, schemeName);
                 stage = kStageSchemed;
                 mutate.setLodIndex(generated, lodIndex);
@@ -2514,7 +2538,10 @@ namespace BZROpenShim::RenderProfiles
                     GuardedGetNumPasses(inspect.getNumPasses, generated);
                 if (generatedPasses != sourcePasses)
                 {
-                    RestoreMaterialAfterCompatFailure(material, createdIndex);
+                    if (!preserveTechniqueCount)
+                    {
+                        RestoreMaterialAfterCompatFailure(material, createdIndex);
+                    }
                     return nullptr;
                 }
                 for (unsigned short p = 0; p < generatedPasses; ++p)
@@ -2522,7 +2549,10 @@ namespace BZROpenShim::RenderProfiles
                     void* pass = GuardedGetPass(inspect.getPass, generated, p);
                     if (pass == nullptr)
                     {
-                        RestoreMaterialAfterCompatFailure(material, createdIndex);
+                        if (!preserveTechniqueCount)
+                        {
+                            RestoreMaterialAfterCompatFailure(material, createdIndex);
+                        }
                         return nullptr;
                     }
                     stage = kStagePassFetched;
@@ -2542,7 +2572,10 @@ namespace BZROpenShim::RenderProfiles
 
                 if (!techApi.isSupported(generated))
                 {
-                    RestoreMaterialAfterCompatFailure(material, createdIndex);
+                    if (!preserveTechniqueCount)
+                    {
+                        RestoreMaterialAfterCompatFailure(material, createdIndex);
+                    }
                     LogCompatOnce("[DX11COMPAT] instantiate failed material=" +
                                       materialName + " scheme=" + schemeName +
                                       " lastStage=" + SynthStageName(stage) +
@@ -2555,7 +2588,7 @@ namespace BZROpenShim::RenderProfiles
             }
             catch (...)
             {
-                if (generated != nullptr)
+                if (generated != nullptr && !preserveTechniqueCount)
                 {
                     RestoreMaterialAfterCompatFailure(material, createdIndex);
                 }
@@ -2567,6 +2600,26 @@ namespace BZROpenShim::RenderProfiles
                               LogLevel::Warn);
                 return nullptr;
             }
+        }
+
+        void LogCompatTechniqueApplied(const std::string& materialName,
+                                       const char* sourceLabel,
+                                       Dx11Compat::CompatPath path,
+                                       bool preserveTechniqueCount)
+        {
+            if (preserveTechniqueCount)
+            {
+                LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                  " source=" + sourceLabel + " path=" +
+                                  Dx11Compat::CompatPathName(path) +
+                                  " action=retarget-in-place"
+                                  " preserve-technique-count=1",
+                              LogLevel::Info);
+                return;
+            }
+            LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
+                              materialName, sourceLabel, path, false),
+                          LogLevel::Info);
         }
 
         // Scheme misses are the only door into the ladder, but a fixed-
@@ -2736,6 +2789,8 @@ namespace BZROpenShim::RenderProfiles
             // third-party content: left shaderless they throw on every draw.
             const Dx11Compat::CompatConfig config =
                 Dx11Compat::EffectiveCompatConfigForMaterial(userConfig, materialName);
+            const bool preserveTechniqueCount =
+                IsEntityTransparencyMaterial(materialName);
 
             // Collect every technique as a semantic-source candidate, even
             // unsupported ones: the generator still needs the best template.
@@ -2837,12 +2892,11 @@ namespace BZROpenShim::RenderProfiles
                               LogLevel::Info);
                 void* generated = InstantiateDx11CompatTechnique(
                     material, sourceTechnique, schemeName, lodIndex, path, desc,
-                    materialName, inputs);
+                    materialName, inputs, preserveTechniqueCount);
                 if (generated != nullptr)
                 {
-                    LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
-                                      materialName, sourceLabel, path, false),
-                                  LogLevel::Info);
+                    LogCompatTechniqueApplied(materialName, sourceLabel, path,
+                                              preserveTechniqueCount);
                     return generated;
                 }
                 LogCompatOnce(
@@ -2862,12 +2916,11 @@ namespace BZROpenShim::RenderProfiles
                               LogLevel::Warn);
                 void* generated = InstantiateDx11CompatTechnique(
                     material, sourceTechnique, schemeName, lodIndex, path, desc,
-                    materialName, inputs);
+                    materialName, inputs, preserveTechniqueCount);
                 if (generated != nullptr)
                 {
-                    LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
-                                      materialName, sourceLabel, path, false),
-                                  LogLevel::Info);
+                    LogCompatTechniqueApplied(materialName, sourceLabel, path,
+                                              preserveTechniqueCount);
                     ConvertShaderlessSiblingTechniques(material, generated, config,
                                                        inputs, materialName);
                     return generated;
@@ -2885,12 +2938,11 @@ namespace BZROpenShim::RenderProfiles
                 state.fixedFunc.fetch_add(1, std::memory_order_relaxed);
                 void* generated = InstantiateDx11CompatTechnique(
                     material, sourceTechnique, schemeName, lodIndex, path, desc,
-                    materialName, inputs);
+                    materialName, inputs, preserveTechniqueCount);
                 if (generated != nullptr)
                 {
-                    LogCompatOnce(Dx11Compat::FormatCompatAppliedLog(
-                                      materialName, sourceLabel, path, false),
-                                  LogLevel::Info);
+                    LogCompatTechniqueApplied(materialName, sourceLabel, path,
+                                              preserveTechniqueCount);
                     ConvertShaderlessSiblingTechniques(material, generated, config,
                                                        inputs, materialName);
                     return generated;
