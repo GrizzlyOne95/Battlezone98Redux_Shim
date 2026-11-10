@@ -2091,6 +2091,8 @@ namespace BZROpenShim
         void InitializeNoDamageSlowdownConfig();
         void ReloadNoDamageSlowdownConfig();
         void RefreshNoDamageSlowdownState();
+        void InitializeModSubfoldersConfig();
+        void ReloadModSubfoldersConfig();
         void InitializeMpWhitelistTgaConfig();
         void ReloadMpWhitelistTgaConfig();
 
