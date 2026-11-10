@@ -57,6 +57,7 @@ namespace BZROpenShim
         constexpr size_t kSlotFactoryCreateSwapChain = 10;
         constexpr size_t kSlotPresent = 8;
         constexpr size_t kSlotGetBuffer = 9;
+        constexpr size_t kSlotSetFullscreenState = 10;
         constexpr size_t kSlotGetDesc = 12;
         constexpr size_t kSlotResizeBuffers = 13;
         constexpr size_t kSlotPresent1 = 22;
@@ -70,6 +71,7 @@ namespace BZROpenShim
             IDXGIFactory*, IUnknown*, DXGI_SWAP_CHAIN_DESC*, IDXGISwapChain**);
         using FnPresent = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, UINT);
         using FnGetBuffer = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, UINT, REFIID, void**);
+        using FnSetFullscreenState = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, BOOL, IDXGIOutput*);
         using FnGetDesc = HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain*, DXGI_SWAP_CHAIN_DESC*);
         using FnResizeBuffers = HRESULT(STDMETHODCALLTYPE*)(
             IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
@@ -80,6 +82,7 @@ namespace BZROpenShim
         FnPresent g_RealPresent = nullptr;
         FnGetBuffer g_RealGetBuffer = nullptr;
         FnGetDesc g_RealGetDesc = nullptr;
+        FnSetFullscreenState g_RealSetFullscreenState = nullptr;
         FnResizeBuffers g_RealResizeBuffers = nullptr;
         FnPresent1 g_RealPresent1 = nullptr;
 
@@ -99,6 +102,9 @@ namespace BZROpenShim
         UINT g_ProxyBindFlags = 0;
         HANDLE g_Waitable = nullptr;
         bool g_ChainHasWaitableFlag = false;
+        // Ogre asked for fullscreen; the chain stays windowed and the window
+        // covers the monitor (see HookSetFullscreenState).
+        bool g_BorderlessFullscreen = false;
         unsigned long g_WaitTimeouts = 0;
         unsigned long g_ResolveFailures = 0;
         unsigned long g_Presents = 0;
@@ -187,6 +193,7 @@ namespace BZROpenShim
             }
             g_Chain = nullptr;
             g_ChainHasWaitableFlag = false;
+            g_BorderlessFullscreen = false;
             g_ProxySamples = { 1, 0 };
         }
 
@@ -324,8 +331,61 @@ namespace BZROpenShim
                 std::lock_guard<std::mutex> lock(g_StateMutex);
                 if (g_Proxy)
                     desc->SampleDesc = g_ProxySamples;
+                // Ogre derives its own fullscreen flag from this field after
+                // every resize (_resizeSwapChainBuffers).
+                if (g_BorderlessFullscreen)
+                    desc->Windowed = FALSE;
             }
             return hr;
+        }
+
+        // Ogre calls this from _finishSwitchingFullscreen after it has made the
+        // window a borderless topmost one. Exclusive fullscreen is not usable
+        // on this chain: the waitable flag forbids it, and a flip chain that
+        // does get there presents black (see IneligibleReason). So fullscreen
+        // here is that borderless window stretched over its monitor, and only
+        // the state Ogre reads back through GetDesc changes.
+        HRESULT STDMETHODCALLTYPE HookSetFullscreenState(IDXGISwapChain* self, BOOL fullscreen, IDXGIOutput* target)
+        {
+            if (self != g_Chain)
+                return g_RealSetFullscreenState(self, fullscreen, target);
+
+            HWND window = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(g_StateMutex);
+                g_BorderlessFullscreen = fullscreen != FALSE;
+                DXGI_SWAP_CHAIN_DESC current = {};
+                if (fullscreen && SUCCEEDED(g_RealGetDesc(self, &current)))
+                    window = current.OutputWindow;
+            }
+            RECT covered = {};
+            if (window)
+            {
+                // The game asks for its configured video mode, which can be
+                // smaller than the desktop. Outside the lock: the resize comes
+                // straight back as WM_SIZE -> ResizeBuffers on this thread.
+                MONITORINFO info = {};
+                info.cbSize = sizeof(info);
+                if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &info))
+                {
+                    covered = info.rcMonitor;
+                    // Ogre has just clipped the window to the mode size.
+                    SetWindowRgn(window, nullptr, FALSE);
+                    // Not topmost (Ogre made it so for exclusive mode): a
+                    // borderless window stays topmost after Alt-Tab and would
+                    // cover the app switched to. A foreground window covering
+                    // its monitor already sits above the taskbar.
+                    SetWindowPos(window, HWND_NOTOPMOST, covered.left, covered.top, covered.right - covered.left,
+                                 covered.bottom - covered.top, SWP_NOACTIVATE);
+                }
+            }
+            if (fullscreen)
+                LogShimA(LogLevel::Info, kComponent,
+                         "[DXGI Flip] SetFullscreenState(fullscreen): borderless window %ldx%ld at %ld,%ld, swap chain stays windowed",
+                         covered.right - covered.left, covered.bottom - covered.top, covered.left, covered.top);
+            else
+                LogShimA(LogLevel::Info, kComponent, "[DXGI Flip] SetFullscreenState(windowed): left borderless fullscreen");
+            return S_OK;
         }
 
         HRESULT STDMETHODCALLTYPE HookResizeBuffers(
@@ -375,6 +435,8 @@ namespace BZROpenShim
                 Succeeded(PatchEntry(chain, kSlotPresent, &HookPresent, g_RealPresent, OnForeignWrapper::Refuse)) &&
                 Succeeded(PatchEntry(chain, kSlotGetBuffer, &HookGetBuffer, g_RealGetBuffer, OnForeignWrapper::Refuse)) &&
                 Succeeded(PatchEntry(chain, kSlotGetDesc, &HookGetDesc, g_RealGetDesc, OnForeignWrapper::Refuse)) &&
+                Succeeded(PatchEntry(chain, kSlotSetFullscreenState, &HookSetFullscreenState,
+                                     g_RealSetFullscreenState, OnForeignWrapper::Refuse)) &&
                 Succeeded(PatchEntry(chain, kSlotResizeBuffers, &HookResizeBuffers, g_RealResizeBuffers,
                                      OnForeignWrapper::Refuse));
             if (!ok)

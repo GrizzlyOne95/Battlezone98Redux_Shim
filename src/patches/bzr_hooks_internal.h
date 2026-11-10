@@ -674,6 +674,9 @@ namespace BZROpenShim
         extern volatile long g_PlayerKillTraceBudget;
         extern InlineDetour32 g_RecordDeathDetour;
         extern bool g_TracePlayerKills;
+        extern bool g_TraceKillCredit;
+        extern volatile long g_KillCreditTraceBudget;
+        void InstallKillCreditTraceHooksIfPossible();
         extern char g_LastKnownQueuedMissionName[kQueuedLoadNameBufferLen + 1];
         void RememberQueuedMissionName(const char* name);
         void StartCareerStatsMpSessionWorker();

@@ -34,6 +34,7 @@
 #include "autosave.h"
 #include "dx11_colorspace_diagnostic.h"
 #include "d3d11_device_loss_recovery.h"
+#include "d3d11_fullscreen_toggle.h"
 #include "d3d11_primary_monitor.h"
 #include "resolution_list_filter.h"
 #include "resolution_dropdown.h"
@@ -139,6 +140,7 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializeDx11ColorSpaceDiagnostic());
     PATCH_STAGE(BZROpenShim::InitializeD3D11DeviceLossRecovery());
     PATCH_STAGE(BZROpenShim::InitializeD3D11PrimaryMonitor());
+    PATCH_STAGE(BZROpenShim::InitializeD3D11FullscreenToggle());
     // Opt-in; hooks the shared DXGI factory vtable before Ogre makes its
     // render window, so it must arm here rather than wait for the renderer.
     PATCH_STAGE(BZROpenShim::InitializeDxgiFlipModel());

@@ -1938,6 +1938,22 @@ TraceDamageReveal = 0
 ; Legacy env aliases: OPENSHIM_TRACE_PLAYER_KILLS, BZR_TRACE_PLAYER_KILLS
 TracePlayerKills = 0
 
+; Multiplayer kill-credit trace (log only).
+;
+; Scoreboard kills (especially host snipes) sometimes land on the wrong player.
+; With this on, each multiplayer death logs one [KILLCREDIT] record-death line:
+; victim team and owning player id, killer team and owning player id, the local
+; id, whether the engine credits the kill locally or sends it to the killer's
+; peer, and whether it arrived through the snipe handler. [KILLCREDIT]
+; credit-local lines show each time the LOCAL player's kill count is bumped and
+; which path bumped it; [KILLCREDIT] snipe-notify lines show remote snipe
+; notifications. Read-only; budgeted (512 lines) and OFF by default.
+;
+; Accepted: boolean. Default: OFF.
+; Budget override: OPENSHIM_TRACE_KILL_CREDIT_BUDGET (max 4096)
+; Legacy env aliases: OPENSHIM_TRACE_KILL_CREDIT, BZR_TRACE_KILL_CREDIT
+TraceKillCredit = 0
+
 [Network]
 ; In-process LAN host and local identities; no Steam/Galaxy sign-in or helper.
 ; Requires an explicit LAN selection and numeric private IPv4. Development opt-in.

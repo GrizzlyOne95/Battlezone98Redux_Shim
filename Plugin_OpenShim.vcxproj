@@ -269,6 +269,7 @@
     <ClCompile Include="src\patches\d3d11_constant_lookup_cache.cpp" />
     <ClCompile Include="src\patches\d3d_compile_cache.cpp" />
     <ClCompile Include="src\patches\d3d11_device_loss_recovery.cpp" />
+    <ClCompile Include="src\patches\d3d11_fullscreen_toggle.cpp" />
     <ClCompile Include="src\patches\d3d11_primary_monitor.cpp" />
     <ClCompile Include="src\patches\resolution_list_filter.cpp" />
     <ClCompile Include="src\patches\resolution_dropdown.cpp" />
@@ -454,6 +455,7 @@
     <ClInclude Include="include\d3d_compile_cache.h" />
     <ClInclude Include="include\dxbc_cache_policy.h" />
     <ClInclude Include="include\d3d11_device_loss_recovery.h" />
+    <ClInclude Include="include\d3d11_fullscreen_toggle.h" />
     <ClInclude Include="include\d3d11_primary_monitor.h" />
     <ClInclude Include="include\resolution_list_filter.h" />
     <ClInclude Include="include\resolution_dropdown.h" />
