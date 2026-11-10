@@ -50,6 +50,7 @@ TARGETS = [
         "pass_to": "OSEPassScheme",
         "materials": {"BZBase": "CR_BZBase", "BZBaseCockpit": "CR_BZBaseCockpit"},
         "keep_ibl": True,
+        "default_emissive": True,
     },
     {
         "stock": "BZTerrainBase.material",
@@ -138,6 +139,25 @@ def drop_ibl_units(technique):
     return re.sub(r"\n[ \t]*\n([ \t]*\})", r"\n\1", technique)
 
 
+def default_emissive(block):
+    """Declare `emissive 1 1 1` on an Enhanced abstract pass.
+
+    The Enhanced object shaders scale the emissive map by the pass emissive
+    colour (0 = dark, 1 = as authored) so scripts can dim or pulse running
+    lights. Ogre's default pass emissive is black, so an Enhanced pass that
+    never sets one must declare white or its emissive map disappears. The
+    renamed OSE passes are only used by en-* techniques, so stock schemes and
+    the glow technique are untouched.
+    """
+    if re.search(r"^[ \t]*emissive\b", block, re.M):
+        return block
+    block, count = re.subn(r"^([ \t]*)specular\b[^\n]*\n", lambda m: m.group(0) + m.group(1) + "emissive 1 1 1\n",
+                           block, count=1, flags=re.M)
+    if count != 1:
+        raise ValueError("abstract pass has no specular line to anchor emissive on")
+    return block
+
+
 def en_techniques(material_body):
     inner = material_body[material_body.index("{") + 1:material_body.rindex("}")]
     out = []
@@ -191,6 +211,8 @@ def generate(target, stock_dir, cr_dir, programs):
         # The OSE PSSM v2 shaders compare depth by hand through an ordinary
         # SamplerState, so CR's hardware-comparison sampler state is dropped.
         block = re.sub(r"^[ \t]*compare_(?:test|func)\b[^\n]*\n", "", block, flags=re.M)
+        if target.get("default_emissive"):
+            block = default_emissive(block)
         passes.append(pass_re.sub(target["pass_to"] + r"\1", block, count=1))
 
     out = stock.rstrip("\n") + "\n"
