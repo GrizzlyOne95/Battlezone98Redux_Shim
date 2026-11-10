@@ -228,6 +228,81 @@ namespace
         RequireNear(SolveInvisibleRange(constantOnly, 2.0f, 10.0f, 5000.0f), 5000.0, 0.0,
             "a non-decaying curve did not clamp to the maximum range");
     }
+    // HeadlightBeam=Natural with HeadlightColor=White: 5.0 * 0.4.
+    constexpr float kNaturalPeak = 2.0f;
+
+    void TestReachCurveHasTheDocumentedShape()
+    {
+        const Attenuation curve = ReachCurve(kNaturalReach);
+        RequireNear(curve.constant, 1.0, 0.0, "reach curve constant moved");
+        RequireNear(curve.linear, 0.0, 0.0, "reach curve grew a linear term");
+
+        // 1/16 at the reach, half at reach / sqrt(15): the two numbers the
+        // settings text promises.
+        RequireNear(IntensityAt(curve, 1.0f, kNaturalReach), 1.0 / 16.0, 1e-5,
+            "reach curve is not 1/16 at the reach");
+        RequireNear(IntensityAt(curve, 1.0f, kNaturalReach / std::sqrt(15.0f)), 0.5, 1e-4,
+            "reach curve is not half strength at reach / sqrt(15)");
+
+        // Out-of-range requests clamp instead of producing a degenerate curve.
+        RequireNear(ReachCurve(1.0f).quadratic, ReachCurve(kMinReach).quadratic, 0.0,
+            "a tiny reach was not clamped");
+        RequireNear(ReachCurve(1.0e6f).quadratic, ReachCurve(kMaxReach).quadratic, 0.0,
+            "a huge reach was not clamped");
+        Require(IsUsable(ReachCurve(kMinReach)) && IsUsable(ReachCurve(kMaxReach)),
+            "a clamped reach curve is not usable");
+    }
+
+    void TestNaturalBeamStopsClippingFarSurfaces()
+    {
+        // The complaint this mode answers: White/Wide (peak 4 on the stock
+        // curve) adds a full 1.0 or more to any surface facing the craft out
+        // past 100 m. Guard that the comparison is still true, then that
+        // Natural ends the clipped zone inside 35 m and is dim by 120 m.
+        const Attenuation stock = StockCurve();
+        Require(IntensityAt(stock, kWidePeak, 100.0f) > 1.0f,
+            "White/Wide no longer clips at 100 m, so this guard is meaningless");
+
+        const Plan plan = BuildPlan(stock, kNaturalPeak, 1.0f, kNaturalReach);
+        Require(IntensityAt(plan.attenuation, kNaturalPeak, 10.0f) > 1.0f,
+            "Natural lost its near-field hot spot");
+        Require(IntensityAt(plan.attenuation, kNaturalPeak, 35.0f) < 1.0f,
+            "Natural still clips at 35 m");
+        Require(IntensityAt(plan.attenuation, kNaturalPeak, 120.0f) < 0.13f,
+            "Natural is still bright at its reach");
+        Require(IntensityAt(plan.attenuation, kNaturalPeak, 120.0f) <
+                    IntensityAt(stock, kWidePeak, 120.0f) * 0.2f,
+            "Natural is not materially dimmer than White/Wide at 120 m");
+    }
+
+    void TestReachPlanStillHidesTheRangeTerminator()
+    {
+        const Attenuation stock = StockCurve();
+        for (const float reach : { kMinReach, kNaturalReach, kMaxReach })
+        {
+            for (const float peak : { kStockPeak, kNaturalPeak, kFocusedPeak })
+            {
+                const Plan plan = BuildPlan(stock, peak, 1.0f, reach);
+                Require(plan.attenuation.range >= kMinRange &&
+                            plan.attenuation.range <= kMaxRange,
+                    "a reach plan produced a range outside the clamp");
+                Require(plan.edgeIntensityAfter <= kDisplayFloor * 2.05f,
+                    "a reach plan left a visible step at the cutoff");
+                RequireNear(plan.rangeBefore, stock.range, 0.0,
+                    "a reach plan lost the engine's original range");
+            }
+        }
+
+        // No reach means the engine's curve, exactly as before.
+        const Plan stockPlan = BuildPlan(stock, kWidePeak, 0.35f, 0.0f);
+        RequireNear(stockPlan.attenuation.linear, stock.linear, 0.0,
+            "a zero reach changed the stock curve");
+        RequireNear(stockPlan.attenuation.quadratic, stock.quadratic, 0.0,
+            "a zero reach changed the stock curve");
+        const Plan nanPlan = BuildPlan(stock, kWidePeak, 0.35f, std::nanf(""));
+        RequireNear(nanPlan.attenuation.quadratic, stock.quadratic, 0.0,
+            "a non-finite reach changed the stock curve");
+    }
 }
 
 int main()
@@ -241,6 +316,9 @@ int main()
     TestPlanReportsBothTerminators();
     TestDegenerateInputsAreRefusedNotPropagated();
     TestLinearOnlyAndConstantOnlyCurves();
+    TestReachCurveHasTheDocumentedShape();
+    TestNaturalBeamStopsClippingFarSurfaces();
+    TestReachPlanStillHidesTheRangeTerminator();
     std::printf("headlight_falloff_tests: all checks passed\n");
     return 0;
 }

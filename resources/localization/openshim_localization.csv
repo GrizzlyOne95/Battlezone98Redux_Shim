@@ -273,7 +273,9 @@ openshim_opt:OtherHeadlights:desc~AI vehicles run headlights too.~~~~~~
 openshim_opt:HeadlightColor:label~Headlight Color~~~~~~
 openshim_opt:HeadlightColor:desc~Headlight beam color; Rainbow cycles through colors.~~~~~~
 openshim_opt:HeadlightBeam:label~Headlight Beam~~~~~~
-openshim_opt:HeadlightBeam:desc~Headlight beam shape: Stock, Focused (narrow), or Wide.~~~~~~
+openshim_opt:HeadlightBeam:desc~Headlight beam shape: Stock, Focused (narrow), Wide, or Natural (softer, shorter reach).~~~~~~
+openshim_opt:HeadlightReach:label~Headlight Reach~~~~~~
+openshim_opt:HeadlightReach:desc~How far the headlight carries: half strength at a quarter of this distance. Automatic is 120 m for Natural and the game's own long curve otherwise.~~~~~~
 openshim_opt:PilotFlashlight:label~Pilot Flashlight~~~~~~
 openshim_opt:PilotFlashlight:desc~Flashlight on your pilot while on foot.~~~~~~
 openshim_opt:PilotFlashlightColor:label~Pilot Light Color~~~~~~
@@ -446,9 +448,15 @@ openshim_value:Teal~Teal~~~~~~
 openshim_value:Rainbow~Rainbow~~~~~~
 openshim_value:Focused~Focused~~~~~~
 openshim_value:Wide~Wide~~~~~~
+openshim_value:Natural~Natural~~~~~~
+openshim_value:Automatic~Automatic~~~~~~
+openshim_value:60 m~60 m~~~~~~
+openshim_value:90 m~90 m~~~~~~
+openshim_value:120 m~120 m~~~~~~
+openshim_value:180 m~180 m~~~~~~
+openshim_value:250 m~250 m~~~~~~
 openshim_value:Prefer Direct~Prefer Direct~~~~~~
 openshim_value:Force Relay~Force Relay~~~~~~
-openshim_value:Automatic~Automatic~~~~~~
 openshim_value:17770~17770~~~~~~
 openshim_value:17771~17771~~~~~~
 openshim_value:17772~17772~~~~~~

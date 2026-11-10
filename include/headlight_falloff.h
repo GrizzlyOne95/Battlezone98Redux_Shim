@@ -183,15 +183,59 @@ namespace BZROpenShim::HeadlightFalloff
         float rampFractionAfter = 0.0f;
     };
 
+    // Reach: an optional steeper distance curve for a headlight that lights
+    // the ground ahead instead of the whole valley. Stock's curve is so shallow
+    // (half intensity at 55 m, 27% left at 100 m) that any colour override
+    // bright enough to show on grazing terrain also clips every surface facing
+    // the craft out to 100 m and beyond.
+    //
+    // The shape is the one BZCC's stock spotlights carry (attenuation 1 / 0 /
+    // 15 in effects\lights\spot*.odf), read with distance as a fraction of the
+    // reach: intensity = peak / (1 + 15 * (d / reach)^2). That is half at
+    // 0.26 * reach and 1/16 at the reach itself. Treating BZCC's distance as
+    // range-normalised is an assumption (the CPU side was not found in the
+    // decompile); the numbers below are what this function guarantees.
+    inline constexpr float kReachEdgeDivisor = 15.0f;
+    inline constexpr float kMinReach = 30.0f;
+    // 250 keeps the truncation solve exact (inside kMaxRange) for the brightest
+    // documented headlight, White under Focused at peak 10: 250 * sqrt(2549 / 15)
+    // = 3259 m. Its half-strength point, 65 m, is already past stock's 55 m.
+    inline constexpr float kMaxReach = 250.0f;
+    // HeadlightBeam=Natural when HeadlightReach is absent.
+    inline constexpr float kNaturalReach = 120.0f;
+
+    inline float ClampReach(float reach)
+    {
+        return (std::max)(kMinReach, (std::min)(kMaxReach, reach));
+    }
+
+    // The truncation radius is left for SolveInvisibleRange, as for stock.
+    inline Attenuation ReachCurve(float reach)
+    {
+        const float clamped = ClampReach(reach);
+        Attenuation curve = {};
+        curve.range = clamped;
+        curve.constant = 1.0f;
+        curve.linear = 0.0f;
+        curve.quadratic = kReachEdgeDivisor / (clamped * clamped);
+        return curve;
+    }
+
     // `stock` is the curve the engine created; `peakDiffuse` is the brightest
-    // channel the shim is about to write. The returned plan keeps the stock
-    // curve shape exactly -- only the truncation radius and the cone exponent
-    // change.
-    inline Plan BuildPlan(const Attenuation& stock, float peakDiffuse, float previousFalloff)
+    // channel the shim is about to write. With `reach` 0 the returned plan
+    // keeps the stock curve shape exactly -- only the truncation radius and
+    // the cone exponent change. A positive `reach` (metres) swaps in
+    // ReachCurve and solves its truncation radius the same way.
+    inline Plan BuildPlan(
+        const Attenuation& stock,
+        float peakDiffuse,
+        float previousFalloff,
+        float reach = 0.0f)
     {
         Plan plan = {};
-        plan.attenuation = stock;
-        plan.attenuation.range = SolveInvisibleRange(stock, peakDiffuse);
+        const bool useReach = std::isfinite(reach) && reach > 0.0f;
+        plan.attenuation = useReach ? ReachCurve(reach) : stock;
+        plan.attenuation.range = SolveInvisibleRange(plan.attenuation, peakDiffuse);
         plan.falloff = kSmoothSpotFalloff;
         plan.rangeBefore = stock.range;
         plan.edgeIntensityBefore = EdgeIntensity(stock, peakDiffuse);

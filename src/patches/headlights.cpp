@@ -45,6 +45,7 @@ namespace BZROpenShim
             Stock,
             Focused,
             Wide,
+            Natural,
         };
 
 
@@ -92,6 +93,9 @@ namespace BZROpenShim
         static float g_HeadlightColourG = 5.0f;
         static float g_HeadlightColourB = 5.0f;
         static float g_HeadlightBrightness = 1.0f;
+        // HeadlightReach in metres; 0 = automatic (the engine's own distance
+        // curve, or HeadlightFalloff::kNaturalReach under HeadlightBeam=Natural).
+        static float g_HeadlightReach = 0.0f;
         static bool g_HeadlightRuntimeActive = false;
         static bool g_HeadlightLightTraceEnabled = false;
         // A/B switch for validation: restores the pre-repair constants
@@ -782,6 +786,7 @@ namespace BZROpenShim
         static bool BuildHeadlightFalloffPlan(
             void* light,
             float peakDiffuse,
+            float reach,
             HeadlightFalloff::Plan& outPlan)
         {
             auto& api = GetHeadlightOgreApi();
@@ -819,7 +824,7 @@ namespace BZROpenShim
                 existing->second.worldGeneration == s_HeadlightWorldGeneration)
                 stock = existing->second.attenuation;
 
-            outPlan = HeadlightFalloff::BuildPlan(stock, peakDiffuse, previousFalloff);
+            outPlan = HeadlightFalloff::BuildPlan(stock, peakDiffuse, previousFalloff, reach);
             return true;
         }
 
@@ -832,23 +837,32 @@ namespace BZROpenShim
             bool setBeam,
             float inner,
             float outer,
+            float reach,
             bool setVisible,
             bool visible)
         {
-            // Only a shim-owned brightness or beam change can push a terminator
-            // into view, so a run that is merely toggling visibility leaves the
-            // engine's own falloff untouched and stays stock-identical.
+            // Only a shim-owned brightness, beam or reach change can push a
+            // terminator into view, so a run that is merely toggling visibility
+            // leaves the engine's own falloff untouched and stays
+            // stock-identical. `reach` (metres, 0 = keep the engine's curve)
+            // swaps the distance curve itself; see HeadlightFalloff::ReachCurve.
             const bool setFalloff =
-                g_HeadlightFalloffRepairEnabled && (setColour || setBeam);
+                g_HeadlightFalloffRepairEnabled &&
+                (setColour || setBeam || reach > 0.0f);
             const float peakDiffuse = setColour
                 ? (std::max)((std::max)(r, g), b)
                 : 1.0f;
 
             HeadlightFalloff::Plan plan = {};
             const bool haveFalloffPlan =
-                setFalloff && BuildHeadlightFalloffPlan(light, peakDiffuse, plan);
+                setFalloff && BuildHeadlightFalloffPlan(light, peakDiffuse, reach, plan);
 
-            if (!CaptureHeadlightState(light, setColour, setBeam, haveFalloffPlan, setVisible))
+            // The falloff plan rewrites the cone exponent through
+            // setSpotlightRange even when the beam itself is not being set, so
+            // the beam baseline has to be captured for it too or a later revert
+            // leaves the shim's exponent on the engine's light.
+            if (!CaptureHeadlightState(
+                    light, setColour, setBeam || haveFalloffPlan, haveFalloffPlan, setVisible))
                 return false;
             auto& api = GetHeadlightOgreApi();
             __try
@@ -976,6 +990,8 @@ namespace BZROpenShim
                 g_HeadlightBeamMode = HeadlightBeamMode::Focused;
             else if (value == "wide")
                 g_HeadlightBeamMode = HeadlightBeamMode::Wide;
+            else if (value == "natural" || value == "realistic")
+                g_HeadlightBeamMode = HeadlightBeamMode::Natural;
             else
                 return false;
             return true;
@@ -987,6 +1003,7 @@ namespace BZROpenShim
                    g_HeadlightOtherVisibleConfigured ||
                    g_HeadlightColourMode != HeadlightColourMode::Stock ||
                    g_HeadlightBeamMode != HeadlightBeamMode::Stock ||
+                   g_HeadlightReach > 0.0f ||
                    std::abs(g_HeadlightBrightness - 1.0f) > 0.001f;
         }
 
@@ -1095,6 +1112,22 @@ namespace BZROpenShim
                 outer = 1.5f;
                 colourMultiplier = 0.8f;
             }
+            else if (g_HeadlightBeamMode == HeadlightBeamMode::Natural)
+            {
+                // 20 / 60 degrees: a hot spot about a third of the beam wide
+                // with a long soft penumbra. 0.4 puts White at a peak of 2.0,
+                // which with the reach curve below stops clipping surfaces
+                // that face the craft at about a quarter of the reach.
+                inner = 0.35f;
+                outer = 1.05f;
+                colourMultiplier = 0.4f;
+            }
+            // Distance curve. An explicit HeadlightReach applies to every
+            // beam; Natural supplies its own when the key is absent.
+            const float playerReach = g_HeadlightReach > 0.0f
+                ? g_HeadlightReach
+                : (g_HeadlightBeamMode == HeadlightBeamMode::Natural
+                    ? HeadlightFalloff::kNaturalReach : 0.0f);
             colourR *= colourMultiplier;
             colourG *= colourMultiplier;
             colourB *= colourMultiplier;
@@ -1117,7 +1150,8 @@ namespace BZROpenShim
                     : g_HeadlightOtherVisibleConfigured;
                 const bool setColour = isPlayer && setPlayerColour;
                 const bool setBeam = isPlayer && setPlayerBeam;
-                if (!setVisible && !setColour && !setBeam)
+                const float reach = isPlayer ? playerReach : 0.0f;
+                if (!setVisible && !setColour && !setBeam && !(reach > 0.0f))
                     return;
                 const bool visible = isPlayer ? g_HeadlightPlayerVisible : g_HeadlightOtherVisible;
                 const bool trace = g_HeadlightLightTraceEnabled && isPlayer &&
@@ -1152,7 +1186,7 @@ namespace BZROpenShim
                     objectB *= g_HeadlightBrightness;
                 }
                 if (ApplyHeadlightState(light, setColour, objectR, objectG, objectB,
-                                        setBeam, inner, outer,
+                                        setBeam, inner, outer, reach,
                                         setVisible, visible))
                 {
                     touched.insert(light);
@@ -1234,6 +1268,7 @@ namespace BZROpenShim
             g_HeadlightColourG = 5.0f;
             g_HeadlightColourB = 5.0f;
             g_HeadlightBrightness = 1.0f;
+            g_HeadlightReach = 0.0f;
 
             bool boolValue = false;
             if (TryGetUserConfigBool("Diagnostics", "HeadlightLightTrace", boolValue))
@@ -1280,14 +1315,31 @@ namespace BZROpenShim
                 else
                     Log(L"[HEADLIGHT] Ignoring invalid HeadlightBrightness=%hs\n", value.c_str());
             }
+            if (TryGetUserConfigString(kUserConfigSinglePlayerSection, "HeadlightReach", value))
+            {
+                char* end = nullptr;
+                const float parsed = std::strtof(value.c_str(), &end);
+                while (end && *end && std::isspace(static_cast<unsigned char>(*end)))
+                    ++end;
+                // 0 is the documented "automatic" value, not an error.
+                if (end != value.c_str() && end && *end == '\0' && std::isfinite(parsed) &&
+                    parsed >= 0.0f)
+                {
+                    g_HeadlightReach = parsed > 0.0f
+                        ? HeadlightFalloff::ClampReach(parsed) : 0.0f;
+                }
+                else
+                    Log(L"[HEADLIGHT] Ignoring invalid HeadlightReach=%hs\n", value.c_str());
+            }
 
             const char* colourName =
                 g_HeadlightColourMode == HeadlightColourMode::Rainbow ? "rainbow" :
                 (g_HeadlightColourMode == HeadlightColourMode::Fixed ? "fixed" : "stock");
             const char* beamName =
                 g_HeadlightBeamMode == HeadlightBeamMode::Focused ? "focused" :
-                (g_HeadlightBeamMode == HeadlightBeamMode::Wide ? "wide" : "stock");
-            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs brightness=%.2f\n",
+                (g_HeadlightBeamMode == HeadlightBeamMode::Wide ? "wide" :
+                (g_HeadlightBeamMode == HeadlightBeamMode::Natural ? "natural" : "stock"));
+            Log(L"[HEADLIGHT] Baseline configured=%hs player=%hs other=%hs colour=%hs(%.2f,%.2f,%.2f) beam=%hs brightness=%.2f reach=%.0f\n",
                 IsHeadlightFeatureConfigured() ? "yes" : "no",
                 g_HeadlightPlayerVisibleConfigured ? (g_HeadlightPlayerVisible ? "on" : "off") : "stock",
                 g_HeadlightOtherVisibleConfigured ? (g_HeadlightOtherVisible ? "on" : "off") : "stock",
@@ -1296,7 +1348,8 @@ namespace BZROpenShim
                 static_cast<double>(g_HeadlightColourG),
                 static_cast<double>(g_HeadlightColourB),
                 beamName,
-                static_cast<double>(g_HeadlightBrightness));
+                static_cast<double>(g_HeadlightBrightness),
+                static_cast<double>(g_HeadlightReach));
             RefreshHeadlightState();
         }
 

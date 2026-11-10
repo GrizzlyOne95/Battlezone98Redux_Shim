@@ -51,6 +51,14 @@ static const char* const kShimSettingsHeadlightColorValues[] =
     "Cyan", "Magenta", "Orange", "Purple", "Teal", "Rainbow"
 };
 static const char* const kShimSettingsHeadlightBeamValues[] = { "Stock", "Focused", "Wide" };
+// The craft headlight adds Natural: a dimmer, shorter beam (see
+// HeadlightFalloff::ReachCurve). The pilot flashlight keeps the three above.
+static const char* const kShimSettingsCraftHeadlightBeamValues[] =
+    { "Stock", "Focused", "Wide", "Natural" };
+static const char* const kShimSettingsHeadlightReachValues[] =
+    { "0", "60", "90", "120", "180", "250" };
+static const char* const kShimSettingsHeadlightReachLabels[] =
+    { "Automatic", "60 m", "90 m", "120 m", "180 m", "250 m" };
 static const char* const kShimSettingsHeadlightBrightnessValues[] =
     { "0.50", "0.75", "1.00", "1.25", "1.50" };
 static const char* const kShimSettingsHeadlightBrightnessLabels[] =
@@ -663,9 +671,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::Headlights,
       "Headlight beam color; Rainbow cycles through colors." },
     { "Headlight Beam", "SinglePlayer", "HeadlightBeam", nullptr, 0,
-      kShimSettingsHeadlightBeamValues, kShimSettingsHeadlightBeamValues, 3, 0,
+      kShimSettingsCraftHeadlightBeamValues, kShimSettingsCraftHeadlightBeamValues, 4, 0,
       ShimSettingApplyGroup::Headlights,
-      "Headlight beam shape: Stock, Focused (narrow), or Wide." },
+      "Headlight beam shape: Stock, Focused (narrow), Wide, or Natural (softer, shorter reach)." },
+    { "Headlight Reach", "SinglePlayer", "HeadlightReach", nullptr, 0,
+      kShimSettingsHeadlightReachValues, kShimSettingsHeadlightReachLabels, 6, 0,
+      ShimSettingApplyGroup::Headlights,
+      "How far the headlight carries: half strength at a quarter of this distance. Automatic is 120 m for Natural and the game's own long curve otherwise." },
     // Pilot flashlight. Not a stock light: no pilot skeleton has an
     // hlgt bone, so OpenShim creates this one on the pilot's own scene
     // node and destroys it when the player boards or the world ends.
@@ -936,6 +948,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
     { "AllowNeutralAttackOrders", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
+    { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
     { "RoutePreference", "Stock" }, { "UdpPort", "0" }, { "GovernorTuning", "Stock" },
     { "RemoteSmoothingMs", "0" }, { "MapListLetterJump", "0" },
