@@ -464,6 +464,7 @@ $stockValueChecks = @{
     "Network/LobbyDropKeepsMatch" = "1"
     "SinglePlayer/HeadlightColor" = "Stock"
     "SinglePlayer/HeadlightBeam" = "Stock"
+    "SinglePlayer/HeadlightReach" = "0"
     "SinglePlayer/HeadlightBrightness" = "1.00"
 }
 foreach ($entry in $stockValueChecks.GetEnumerator()) {

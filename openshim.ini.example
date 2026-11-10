@@ -2652,11 +2652,24 @@ HeadlightColor = White
 ;   Stock
 ;   Focused
 ;   Wide
+;   Natural
 ; Accepted aliases:
 ;   Stock   : Default, Off
 ;   Focused : Focus, Narrow
+;   Natural : Realistic
+; Natural is a 20/60-degree beam at 40% of the colour's brightness with a
+; 120 m reach (see HeadlightReach): it lights the ground ahead without
+; whiting out everything that faces the craft. Focused and Wide keep the
+; engine's long distance curve unless HeadlightReach is set.
 ; Invalid/absent values fall back to Stock.
 HeadlightBeam = Wide
+
+; Player headlight reach in metres. The beam is at half strength at about a
+; quarter of this distance and at 1/16 at the full distance. 0 (or absent) is
+; automatic: the engine's own curve (half strength at 55 m, a quarter at
+; 105 m), or 120 under HeadlightBeam = Natural. Other values are clamped to
+; 30..250 and apply to every beam shape; the Settings page offers 60..250.
+HeadlightReach = 0
 
 ; Player-craft headlight intensity multiplier. Applies to the emitted Ogre
 ; light and all player-headlight color/beam modes. Manual values are clamped
