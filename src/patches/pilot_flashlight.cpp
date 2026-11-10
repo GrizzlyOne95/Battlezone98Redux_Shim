@@ -1523,6 +1523,24 @@ namespace BZROpenShim
             }
             if (g_BaselineState == 0)
             {
+                // Do not silently add a visible world-lighting change to an
+                // existing user INI just because it predates this feature.
+                // The shipped defaults include Enabled=1 explicitly; older
+                // custom INIs without the key retain the engine's lighting.
+                bool explicitlyEnabled = false;
+                if (!TryGetUserConfigBool("SunBaseline", "Enabled", explicitlyEnabled))
+                {
+                    g_BaselineState = -1;
+                    Log(L"[SUNBASE] disabled (no explicit [SunBaseline] Enabled; keeping engine lighting)\n");
+                    return;
+                }
+                if (!explicitlyEnabled)
+                {
+                    g_BaselineState = -1;
+                    Log(L"[SUNBASE] disabled by [SunBaseline] Enabled=0\n");
+                    return;
+                }
+
                 g_BaselineConfig = openshim::sunbaseline::ParseSunBaselineConfig(
                     [](const char* key, std::string& out) {
                         return TryGetUserConfigString("SunBaseline", key, out);
