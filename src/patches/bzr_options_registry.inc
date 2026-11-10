@@ -69,6 +69,8 @@ static const char* const kShimSettingsUdpPortValues[] = { "0", "17770", "17771",
 static const char* const kShimSettingsUdpPortLabels[] = { "Automatic", "17770", "17771", "17772", "17773" };
 static const char* const kShimSettingsRemoteSmoothingValues[] = { "0", "50", "100", "150", "200" };
 static const char* const kShimSettingsRemoteSmoothingLabels[] = { "Off", "50 ms", "100 ms", "150 ms", "200 ms" };
+static const char* const kShimSettingsScrapShadowValues[] = { "0", "50", "100", "150" };
+static const char* const kShimSettingsScrapShadowLabels[] = { "Off", "Past 50 m", "Past 100 m", "Past 150 m" };
 static const char* const kShimSettingsShadowFarValues[] = { "256", "stock" };
 static const char* const kShimSettingsShadowFarLabels[] = { "Full (256 m)", "Stock (128 m)" };
 static const char* const kShimSettingsNetRouteLabels[] = { "Stock", "Prefer Direct", "Force Relay" };
@@ -775,6 +777,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Sort effect-sprite batches without calling into Ogre for every compare. "
       "Same order, same pixels. Restart required." },
+    { "Scrap Shadows", "Fixes", "ScrapShadowDistance", nullptr, 0,
+      kShimSettingsScrapShadowValues, kShimSettingsScrapShadowLabels, 4, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Stop scrap pieces beyond this distance from casting shadows. Scrap stays "
+      "visible and collectable; only its tiny shadow goes. Saves CPU on scrap-heavy "
+      "maps. Rendering only. Restart required." },
     { "Net Route", "Network", "RoutePreference", nullptr, 0,
       kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
       ShimSettingApplyGroup::BzrNetRoute,
@@ -956,7 +964,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
     { "RoutePreference", "Stock" }, { "UdpPort", "0" }, { "GovernorTuning", "Stock" },
-    { "RemoteSmoothingMs", "0" }, { "MapListLetterJump", "0" },
+    { "RemoteSmoothingMs", "0" }, { "MapListLetterJump", "0" }, { "ScrapShadowDistance", "0" },
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "BlockFreeCamInMultiplayer", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },

@@ -316,6 +316,8 @@ openshim_opt:DynamicGeometryPieceReuse:label~Effect Batching~~~~~~
 openshim_opt:DynamicGeometryPieceReuse:desc~Add smoke, fire and tracer sprites to the current batch when they would be merged into it anyway, instead of opening a new one. Same pixels, less CPU. Restart required.~~~~~~
 openshim_opt:DynamicGeometryFastSort:label~Effect Sort~~~~~~
 openshim_opt:DynamicGeometryFastSort:desc~Sort effect-sprite batches without calling into Ogre for every compare. Same order, same pixels. Restart required.~~~~~~
+openshim_opt:ScrapShadowDistance:label~Scrap Shadows~~~~~~
+openshim_opt:ScrapShadowDistance:desc~Stop scrap pieces beyond this distance from casting shadows. Scrap stays visible and collectable; only its tiny shadow goes. Saves CPU on scrap-heavy maps. Rendering only. Restart required.~~~~~~
 openshim_opt:RoutePreference:label~Net Route~~~~~~
 openshim_opt:RoutePreference:desc~Peer path: Stock leaves Redux's choice; Prefer Direct tries LAN, then direct WAN, then the relay; Force Relay always uses BZRNet. Does not add LAN or direct-IP hosting.~~~~~~
 openshim_opt:UdpPort:label~UDP Port~~~~~~
@@ -457,6 +459,9 @@ openshim_value:90 m~90 m~~~~~~
 openshim_value:120 m~120 m~~~~~~
 openshim_value:180 m~180 m~~~~~~
 openshim_value:250 m~250 m~~~~~~
+openshim_value:Past 50 m~Past 50 m~~~~~~
+openshim_value:Past 100 m~Past 100 m~~~~~~
+openshim_value:Past 150 m~Past 150 m~~~~~~
 openshim_value:Prefer Direct~Prefer Direct~~~~~~
 openshim_value:Force Relay~Force Relay~~~~~~
 openshim_value:17770~17770~~~~~~
