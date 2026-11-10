@@ -355,7 +355,22 @@ namespace BZROpenShim
                 if (g_Proxy)
                     desc->SampleDesc = g_ProxySamples;
                 // Ogre derives its own fullscreen flag from this field after
-                // every resize (_resizeSwapChainBuffers).
+                // every resize (_resizeSwapChainBuffers). setFullscreen(false)
+                // gives the window its caption back and then resizes it, long
+                // before it calls SetFullscreenState(FALSE). Still reporting
+                // fullscreen there re-flags Ogre as fullscreen, and the next
+                // setFullscreen(true) takes its "already fullscreen" branch,
+                // which never strips the caption. So a captioned window has
+                // left borderless fullscreen. Only Ogre's windowed path puts
+                // the caption back; entering is unaffected (the flag is only
+                // set by SetFullscreenState(TRUE), on an uncaptioned window).
+                if (g_BorderlessFullscreen && desc->OutputWindow &&
+                    (GetWindowLongW(desc->OutputWindow, GWL_STYLE) & WS_CAPTION) == WS_CAPTION)
+                {
+                    g_BorderlessFullscreen = false;
+                    LogShimA(LogLevel::Info, kComponent,
+                             "[Borderless] window got its caption back: left borderless fullscreen");
+                }
                 if (g_BorderlessFullscreen)
                     desc->Windowed = FALSE;
             }
