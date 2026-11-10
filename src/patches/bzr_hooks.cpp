@@ -614,6 +614,9 @@ namespace BZROpenShim
         Log(L"[BRIEFSTRIDE] Text block scroll-stride fix: %hs hook=%hs\n",
             g_BriefingPageStrideFixEnabled ? "enabled" : "disabled",
             g_BriefingPageStrideFixInstalled ? "installed" : "pending");
+        Log(L"[BRIEFPAGES] Multi-page briefings: %hs hook=%hs\n",
+            g_BriefingPagesEnabled ? "enabled" : "disabled",
+            g_BriefingPagesInstalled ? "installed" : "pending");
         Log(L"[RENDERCOUNT] draw_multi renderCount clamp: %hs hook=%hs max=%d\n",
             g_MultiRenderCountClampEnabled ? "enabled" : "disabled",
             g_MultiRenderCountClampInstalled ? "installed" : "pending",
@@ -1006,6 +1009,8 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_SCAVENGER_NETPROCESS_GUARD", "BZR_DISABLE_SCAVENGER_NETPROCESS_GUARD"},
             {&g_BriefingPageStrideFixEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_BRIEFING_PAGE_STRIDE_FIX", "BZR_DISABLE_BRIEFING_PAGE_STRIDE_FIX"},
+            {&g_BriefingPagesEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_BRIEFING_PAGES", "BZR_DISABLE_BRIEFING_PAGES"},
             {&g_MultiRenderCountClampEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_RENDERCOUNT_CLAMP", "BZR_DISABLE_RENDERCOUNT_CLAMP"},
             {&g_ThumbnailBmpGuardEnabled, EnvSwitches::Kind::KillSwitch,
@@ -1067,6 +1072,7 @@ namespace BZROpenShim
         static const InitStep kFixInstallSteps[] = {
             {"InstallProducerScriptPredicateHooksIfPossible", &InstallProducerScriptPredicateHooksIfPossible},
             {"InstallBriefingPageStrideFixIfPossible", &InstallBriefingPageStrideFixIfPossible},
+            {"InstallBriefingPagesIfPossible", &InstallBriefingPagesIfPossible},
             {"InstallMultiRenderCountClampIfPossible", &InstallMultiRenderCountClampIfPossible},
             {"InstallThumbnailBmpGuardIfPossible", &InstallThumbnailBmpGuardIfPossible},
             {"InstallSplinterUndeadFixIfPossible", &InstallSplinterUndeadFixIfPossible},
@@ -1715,6 +1721,7 @@ namespace BZROpenShim
         InstallMineTeamFilterHooksIfPossible();
         InstallProducerScriptPredicateHooksIfPossible();
 		InstallBriefingPageStrideFixIfPossible();
+		InstallBriefingPagesIfPossible();
 		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();

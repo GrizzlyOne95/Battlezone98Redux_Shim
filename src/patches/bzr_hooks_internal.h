@@ -1437,6 +1437,8 @@ namespace BZROpenShim
         using FnEarthQuakeSimulate = void(__fastcall*)(void* thisPtr, void* edx, float dt);
         extern bool g_BriefingPageStrideFixEnabled;
         extern bool g_BriefingPageStrideFixInstalled;
+        extern bool g_BriefingPagesEnabled;   // briefing_pages.cpp
+        extern bool g_BriefingPagesInstalled;
         extern bool g_CinematicSatelliteZoomFixEnabled;
         extern bool g_CinematicSatelliteZoomFixInstalled;
         extern volatile long g_CinematicSatelliteZoomLogBudget;
@@ -1454,6 +1456,7 @@ namespace BZROpenShim
         extern bool g_ThumbnailBmpGuardEnabled;
         extern bool g_ThumbnailBmpGuardInstalled;
         void InstallBriefingPageStrideFixIfPossible();
+        void InstallBriefingPagesIfPossible();
         void InstallMultiRenderCountClampIfPossible();
         void InstallThumbnailBmpGuardIfPossible();
         extern FnEarthQuakeSimulate g_BzrFn_EarthQuakeSimulateOriginal;
