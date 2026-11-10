@@ -15,6 +15,7 @@ namespace BZROpenShim
     //
     // The same factory hook serves [Graphics] BorderlessFullscreen (default 0,
     // OPENSHIM_BORDERLESS_FULLSCREEN): DX11 fullscreen becomes a borderless,
-    // non-topmost window over its monitor with or without flip model.
+    // non-topmost window over the monitor Ogre places it on, with or without
+    // flip model.
     void InitializeDxgiFlipModel();
 }

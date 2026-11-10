@@ -981,7 +981,8 @@ DxgiFlipModel = 0
 
 ; Borderless fullscreen (DX11 only). Accepted: boolean. Default: 0.
 ;   Fullscreen (Alt-Enter or a fullscreen start) becomes a borderless,
-;   non-topmost window covering the game window's monitor; the swap chain stays
+;   non-topmost window covering the monitor exclusive mode would use (the one
+;   Ogre places the window on, see D3D11PrimaryMonitor); the swap chain stays
 ;   windowed and the back buffer takes the monitor's size. Alt-Tab switches away
 ;   without a mode change or minimising. With DxgiFlipModel = 1 fullscreen is
 ;   already borderless (a flip chain cannot go exclusive); this key extends it

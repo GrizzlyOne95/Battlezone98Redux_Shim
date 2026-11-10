@@ -36,7 +36,8 @@
 // borderless when fullscreen (see HookSetFullscreenState). With this switch the
 // stock blt chain is borderless too: Ogre's request is created windowed and
 // only GetDesc and SetFullscreenState are hooked on it, so fullscreen is a
-// non-topmost window covering the window's monitor instead of exclusive mode.
+// non-topmost window covering the monitor Ogre's setFullscreen has just moved
+// the window onto (the one exclusive mode would use) instead of exclusive mode.
 // A fullscreen start works the same way: Ogre's _beginUpdate sees a windowed
 // chain while it wants fullscreen and calls SetFullscreenState(TRUE) itself
 // (RenderSystem_Direct3D11 0x100047d2 -> _finishSwitchingFullscreen
@@ -688,14 +689,11 @@ namespace BZROpenShim
             HRESULT hr = S_OK;
             if (g_FlipRequested && TryCreateFlipChain(self, device, &request, swapChain, hr))
                 return hr;
+            // Not reset here: a chain Ogre did not ask for (say a second
+            // window) must not drop the live one. Both helpers reset on their
+            // own failure paths.
             if (borderless && TryCreateBorderlessChain(self, device, &request, swapChain, hr))
                 return hr;
-            {
-                // Hooks must not act on a stock chain that reuses a freed
-                // chain's address.
-                std::lock_guard<std::mutex> lock(g_StateMutex);
-                ResetStateLocked();
-            }
             return g_RealCreateSwapChain(self, device, desc, swapChain);
         }
     }
