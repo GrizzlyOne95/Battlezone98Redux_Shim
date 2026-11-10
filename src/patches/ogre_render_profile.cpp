@@ -1954,6 +1954,201 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
+        // Released Ogre SharedPtr<GpuProgramParameters> ABI, as used by
+        // menu_theme.cpp: {rep, info}, use count at info+0x14.
+        struct OgreSharedParams
+        {
+            void* rep = nullptr;
+            void* info = nullptr;
+        };
+        static_assert(sizeof(OgreSharedParams) == 8,
+                      "released Ogre SharedPtr ABI");
+        using FnPassGetParams =
+            OgreSharedParams* (__thiscall*)(const void*, OgreSharedParams*);
+        using FnPassSetParams = void(__thiscall*)(void*, OgreSharedParams);
+        using FnOgreFree = void(__cdecl*)(void*);
+        using FnSharedInfoDtor = void(__thiscall*)(void*, unsigned);
+
+        struct OgreCompatParamsApi
+        {
+            FnPassGetParams getVertexParams = nullptr;
+            FnPassGetParams getFragmentParams = nullptr;
+            FnPassSetParams setVertexParams = nullptr;
+            FnPassSetParams setFragmentParams = nullptr;
+            FnOgreFree free = nullptr;
+
+            bool Valid() const
+            {
+                return getVertexParams != nullptr &&
+                       getFragmentParams != nullptr &&
+                       setVertexParams != nullptr &&
+                       setFragmentParams != nullptr && free != nullptr;
+            }
+        };
+
+        const OgreCompatParamsApi& CompatParamsApi()
+        {
+            static const OgreCompatParamsApi api = [] {
+                OgreCompatParamsApi resolved;
+                resolved.getVertexParams = ResolveOgreExport<FnPassGetParams>(
+                    "?getVertexProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@"
+                    "VGpuProgramParameters@Ogre@@@2@XZ");
+                resolved.getFragmentParams = ResolveOgreExport<FnPassGetParams>(
+                    "?getFragmentProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@"
+                    "VGpuProgramParameters@Ogre@@@2@XZ");
+                resolved.setVertexParams = ResolveOgreExport<FnPassSetParams>(
+                    "?setVertexProgramParameters@Pass@Ogre@@QAEXV?$SharedPtr@"
+                    "VGpuProgramParameters@Ogre@@@2@@Z");
+                resolved.setFragmentParams = ResolveOgreExport<FnPassSetParams>(
+                    "?setFragmentProgramParameters@Pass@Ogre@@QAEXV?$SharedPtr@"
+                    "VGpuProgramParameters@Ogre@@@2@@Z");
+                resolved.free = ResolveOgreExport<FnOgreFree>(
+                    "?deallocateBytes@StdAllocPolicy@Ogre@@SAXPAX@Z");
+                return resolved;
+            }();
+            return api;
+        }
+
+        volatile LONG* SharedParamsCount(const OgreSharedParams& p)
+        {
+            return reinterpret_cast<volatile LONG*>(
+                static_cast<unsigned char*>(p.info) + 0x14);
+        }
+
+        void RetainSharedParams(const OgreSharedParams& p)
+        {
+            if (p.rep != nullptr && p.info != nullptr)
+            {
+                InterlockedIncrement(SharedParamsCount(p));
+            }
+        }
+
+        void ReleaseSharedParams(OgreSharedParams& p)
+        {
+            if (p.rep != nullptr && p.info != nullptr &&
+                InterlockedDecrement(SharedParamsCount(p)) == 0)
+            {
+                reinterpret_cast<FnSharedInfoDtor>(
+                    (*static_cast<void***>(p.info))[0])(p.info, 0);
+                CompatParamsApi().free(p.info);
+            }
+            p = {};
+        }
+
+        // What the in-place retarget changes on one pass, captured before the
+        // first mutation so a failure can put every pass back as it was.
+        struct PassProgramSnapshot
+        {
+            void* pass = nullptr;
+            bool hadVertex = false;
+            bool hadFragment = false;
+            std::string vertexName;
+            std::string fragmentName;
+            OgreSharedParams vertexParams;
+            OgreSharedParams fragmentParams;
+        };
+
+        // Fills one snapshot per pass. False (with nothing mutated) when a
+        // pass is missing; the caller then declines and leaves the clone stock.
+        bool SnapshotPassPrograms(void* technique,
+                                  unsigned short passCount,
+                                  std::vector<PassProgramSnapshot>& out)
+        {
+            const OgreCompatPassApi& inspect = CompatPassApi();
+            const OgreCompatParamsApi& params = CompatParamsApi();
+            out.reserve(passCount);
+            for (unsigned short p = 0; p < passCount; ++p)
+            {
+                void* pass = GuardedGetPass(inspect.getPass, technique, p);
+                if (pass == nullptr)
+                {
+                    return false;
+                }
+                // Own the entry in `out` before taking any reference, so the
+                // caller's release covers a throw partway through.
+                out.emplace_back();
+                PassProgramSnapshot& snap = out.back();
+                snap.pass = pass;
+                snap.hadVertex = inspect.hasVertexProgram(snap.pass);
+                snap.hadFragment = inspect.hasFragmentProgram(snap.pass);
+                // get*ProgramParameters throws without a program, so only
+                // ask a pass that has one.
+                if (snap.hadVertex)
+                {
+                    snap.vertexName = inspect.getVertexProgramName(snap.pass);
+                    params.getVertexParams(snap.pass, &snap.vertexParams);
+                }
+                if (snap.hadFragment)
+                {
+                    snap.fragmentName = inspect.getFragmentProgramName(snap.pass);
+                    params.getFragmentParams(snap.pass, &snap.fragmentParams);
+                }
+            }
+            return true;
+        }
+
+        // Puts every snapshotted pass back: the old program name (empty removes
+        // the usage the retarget added) and the old parameter object, then
+        // recompiles the material. Best-effort, never throws.
+        void RestorePassPrograms(void* material,
+                                 std::vector<PassProgramSnapshot>& snapshots)
+        {
+            const OgreCompatMutationApi& mutate = CompatMutationApi();
+            const OgreCompatParamsApi& params = CompatParamsApi();
+            for (PassProgramSnapshot& snap : snapshots)
+            {
+                try
+                {
+                    mutate.setVertexProgram(snap.pass, snap.vertexName, true);
+                    if (snap.hadVertex && snap.vertexParams.rep != nullptr)
+                    {
+                        // The setter consumes a by-value SharedPtr; give it
+                        // its own reference and keep ours for the release.
+                        RetainSharedParams(snap.vertexParams);
+                        params.setVertexParams(snap.pass, snap.vertexParams);
+                    }
+                }
+                catch (...)
+                {
+                }
+                // Separate block: a vertex-stage throw must not leave the
+                // fragment stage retargeted.
+                try
+                {
+                    mutate.setFragmentProgram(snap.pass, snap.fragmentName, true);
+                    if (snap.hadFragment && snap.fragmentParams.rep != nullptr)
+                    {
+                        RetainSharedParams(snap.fragmentParams);
+                        params.setFragmentParams(snap.pass, snap.fragmentParams);
+                    }
+                }
+                catch (...)
+                {
+                }
+            }
+            try
+            {
+                if (mutate.notifyNeedsRecompile != nullptr)
+                {
+                    mutate.notifyNeedsRecompile(material);
+                }
+                mutate.loadResource(material, false);
+            }
+            catch (...)
+            {
+            }
+        }
+
+        void ReleasePassSnapshots(std::vector<PassProgramSnapshot>& snapshots)
+        {
+            for (PassProgramSnapshot& snap : snapshots)
+            {
+                ReleaseSharedParams(snap.vertexParams);
+                ReleaseSharedParams(snap.fragmentParams);
+            }
+            snapshots.clear();
+        }
+
         // ---- OpenShim-owned Enhanced resource bootstrap ---------------------
         //
         // OpenShim ships the Enhanced payload but nothing ever registered it
@@ -2288,11 +2483,11 @@ namespace BZROpenShim::RenderProfiles
             return true;
         }
 
-        // Ogre creates these materials per transparent renderable and later
-        // pairs their techniques with the source material by index. Appending
-        // a compatibility technique to one of these clones breaks that
-        // invariant and can make the engine read past the source technique
-        // vector while copying transparency state.
+        // The game's own EntityTransparencyMaterial code (not Ogre) clones these
+        // per transparent renderable and later pairs clone and source
+        // techniques by index, with no null check. Appending a compatibility
+        // technique to one of these clones breaks that invariant: the game
+        // then calls Technique::getPass on a null source technique.
         bool IsEntityTransparencyMaterial(const std::string& materialName)
         {
             constexpr char kPrefix[] = "EntityTransparencyMaterial_";
@@ -2503,9 +2698,79 @@ namespace BZROpenShim::RenderProfiles
                 return nullptr;
             }
 
+            // In-place retarget (technique count must not change): only swap
+            // programs on a technique that already has the scheme and LOD the
+            // fallback would set, and snapshot every pass first so a failure
+            // can put the clone back exactly as the game built it.
+            std::vector<PassProgramSnapshot> snapshots;
+            struct SnapshotRelease
+            {
+                std::vector<PassProgramSnapshot>& s;
+                ~SnapshotRelease() { ReleasePassSnapshots(s); }
+            } snapshotRelease{ snapshots };
+            if (preserveTechniqueCount)
+            {
+                const std::string sourceSchemeName(
+                    techApi.getSchemeName(sourceTechnique));
+                const unsigned short sourceLod =
+                    techApi.getLodIndex(sourceTechnique);
+                if (!Dx11Compat::CanRetargetTechniqueInPlace(
+                        sourceSchemeName, sourceLod, schemeName, lodIndex))
+                {
+                    LogCompatOnce("[DX11COMPAT] instantiate declined material=" +
+                                      materialName +
+                                      " reason=retarget-scheme-lod-mismatch"
+                                      " source-scheme=" + sourceSchemeName +
+                                      " source-lod=" +
+                                      std::to_string(sourceLod) +
+                                      " scheme=" + schemeName +
+                                      " lod=" + std::to_string(lodIndex) +
+                                      " action=stock-fallback",
+                                  LogLevel::Warn);
+                    return nullptr;
+                }
+                bool snapshotted = false;
+                if (CompatParamsApi().Valid())
+                {
+                    try
+                    {
+                        snapshotted = SnapshotPassPrograms(sourceTechnique,
+                                                           sourcePasses,
+                                                           snapshots);
+                    }
+                    catch (...)
+                    {
+                        snapshotted = false;
+                    }
+                }
+                if (!snapshotted)
+                {
+                    LogCompatOnce("[DX11COMPAT] instantiate declined material=" +
+                                      materialName +
+                                      " reason=retarget-snapshot-unavailable"
+                                      " action=stock-fallback",
+                                  LogLevel::Warn);
+                    return nullptr;
+                }
+            }
+
             const unsigned short createdIndex =
                 preserveTechniqueCount ? 0 : techApi.getNumTechniques(material);
             void* generated = preserveTechniqueCount ? sourceTechnique : nullptr;
+            // Undo whatever this call changed: drop the appended technique, or
+            // put the retargeted passes' programs and parameters back. Either
+            // way the material ends as stock and the reserved cache key keeps
+            // this miss from retrying, the same "not patched" outcome.
+            const auto restore = [&]() {
+                if (preserveTechniqueCount)
+                {
+                    RestorePassPrograms(material, snapshots);
+                }
+                else
+                {
+                    RestoreMaterialAfterCompatFailure(material, createdIndex);
+                }
+            };
             int stage = kStageEntry;
             try
             {
@@ -2528,20 +2793,18 @@ namespace BZROpenShim::RenderProfiles
                     // deep-copies its TextureUnitStates and render state.
                     mutate.assignTechnique(generated, sourceTechnique);
                     stage = kStageAssigned;
+                    // The in-place technique already has both (gated above).
+                    mutate.setSchemeName(generated, schemeName);
+                    stage = kStageSchemed;
+                    mutate.setLodIndex(generated, lodIndex);
+                    stage = kStageLodSet;
                 }
-                mutate.setSchemeName(generated, schemeName);
-                stage = kStageSchemed;
-                mutate.setLodIndex(generated, lodIndex);
-                stage = kStageLodSet;
 
                 const unsigned short generatedPasses =
                     GuardedGetNumPasses(inspect.getNumPasses, generated);
                 if (generatedPasses != sourcePasses)
                 {
-                    if (!preserveTechniqueCount)
-                    {
-                        RestoreMaterialAfterCompatFailure(material, createdIndex);
-                    }
+                    restore();
                     return nullptr;
                 }
                 for (unsigned short p = 0; p < generatedPasses; ++p)
@@ -2549,10 +2812,7 @@ namespace BZROpenShim::RenderProfiles
                     void* pass = GuardedGetPass(inspect.getPass, generated, p);
                     if (pass == nullptr)
                     {
-                        if (!preserveTechniqueCount)
-                        {
-                            RestoreMaterialAfterCompatFailure(material, createdIndex);
-                        }
+                        restore();
                         return nullptr;
                     }
                     stage = kStagePassFetched;
@@ -2572,10 +2832,7 @@ namespace BZROpenShim::RenderProfiles
 
                 if (!techApi.isSupported(generated))
                 {
-                    if (!preserveTechniqueCount)
-                    {
-                        RestoreMaterialAfterCompatFailure(material, createdIndex);
-                    }
+                    restore();
                     LogCompatOnce("[DX11COMPAT] instantiate failed material=" +
                                       materialName + " scheme=" + schemeName +
                                       " lastStage=" + SynthStageName(stage) +
@@ -2588,9 +2845,9 @@ namespace BZROpenShim::RenderProfiles
             }
             catch (...)
             {
-                if (generated != nullptr && !preserveTechniqueCount)
+                if (generated != nullptr)
                 {
-                    RestoreMaterialAfterCompatFailure(material, createdIndex);
+                    restore();
                 }
                 // One opaque "failed" line is what hid the real cause for
                 // several live runs; naming the stage is what pinned it.

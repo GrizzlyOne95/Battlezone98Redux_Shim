@@ -386,6 +386,15 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         std::string_view requestedScheme,
         unsigned short requestedLod) noexcept;
 
+    // In-place retarget gate for materials whose technique count must not
+    // change. True only when the source technique already carries the scheme
+    // and LOD the fallback would set, so retargeting swaps programs and
+    // nothing else. Exact, case-sensitive: Ogre scheme names are.
+    bool CanRetargetTechniqueInPlace(std::string_view sourceScheme,
+                                     unsigned short sourceLod,
+                                     std::string_view targetScheme,
+                                     unsigned short targetLod) noexcept;
+
     // Stable cache key equivalent to
     // (material identity, requested scheme, lod, source technique,
     //  compatibility variant). Only ASCII alphanumerics plus _ - . survive;
