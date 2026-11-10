@@ -343,12 +343,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Present through a flip-model swap chain with a frame-latency wait, to even out frame pacing. "
       "Experimental. DX11 windowed only. Restart required." },
-    // Absent key = off (DiagnosticSwitch::Requested), so defaultIndex 1 selects "0" (Off).
-    { "DX11 Borderless Fullscreen", "Graphics", "BorderlessFullscreen", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::RestartRequired,
-      "Full screen becomes a borderless window over the monitor instead of exclusive mode, "
-      "so Alt-Tab is instant. DX11 only. Restart required." },
+    // [Graphics] BorderlessFullscreen has no row here: it is the third value of
+    // the stock Full Screen row (fullscreen_mode_choice.cpp).
     // Read once when the shadow far-distance detour installs; absent = 256 m.
     { "Shadow Distance", "Graphics", "ShadowFarDistance", nullptr, 0,
       kShimSettingsShadowFarValues, kShimSettingsShadowFarLabels, 2, 0,
@@ -916,7 +912,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "UnitHealthLowColor", "Default" }, { "UnitAmmoColor", "Default" },
     { "UnitEmptyColor", "Default" },
     { "FieldOfView", "0" }, { "RenderProfile", "Redux" }, { "FXAA", "0" }, { "DxgiFlipModel", "0" },
-    { "BorderlessFullscreen", "0" }, { "ShadowFarDistance", "stock" }, { "EnhancedLightSelectionV2", "0" },
+    { "ShadowFarDistance", "stock" }, { "EnhancedLightSelectionV2", "0" },
     { "TerrainHdEnabled", "0" }, { "TerrainMicroRelief", "0" },
     // Stock draws the sun flash, so this one is On.
     { "SunFlashbang", "1" }, { "ExplosionFlash", "Stock" }, { "DamageFlash", "Stock" },
