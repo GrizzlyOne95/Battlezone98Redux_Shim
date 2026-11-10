@@ -29,7 +29,7 @@ static const char* const kShimCategoryEffects[] = {
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
-    "Explosion Flash", "Sun Flashbang", "Empty Craft Glow" };
+    "Explosion Flash", "Sun Flashbang", "Empty Craft Glow", "Fog Culling" };
 static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
 static const char* const kShimCategoryHud[] = {
@@ -68,7 +68,7 @@ static const char* const kShimCategoryGameplay[] = {
 static const char* const kShimCategoryFixes[] = {
     "AI Multi-Producer", "APC Allied Deploy", "Splinter Fix", "Howitzer Fix",
     "Tug Cargo Deploy", "Recycle Fix", "Builder Cleanup", "Material Guard", "Sniper Eject Aim",
-    "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Fog Culling", "Effect Batching",
+    "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
     "Effect Sort", "Map List Fixes" };
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions",
