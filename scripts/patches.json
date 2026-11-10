@@ -4160,6 +4160,12 @@
       "identity": "LightRenderClass::Simulate loop continue jmp; the emission-light fix sends dormant renderers here instead of the deleting destructor"
     },
     {
+      "name": "EmissionLightDeletePath",
+      "address": "0x0044CF1D",
+      "expected": "8B 45 FC 89 45 D0 8B 4D D0 89 4D E4 83 7D E4 00 74 13 6A 01 8B 55 E4 8B 02 8B 4D E4 8B 10 FF D2",
+      "identity": "LightRenderClass::Simulate inactive path (the je target of EmissionLightStateBranch, cross-checked at bind): if (renderer) renderer->vtbl[0](1), the deleting destructor, then falls to EmissionLightLoopContinue; the emission-light fix sends released (owner slot +0x68 null) renderers here"
+    },
+    {
       "name": "RunStateNameTable",
       "address": "0x00871690",
       "kind": "data",

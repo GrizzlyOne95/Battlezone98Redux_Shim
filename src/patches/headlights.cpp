@@ -145,6 +145,18 @@ namespace BZROpenShim
         static InlineDetour32 g_EmissionLightStateDetour = {};
         static uintptr_t g_EmissionLightActiveResume = 0;
         static uintptr_t g_EmissionLightLoopResume = 0;
+        static uintptr_t g_EmissionLightDeleteResume = 0;
+        // Renderer census, written only from the render thread's Simulate
+        // loop. A pass is counted by an anchor renderer revisiting, so
+        // visits / passes is the number of renderers walked per frame.
+        static bool g_EmissionLightStatsEverySecond = false;
+        static ULONGLONG g_EmissionLightStatsWindowStart = 0;
+        static const void* g_EmissionLightStatsAnchor = nullptr;
+        static uint32_t g_EmissionLightStatsPasses = 0;
+        static uint32_t g_EmissionLightStatsActiveVisits = 0;
+        static uint32_t g_EmissionLightStatsDormantVisits = 0;
+        static uint32_t g_EmissionLightStatsReaped = 0;
+        static uint64_t g_EmissionLightStatsReapedTotal = 0;
         static bool g_EmissionLightFixInstallAttempted = false;
         static bool g_EmissionLightFixInstalled = false;
         static bool g_EmissionLightFixMismatchLogged = false;
@@ -421,23 +433,88 @@ namespace BZROpenShim
             }
         }
 
-        static void HandleEmissionLightState(void* renderer, void* renderClass)
+        static void NoteEmissionLightVisit(const void* renderer, bool active, bool reap, ULONGLONG now)
+        {
+            if (renderer == g_EmissionLightStatsAnchor)
+                ++g_EmissionLightStatsPasses;
+            else if (!g_EmissionLightStatsAnchor && !reap)
+            {
+                // A replacement anchor after a reap joins a pass already
+                // counted; only the window's first anchor opens one.
+                g_EmissionLightStatsAnchor = renderer;
+                if (g_EmissionLightStatsPasses == 0)
+                    ++g_EmissionLightStatsPasses;
+            }
+            if (reap)
+            {
+                ++g_EmissionLightStatsReaped;
+                ++g_EmissionLightStatsReapedTotal;
+                if (renderer == g_EmissionLightStatsAnchor)
+                    g_EmissionLightStatsAnchor = nullptr;
+            }
+            else if (active)
+                ++g_EmissionLightStatsActiveVisits;
+            else
+                ++g_EmissionLightStatsDormantVisits;
+
+            const ULONGLONG window = g_EmissionLightStatsEverySecond ? 1000ull : 60000ull;
+            if (g_EmissionLightStatsWindowStart == 0)
+                g_EmissionLightStatsWindowStart = now;
+            if (now - g_EmissionLightStatsWindowStart < window)
+                return;
+            const uint32_t passes = g_EmissionLightStatsPasses ? g_EmissionLightStatsPasses : 1;
+            const uint32_t activeAvg = g_EmissionLightStatsActiveVisits / passes;
+            const uint32_t dormantAvg = g_EmissionLightStatsDormantVisits / passes;
+            Log(L"[EMISSIONLIGHT] renderers/frame total=%u active=%u dormant=%u "
+                L"reaped=%u (session %llu) frames=%u\n",
+                activeAvg + dormantAvg, activeAvg, dormantAvg,
+                g_EmissionLightStatsReaped,
+                static_cast<unsigned long long>(g_EmissionLightStatsReapedTotal),
+                g_EmissionLightStatsPasses);
+            g_EmissionLightStatsWindowStart = now;
+            // Re-pick the anchor each window: one freed outside this loop
+            // (world teardown) would otherwise never count another pass.
+            g_EmissionLightStatsAnchor = nullptr;
+            g_EmissionLightStatsPasses = 0;
+            g_EmissionLightStatsActiveVisits = 0;
+            g_EmissionLightStatsDormantVisits = 0;
+            g_EmissionLightStatsReaped = 0;
+        }
+
+        // Returns 2 when the renderer should take the stock deleting path,
+        // 0 otherwise (the hook replays the active test for the rest).
+        static int HandleEmissionLightState(void* renderer, void* renderClass)
         {
             if (!renderer)
-                return;
+                return 0;
 
             __try
             {
                 auto* rendererBytes = reinterpret_cast<uint8_t*>(renderer);
                 const bool active = rendererBytes[0x1C] != 0;
+                // +0x68 is the producer's owner slot. Update(slot, nullptr)
+                // leaves it set (dormant, can come back); Release and the
+                // slot handle's destructor clear it, after which nothing can
+                // set the active byte again. Stock deletes every inactive
+                // renderer; only those released ones are safe to delete.
+                const bool released =
+                    *reinterpret_cast<void* const*>(rendererBytes + 0x68) == nullptr;
+                const bool reap = !active && released && g_EmissionLightDeleteResume;
+                const ULONGLONG now = GetTickCount64();
+                NoteEmissionLightVisit(renderer, active, reap, now);
+                if (reap)
+                    return 2;
+
                 void* light = *reinterpret_cast<void**>(rendererBytes + 0x70);
                 auto& api = GetHeadlightOgreApi();
-                // The renderer can outlive its light, as the player headlight did.
-                if (api.setVisible && IsLiveOgreLight(light))
+                // The renderer can outlive its light, as the player headlight
+                // did. Write visibility only when it differs from the state.
+                if (api.setVisible && IsLiveOgreLight(light) &&
+                    (!api.getVisible || api.getVisible(light) != active))
                     api.setVisible(light, active);
 
                 if (!active || !renderClass)
-                    return;
+                    return 0;
 
                 // The stock blend is clamp(phase * rate, 0, 1), followed by
                 // phase += dt. Feed it a repeating cosine blend each frame so
@@ -447,7 +524,7 @@ namespace BZROpenShim
                 if (std::isfinite(rate) && rate > 0.0001f)
                 {
                     constexpr double kPi = 3.14159265358979323846;
-                    const double seconds = static_cast<double>(GetTickCount64()) / 1000.0;
+                    const double seconds = static_cast<double>(now) / 1000.0;
                     const float blend = static_cast<float>(
                         0.5 - 0.5 * std::cos(kPi * seconds * static_cast<double>(rate)));
                     *reinterpret_cast<float*>(rendererBytes + 0x60) = blend / rate;
@@ -456,6 +533,7 @@ namespace BZROpenShim
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
             }
+            return 0;
         }
 
         static void __declspec(naked) EmissionLightStateHook()
@@ -468,12 +546,19 @@ namespace BZROpenShim
                 push dword ptr [ebp - 0x04]
                 call HandleEmissionLightState
                 add esp, 8
+                // Hand the verdict back through the saved EAX slot
+                // (pushad stored EAX highest, above EFLAGS).
+                mov dword ptr [esp + 0x20], eax
                 popfd
                 popad
 
-                // Replay the displaced active-state test.
+                // Replay the displaced active-state test. mov/movzx leave
+                // the verdict's flags alone; each exit ends on the stock
+                // test so the resumed code sees the stock flags.
+                cmp eax, 2
                 mov eax, [ebp - 0x04]
                 movzx ecx, byte ptr [eax + 0x1C]
+                je emissionReapCandidate
                 test ecx, ecx
                 jz emissionInactive
                 jmp dword ptr [g_EmissionLightActiveResume]
@@ -482,6 +567,15 @@ namespace BZROpenShim
                 // Keep the renderer dormant instead of invoking its deleting
                 // destructor. Its producer can set active again on re-entry.
                 jmp dword ptr [g_EmissionLightLoopResume]
+
+            emissionReapCandidate:
+                // Released by its producer: nothing can reactivate it, so
+                // let stock delete it (destroys its Ogre light too).
+                test ecx, ecx
+                jz emissionReap
+                jmp dword ptr [g_EmissionLightActiveResume]
+            emissionReap:
+                jmp dword ptr [g_EmissionLightDeleteResume]
             }
         }
 
@@ -489,9 +583,11 @@ namespace BZROpenShim
         {
             static const bool bound = [] {
                 uint32_t loopContinue = 0;
+                uint32_t deletePath = 0;
                 const HookEngine::EngineRow rows[] = {
                     { "EmissionLightStateBranch", &g_EmissionLightStateBranchAddr },
                     { "EmissionLightLoopContinue", &loopContinue },
+                    { "EmissionLightDeletePath", &deletePath },
                 };
                 if (!HookEngine::BindEngineRows("Emission light fix", rows))
                     return false;
@@ -499,8 +595,19 @@ namespace BZROpenShim
                 const auto* code = reinterpret_cast<const uint8_t*>(g_EmissionLightStateBranchAddr);
                 if (code[9] != 0x0F || code[10] != 0x84)
                     return false;
+                // The delete row must be exactly where the stock je goes.
+                int32_t rel = 0;
+                std::memcpy(&rel, code + 11, sizeof(rel));
+                const uintptr_t jeTarget = g_EmissionLightStateBranchAddr + 15 + rel;
+                if (jeTarget != deletePath)
+                {
+                    Log(L"[EMISSIONLIGHT] delete row 0x%08X is not the je target 0x%08X; fix not installed\n",
+                        static_cast<uint32_t>(deletePath), static_cast<uint32_t>(jeTarget));
+                    return false;
+                }
                 g_EmissionLightActiveResume = g_EmissionLightStateBranchAddr + 15;
                 g_EmissionLightLoopResume = loopContinue;
+                g_EmissionLightDeleteResume = deletePath;
                 return true;
             }();
             return bound;
@@ -519,6 +626,9 @@ namespace BZROpenShim
             }
             if (!EmissionLightAddressesBound())
                 return;
+            // Read once here; the census logs each second under perf
+            // telemetry and once a minute otherwise.
+            g_EmissionLightStatsEverySecond = EnvFlagEnabled("OPENSHIM_PERF_TELEMETRY");
 
             static const uint8_t kExpectedBytes[kEmissionLightStateBranchPatchLen] =
             {
@@ -548,8 +658,10 @@ namespace BZROpenShim
             }
 
             g_EmissionLightFixInstalled = true;
-            Log(L"[EMISSIONLIGHT] Installed re-entry visibility and continuous pulse fix at 0x%08X\n",
-                static_cast<uint32_t>(g_EmissionLightStateBranchAddr));
+            Log(L"[EMISSIONLIGHT] Installed re-entry visibility and continuous pulse fix at 0x%08X "
+                L"(released renderers deleted via 0x%08X)\n",
+                static_cast<uint32_t>(g_EmissionLightStateBranchAddr),
+                static_cast<uint32_t>(g_EmissionLightDeleteResume));
         }
 
         // The player's bridge can keep its light pointer after the light is
