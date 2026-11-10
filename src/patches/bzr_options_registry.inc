@@ -760,6 +760,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Give craft their real bounding boxes so off-screen and distant craft are "
       "skipped by the camera and shadows. Rendering only. Restart required." },
+    { "Fog Culling", "Fixes", "FogDistanceCull", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::RestartRequired,
+      "Skip drawing objects that sit wholly inside the fully fogged distance. "
+      "Rendering only. Restart required." },
     { "Effect Batching", "Fixes", "DynamicGeometryPieceReuse", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -955,7 +960,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "BlockFreeCamInMultiplayer", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
-    { "SkipRebellionLauncher", "0" },
+    { "SkipRebellionLauncher", "0" }, { "FogDistanceCull", "0" },
 };
 
 // Rows Reset to Stock leaves alone:

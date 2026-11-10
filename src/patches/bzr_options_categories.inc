@@ -68,7 +68,7 @@ static const char* const kShimCategoryGameplay[] = {
 static const char* const kShimCategoryFixes[] = {
     "AI Multi-Producer", "APC Allied Deploy", "Splinter Fix", "Howitzer Fix",
     "Tug Cargo Deploy", "Recycle Fix", "Builder Cleanup", "Material Guard", "Sniper Eject Aim",
-    "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
+    "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Fog Culling", "Effect Batching",
     "Effect Sort", "Map List Fixes" };
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions",
