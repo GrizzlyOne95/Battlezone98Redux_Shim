@@ -4364,6 +4364,12 @@
       "identity": "int AI tick counter, incremented once per AISchedule_Simulate tick (FUN_006a3490)."
     },
     {
+      "name": "ModSourceRegister",
+      "address": "0x00820E00",
+      "expected": "55 8B EC 83 EC 08 C7 45 FC 00 00 00 00",
+      "identity": "Engine VFS source-table registration, cdecl bool(const char* path): case-insensitive de-dup then strncpy(0xFF) into a 0x800 x 0x100 table (DAT_02C41B08/DAT_00946730). Called with each mod folder from the mount builders FUN_0076A030..FUN_0076B7A0 (e.g. 0x0076A130, 0x0076B46A). RecurseModSubfolders detours it to also register descendant folders."
+    },
+    {
       "name": "MpWhitelistMatch",
       "address": "0x0076DDF0",
       "expected": "55 8B EC 6A FF 68 18 52 84 00",

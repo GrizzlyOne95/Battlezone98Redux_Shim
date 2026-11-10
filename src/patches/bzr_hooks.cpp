@@ -1612,6 +1612,7 @@ namespace BZROpenShim
             {"InitializeNoDamageSlowdownConfig", &InitializeNoDamageSlowdownConfig},
             {"InitializeAiConstructionCounterRepairConfig", &InitializeAiConstructionCounterRepairConfig},
             {"InitializeAiBuildLedgerTraceConfig", &InitializeAiBuildLedgerTraceConfig},
+            {"InitializeModSubfoldersConfig", &InitializeModSubfoldersConfig},
             {"InitializeMpWhitelistTgaConfig", &InitializeMpWhitelistTgaConfig},
             {"InitializeMpBlockFreeCam", &InitializeMpBlockFreeCam},
             {"InitializeSeismicWaveExtentClampConfig", &InitializeSeismicWaveExtentClampConfig},

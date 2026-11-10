@@ -202,6 +202,7 @@
     <ClCompile Include="src\patches\global_turbo.cpp" />
     <ClCompile Include="src\patches\ai_construction_counter_repair.cpp" />
     <ClCompile Include="src\patches\ai_build_ledger_trace.cpp" />
+    <ClCompile Include="src\patches\mod_subfolders.cpp" />
     <ClCompile Include="src\patches\mp_whitelist_tga.cpp" />
     <ClCompile Include="src\patches\no_damage_slowdown.cpp" />
     <ClCompile Include="src\patches\mp_block_freecam.cpp" />
