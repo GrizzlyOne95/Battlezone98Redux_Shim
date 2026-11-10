@@ -3,6 +3,7 @@
 
 #include "script_scheme_prune.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -254,6 +255,27 @@ void TestCheckedInStockBase()
         other |= TierBit(s) != 0 && TierBit(s) != kTierHigh && StripFamily(s) != "low-noshadow";
     }
     Check(glow && secondary && enHigh && !other, "keeps glow, low-noshadow, en-high; nothing else tiered");
+
+    // The Enhanced base shader scales the emissive map by the pass emissive, so a pass without
+    // `emissive 1 1 1` renders its emissive map black.
+    const std::string text = ss.str();
+    const std::string marker = "abstract pass OSEPassScheme";
+    size_t blocks = 0;
+    for (size_t at = text.find(marker); at != std::string::npos; at = text.find(marker, at + 1))
+    {
+        size_t end = std::min(text.find("abstract pass ", at + 1), text.find("\nmaterial ", at + 1));
+        const std::string block = text.substr(at, end == std::string::npos ? std::string::npos : end - at);
+        bool hasEmissive = false;
+        std::istringstream lines(block);
+        for (std::string line; std::getline(lines, line);)
+        {
+            const size_t s = line.find_first_not_of(" \t");
+            hasEmissive |= s != std::string::npos && line.compare(s, 14, "emissive 1 1 1") == 0;
+        }
+        Check(hasEmissive, "every OSEPassScheme pass declares emissive 1 1 1");
+        ++blocks;
+    }
+    Check(blocks >= 13, "found the OSEPassScheme passes");
 }
 
 int main()
