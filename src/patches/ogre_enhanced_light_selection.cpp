@@ -2,6 +2,7 @@
 
 #include "bzr_options_ui.h"
 #include "enhanced_light_selection.h"
+#include "render_profile_runtime.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -285,9 +286,9 @@ namespace BZROpenShim
             }
         }
 
-        // Asked once per renderable per frame from the light-list hook; the
-        // module set only changes at startup, so answer from a one-second
-        // cache instead of a loader lookup per renderable.
+        // Asked once per renderable per frame from the light-list hook, so
+        // answer from a one-second cache. Ogre's ACTIVE render system, not
+        // module presence: the DX11 DLL is also mapped in DX9 sessions.
         bool Dx11RenderSystemLoaded()
         {
             static std::atomic<ULONGLONG> s_checkedTick{ 0 };
@@ -296,7 +297,7 @@ namespace BZROpenShim
             const ULONGLONG last = s_checkedTick.load(std::memory_order_relaxed);
             if (last == 0 || now - last >= 1000)
             {
-                s_loaded.store(GetModuleHandleA("RenderSystem_Direct3D11.dll") != nullptr,
+                s_loaded.store(BZROpenShim::RenderProfiles::IdentifyActiveRenderSystem() == 1,
                                std::memory_order_relaxed);
                 s_checkedTick.store(now != 0 ? now : 1, std::memory_order_relaxed);
             }
