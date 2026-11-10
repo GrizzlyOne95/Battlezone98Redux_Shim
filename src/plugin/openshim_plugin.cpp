@@ -38,6 +38,7 @@
 #include "d3d11_primary_monitor.h"
 #include "resolution_list_filter.h"
 #include "resolution_dropdown.h"
+#include "fullscreen_mode_choice.h"
 #include "dxgi_flip_model.h"
 #include "dx11_enhanced_fxaa.h"
 #include "dx11_scene_depth.h"
@@ -177,6 +178,10 @@ static unsigned __stdcall PatchThreadProc(void*)
     // Dropdown for the options-screen resolution row; hooks the same screen
     // ctor after the filter above has trimmed the list it reads.
     PATCH_STAGE(BZROpenShim::InitializeResolutionDropdown());
+
+    // Full Screen row: Windowed / Fullscreen / Borderless on DX11. Redirects
+    // two call sites on the same options screen (not the ctor entry).
+    PATCH_STAGE(BZROpenShim::InitializeFullscreenModeChoice());
 
     // Lua Send/Receive carries a Handle as the object's network id, which
     // map-authored objects (geysers, beacons) never get, so receivers see nil.

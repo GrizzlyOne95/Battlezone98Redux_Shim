@@ -6025,6 +6025,42 @@
       "identity": "Released GOG 2.2.301 cUI_Checklist select-by-value thiscall(this, int value): walks the items vector at +0x1E4 comparing item value, stores the index at +0x1DC and updates the text child; does not call the +0x1D8 callback. The options ctor calls it at 0x007B01E2 to select the current video mode."
     },
     {
+      "name": "FsModeCallbackGuard",
+      "address": "0x007B07BE",
+      "expected": "68 30 E8 7A 00 8B 8D 60 FE FF FF 8B 89 50 01 00 00 E8 1C 35 01 00 6A 00",
+      "identity": "Released GOG 2.2.301 options screen ctor 0x007AF4A0, after the Full Screen loop: push 0x007AE830 (Full Screen change callback); mov ecx,[ebp-0x1A0] (screen); mov ecx,[ecx+0x150] (Full Screen cUI_Checklist, stored by the ctor at decomp line 1077); call 0x007C3CF0. Unique byte hit in the exe."
+    },
+    {
+      "name": "FsModeSetCallbackCall",
+      "address": "0x007B07CF",
+      "expected": "E8 1C 35 01 00 6A 00 8B",
+      "identity": "Released GOG 2.2.301 the call to the checklist set-callback 0x007C3CF0 that ends the Full Screen row setup (FsModeCallbackGuard). FullscreenModeChoice redirects it to append the Borderless item on DX11."
+    },
+    {
+      "name": "FsModeSetCallbackTarget",
+      "address": "0x007C3CF0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D 08 89 88 D8 01 00 00",
+      "identity": "Released GOG 2.2.301 cUI_Checklist set change callback thiscall(this, cb), ret 4: stores cb at +0x1D8."
+    },
+    {
+      "name": "FsModeApplyGuard",
+      "address": "0x007AE813",
+      "expected": "8B 0D A4 55 94 00 E8 A2 03 00 00 5D C3",
+      "identity": "Released GOG 2.2.301 options Apply button callback 0x007AE810 (installed by the ctor at decomp line 1821): mov ecx,[0x009455A4] (graphics options screen); call 0x007AEBC0; pop ebp; ret. Unique byte hit; the only caller of 0x007AEBC0."
+    },
+    {
+      "name": "FsModeApplyCall",
+      "address": "0x007AE819",
+      "expected": "E8 A2 03 00 00 5D C3 55",
+      "identity": "Released GOG 2.2.301 the call to the graphics options apply 0x007AEBC0 in the Apply callback (FsModeApplyGuard). FullscreenModeChoice redirects it so Ogre's Full Screen option only sees Yes/No and to write [Graphics] BorderlessFullscreen."
+    },
+    {
+      "name": "FsModeApplyTarget",
+      "address": "0x007AEBC0",
+      "expected": "55 8B EC 6A FF 68 8B 0D 86 00 64 A1 00 00 00 00 50 81 EC F0 00 00 00",
+      "identity": "Released GOG 2.2.301 cUI_OptionsGraphics apply, fastcall(screen in ecx): skips all while +0x178 (restart alert) is set; on dirty +0x19E/+0x19C/+0x1A0 sets Ogre Full Screen to the selected item text of the +0x150 checklist (0x007C3D10); on +0x19F/+0x19D saves config and raises restart_required."
+    },
+    {
       "name": "ResDropListRefresh",
       "address": "0x007CB400",
       "expected": "55 8B EC 83 EC 10 89 4D FC C7 45 F8 00 00 00 00 EB 09 8B 45 F8 83 C0 01 89 45 F8 8B 4D FC 81 C1",
