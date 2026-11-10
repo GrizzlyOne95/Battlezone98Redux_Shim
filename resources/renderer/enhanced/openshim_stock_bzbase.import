@@ -598,6 +598,7 @@ abstract pass OSEPassSchemeENHighPSSMV2
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -661,6 +662,7 @@ abstract pass OSEPassSchemeHigh
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -707,6 +709,7 @@ abstract pass OSEPassSchemeHighNoShadow
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -746,6 +749,7 @@ abstract pass OSEPassSchemeHighPSSM
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -806,6 +810,7 @@ abstract pass OSEPassSchemeLow
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -852,6 +857,7 @@ abstract pass OSEPassSchemeLowNoShadow
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -891,6 +897,7 @@ abstract pass OSEPassSchemeLowPSSM
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -951,6 +958,7 @@ abstract pass OSEPassSchemeLowest
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -997,6 +1005,7 @@ abstract pass OSEPassSchemeLowestNoShadow
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -1036,6 +1045,7 @@ abstract pass OSEPassSchemeLowestPSSM
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -1096,6 +1106,7 @@ abstract pass OSEPassSchemeMedium
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -1142,6 +1153,7 @@ abstract pass OSEPassSchemeMediumNoShadow
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap
@@ -1181,6 +1193,7 @@ abstract pass OSEPassSchemeMediumPSSM
 	ambient $ambient
 	diffuse $diffuse
 	specular $specular $shininess	
+	emissive 1 1 1
 	depth_bias $bias
 
 	texture_unit diffuseMap

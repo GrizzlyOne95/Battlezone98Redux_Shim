@@ -3000,6 +3000,7 @@ fragment_program OSE_BaseENMediumNoShadow_fragmentHLSL4 hlsl
 
     default_params
     {
+        param_named_auto materialEmissive surface_emissive_colour
         param_named_auto surfaceViewToLocal inverse_worldview_matrix
         param_named_auto inverseViewMatrix inverse_view_matrix
         param_named surfaceState float4 0 0 0 0
@@ -3026,6 +3027,7 @@ fragment_program OSE_BaseENMediumShadow_fragmentHLSL4 hlsl
 
     default_params
     {
+        param_named_auto materialEmissive surface_emissive_colour
         param_named_auto surfaceViewToLocal inverse_worldview_matrix
         param_named_auto inverseViewMatrix inverse_view_matrix
         param_named surfaceState float4 0 0 0 0
@@ -3052,6 +3054,7 @@ fragment_program OSE_BaseENMediumPSSM_fragmentHLSL4 hlsl
 
     default_params
     {
+        param_named_auto materialEmissive surface_emissive_colour
         param_named_auto surfaceViewToLocal inverse_worldview_matrix
         param_named_auto inverseViewMatrix inverse_view_matrix
         param_named surfaceState float4 0 0 0 0
@@ -3078,6 +3081,7 @@ fragment_program OSE_BaseENLowNoShadow_fragmentHLSL4 hlsl
 
     default_params
     {
+        param_named_auto materialEmissive surface_emissive_colour
         param_named_auto surfaceViewToLocal inverse_worldview_matrix
         param_named_auto inverseViewMatrix inverse_view_matrix
         param_named surfaceState float4 0 0 0 0
@@ -3104,6 +3108,7 @@ fragment_program OSE_BaseENLowShadow_fragmentHLSL4 hlsl
 
     default_params
     {
+        param_named_auto materialEmissive surface_emissive_colour
         param_named_auto surfaceViewToLocal inverse_worldview_matrix
         param_named_auto inverseViewMatrix inverse_view_matrix
         param_named surfaceState float4 0 0 0 0
@@ -3130,6 +3135,7 @@ fragment_program OSE_BaseENLowPSSM_fragmentHLSL4 hlsl
 
     default_params
     {
+        param_named_auto materialEmissive surface_emissive_colour
         param_named_auto surfaceViewToLocal inverse_worldview_matrix
         param_named_auto inverseViewMatrix inverse_view_matrix
         param_named surfaceState float4 0 0 0 0
