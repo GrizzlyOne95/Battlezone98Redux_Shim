@@ -1025,6 +1025,14 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         }
     }
 
+    bool CanRetargetTechniqueInPlace(std::string_view sourceScheme,
+                                     unsigned short sourceLod,
+                                     std::string_view targetScheme,
+                                     unsigned short targetLod) noexcept
+    {
+        return sourceLod == targetLod && sourceScheme == targetScheme;
+    }
+
     size_t SelectSourceTechniqueIndex(
         const std::vector<TechniqueCandidate>& candidates,
         std::string_view requestedScheme,

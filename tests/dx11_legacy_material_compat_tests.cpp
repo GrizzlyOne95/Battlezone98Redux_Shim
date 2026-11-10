@@ -279,6 +279,19 @@ void TestSourceSelection()
           "first technique as last resort");
 }
 
+void TestRetargetInPlaceGate()
+{
+    std::printf("TestRetargetInPlaceGate\n");
+    Check(CanRetargetTechniqueInPlace("high-pssm", 0, "high-pssm", 0),
+          "matching scheme+lod retargets in place");
+    Check(!CanRetargetTechniqueInPlace("high-pssm", 1, "high-pssm", 0),
+          "lod mismatch declines");
+    Check(!CanRetargetTechniqueInPlace("Default", 0, "high-pssm", 0),
+          "scheme mismatch declines");
+    Check(!CanRetargetTechniqueInPlace("Default", 0, "default", 0),
+          "scheme compare is case-sensitive");
+}
+
 void TestCacheKeys()
 {
     std::printf("TestCacheKeys\n");
@@ -1281,6 +1294,7 @@ int main()
     TestFixedFuncSupport();
     TestDecidePaths();
     TestSourceSelection();
+    TestRetargetInPlaceGate();
     TestCacheKeys();
     TestLogFormats();
 

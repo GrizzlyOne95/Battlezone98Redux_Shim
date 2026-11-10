@@ -3,10 +3,11 @@
 Date: 2026-09-16
 
 Status: implemented through the first bounded instantiation slice
-(one-pass known-family and fixed-function techniques; multi-pass/aggressive
-paths still fail closed pending qualification)
+(one-pass known-family and fixed-function techniques; entity-transparency
+clones preserve technique-count parity; multi-pass/aggressive paths still fail
+closed pending qualification)
 
-Branch: `agent/dx11-fixedfunc-fallback`
+Branch: `codex/entity-transparency-technique-parity`
 
 ## Implementation notes (2026-09-19)
 
@@ -32,6 +33,40 @@ the retarget marks the material for recompilation, so Ogre rebuilds its
 supported-technique scheme/LOD table and loads the SM4 programs before the
 listener returns the generated technique. The cache key is reserved before
 mutation so a failed conversion cannot synthesize one technique per draw.
+
+## Crash repair (2026-11-09)
+
+A full dump of `battlezone98redux.exe` (PID 4908) showed an access violation
+inside Ogre's `Technique::getPass`: the technique pointer was null. The
+faulting transparency update was processing a `BaseWhite` entity clone. Its
+source material had one technique, while
+`EntityTransparencyMaterial_BaseWhite0.926084` had two. These clones are made
+by the game's own EntityTransparencyMaterial code, not by Ogre: it builds the
+`EntityTransparencyMaterial_` name and calls `Material::clone` (GOG exe
+`0x00661f20`). Its transparency update (`0x00661ac0`) walks the techniques and
+passes and fetches the paired technique by the same index, then calls
+`Technique::getPass` on it with no null check. The extra clone entry therefore
+produced a null source technique at index 1, and that game code called
+`Technique::getPass` on it.
+
+The extra entry came from the DX11 fixed-function compatibility fallback:
+the run log records that this generated transparency material was converted
+and retargeted through the normal synthesis path, which appends a technique.
+For material names beginning `EntityTransparencyMaterial_`, the fallback now
+retargets the selected existing technique in place, reloads the material, and
+returns that technique. It does not append or remove entries, preserving the
+technique count and index pairing expected by Battlezone. The runtime log marks
+this with `action=retarget-in-place preserve-technique-count=1`. Other
+materials continue to use the existing deep-copy synthesis path.
+
+The in-place retarget only runs when the selected technique already has the
+scheme and LOD the fallback would set; otherwise the clone is left stock and
+the log says `reason=retarget-scheme-lod-mismatch`. Each pass's programs and
+parameter objects are snapshotted first, and any later failure puts them back
+and reloads the material, so a failed retarget leaves the clone unpatched with
+its cache key reserved, as a failed append does. This fixes the identified
+clone/source mismatch; in-game reproduction has not been run, so native
+gameplay qualification is still needed to confirm the rendering result.
 
 The initial mutation slice intentionally refuses multi-pass techniques and
 the aggressive unknown-custom path. Those continue to fail closed until
