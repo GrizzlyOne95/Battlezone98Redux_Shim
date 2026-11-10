@@ -1696,11 +1696,13 @@ void base_fragment(
     emissiveTex = srgb_to_linear(emissiveTex);
 #endif
 #if defined(ENHANCED_MODE)
-    // Preserve the legacy full-bright map at High LOD. The material emissive
-    // colour may boost authored emission, but must never attenuate it below
-    // the Medium/Low/Lowest behavior (which adds the map at 1.0x).
+    // The pass emissive colour is an intensity control, as in the sm3 and
+    // GLSL variants: 0 turns the map off (running lights on an empty craft),
+    // values in between dim it (the occupied-craft pulse). Ogre's default
+    // pass emissive is black, so every pass that binds this program must
+    // declare `emissive 1 1 1` to show the map as authored.
     float materialEmissiveIntensity = max(materialEmissive.x, max(materialEmissive.y, materialEmissive.z));
-    float emissiveIntensity = max(1.0, materialEmissiveIntensity);
+    float emissiveIntensity = saturate(materialEmissiveIntensity);
     emissiveContribution += emissiveTex.xyz * emissiveIntensity * ose_surface_emissive_scale(surfaceState, surfaceMode);
 #else
     oColor.xyz += emissiveTex.xyz;
