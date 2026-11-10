@@ -8,6 +8,7 @@ Native `winmm.dll` shim for Battlezone 98 Redux. This repository owns low-level 
 - Route reusable Lua/native runtime APIs to **EXU**, campaign content and packaging to **CR**, and Lua file/update primitives to **bzfile**. Read a sibling's `AGENTS.md` before editing it.
 - The GOG install at `C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux` is the normal test copy. Never use Steam's Workshop cache as a development target.
 - Some co-op test instances under `C:\BZRCoop\instances\` junction `plugins\` to that GOG install (Instance2 and Instance3 when this was written) and so load the same `plugins\openshim.dll` as GOG; `scripts\patches.json` and `openshim.ini` are per-instance. Before running tests with different DLLs in parallel, check `(Get-Item '<instance>\Battlezone 98 Redux\plugins').LinkType`: a junction means one at a time, an own folder can run alongside.
+- A test mod under `addon\` is mounted only when `addon\<name>\<name>.ini` exists in its root; without it the engine ignores the folder. A BZN stores its terrain name, so a renamed copy of a map does not load.
 
 ## Load only when relevant
 

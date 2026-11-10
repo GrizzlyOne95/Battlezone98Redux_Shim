@@ -2329,6 +2329,10 @@ RemoteSmoothingMs = 0
 ; this setting do not mount the subfolders at all.
 ; Accepted: 0/1. Default: 0. Restart required after changing.
 RecurseModSubfolders = 0
+; How many folder levels below the mod folder are mounted (1 = only its direct
+; subfolders). Deeper folders are ignored and a line is logged.
+; Accepted: 1..8. Default: 4. Restart required after changing.
+ModSubfolderMaxDepth = 4
 
 [Gameplay]
 

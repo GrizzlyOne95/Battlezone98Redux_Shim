@@ -34,7 +34,8 @@
 // (plus .tga when AllowTgaInMultiplayerMods is on). A peer without this
 // setting does not mount subfolders at all, so its asset view differs.
 //
-// Off unless [Mods] RecurseModSubfolders = 1.
+// Off unless [Mods] RecurseModSubfolders = 1. [Mods] ModSubfolderMaxDepth
+// (1..8, default 4) limits how many levels below the mod root are mounted.
 #include "bzr_hooks.h"
 #include "hook_engine.h"
 #include "bzr_hooks_internal.h"
@@ -48,6 +49,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <unordered_map>
@@ -74,12 +76,17 @@ namespace BZROpenShim
 
             constexpr size_t kEnginePathLimit = 0xFF;   // strncpy(…, 0xFF)
             constexpr size_t kEngineNameKey = 16;       // FUN_00827640
-            constexpr int kMaxDepth = 8;
+            // [Mods] ModSubfolderMaxDepth: levels below the mod root that are
+            // mounted. The default keeps a dev tree left inside a mod folder
+            // (tools, sources) from being mounted wholesale.
+            constexpr int kDefaultMaxDepth = 4;
+            constexpr int kHardMaxDepth = 8;
             constexpr size_t kMaxDirsPerRoot = 256;
 
             InlineDetour32 g_RegisterDetour = {};
             FnRegisterSource g_OrigRegister = nullptr;
             volatile bool g_Recurse = false;
+            int g_MaxDepth = kDefaultMaxDepth;
             bool g_AllowTga = false;
             bool g_ConfigInitialized = false;
             bool g_InExpand = false;
@@ -197,8 +204,14 @@ namespace BZROpenShim
                 }
 
                 size_t registered = 0, skipped = 0, visited = 0;
-                for (int depth = 1; depth <= kMaxDepth && !level.empty(); ++depth)
+                for (int depth = 1; !level.empty(); ++depth)
                 {
+                    if (depth > g_MaxDepth)
+                    {
+                        Log(L"[MODSUB] %hs: folders deeper than %d level(s) are not mounted (ModSubfolderMaxDepth)\n",
+                            rootPath, g_MaxDepth);
+                        break;
+                    }
                     std::vector<fs::path> next;
                     for (const fs::path& dir : level)
                     {
@@ -327,8 +340,17 @@ namespace BZROpenShim
             const bool on = TryGetUserConfigBool("Mods", "RecurseModSubfolders", cfg) && cfg;
             cfg = false;
             g_AllowTga = TryGetUserConfigBool(kUserConfigNetworkSection, "AllowTgaInMultiplayerMods", cfg) && cfg;
+            g_MaxDepth = kDefaultMaxDepth;
+            std::string depthText;
+            if (TryGetUserConfigString("Mods", "ModSubfolderMaxDepth", depthText) && !depthText.empty())
+            {
+                char* end = nullptr;
+                const long value = std::strtol(depthText.c_str(), &end, 10);
+                if (end != depthText.c_str())
+                    g_MaxDepth = static_cast<int>(std::clamp(value, 1L, static_cast<long>(kHardMaxDepth)));
+            }
             g_Recurse = on;
-            Log(L"[MODSUB] RecurseModSubfolders=%hs\n", on ? "on" : "off");
+            Log(L"[MODSUB] RecurseModSubfolders=%hs, max depth %d\n", on ? "on" : "off", g_MaxDepth);
             if (on)
                 InstallRegisterDetour();
         }
