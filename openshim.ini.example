@@ -880,6 +880,20 @@ DX11ShaderlessDrawGuard = 1
 ; Accepted: boolean. Default: OFF.
 DX11LegacyMaterialAggressive = 0
 
+[Features]
+; Multi-page mission briefings on the pre-launch briefing screen. A mission
+; <m> that ships <m>_2.des (then _3 .. _9, stopping at the first gap) gets
+; prev/next arrows beside the briefing picture, and Left/Right/PgUp/PgDn turn
+; pages. Each page may add <m>_Np.des (sidebar text), <m>_N.ogv or <m>_N.png
+; (picture) and <m>_N.wav (voice). Page 1 is the stock briefing; a mission
+; without <m>_2.des behaves exactly as before. Mission names longer than 8
+; characters are skipped (page file names must fit 15 characters). Not on
+; the mission archive screen yet. Client-local UI; cannot affect a network
+; game. Modder guide: Docs/BRIEFING_PAGES.md.
+; Accepted: boolean. Default: ON.
+; Env kill switch: OPENSHIM_DISABLE_BRIEFING_PAGES
+BriefingPages = 1
+
 [Startup]
 
 ; Early D3D startup-hook path used for renderer/startup development.
@@ -1004,6 +1018,11 @@ DxgiFlipModel = 0
 ;   already borderless (a flip chain cannot go exclusive); this key extends it
 ;   to the stock swap chain. 0 keeps exclusive fullscreen. DX9 is unaffected.
 ;   Logged under [Borderless]. Restart required.
+;   In game: the stock Options > Graphics > Full Screen row offers Borderless
+;   on DX11 (Borderless writes 1; Yes or No writes 0). The row shows Borderless
+;   while this key is on and fullscreen is on. With the env below set, or
+;   OPENSHIM_DISABLE_FULLSCREEN_MODE_CHOICE=1, the row stays stock. With
+;   DxgiFlipModel = 1 fullscreen is borderless either way. Logged under [FsMode].
 ;   Env: OPENSHIM_BORDERLESS_FULLSCREEN=1 (wins over this key).
 BorderlessFullscreen = 0
 
