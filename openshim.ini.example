@@ -979,6 +979,17 @@ ResolutionDropdown = 1
 ;   OPENSHIM_DXGI_FLIP_WAITABLE=0 keeps flip model without the waitable object.
 DxgiFlipModel = 0
 
+; Borderless fullscreen (DX11 only). Accepted: boolean. Default: 0.
+;   Fullscreen (Alt-Enter or a fullscreen start) becomes a borderless,
+;   non-topmost window covering the game window's monitor; the swap chain stays
+;   windowed and the back buffer takes the monitor's size. Alt-Tab switches away
+;   without a mode change or minimising. With DxgiFlipModel = 1 fullscreen is
+;   already borderless (a flip chain cannot go exclusive); this key extends it
+;   to the stock swap chain. 0 keeps exclusive fullscreen. DX9 is unaffected.
+;   Logged under [Borderless]. Restart required.
+;   Env: OPENSHIM_BORDERLESS_FULLSCREEN=1 (wins over this key).
+BorderlessFullscreen = 0
+
 ; Sun shadow reach for the DX11 Enhanced receiver, in the OpenShim Video page
 ; as Shadow Distance. Restart required.
 ; Accepted: a distance in metres (16 to 4096), or stock/off for the stock 128 m

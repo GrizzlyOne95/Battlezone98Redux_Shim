@@ -140,6 +140,8 @@ openshim_opt:FXAA:label~DX11 FXAA~~~~~~
 openshim_opt:FXAA:desc~FXAA 3.11 anti-aliasing pass on the DX11 Enhanced pipeline. DX11 only. Restart required.~~~~~~
 openshim_opt:DxgiFlipModel:label~DX11 Flip Model~~~~~~
 openshim_opt:DxgiFlipModel:desc~Present through a flip-model swap chain with a frame-latency wait, to even out frame pacing. Experimental. DX11 windowed only. Restart required.~~~~~~
+openshim_opt:BorderlessFullscreen:label~DX11 Borderless Fullscreen~~~~~~
+openshim_opt:BorderlessFullscreen:desc~Full screen becomes a borderless window over the monitor instead of exclusive mode, so Alt-Tab is instant. DX11 only. Restart required.~~~~~~
 openshim_opt:ShadowFarDistance:label~Shadow Distance~~~~~~
 openshim_opt:ShadowFarDistance:desc~How far sun shadows reach. Full covers the 256 m the shadow shader was built for; Stock clips at 128 m for slightly sharper near shadows. Restart required.~~~~~~
 openshim_opt:EnhancedLightSelectionV2:label~DX11 Local Lights~~~~~~

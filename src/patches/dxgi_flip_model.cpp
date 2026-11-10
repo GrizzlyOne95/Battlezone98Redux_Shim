@@ -30,6 +30,17 @@
 // over the ini. OPENSHIM_DXGI_FLIP_LATENCY (1-3, default 1) is the maximum
 // frame latency; OPENSHIM_DXGI_FLIP_WAITABLE=0 keeps flip model but skips the
 // waitable object (for separating the two effects). Logged under [DXGI Flip].
+//
+// Borderless fullscreen: [Graphics] BorderlessFullscreen (default 0;
+// OPENSHIM_BORDERLESS_FULLSCREEN=1 wins over the ini). A flip chain is always
+// borderless when fullscreen (see HookSetFullscreenState). With this switch the
+// stock blt chain is borderless too: Ogre's request is created windowed and
+// only GetDesc and SetFullscreenState are hooked on it, so fullscreen is a
+// non-topmost window covering the window's monitor instead of exclusive mode.
+// A fullscreen start works the same way: Ogre's _beginUpdate sees a windowed
+// chain while it wants fullscreen and calls SetFullscreenState(TRUE) itself
+// (RenderSystem_Direct3D11 0x100047d2 -> _finishSwitchingFullscreen
+// 0x10005218, GOG 2.2.301). Logged under [Borderless].
 #include "dxgi_flip_model.h"
 
 #include "bool_token.h"
@@ -87,6 +98,8 @@ namespace BZROpenShim
         FnPresent1 g_RealPresent1 = nullptr;
 
         bool g_Armed = false;
+        bool g_FlipRequested = false;
+        bool g_BorderlessRequested = false;
         UINT g_MaxLatency = 1;
         bool g_UseWaitable = true;
 
@@ -95,6 +108,9 @@ namespace BZROpenShim
         // recreation on another thread, which Ogre does not do today.
         std::mutex g_StateMutex;
         IDXGISwapChain* g_Chain = nullptr;   // not owned; Ogre owns it
+        // False for Ogre's own blt chain kept only for borderless fullscreen:
+        // the present, buffer and resize hooks leave that one alone.
+        bool g_ChainIsFlip = false;
         ID3D11Texture2D* g_Proxy = nullptr;  // owned; null without MSAA
         ID3D11DeviceContext* g_Context = nullptr;
         DXGI_FORMAT g_ProxyFormat = DXGI_FORMAT_UNKNOWN;
@@ -192,6 +208,7 @@ namespace BZROpenShim
                 g_Waitable = nullptr;
             }
             g_Chain = nullptr;
+            g_ChainIsFlip = false;
             g_ChainHasWaitableFlag = false;
             g_BorderlessFullscreen = false;
             g_ProxySamples = { 1, 0 };
@@ -271,9 +288,14 @@ namespace BZROpenShim
                          syncInterval, flags, static_cast<unsigned long>(hr));
         }
 
+        bool IsOurFlipChain(IDXGISwapChain* chain)
+        {
+            return chain == g_Chain && g_ChainIsFlip;
+        }
+
         HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* self, UINT syncInterval, UINT flags)
         {
-            if (self != g_Chain)
+            if (!IsOurFlipChain(self))
                 return g_RealPresent(self, syncInterval, flags);
             if (!(flags & DXGI_PRESENT_TEST))
             {
@@ -293,7 +315,7 @@ namespace BZROpenShim
         HRESULT STDMETHODCALLTYPE HookPresent1(
             IDXGISwapChain1* self, UINT syncInterval, UINT flags, const DXGI_PRESENT_PARAMETERS* params)
         {
-            if (static_cast<IDXGISwapChain*>(self) != g_Chain)
+            if (!IsOurFlipChain(self))
                 return g_RealPresent1(self, syncInterval, flags, params);
             if (!(flags & DXGI_PRESENT_TEST))
             {
@@ -312,7 +334,7 @@ namespace BZROpenShim
 
         HRESULT STDMETHODCALLTYPE HookGetBuffer(IDXGISwapChain* self, UINT buffer, REFIID riid, void** surface)
         {
-            if (self == g_Chain && buffer == 0)
+            if (IsOurFlipChain(self) && buffer == 0)
             {
                 std::lock_guard<std::mutex> lock(g_StateMutex);
                 if (g_Proxy)
@@ -339,59 +361,67 @@ namespace BZROpenShim
             return hr;
         }
 
+        // Stretches the window over its monitor as a borderless, non-topmost
+        // window. The game asks for its configured video mode, which can be
+        // smaller than the desktop; the resize comes straight back as WM_SIZE
+        // -> ResizeBuffers on this thread, so the back buffer follows.
+        RECT CoverMonitor(HWND window)
+        {
+            RECT covered = {};
+            MONITORINFO info = {};
+            info.cbSize = sizeof(info);
+            if (!GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &info))
+                return covered;
+            covered = info.rcMonitor;
+            // Ogre has just clipped the window to the mode size.
+            SetWindowRgn(window, nullptr, FALSE);
+            // Not topmost (Ogre made it so for exclusive mode): a borderless
+            // window stays topmost after Alt-Tab and would cover the app
+            // switched to. A foreground window covering its monitor already
+            // sits above the taskbar.
+            SetWindowPos(window, HWND_NOTOPMOST, covered.left, covered.top, covered.right - covered.left,
+                         covered.bottom - covered.top, SWP_NOACTIVATE);
+            return covered;
+        }
+
         // Ogre calls this from _finishSwitchingFullscreen after it has made the
         // window a borderless topmost one. Exclusive fullscreen is not usable
-        // on this chain: the waitable flag forbids it, and a flip chain that
-        // does get there presents black (see IneligibleReason). So fullscreen
-        // here is that borderless window stretched over its monitor, and only
-        // the state Ogre reads back through GetDesc changes.
+        // on a flip chain: the waitable flag forbids it, and a flip chain that
+        // does get there presents black (see IneligibleReason). On the blt
+        // chain it is skipped because BorderlessFullscreen asked for that. So
+        // fullscreen here is that borderless window stretched over its
+        // monitor, and only the state Ogre reads back through GetDesc changes.
         HRESULT STDMETHODCALLTYPE HookSetFullscreenState(IDXGISwapChain* self, BOOL fullscreen, IDXGIOutput* target)
         {
             if (self != g_Chain)
                 return g_RealSetFullscreenState(self, fullscreen, target);
 
             HWND window = nullptr;
+            bool flip = false;
             {
                 std::lock_guard<std::mutex> lock(g_StateMutex);
+                flip = g_ChainIsFlip;
                 g_BorderlessFullscreen = fullscreen != FALSE;
                 DXGI_SWAP_CHAIN_DESC current = {};
                 if (fullscreen && SUCCEEDED(g_RealGetDesc(self, &current)))
                     window = current.OutputWindow;
             }
-            RECT covered = {};
-            if (window)
-            {
-                // The game asks for its configured video mode, which can be
-                // smaller than the desktop. Outside the lock: the resize comes
-                // straight back as WM_SIZE -> ResizeBuffers on this thread.
-                MONITORINFO info = {};
-                info.cbSize = sizeof(info);
-                if (GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &info))
-                {
-                    covered = info.rcMonitor;
-                    // Ogre has just clipped the window to the mode size.
-                    SetWindowRgn(window, nullptr, FALSE);
-                    // Not topmost (Ogre made it so for exclusive mode): a
-                    // borderless window stays topmost after Alt-Tab and would
-                    // cover the app switched to. A foreground window covering
-                    // its monitor already sits above the taskbar.
-                    SetWindowPos(window, HWND_NOTOPMOST, covered.left, covered.top, covered.right - covered.left,
-                                 covered.bottom - covered.top, SWP_NOACTIVATE);
-                }
-            }
+            // Outside the lock: the resize re-enters the swap-chain hooks.
+            const RECT covered = window ? CoverMonitor(window) : RECT{};
+            const char* tag = flip ? "[DXGI Flip]" : "[Borderless]";
             if (fullscreen)
                 LogShimA(LogLevel::Info, kComponent,
-                         "[DXGI Flip] SetFullscreenState(fullscreen): borderless window %ldx%ld at %ld,%ld, swap chain stays windowed",
-                         covered.right - covered.left, covered.bottom - covered.top, covered.left, covered.top);
+                         "%s SetFullscreenState(fullscreen): borderless window %ldx%ld at %ld,%ld, swap chain stays windowed",
+                         tag, covered.right - covered.left, covered.bottom - covered.top, covered.left, covered.top);
             else
-                LogShimA(LogLevel::Info, kComponent, "[DXGI Flip] SetFullscreenState(windowed): left borderless fullscreen");
+                LogShimA(LogLevel::Info, kComponent, "%s SetFullscreenState(windowed): left borderless fullscreen", tag);
             return S_OK;
         }
 
         HRESULT STDMETHODCALLTYPE HookResizeBuffers(
             IDXGISwapChain* self, UINT bufferCount, UINT width, UINT height, DXGI_FORMAT format, UINT flags)
         {
-            if (self != g_Chain)
+            if (!IsOurFlipChain(self))
                 return g_RealResizeBuffers(self, bufferCount, width, height, format, flags);
 
             std::lock_guard<std::mutex> lock(g_StateMutex);
@@ -426,17 +456,26 @@ namespace BZROpenShim
             return hr;
         }
 
+        // The two hooks borderless fullscreen needs on any chain.
+        bool PatchFullscreenHooks(IDXGISwapChain* chain)
+        {
+            using ComVtablePatch::OnForeignWrapper;
+            using ComVtablePatch::PatchEntry;
+            using ComVtablePatch::Succeeded;
+            return Succeeded(PatchEntry(chain, kSlotGetDesc, &HookGetDesc, g_RealGetDesc, OnForeignWrapper::Refuse)) &&
+                   Succeeded(PatchEntry(chain, kSlotSetFullscreenState, &HookSetFullscreenState,
+                                        g_RealSetFullscreenState, OnForeignWrapper::Refuse));
+        }
+
         bool PatchSwapChain(IDXGISwapChain* chain)
         {
             using ComVtablePatch::OnForeignWrapper;
             using ComVtablePatch::PatchEntry;
             using ComVtablePatch::Succeeded;
             const bool ok =
+                PatchFullscreenHooks(chain) &&
                 Succeeded(PatchEntry(chain, kSlotPresent, &HookPresent, g_RealPresent, OnForeignWrapper::Refuse)) &&
                 Succeeded(PatchEntry(chain, kSlotGetBuffer, &HookGetBuffer, g_RealGetBuffer, OnForeignWrapper::Refuse)) &&
-                Succeeded(PatchEntry(chain, kSlotGetDesc, &HookGetDesc, g_RealGetDesc, OnForeignWrapper::Refuse)) &&
-                Succeeded(PatchEntry(chain, kSlotSetFullscreenState, &HookSetFullscreenState,
-                                     g_RealSetFullscreenState, OnForeignWrapper::Refuse)) &&
                 Succeeded(PatchEntry(chain, kSlotResizeBuffers, &HookResizeBuffers, g_RealResizeBuffers,
                                      OnForeignWrapper::Refuse));
             if (!ok)
@@ -481,12 +520,11 @@ namespace BZROpenShim
             }
         }
 
-        HRESULT STDMETHODCALLTYPE HookCreateSwapChain(
-            IDXGIFactory* self, IUnknown* device, DXGI_SWAP_CHAIN_DESC* desc, IDXGISwapChain** swapChain)
+        // Creates the flip chain for `desc`. False means nothing was created
+        // and the caller falls back; true means `result` is the creation result.
+        bool TryCreateFlipChain(IDXGIFactory* self, IUnknown* device, const DXGI_SWAP_CHAIN_DESC* desc,
+                                IDXGISwapChain** swapChain, HRESULT& result)
         {
-            if (!desc || !swapChain || !device)
-                return g_RealCreateSwapChain(self, device, desc, swapChain);
-
             const char* reason = IneligibleReason(*desc);
             ID3D11Device* d3dDevice = nullptr;
             if (!reason &&
@@ -499,7 +537,7 @@ namespace BZROpenShim
                          "[DXGI Flip] kept Ogre's swap chain (swapEffect=%u format=%u samples=%u): %s",
                          static_cast<unsigned>(desc->SwapEffect), static_cast<unsigned>(desc->BufferDesc.Format),
                          desc->SampleDesc.Count, reason);
-                return g_RealCreateSwapChain(self, device, desc, swapChain);
+                return false;
             }
 
             std::lock_guard<std::mutex> lock(g_StateMutex);
@@ -525,7 +563,7 @@ namespace BZROpenShim
                              static_cast<unsigned>(desc->BufferDesc.Format));
                     ResetStateLocked();
                     d3dDevice->Release();
-                    return g_RealCreateSwapChain(self, device, desc, swapChain);
+                    return false;
                 }
             }
 
@@ -554,7 +592,7 @@ namespace BZROpenShim
                          static_cast<unsigned long>(hr));
                 ResetStateLocked();
                 d3dDevice->Release();
-                return g_RealCreateSwapChain(self, device, desc, swapChain);
+                return false;
             }
 
             if (!PatchSwapChain(created))
@@ -564,10 +602,11 @@ namespace BZROpenShim
                 created->Release();
                 ResetStateLocked();
                 d3dDevice->Release();
-                return g_RealCreateSwapChain(self, device, desc, swapChain);
+                return false;
             }
 
             g_Chain = created;
+            g_ChainIsFlip = true;
             g_ChainHasWaitableFlag = (flip.Flags & DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT) != 0;
             d3dDevice->GetImmediateContext(&g_Context);
             SetLatency(created, device, g_ChainHasWaitableFlag);
@@ -585,7 +624,79 @@ namespace BZROpenShim
                 LogShimA(LogLevel::Info, kComponent,
                          "[DXGI Flip] MSAA %ux (quality %u) renders into a proxy resolved at Present",
                          g_ProxySamples.Count, g_ProxySamples.Quality);
-            return hr;
+            result = hr;
+            return true;
+        }
+
+        // Creates Ogre's own (blt) chain from the windowed `desc` and hooks
+        // only GetDesc and SetFullscreenState on it. False means nothing was
+        // created and the caller falls back to Ogre's request.
+        bool TryCreateBorderlessChain(IDXGIFactory* self, IUnknown* device, const DXGI_SWAP_CHAIN_DESC* desc,
+                                      IDXGISwapChain** swapChain, HRESULT& result)
+        {
+            std::lock_guard<std::mutex> lock(g_StateMutex);
+            ResetStateLocked();
+            DXGI_SWAP_CHAIN_DESC request = *desc;
+            IDXGISwapChain* created = nullptr;
+            const HRESULT hr = g_RealCreateSwapChain(self, device, &request, &created);
+            if (FAILED(hr) || !created)
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                         "[Borderless] windowed swap chain refused (0x%08lX); kept Ogre's request",
+                         static_cast<unsigned long>(hr));
+                return false;
+            }
+            if (!PatchFullscreenHooks(created))
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                         "[Borderless] could not hook the swap chain; released it and kept Ogre's request");
+                created->Release();
+                return false;
+            }
+            g_Chain = created;
+            g_ChainIsFlip = false;
+            *swapChain = created;
+            result = hr;
+            LogShimA(LogLevel::Info, kComponent,
+                     "[Borderless] active: Ogre's swap chain %ux%u swapEffect=%u samples=%u created windowed; "
+                     "fullscreen will be a borderless window over its monitor",
+                     request.BufferDesc.Width, request.BufferDesc.Height, static_cast<unsigned>(request.SwapEffect),
+                     request.SampleDesc.Count);
+            return true;
+        }
+
+        HRESULT STDMETHODCALLTYPE HookCreateSwapChain(
+            IDXGIFactory* self, IUnknown* device, DXGI_SWAP_CHAIN_DESC* desc, IDXGISwapChain** swapChain)
+        {
+            if (!desc || !swapChain || !device)
+                return g_RealCreateSwapChain(self, device, desc, swapChain);
+
+            // Ogre passes a pointer to its own member description
+            // (_createSwapChainImpl, 0x10001b54), so changes go to a copy.
+            DXGI_SWAP_CHAIN_DESC request = *desc;
+            const bool borderless = g_BorderlessRequested && request.OutputWindow;
+            if (borderless && !request.Windowed)
+            {
+                // Ogre wants exclusive fullscreen (a fullscreen start or a
+                // rebuild while fullscreen). Created windowed, its next frame
+                // asks for fullscreen through SetFullscreenState.
+                request.Windowed = TRUE;
+                LogShimA(LogLevel::Info, kComponent,
+                         "[Borderless] Ogre asked for an exclusive fullscreen swap chain; creating it windowed");
+            }
+
+            HRESULT hr = S_OK;
+            if (g_FlipRequested && TryCreateFlipChain(self, device, &request, swapChain, hr))
+                return hr;
+            if (borderless && TryCreateBorderlessChain(self, device, &request, swapChain, hr))
+                return hr;
+            {
+                // Hooks must not act on a stock chain that reuses a freed
+                // chain's address.
+                std::lock_guard<std::mutex> lock(g_StateMutex);
+                ResetStateLocked();
+            }
+            return g_RealCreateSwapChain(self, device, desc, swapChain);
         }
     }
 
@@ -593,11 +704,18 @@ namespace BZROpenShim
     {
         if (g_Armed)
             return;
-        if (!DiagnosticSwitch::Requested("OPENSHIM_DXGI_FLIP_MODEL", "Graphics", "DxgiFlipModel"))
+        g_FlipRequested = DiagnosticSwitch::Requested("OPENSHIM_DXGI_FLIP_MODEL", "Graphics", "DxgiFlipModel");
+        g_BorderlessRequested =
+            DiagnosticSwitch::Requested("OPENSHIM_BORDERLESS_FULLSCREEN", "Graphics", "BorderlessFullscreen");
+        if (!g_FlipRequested && !g_BorderlessRequested)
             return;
 
-        g_MaxLatency = ReadLatency();
-        g_UseWaitable = ReadUseWaitable();
+        if (g_FlipRequested)
+        {
+            g_MaxLatency = ReadLatency();
+            g_UseWaitable = ReadUseWaitable();
+        }
+        const char* tag = g_FlipRequested ? "[DXGI Flip]" : "[Borderless]";
 
         // Every IDXGIFactory in the process shares dxgi.dll's vtable, so a
         // factory made here arms the hook for the one Ogre makes later. The
@@ -610,7 +728,7 @@ namespace BZROpenShim
         if (!createFactory ||
             FAILED(createFactory(__uuidof(IDXGIFactory), reinterpret_cast<void**>(&factory))) || !factory)
         {
-            LogShimA(LogLevel::Warn, kComponent, "[DXGI Flip] requested but no DXGI factory is available; not armed");
+            LogShimA(LogLevel::Warn, kComponent, "%s requested but no DXGI factory is available; not armed", tag);
             return;
         }
 
@@ -621,14 +739,18 @@ namespace BZROpenShim
         if (!ComVtablePatch::Succeeded(result))
         {
             LogShimA(LogLevel::Warn, kComponent,
-                     "[DXGI Flip] requested but IDXGIFactory::CreateSwapChain could not be hooked (result=%d); not armed",
-                     static_cast<int>(result));
+                     "%s requested but IDXGIFactory::CreateSwapChain could not be hooked (result=%d); not armed",
+                     tag, static_cast<int>(result));
             return;
         }
 
         g_Armed = true;
-        LogShimA(LogLevel::Info, kComponent,
-                 "[DXGI Flip] armed: Ogre's D3D11 swap chain will be created as FLIP_DISCARD (maxLatency=%u waitable=%s)",
-                 g_MaxLatency, g_UseWaitable ? "yes" : "no");
+        if (g_FlipRequested)
+            LogShimA(LogLevel::Info, kComponent,
+                     "[DXGI Flip] armed: Ogre's D3D11 swap chain will be created as FLIP_DISCARD (maxLatency=%u waitable=%s)",
+                     g_MaxLatency, g_UseWaitable ? "yes" : "no");
+        if (g_BorderlessRequested)
+            LogShimA(LogLevel::Info, kComponent,
+                     "[Borderless] armed: DX11 fullscreen will be a borderless, non-topmost window over its monitor");
     }
 }

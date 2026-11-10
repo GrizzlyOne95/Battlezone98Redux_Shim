@@ -12,5 +12,9 @@ namespace BZROpenShim
     // wins over the ini). OPENSHIM_DXGI_FLIP_LATENCY (1-3, default 1) sets the
     // maximum frame latency. Any swap chain the rewrite cannot build is created
     // exactly as Ogre asked; DX9 is untouched.
+    //
+    // The same factory hook serves [Graphics] BorderlessFullscreen (default 0,
+    // OPENSHIM_BORDERLESS_FULLSCREEN): DX11 fullscreen becomes a borderless,
+    // non-topmost window over its monitor with or without flip model.
     void InitializeDxgiFlipModel();
 }
