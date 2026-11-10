@@ -59,6 +59,7 @@ These are known problems we are still tracking down. Detailed reports and log fi
 [*] Walker cockpit jitter, and a rare sniper-scope misalignment after ejecting.
 [*] Finishing the last campaign missions.
 [*] An optional kill ticker: a short [i]-Tank[/i] or [i]-Scout[/i] above your weapons when your shot destroys a unit. In the build and off by default; not yet tested in game.
+[*] Multi-page mission briefings: mission makers can add extra briefing pages, each with its own text, picture or video and voice, turned with arrow buttons or the arrow keys. In the build; not yet tested in game.
 [/list]
 
 [h2]Experiments[/h2]

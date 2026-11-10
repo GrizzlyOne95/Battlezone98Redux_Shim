@@ -6112,6 +6112,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             LogShimA(LogLevel::Warn,"terrain-proxy","[FRAME-CAPTURE] invalid client size; expected 320..7680x200..4320");
             return;
         }
+        // The DX11 DLL is also mapped in DX9 sessions, where the window below
+        // is not a D3D11RenderWindowHwnd.
+        if (RenderProfiles::IdentifyActiveRenderSystem()!=1) return;
         const auto ogre=GetModuleHandleW(L"OgreMain.dll");
         const auto dx11=GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
         using Attribute=void(__thiscall*)(void*,const std::string&,void*);
