@@ -864,6 +864,20 @@ DX11ShaderlessDrawGuard = 1
 ; Accepted: boolean. Default: OFF.
 DX11LegacyMaterialAggressive = 0
 
+[Features]
+; Multi-page mission briefings on the pre-launch briefing screen. A mission
+; <m> that ships <m>_2.des (then _3 .. _9, stopping at the first gap) gets
+; prev/next arrows beside the briefing picture, and Left/Right/PgUp/PgDn turn
+; pages. Each page may add <m>_Np.des (sidebar text), <m>_N.ogv or <m>_N.png
+; (picture) and <m>_N.wav (voice). Page 1 is the stock briefing; a mission
+; without <m>_2.des behaves exactly as before. Mission names longer than 8
+; characters are skipped (page file names must fit 15 characters). Not on
+; the mission archive screen yet. Client-local UI; cannot affect a network
+; game. Modder guide: Docs/BRIEFING_PAGES.md.
+; Accepted: boolean. Default: ON.
+; Env kill switch: OPENSHIM_DISABLE_BRIEFING_PAGES
+BriefingPages = 1
+
 [Startup]
 
 ; Early D3D startup-hook path used for renderer/startup development.

@@ -281,6 +281,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "BriefingPageStride", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_BRIEFING_PAGES") ||
+            Equals(name, "BZR_DISABLE_BRIEFING_PAGES"))
+        {
+            return TryReadMappedBool(ini, "Features", "BriefingPages", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_DG_PIECE_REUSE") ||
             Equals(name, "BZR_DISABLE_DG_PIECE_REUSE"))
         {

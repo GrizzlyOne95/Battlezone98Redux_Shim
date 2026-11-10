@@ -245,6 +245,7 @@
     <ClCompile Include="src\patches\sniper_eject_aim_fix.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
     <ClCompile Include="src\patches\planet_video.cpp" />
+    <ClCompile Include="src\patches\briefing_pages.cpp" />
     <ClCompile Include="src\patches\tro_menu_movie.cpp" />
     <ClCompile Include="src\patches\never_activate.cpp" />
     <ClCompile Include="src\patches\window_unclamp.cpp" />
@@ -382,6 +383,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
+    <ClInclude Include="include\briefing_pages_policy.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />
     <ClInclude Include="include\deferred_modable_policy.h" />
     <ClInclude Include="include\background_run_policy.h" />
