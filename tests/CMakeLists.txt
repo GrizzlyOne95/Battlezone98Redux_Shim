@@ -171,6 +171,7 @@ function(openshim_add_test name)
 endfunction()
 
 openshim_add_test(camera_fov_policy_tests STD 17 SOURCES camera_fov_policy_tests.cpp)
+openshim_add_test(briefing_pages_policy_tests STD 17 SOURCES briefing_pages_policy_tests.cpp)
 openshim_add_test(lan_discovery_tests STD 17 SOURCES lan_discovery_tests.cpp)
 openshim_add_test(lan_no_auth_policy_tests STD 17 SOURCES lan_no_auth_policy_tests.cpp)
 openshim_add_test(embedded_lan_model_tests STD 17 SOURCES embedded_lan_model_tests.cpp ../src/network/embedded_lan_model.cpp)
@@ -246,6 +247,7 @@ openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
 openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
 openshim_add_test(terrain_live_paint_tests STD 17 SOURCES terrain_live_paint_tests.cpp)
 openshim_add_test(terrain_tess_defines_tests STD 17 SOURCES terrain_tess_defines_tests.cpp)
+openshim_add_test(terrain_mesh_name_tests STD 17 SOURCES terrain_mesh_name_tests.cpp)
 openshim_add_test(options_ui_l10n_tests STD 17 SOURCES options_ui_l10n_tests.cpp ../src/patches/options_ui_l10n.cpp)
 target_compile_definitions(options_ui_l10n_tests PRIVATE
     OPENSHIM_L10N_TABLE="${CMAKE_CURRENT_SOURCE_DIR}/../resources/localization/openshim_localization.csv")
@@ -483,6 +485,10 @@ openshim_add_test(sun_baseline_tests STD 20 SOURCES
 
 add_executable(shadow_far_distance_tests
     shadow_far_distance_tests.cpp
+)
+
+openshim_add_test(fog_distance_cull_tests STD 20 SOURCES
+    fog_distance_cull_tests.cpp
 )
 
 openshim_add_test(chunk_batch_invalidation_tests STD 20 SOURCES

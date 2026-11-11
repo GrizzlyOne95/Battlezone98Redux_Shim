@@ -281,6 +281,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "BriefingPageStride", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_BRIEFING_PAGES") ||
+            Equals(name, "BZR_DISABLE_BRIEFING_PAGES"))
+        {
+            return TryReadMappedBool(ini, "Features", "BriefingPages", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_DG_PIECE_REUSE") ||
             Equals(name, "BZR_DISABLE_DG_PIECE_REUSE"))
         {
@@ -300,6 +305,11 @@ namespace
             Equals(name, "BZR_DISABLE_RESTORE_CRAFT_BOUNDS"))
         {
             return TryReadMappedBool(ini, "Fixes", "RestoreCraftBounds", true, out);
+        }
+        if (Equals(name, "OPENSHIM_ENABLE_FOG_DISTANCE_CULL") ||
+            Equals(name, "BZR_ENABLE_FOG_DISTANCE_CULL"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "FogDistanceCull", false, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE") ||
             Equals(name, "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"))

@@ -30,6 +30,7 @@
 #include "terrain_paint.h"
 #include "terrain_live_paint.h"
 #include "terrain_tess_defines.h"
+#include "terrain_mesh_name.h"
 #include "frame_bridge_native_geometry.h"
 #include "frame_bridge_native_mesh.h"
 #include "frame_bridge_native_lease.h"
@@ -5100,10 +5101,14 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             int nameZoneZ = 0;
             int nameClusterX = 0;
             int nameClusterZ = 0;
+            // Per-frame path: the stock spelling is checked without sscanf;
+            // anything else still gets the original parse, so the verdict is
+            // unchanged for every name.
             if (!meshName ||
-                !ParseTerrainMeshName(*meshName, nameZoneX, nameZoneZ, nameClusterX, nameClusterZ) ||
-                nameZoneX != zoneX || nameZoneZ != zoneZ ||
-                nameClusterX != clusterX || nameClusterZ != clusterZ)
+                (!TerrainMeshName::IsCanonical(*meshName, zoneX, zoneZ, clusterX, clusterZ) &&
+                 (!ParseTerrainMeshName(*meshName, nameZoneX, nameZoneZ, nameClusterX, nameClusterZ) ||
+                  nameZoneX != zoneX || nameZoneZ != zoneZ ||
+                  nameClusterX != clusterX || nameClusterZ != clusterZ)))
             {
                 LogShimA(LogLevel::Warn, "terrain-proxy",
                     "[TERRAIN-PROXY] native identity validation failed; selected cluster skipped");
@@ -6112,6 +6117,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             LogShimA(LogLevel::Warn,"terrain-proxy","[FRAME-CAPTURE] invalid client size; expected 320..7680x200..4320");
             return;
         }
+        // The DX11 DLL is also mapped in DX9 sessions, where the window below
+        // is not a D3D11RenderWindowHwnd.
+        if (RenderProfiles::IdentifyActiveRenderSystem()!=1) return;
         const auto ogre=GetModuleHandleW(L"OgreMain.dll");
         const auto dx11=GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
         using Attribute=void(__thiscall*)(void*,const std::string&,void*);

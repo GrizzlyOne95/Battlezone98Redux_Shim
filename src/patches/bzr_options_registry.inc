@@ -351,12 +351,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Present through a flip-model swap chain with a frame-latency wait, to even out frame pacing. "
       "Experimental. DX11 windowed only. Restart required." },
-    // Absent key = off (DiagnosticSwitch::Requested), so defaultIndex 1 selects "0" (Off).
-    { "DX11 Borderless Fullscreen", "Graphics", "BorderlessFullscreen", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::RestartRequired,
-      "Full screen becomes a borderless window over the monitor instead of exclusive mode, "
-      "so Alt-Tab is instant. DX11 only. Restart required." },
+    // [Graphics] BorderlessFullscreen has no row here: it is the third value of
+    // the stock Full Screen row (fullscreen_mode_choice.cpp).
     // Read once when the shadow far-distance detour installs; absent = 256 m.
     { "Shadow Distance", "Graphics", "ShadowFarDistance", nullptr, 0,
       kShimSettingsShadowFarValues, kShimSettingsShadowFarLabels, 2, 0,
@@ -760,6 +756,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Give craft their real bounding boxes so off-screen and distant craft are "
       "skipped by the camera and shadows. Rendering only. Restart required." },
+    { "Fog Culling", "Fixes", "FogDistanceCull", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::RestartRequired,
+      "Skip drawing objects that sit wholly inside the fully fogged distance. "
+      "Rendering only. Restart required." },
     { "Effect Batching", "Fixes", "DynamicGeometryPieceReuse", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -928,7 +929,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "UnitHealthLowColor", "Default" }, { "UnitAmmoColor", "Default" },
     { "UnitEmptyColor", "Default" },
     { "FieldOfView", "0" }, { "RenderProfile", "Redux" }, { "FXAA", "0" }, { "DxgiFlipModel", "0" },
-    { "BorderlessFullscreen", "0" }, { "ShadowFarDistance", "stock" }, { "EnhancedLightSelectionV2", "0" },
+    { "ShadowFarDistance", "stock" }, { "EnhancedLightSelectionV2", "0" },
     { "TerrainHdEnabled", "0" }, { "TerrainMicroRelief", "0" },
     // Stock draws the sun flash, so this one is On.
     { "SunFlashbang", "1" }, { "ExplosionFlash", "Stock" }, { "DamageFlash", "Stock" },
@@ -955,7 +956,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "BlockFreeCamInMultiplayer", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
-    { "SkipRebellionLauncher", "0" },
+    { "SkipRebellionLauncher", "0" }, { "FogDistanceCull", "0" },
 };
 
 // Rows Reset to Stock leaves alone:

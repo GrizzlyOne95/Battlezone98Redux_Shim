@@ -225,6 +225,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/MagnetZeroRangeGuard",
     # Client-local text-block scroll stride repair (briefing/archive/chat).
     "Fixes/BriefingPageStride",
+    # Client-local UI: extra briefing pages only for missions that ship
+    # <mission>_2.des; every other mission keeps the stock screen.
+    "Features/BriefingPages",
     # Local-only: rebuilds the shooter's own sniper aim for a tilted (ejected) pilot;
     # identical to stock for a level pilot, no sync field written.
     "Fixes/SniperEjectAimFix",
@@ -507,6 +510,7 @@ $shippingPolicyChecks = @{
     "Fixes/MusicSingleFill" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/BriefingPageStride" = "1"
+    "Features/BriefingPages" = "1"
     "Fixes/SniperEjectAimFix" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"

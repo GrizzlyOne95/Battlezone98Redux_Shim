@@ -4160,6 +4160,12 @@
       "identity": "LightRenderClass::Simulate loop continue jmp; the emission-light fix sends dormant renderers here instead of the deleting destructor"
     },
     {
+      "name": "EmissionLightDeletePath",
+      "address": "0x0044CF1D",
+      "expected": "8B 45 FC 89 45 D0 8B 4D D0 89 4D E4 83 7D E4 00 74 13 6A 01 8B 55 E4 8B 02 8B 4D E4 8B 10 FF D2",
+      "identity": "LightRenderClass::Simulate inactive path (the je target of EmissionLightStateBranch, cross-checked at bind): if (renderer) renderer->vtbl[0](1), the deleting destructor, then falls to EmissionLightLoopContinue; the emission-light fix sends released (owner slot +0x68 null) renderers here"
+    },
+    {
       "name": "RunStateNameTable",
       "address": "0x00871690",
       "kind": "data",
@@ -4782,6 +4788,72 @@
       "address": "0x007CCF53",
       "expected": "68 B4 09 8A 00 8D 4D D8",
       "identity": "`push 0x8A09B4` (the appended \"\nT\" literal) before the string append 0x0041F7B0 in the same probe 0x007CCE90. The only reference to that literal. Fix redirects the operand to a DLL-owned \"T\n\" so the probe text ends in a newline exactly like the page text rendered by cUI_ScrollingTextBlock 0x007CDD50 (see reverse_engineering/briefing_page_stride_20261109.md)."
+    },
+    {
+      "name": "BriefingScreenCtor",
+      "address": "0x0078F030",
+      "expected": "55 8B EC 6A FF 68 53 ED 85 00 64 A1 00 00 00 00",
+      "identity": "cUI_Mission (pre-launch briefing) ctor, GOG Redux 2.2.301: thiscall(this, manager, std::string missionName by value), RET 0x1C; writes vtable 0x0089E2A8 at 0x0078F081 and stores this in 0x0094552C at 0x0078F131. Briefing pages detour the entry (5 bytes) to capture page 1 and add the page widgets after it returns (reverse_engineering/briefing_pages_20261110.md)."
+    },
+    {
+      "name": "BriefingScreenOnKey",
+      "address": "0x00790AA0",
+      "expected": "55 8B EC 51 89 4D FC 83 7D 08 1B 75 0C 8B 4D FC",
+      "identity": "cUI_Mission key handler (vtable 0x0089E2A8 slot 5), thiscall(key, mods), RET 8; only handles VK_ESCAPE (0x1B -> 0x0078EDC0). Same bytes as UiScreenEscBackKey 0x00788E70, a different screen's copy. Briefing pages detour the entry (7 bytes) for Left/Right/PgUp/PgDn."
+    },
+    {
+      "name": "BriefingScreenPlayWav",
+      "address": "0x0078EF60",
+      "expected": "55 8B EC 83 EC 34 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "cUI_Mission play-wav, thiscall(const char* wav), RET 4: stops the sound handle at this+0x160 (0x0043AAA0) then plays the wav (0x0043AA30). Only called from the cUI_Mission ctor (0x00790202..0x00790919). Also resolved by PlanetVideo::MissionIntroSound. Briefing pages detour the entry (6 bytes) to record page 1's wav and call the original to change page sound."
+    },
+    {
+      "name": "BriefingScreenStopWav",
+      "address": "0x0078EFE0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 60 01 00 00",
+      "identity": "cUI_Mission stop-wav, thiscall(), stops and zeroes the sound handle at this+0x160; stock caller is the dtor at 0x00790A59. Called by briefing pages for a page with no wav."
+    },
+    {
+      "name": "BriefingScreenSingleton",
+      "address": "0x0094552C",
+      "kind": "data",
+      "identity": "Live cUI_Mission pointer: set by the ctor at 0x0078F131, cleared by the dtor body at 0x00790A5E. Briefing pages act only while it names the screen they built."
+    },
+    {
+      "name": "DescriptionFileLoad",
+      "address": "0x004889C0",
+      "expected": "55 8B EC 6A FF 68 51 90 84 00 64 A1 00 00 00 00",
+      "identity": "Description loader, cdecl(const char* name, char* buffer): cuts name at the first '.', appends \".des\" (0x00488AD2), copies at most 0x1F400 bytes (0x00488CCA) plus NUL, or \"NO DESCRIPTION\" (0x00488D39). Called twice by the cUI_Mission ctor: mission text (0x0078FB8A) then planet text (0x0078FEE7). Briefing pages detour the entry (5 bytes)."
+    },
+    {
+      "name": "ScrollingTextBlockSetText",
+      "address": "0x007CE0B0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 80 58 29 00 00",
+      "identity": "cUI_ScrollingTextBlock SetText (vtable 0x008A09C8 +0x3C), thiscall(text, colourIndex), RET 8: zeroes the scroll at +0x2958 then calls 0x007CCD50. The briefing Mission block is this class (this+0x15C of cUI_Mission)."
+    },
+    {
+      "name": "TextBlockSetText",
+      "address": "0x007CCD50",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 45 08 50 8B 4D 0C",
+      "identity": "cUI_TextBlock SetText (vtable 0x008A0A10 +0x3C), thiscall(text, colourIndex), RET 8: _snprintf(this+0x144, 0x2800, \"%%%d%s\", colourIndex, text), RGB at +0x100 from the index, then reflow 0x007CCFC0. The briefing \"Planet\" sidebar block is this class."
+    },
+    {
+      "name": "UiTextBlockSetColour",
+      "address": "0x007CCD20",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 00 01 00 00",
+      "identity": "cUI_TextBlock set RGB, thiscall(rgb), RET 4: replaces the low 24 bits of +0x100 and reflows. The cUI_Mission ctor applies the mission record colour with it (0x00790081..0x007900CA); briefing pages re-apply the captured RGB after each SetText."
+    },
+    {
+      "name": "UiViewLoadMovie",
+      "address": "0x007D3850",
+      "expected": "55 8B EC 6A FF 68 37 2C 86 00 64 A1 00 00 00 00",
+      "identity": "cUI_View set movie, thiscall(const char* ogv, int language), RET 8; tears down the previous clip. The cUI_Mission default display branch calls it with (name, 0) then play 0x007D3DD0(1)."
+    },
+    {
+      "name": "UiViewPlayMovie",
+      "address": "0x007D3DD0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 40 01 00 00",
+      "identity": "cUI_View play(bool), thiscall, RET 4: forwards to OgreTheoraVideoClip::play (import 0x00869EF8) when the clip at +0x140 is set. Same function as the PlanetVideo::ViewPlay resolve."
     },
     {
       "name": "ThumbnailMaterialApply",
@@ -5957,6 +6029,42 @@
       "address": "0x007C3C10",
       "expected": "55 8B EC 83 EC 08 89 4D FC C7 45 F8 00 00 00 00 EB 09 8B 45 F8 83 C0 01 89 45 F8 8B 4D FC 81 C1",
       "identity": "Released GOG 2.2.301 cUI_Checklist select-by-value thiscall(this, int value): walks the items vector at +0x1E4 comparing item value, stores the index at +0x1DC and updates the text child; does not call the +0x1D8 callback. The options ctor calls it at 0x007B01E2 to select the current video mode."
+    },
+    {
+      "name": "FsModeCallbackGuard",
+      "address": "0x007B07BE",
+      "expected": "68 30 E8 7A 00 8B 8D 60 FE FF FF 8B 89 50 01 00 00 E8 1C 35 01 00 6A 00",
+      "identity": "Released GOG 2.2.301 options screen ctor 0x007AF4A0, after the Full Screen loop: push 0x007AE830 (Full Screen change callback); mov ecx,[ebp-0x1A0] (screen); mov ecx,[ecx+0x150] (Full Screen cUI_Checklist, stored by the ctor at decomp line 1077); call 0x007C3CF0. Unique byte hit in the exe."
+    },
+    {
+      "name": "FsModeSetCallbackCall",
+      "address": "0x007B07CF",
+      "expected": "E8 1C 35 01 00 6A 00 8B",
+      "identity": "Released GOG 2.2.301 the call to the checklist set-callback 0x007C3CF0 that ends the Full Screen row setup (FsModeCallbackGuard). FullscreenModeChoice redirects it to append the Borderless item on DX11."
+    },
+    {
+      "name": "FsModeSetCallbackTarget",
+      "address": "0x007C3CF0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 4D 08 89 88 D8 01 00 00",
+      "identity": "Released GOG 2.2.301 cUI_Checklist set change callback thiscall(this, cb), ret 4: stores cb at +0x1D8."
+    },
+    {
+      "name": "FsModeApplyGuard",
+      "address": "0x007AE813",
+      "expected": "8B 0D A4 55 94 00 E8 A2 03 00 00 5D C3",
+      "identity": "Released GOG 2.2.301 options Apply button callback 0x007AE810 (installed by the ctor at decomp line 1821): mov ecx,[0x009455A4] (graphics options screen); call 0x007AEBC0; pop ebp; ret. Unique byte hit; the only caller of 0x007AEBC0."
+    },
+    {
+      "name": "FsModeApplyCall",
+      "address": "0x007AE819",
+      "expected": "E8 A2 03 00 00 5D C3 55",
+      "identity": "Released GOG 2.2.301 the call to the graphics options apply 0x007AEBC0 in the Apply callback (FsModeApplyGuard). FullscreenModeChoice redirects it so Ogre's Full Screen option only sees Yes/No and to write [Graphics] BorderlessFullscreen."
+    },
+    {
+      "name": "FsModeApplyTarget",
+      "address": "0x007AEBC0",
+      "expected": "55 8B EC 6A FF 68 8B 0D 86 00 64 A1 00 00 00 00 50 81 EC F0 00 00 00",
+      "identity": "Released GOG 2.2.301 cUI_OptionsGraphics apply, fastcall(screen in ecx): skips all while +0x178 (restart alert) is set; on dirty +0x19E/+0x19C/+0x1A0 sets Ogre Full Screen to the selected item text of the +0x150 checklist (0x007C3D10); on +0x19F/+0x19D saves config and raises restart_required."
     },
     {
       "name": "ResDropListRefresh",

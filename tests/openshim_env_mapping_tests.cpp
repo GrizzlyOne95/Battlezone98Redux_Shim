@@ -169,6 +169,14 @@ namespace
         ini.Set("General", "FastMenuTransitions", "1");
         Check(Mapped(ini, "OPENSHIM_DISABLE_FAST_MENU_TRANSITIONS") == "0", "FastMenuTransitions = 1 reads as DISABLE=0");
 
+        // FogDistanceCull: opt-in, read as written, both aliases.
+        Check(Mapped(ini, "OPENSHIM_ENABLE_FOG_DISTANCE_CULL") == "<none>", "unset FogDistanceCull keeps the code default");
+        ini.Set("Fixes", "FogDistanceCull", "1");
+        Check(Mapped(ini, "OPENSHIM_ENABLE_FOG_DISTANCE_CULL") == "1", "FogDistanceCull = 1 reads as ENABLE=1");
+        Check(Mapped(ini, "BZR_ENABLE_FOG_DISTANCE_CULL") == "1", "BZR_ alias reads the same key");
+        ini.Set("Fixes", "FogDistanceCull", "0");
+        Check(Mapped(ini, "OPENSHIM_ENABLE_FOG_DISTANCE_CULL") == "0", "FogDistanceCull = 0 reads as ENABLE=0");
+
         // MapListLetterJump: inverted switch.
         Check(Mapped(ini, "OPENSHIM_DISABLE_MAP_LIST_LETTER_JUMP") == "<none>", "unset MapListLetterJump keeps the code default");
         ini.Set("General", "MapListLetterJump", "0");

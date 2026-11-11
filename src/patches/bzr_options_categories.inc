@@ -19,7 +19,7 @@ constexpr const char* kShimRowBans = "Banned Players";
 
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
-    "DX11 Borderless Fullscreen", "Shadow Distance", "HD Terrain Tiles", "Micro Relief", "GPU Skinning",
+    "Shadow Distance", "HD Terrain Tiles", "Micro Relief", "GPU Skinning",
     "Primary Monitor", "Resolution Filter", "Resolution List",
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
@@ -29,7 +29,7 @@ static const char* const kShimCategoryEffects[] = {
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
-    "Explosion Flash", "Sun Flashbang", "Empty Craft Glow" };
+    "Explosion Flash", "Sun Flashbang", "Empty Craft Glow", "Fog Culling" };
 static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
 static const char* const kShimCategoryHud[] = {

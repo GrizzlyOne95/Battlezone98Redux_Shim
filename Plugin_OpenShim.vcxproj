@@ -245,6 +245,7 @@
     <ClCompile Include="src\patches\sniper_eject_aim_fix.cpp" />
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
     <ClCompile Include="src\patches\planet_video.cpp" />
+    <ClCompile Include="src\patches\briefing_pages.cpp" />
     <ClCompile Include="src\patches\tro_menu_movie.cpp" />
     <ClCompile Include="src\patches\never_activate.cpp" />
     <ClCompile Include="src\patches\window_unclamp.cpp" />
@@ -273,6 +274,7 @@
     <ClCompile Include="src\patches\d3d11_primary_monitor.cpp" />
     <ClCompile Include="src\patches\resolution_list_filter.cpp" />
     <ClCompile Include="src\patches\resolution_dropdown.cpp" />
+    <ClCompile Include="src\patches\fullscreen_mode_choice.cpp" />
     <ClCompile Include="src\patches\dxgi_flip_model.cpp" />
     <ClCompile Include="src\patches\dx11_enhanced_fxaa.cpp" />
     <ClCompile Include="src\engine\frame_bridge_producer.cpp" />
@@ -382,6 +384,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
+    <ClInclude Include="include\briefing_pages_policy.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />
     <ClInclude Include="include\deferred_modable_policy.h" />
     <ClInclude Include="include\background_run_policy.h" />
@@ -459,6 +462,7 @@
     <ClInclude Include="include\d3d11_primary_monitor.h" />
     <ClInclude Include="include\resolution_list_filter.h" />
     <ClInclude Include="include\resolution_dropdown.h" />
+    <ClInclude Include="include\fullscreen_mode_choice.h" />
     <ClInclude Include="include\resolution_list_policy.h" />
     <ClInclude Include="include\dxgi_flip_model.h" />
     <ClInclude Include="include\dx11_scene_depth.h" />
