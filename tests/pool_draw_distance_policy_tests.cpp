@@ -76,6 +76,7 @@ int main()
         const float d = 400.0f; // 400 m through a 4x scope looks like 100 m
         const float z = ZoomDistanceScale(2.0f * std::atan(0.57735027f / 4.0f));
         check(Decide(false, true, d * d * z * z, 150) == Transition::Keep, "zoomed: far piece stays drawn");
+        check(Decide(false, true, d * d, 150) == Transition::Hide, "same piece unzoomed hides");
     }
 
     if (g_failures)

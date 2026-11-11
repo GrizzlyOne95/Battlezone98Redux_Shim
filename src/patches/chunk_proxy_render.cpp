@@ -2400,24 +2400,35 @@ namespace BZROpenShim
             float out[3],
             float* fovY)
         {
+            void* camera = nullptr;
             __try
             {
                 void* const root = getRoot();
                 void* const window = root ? getWindow(root) : nullptr;
                 void* const viewport = window ? getViewport(window, 0) : nullptr;
-                void* const camera = viewport ? getCamera(viewport) : nullptr;
+                camera = viewport ? getCamera(viewport) : nullptr;
                 const OgreVector3* const p = camera ? getPosition(camera) : nullptr;
                 if (!p)
                     return false;
                 out[0] = p->x;
                 out[1] = p->y;
                 out[2] = p->z;
-                const float* const fov = getFovY(camera); // Camera derives from Frustum first
-                *fovY = fov ? *fov : 0.0f;
             }
             __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
+            }
+            // FOV is only a refinement: an unreadable one leaves 0 (plain distance).
+            *fovY = 0.0f;
+            __try
+            {
+                const float* const fov = getFovY ? getFovY(camera) : nullptr; // Camera derives from Frustum first
+                if (fov)
+                    *fovY = *fov;
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                *fovY = 0.0f;
             }
             return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
         }
@@ -2440,7 +2451,7 @@ namespace BZROpenShim
                 ResolveOgreProc<FnOgreCameraPosition>("?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ");
             static const FnOgreFrustumFovY getFovY =
                 ResolveOgreProc<FnOgreFrustumFovY>("?getFOVy@Frustum@Ogre@@UBEABVRadian@2@XZ");
-            if (!out || !fovY || !getRoot || !getWindow || !getViewport || !getCamera || !getPosition || !getFovY)
+            if (!out || !fovY || !getRoot || !getWindow || !getViewport || !getCamera || !getPosition)
                 return false;
             return TryReadMainViewCameraSeh(getRoot, getWindow, getViewport, getCamera, getPosition, getFovY, out, fovY);
         }
