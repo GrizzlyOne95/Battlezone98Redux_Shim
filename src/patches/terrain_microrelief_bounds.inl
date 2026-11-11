@@ -22,7 +22,18 @@ void UpdateTerrainReliefZoneBounds(void* zone)
     if (!SafeReadZoneInt(zone, kZoneXOffset, zoneX) || !SafeReadZoneInt(zone, kZoneZOffset, zoneZ))
         throw std::runtime_error("relief zone bounds identity unreadable");
     using NeedUpdate = void (__thiscall*)(void*, bool);
-    auto update = Resolve<NeedUpdate>(GetModuleHandleW(L"OgreMain.dll"), "?needUpdate@Node@Ogre@@UAEX_N@Z");
+    // Runs per zone per frame: keep the export once found for this OgreMain
+    // load (a miss, or a different module base, resolves again).
+    static HMODULE s_ogre = nullptr;
+    static NeedUpdate s_update = nullptr;
+    const HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
+    if (!ogre) throw std::runtime_error("relief node bounds invalidation unavailable");
+    if (ogre != s_ogre || !s_update)
+    {
+        s_ogre = ogre;
+        s_update = Resolve<NeedUpdate>(ogre, "?needUpdate@Node@Ogre@@UAEX_N@Z");
+    }
+    const NeedUpdate update = s_update;
     if (!update) throw std::runtime_error("relief node bounds invalidation unavailable");
     for (int x = 0; x < kClusterAxisCount; ++x)
     for (int z = 0; z < kClusterAxisCount; ++z)
