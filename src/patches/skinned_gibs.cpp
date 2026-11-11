@@ -1321,6 +1321,18 @@ namespace BZROpenShim
             }
         }
 
+        bool IsSkinnedGibEntity(const void* entity)
+        {
+            if (!entity)
+                return false;
+            for (const GibSlot& slot : g_Slots)
+            {
+                if (slot.active && slot.entity == entity)
+                    return true;
+            }
+            return false;
+        }
+
         void SubmitSkinnedGibsToRenderQueue(void* renderQueue)
         {
             if (!renderQueue || (!IsSkinnedGibsEnabled() && !IsFractureEnabled()))
@@ -1333,6 +1345,8 @@ namespace BZROpenShim
                 const bool ready = EnsureSkinnedGibResourceLocations();
                 LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] payload resources ready=%u\n", ready ? 1u : 0u);
             }
+            if (!ShimPoolManualSubmitEnabled())
+                return; // Ogre's scene traversal already queues every active gib.
             if (!g_ActiveCount)
                 return;
             void* const sceneManager = GetOgreSceneManagerRuntime();
@@ -1342,6 +1356,8 @@ namespace BZROpenShim
             {
                 if (!slot.active || !slot.entity || !SceneMatches(slot, sceneManager))
                     continue;
+                if (g_PoolSubmitCensusEnabled)
+                    NotePoolManualSubmit(false);
                 ++g_SubmitEntities;
                 if (g_Config.trace && !probed)
                 {

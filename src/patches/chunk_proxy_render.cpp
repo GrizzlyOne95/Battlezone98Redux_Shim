@@ -2415,6 +2415,15 @@ namespace BZROpenShim
             TryDestroyShimObjectSeh(sceneManager, node, entity, destroyEntity, destroySceneNode);
         }
 
+        bool ShimPoolManualSubmitEnabled()
+        {
+            static const bool enabled = [] {
+                const char* value = std::getenv("OPENSHIM_POOL_MANUAL_SUBMIT");
+                return value && value[0] == '1';
+            }();
+            return enabled;
+        }
+
         // Same submission the per-Entity chunk path makes: notify the live
         // viewport camera, then let the Entity queue its own sub-entities.
         // False means the entity faulted and must be forgotten, not touched.

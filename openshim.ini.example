@@ -555,6 +555,16 @@ MusicSingleFill = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MAGNET_ZERO_RANGE_FIX
 MagnetZeroRangeGuard = 1
 
+; Stock ordnance teardown detaches the round's Ogre entity from its scene node
+; and destroys the node, but never destroys the entity: every shot fired leaks
+; one entity (gatst00.mesh for most rounds) until the mission ends. This
+; destroys it right after the stock teardown, only when it is still the same
+; entity, still registered in the live scene and no longer attached. Render
+; state only; no simulation effect, so it is not gated on the net id.
+; Accepted: boolean. Default: ON.
+; Legacy env alias to force it off: OPENSHIM_DISABLE_ORDNANCE_ENTITY_LEAK_FIX
+OrdnanceEntityLeak = 1
+
 ; Mission briefing and mission archive text is shown a page at a time. The page
 ; size (the scroll step) is measured with a probe string that ends in a letter,
 ; but each page is drawn with a newline after every line, which measures

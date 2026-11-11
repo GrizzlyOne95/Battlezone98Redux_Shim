@@ -4148,6 +4148,12 @@
       "identity": "comiss xmm0,[next beep] in CockpitRadar::Render's under-attack growl; operand at +3 is the cooldown float"
     },
     {
+      "name": "OrdnanceNodeTeardown",
+      "address": "0x00680620",
+      "expected": "55 8B EC 83 EC 0C 8B 45 08 89 45 F8 8B 4D F8 8B 51 14",
+      "identity": "Ordnance render teardown (cdecl, Ordnance*; only caller 0x00585635 in FUN_00585560): node=[ord+0xD0]; node->detachAllObjects(); FUN_0067E550(node). The Entity at +0xCC is detached and never destroyed"
+    },
+    {
       "name": "EmissionLightStateBranch",
       "address": "0x0044CBD0",
       "expected": "8B 45 FC 0F B6 48 1C 85 C9 0F 84 3E 03 00 00 8B 55 FC F2 0F 10 42 58 66 0F 57 05 00 30 8A 00",

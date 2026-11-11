@@ -229,6 +229,7 @@
     <ClCompile Include="src\patches\unit_damage.cpp" />
     <ClCompile Include="src\patches\perceived_team_reveal.cpp" />
     <ClCompile Include="src\patches\pilot_flashlight.cpp" />
+    <ClCompile Include="src\patches\ordnance_entity_leak.cpp" />
     <ClCompile Include="src\patches\pilot_team_restore.cpp" />
     <ClCompile Include="src\patches\producer_build_menu.cpp" />
     <ClCompile Include="src\patches\background_run.cpp" />
@@ -385,6 +386,7 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\briefing_pages_policy.h" />
+    <ClInclude Include="include\ordnance_entity_leak_policy.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />
     <ClInclude Include="include\deferred_modable_policy.h" />
     <ClInclude Include="include\background_run_policy.h" />

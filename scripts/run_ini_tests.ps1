@@ -206,6 +206,7 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # has no gameplay effect. VehicleListModScoping reloads the selected
     # map's own waiting-room .vxt.
     "Fixes/ApcAlliedTargetDeploy",
+    "Fixes/OrdnanceEntityLeak",
     "Fixes/SplinterUndead",
     # Confirmed owner-attribution defect; the fix mutates perceivedTeam only in
     # single player and restores the firing craft's reveal after a landed hit.
@@ -502,6 +503,7 @@ $shippingPolicyChecks = @{
 
     "Fixes/AiMultiProducerMakers" = "1"
     "Fixes/ApcAlliedTargetDeploy" = "1"
+    "Fixes/OrdnanceEntityLeak" = "1"
     "Fixes/SplinterUndead" = "1"
     "Fixes/OwnedObjectReveal" = "1"
     "Fixes/HowitzerUndeployedRetaliation" = "1"
