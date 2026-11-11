@@ -40,6 +40,14 @@ function Start-BZRCoopWatchdog {
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command)
 }
 
+# Ends this run's watchdog. The watchdog is scoped to the runner's PID, which is
+# the shared host PID when several runs execute in one PowerShell host, so the
+# runner's exit never ends it; without this marker it would outlive the run and
+# later kill the host and the next run's processes.
+function Stop-BZRCoopWatchdog([string]$RunDir) {
+    Set-Content -LiteralPath (Join-Path $RunDir 'run-ended') -Value (Get-Date).ToString('o') -ErrorAction SilentlyContinue
+}
+
 # Records the runner's long-lived children (server, launcher) for the watchdog.
 function Set-BZRCoopWatchdogPid([string]$RunDir, [string]$Name, [int]$ProcessId) {
     $path = Join-Path $RunDir 'harness-pids.json'
@@ -85,6 +93,8 @@ function Watch-BZRCoopRun {
     }
 
     function Test-ParentAlive {
+        # run-ended is the runner's own end-of-run signal (see Stop-BZRCoopWatchdog).
+        if (Test-Path -LiteralPath (Join-Path $RunDir 'run-ended')) { return $false }
         $p = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
         [bool]($p -and $p.StartTime.ToUniversalTime().Ticks -eq $ParentStartTicks)
     }

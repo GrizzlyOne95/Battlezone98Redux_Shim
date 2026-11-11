@@ -40,6 +40,14 @@ switch ($Mode) {
         @{ verdict = 'PASS' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RunDir 'flow-summary.json')
         exit 0
     }
+    'ended' {
+        # Same-host case: the runner PID stays alive after its run ends.
+        Set-Content -LiteralPath (Join-Path $RunDir 'flow-teardown') -Value 'x'
+        @{ verdict = 'PASS' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RunDir 'flow-summary.json')
+        Stop-BZRCoopWatchdog $RunDir
+        Start-Sleep 8
+        exit 0
+    }
     'crashed' {
         Set-Content -LiteralPath (Join-Path $RunDir 'flow-failed') -Value 'Stopped early: fake'
         Start-Sleep 2
@@ -94,6 +102,12 @@ Assert $script:closedGame 'game close did not use Stop-BZRGame -NoForce'
 
 $started = @()
 try {
+    # A finished run's watchdog must not outlive it and kill the still-live host.
+    $r = Invoke-FakeRun 'ended'
+    $started += $r.server, $r.client
+    Assert ($r.exit -eq 0) "ended: runner killed by a stale watchdog (exit $($r.exit))"
+    Assert (-not (Test-Alive $r.server)) 'ended: server left running'
+
     $r = Invoke-FakeRun 'hung'
     $started += $r.server, $r.client
     Assert ($r.exit -ne 0) "hung: runner exit $($r.exit)"
