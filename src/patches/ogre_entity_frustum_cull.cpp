@@ -158,6 +158,7 @@
 #include "weapon_convergence.h"
 #include "headlight_falloff.h"
 #include "shadow_far_distance.h"
+#include "ogre_scene_census.h"
 #include "fog_distance_cull.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
@@ -1671,6 +1672,9 @@ static void __fastcall ProcessVisibleObjectHook(
     bool cull = false;
     int extentKind = -1;
     bool recovered = false;
+    const bool sceneCensus = SceneCensusEnabled();
+    if (sceneCensus && movableObject)
+        SceneCensusOnVisit(movableObject, camera, onlyShadowCasters);
 
     if (g_EntityFrustumCullEnabled && !g_EntityFrustumCullStoodDown &&
         movableObject && camera &&
@@ -1767,6 +1771,8 @@ static void __fastcall ProcessVisibleObjectHook(
     t_EntityFrustumCullSuppress = previous;
 
     ReportFrustumCullIntervalIfDue();
+    if (sceneCensus)
+        SceneCensusTick();
 }
 
 // -------------------------------------------------------------- install -----
@@ -2064,7 +2070,7 @@ void InstallEntityFrustumCullingIfEnabled()
     // shadow distance; either one patches all four.
     const bool needSubmissionHooks =
         g_EntityFrustumCullEnabled || g_FogDistanceCullEnabled ||
-        g_ScrapShadowDistanceMetres > 0;
+        g_ScrapShadowDistanceMetres > 0 || SceneCensusEnabled();
     const size_t requestCount = needSubmissionHooks ? 4u : 2u;
 
     // A detour that never installed leaves its trampoline null, so this is

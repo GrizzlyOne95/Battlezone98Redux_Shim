@@ -224,6 +224,9 @@
     <ClCompile Include="src\patches\resource_walk_stat_cache.cpp" />
     <ClCompile Include="src\patches\ogre_entity_reload.cpp" />
     <ClCompile Include="src\patches\ogre_entity_frustum_cull.cpp" />
+    <ClCompile Include="src\patches\ogre_scene_census.cpp">
+      <LanguageStandard>stdcpp14</LanguageStandard>
+    </ClCompile>
     <ClCompile Include="src\patches\ogre_runtime_helpers.cpp" />
     <ClCompile Include="src\patches\ordnance_velocity.cpp" />
     <ClCompile Include="src\patches\unit_damage.cpp" />
