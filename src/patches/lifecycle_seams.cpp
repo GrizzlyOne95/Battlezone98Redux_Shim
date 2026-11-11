@@ -661,6 +661,11 @@ namespace BZROpenShim
             TryReadBzrRunState(initial);
             if (initial != kBzrRunStateUnknown)
                 NotifyExuMissionSimulationState(initial == kBzrRunStateStarted);
+            // A mission loaded before the seam went in (direct load from the
+            // command line) never passes through SetRunning into RUN_STARTED,
+            // so arm the fracture prewarm here as the transition would.
+            if (initial == kBzrRunStateStarted)
+                NotifyFracturePrewarmMissionRunState(true);
             Log(L"[MISSION] Installed mission transition seam SetRunning=0x%08X initialState=%hs(%d)\n",
                 static_cast<uint32_t>(g_BzrSetRunningAddr),
                 BzrRunStateName(initial), initial);
