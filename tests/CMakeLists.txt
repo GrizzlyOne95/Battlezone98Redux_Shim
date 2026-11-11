@@ -171,6 +171,7 @@ function(openshim_add_test name)
 endfunction()
 
 openshim_add_test(camera_fov_policy_tests STD 17 SOURCES camera_fov_policy_tests.cpp)
+openshim_add_test(scrap_render_policy_tests STD 17 SOURCES scrap_render_policy_tests.cpp)
 openshim_add_test(briefing_pages_policy_tests STD 17 SOURCES briefing_pages_policy_tests.cpp)
 openshim_add_test(lan_discovery_tests STD 17 SOURCES lan_discovery_tests.cpp)
 openshim_add_test(lan_no_auth_policy_tests STD 17 SOURCES lan_no_auth_policy_tests.cpp)

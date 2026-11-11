@@ -753,6 +753,17 @@ DynamicGeometryPieceReuse = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_DG_FAST_SORT
 DynamicGeometryFastSort = 1
 
+; Stop stock scrap (npscr1/2/3 meshes) from casting shadows when it lies
+; farther than this many metres from the main camera. Each scrap piece is
+; otherwise submitted once per PSSM cascade every frame; its shadow is a few
+; texels under the piece. The main view and glow pass are untouched, so scrap
+; stays visible and collectable. Renderer only: no simulation, collision,
+; pickup, AI or network effect. Mod scrap with other mesh names keeps shadows.
+; The 1 Hz [FRUSTUMCULL] line reports scrapShadowSkipped per cascade.
+; Accepted: 0 (off) or 1..256 metres. Default: 0.
+; Env override for benches: OPENSHIM_SCRAP_SHADOW_DISTANCE
+ScrapShadowDistance = 0
+
 ; Improve how Windows schedules the game's frame thread. Most frame hitches
 ; are waits on Present; these reduce scheduler-caused ones rather than raise
 ; the average frame rate. The thread that runs the frame loop registers with
