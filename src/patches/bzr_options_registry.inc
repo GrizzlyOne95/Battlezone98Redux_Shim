@@ -71,6 +71,8 @@ static const char* const kShimSettingsRemoteSmoothingValues[] = { "0", "50", "10
 static const char* const kShimSettingsRemoteSmoothingLabels[] = { "Off", "50 ms", "100 ms", "150 ms", "200 ms" };
 static const char* const kShimSettingsScrapShadowValues[] = { "0", "50", "100", "150" };
 static const char* const kShimSettingsScrapShadowLabels[] = { "Off", "Past 50 m", "Past 100 m", "Past 150 m" };
+static const char* const kShimSettingsScrapDrawValues[] = { "0", "150", "250", "400" };
+static const char* const kShimSettingsScrapDrawLabels[] = { "Off", "Past 150 m", "Past 250 m", "Past 400 m" };
 static const char* const kShimSettingsShadowFarValues[] = { "256", "stock" };
 static const char* const kShimSettingsShadowFarLabels[] = { "Full (256 m)", "Stock (128 m)" };
 static const char* const kShimSettingsNetRouteLabels[] = { "Stock", "Prefer Direct", "Force Relay" };
@@ -779,6 +781,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Stop scrap pieces beyond this distance from casting shadows. Scrap stays "
       "visible and collectable; only its tiny shadow goes. Saves CPU on scrap-heavy "
       "maps. Rendering only. Restart required." },
+    { "Scrap Draw Distance", "Fixes", "ScrapDrawDistance", nullptr, 0,
+      kShimSettingsScrapDrawValues, kShimSettingsScrapDrawLabels, 4, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Stop drawing scrap pieces beyond this distance. Far scrap disappears from view "
+      "but still exists and can be collected. Saves CPU in big battles. Rendering only. "
+      "Restart required." },
     { "Scrap Glow", "Fixes", "ScrapGlow", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -967,6 +975,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
     { "RoutePreference", "Stock" }, { "UdpPort", "0" }, { "GovernorTuning", "Stock" },
     { "RemoteSmoothingMs", "0" }, { "MapListLetterJump", "0" }, { "ScrapShadowDistance", "0" }, { "ScrapGlow", "1" },
+    { "ScrapDrawDistance", "0" },
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "BlockFreeCamInMultiplayer", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },

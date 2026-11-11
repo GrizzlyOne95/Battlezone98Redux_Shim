@@ -128,6 +128,7 @@
 //   OPENSHIM_SCRAP_SHADOW_DISTANCE=<m>          [Fixes] ScrapShadowDistance
 //   OPENSHIM_SCRAP_GLOW=0                       leave scrap out of the glow pass
 //                                               ([Fixes] ScrapGlow, default 1)
+//   OPENSHIM_SCRAP_DRAW_DISTANCE=<m>            [Fixes] ScrapDrawDistance
 
 // ---------------------------------------------------------------- state -----
 
@@ -303,6 +304,17 @@ static bool g_ScrapGlowActive = false;
 static uint64_t g_ScrapGlowSkipped = 0;
 static uint64_t g_ScrapGlowSkippedAtLastLog = 0;
 
+// ------------------------------------------------- scrap draw distance ------
+//
+// [Fixes] ScrapDrawDistance (metres, 0 = off). Render-only: past the threshold
+// from the viewing camera a scrap piece is not submitted to any pass (main
+// view, glow, shadow). The piece still exists, collides and can be picked up;
+// nothing here reaches simulation, collision, pickup, AI or networking.
+static int g_ScrapDrawDistanceMetres = 0;
+static bool g_ScrapDrawActive = false;
+static uint64_t g_ScrapDrawSkipped = 0;
+static uint64_t g_ScrapDrawSkippedAtLastLog = 0;
+
 // Bounded 1 Hz telemetry.
 static uint64_t g_FrustumCullTested = 0;
 static uint64_t g_FrustumCullCulled = 0;
@@ -433,14 +445,15 @@ static uint32_t MeshIdentityHash(const void* mesh)
     }
 }
 
-// Called from Mesh::_setBounds while a scrap feature (shadow distance or glow)
-// is active. Every mesh reaches _setBounds on load, so this is where scrap
-// meshes are named once; the per-frame path then only compares pointers. A
-// scrap mesh loaded before install is never registered and simply keeps stock
-// shadows and glow.
+// Called from Mesh::_setBounds while a scrap feature (shadow distance, draw
+// distance or glow) is active. Every mesh reaches _setBounds on load, so this
+// is where scrap meshes are named once; the per-frame path then only compares
+// pointers. A scrap mesh loaded before install is never registered and simply
+// keeps stock shadows, glow and draw.
 static void RegisterScrapMeshIfNamed(const void* mesh)
 {
-    if (!(g_ScrapShadowActive || g_ScrapGlowActive) || !mesh || !g_OgreFn_ResourceGetName)
+    if (!(g_ScrapShadowActive || g_ScrapGlowActive || g_ScrapDrawActive) || !mesh ||
+        !g_OgreFn_ResourceGetName)
         return;
     __try
     {
@@ -1574,6 +1587,9 @@ static void ReportFrustumCullIntervalIfDue()
     const uint64_t scrapGlowSkipped = g_ScrapGlowSkipped - g_ScrapGlowSkippedAtLastLog;
     g_ScrapGlowSkippedAtLastLog = g_ScrapGlowSkipped;
 
+    const uint64_t scrapDrawSkipped = g_ScrapDrawSkipped - g_ScrapDrawSkippedAtLastLog;
+    g_ScrapDrawSkippedAtLastLog = g_ScrapDrawSkipped;
+
     // Per-pass split: casters skipped in shadow cameras 0/1/2 (+ any further
     // camera), casters kept, and live scrap meshes. Cascade numbering is by
     // first appearance after a non-shadow traversal; telemetry only.
@@ -1603,6 +1619,17 @@ static void ReportFrustumCullIntervalIfDue()
             static_cast<unsigned long long>(scrapGlowSkipped),
             g_ScrapMeshes.Live());
     }
+    // Submissions skipped across all passes (main, glow and shadow cascades).
+    char scrapDrawText[80] = {};
+    if (g_ScrapDrawActive)
+    {
+        std::snprintf(
+            scrapDrawText,
+            sizeof(scrapDrawText),
+            " scrapDrawSkipped=%llu scrapDrawDistance=%d",
+            static_cast<unsigned long long>(scrapDrawSkipped),
+            g_ScrapDrawDistanceMetres);
+    }
 
     LogShimA(
         LogLevel::Info,
@@ -1610,7 +1637,7 @@ static void ReportFrustumCullIntervalIfDue()
         "[FRUSTUMCULL] windowMs=%lu tested=%llu culled=%llu (%.1f%%) "
         "recoveredBounds=%llu ineligible=%llu nonEntity=%llu shadowPassSkipped=%llu "
         "rememberedMeshes=%u margin=%.2f "
-        "fogCulledMain=%llu fogCulledGlow=%llu fogKeptOverride=%llu%s%s",
+        "fogCulledMain=%llu fogCulledGlow=%llu fogKeptOverride=%llu%s%s%s",
         static_cast<unsigned long>(windowMs),
         static_cast<unsigned long long>(tested),
         static_cast<unsigned long long>(culled),
@@ -1625,7 +1652,8 @@ static void ReportFrustumCullIntervalIfDue()
         static_cast<unsigned long long>(fogGlow),
         static_cast<unsigned long long>(fogKeptOverride),
         scrapText,
-        scrapGlowText);
+        scrapGlowText,
+        scrapDrawText);
 
     if (g_FrustumCullCensusEnabled)
         DumpFrustumCullCensus();
@@ -1638,57 +1666,93 @@ enum class ScrapShadowOutcome
     Skip,
 };
 
-// Skip: the object is an Entity whose mesh is a registered scrap mesh, and its
-// node origin lies farther than the threshold from the viewing camera. Every
-// unknown or fault keeps the caster.
-static ScrapShadowOutcome DecideScrapShadow(void* movableObject, const void* shadowCamera)
+enum class ScrapDistance
+{
+    NotScrap,
+    Unknown,
+    Known,
+};
+
+// Squared distance from the viewing camera to a registered scrap Entity's node
+// origin. In a shadow traversal the viewing camera is the viewport camera the
+// shadow texture serves (main, target picture-in-picture or sniper view), else
+// the main camera; in any other traversal it is the camera being rendered.
+// Unknown on any missing piece or fault, so callers keep the submission.
+static ScrapDistance TryGetScrapViewDistanceSquared(
+    void* movableObject, const void* camera, bool shadowPass, float& distanceSquared)
 {
     if (g_ScrapMeshes.Live() == 0 || !IsOgreEntityObject(movableObject))
-        return ScrapShadowOutcome::NotScrap;
+        return ScrapDistance::NotScrap;
     if (!g_ScrapMeshes.Contains(TryGetEntityMesh(movableObject)))
-        return ScrapShadowOutcome::NotScrap;
+        return ScrapDistance::NotScrap;
     // Signature-checked "RenderGlobals" row; cached after the first hit and
     // rate-limited on a miss, so this is an atomic load per call.
-    const uintptr_t globalsSlot = EngineGlobals::RenderGlobals();
+    const uintptr_t globalsSlot = shadowPass ? EngineGlobals::RenderGlobals() : 0;
     __try
     {
-        // Prefer the viewport camera this shadow texture serves (main, target
-        // picture-in-picture or sniper view); fall back to the main camera.
-        const void* viewCamera = nullptr;
-        if (g_OgreFn_CameraGetLodCamera && shadowCamera)
+        const void* viewCamera = shadowPass ? nullptr : camera;
+        if (shadowPass && g_OgreFn_CameraGetLodCamera && camera)
         {
-            const void* lodCamera = g_OgreFn_CameraGetLodCamera(shadowCamera);
-            if (lodCamera != shadowCamera)
+            const void* lodCamera = g_OgreFn_CameraGetLodCamera(camera);
+            if (lodCamera != camera)
                 viewCamera = lodCamera;
         }
-        if (!viewCamera)
+        if (!viewCamera && shadowPass)
         {
             if (!globalsSlot)
-                return ScrapShadowOutcome::Keep;
+                return ScrapDistance::Unknown;
             const uintptr_t globals = *reinterpret_cast<const uintptr_t*>(globalsSlot);
             if (!globals)
-                return ScrapShadowOutcome::Keep;
+                return ScrapDistance::Unknown;
             viewCamera = *reinterpret_cast<void* const*>(
                 globals + kRenderGlobalsMainCameraOffset);
         }
         if (!viewCamera)
-            return ScrapShadowOutcome::Keep;
+            return ScrapDistance::Unknown;
         const float* eye = g_OgreFn_CameraGetDerivedPosition(viewCamera);
         // Ogre::Matrix4 is row-major; the translation is m[0..2][3].
         const auto* transform =
             static_cast<const float*>(g_OgreFn_MovableGetFullTransform(movableObject));
         if (!eye || !transform)
-            return ScrapShadowOutcome::Keep;
+            return ScrapDistance::Unknown;
         const float origin[3] = { transform[3], transform[7], transform[11] };
-        return ScrapRender::ShouldSkipShadowCaster(
-                   ScrapRender::DistanceSquared(eye, origin), g_ScrapShadowDistanceMetres)
-            ? ScrapShadowOutcome::Skip
-            : ScrapShadowOutcome::Keep;
+        distanceSquared = ScrapRender::DistanceSquared(eye, origin);
+        return ScrapDistance::Known;
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
-        return ScrapShadowOutcome::Keep;
+        return ScrapDistance::Unknown;
     }
+}
+
+// Skip: the object is an Entity whose mesh is a registered scrap mesh, and its
+// node origin lies farther than the threshold from the viewing camera. Every
+// unknown or fault keeps the caster.
+static ScrapShadowOutcome DecideScrapShadow(void* movableObject, const void* shadowCamera)
+{
+    float distanceSquared = 0.0f;
+    switch (TryGetScrapViewDistanceSquared(movableObject, shadowCamera, true, distanceSquared))
+    {
+    case ScrapDistance::NotScrap:
+        return ScrapShadowOutcome::NotScrap;
+    case ScrapDistance::Unknown:
+        return ScrapShadowOutcome::Keep;
+    case ScrapDistance::Known:
+        break;
+    }
+    return ScrapRender::ShouldSkipShadowCaster(distanceSquared, g_ScrapShadowDistanceMetres)
+        ? ScrapShadowOutcome::Skip
+        : ScrapShadowOutcome::Keep;
+}
+
+// [Fixes] ScrapDrawDistance: true only for a registered scrap Entity farther
+// than the threshold from the viewing camera, in any traversal.
+static bool IsScrapBeyondDrawDistance(void* movableObject, const void* camera, bool shadowPass)
+{
+    float distanceSquared = 0.0f;
+    return TryGetScrapViewDistanceSquared(movableObject, camera, shadowPass, distanceSquared) ==
+            ScrapDistance::Known &&
+        ScrapRender::ShouldSkipScrapDraw(distanceSquared, g_ScrapDrawDistanceMetres);
 }
 
 // True only for a registered scrap Entity submitted to the glow pass (main
@@ -1799,6 +1863,15 @@ static void __fastcall ProcessVisibleObjectHook(
         }
     }
 
+    // Scrap draw distance: every traversal (main, glow, shadow), only when
+    // [Fixes] ScrapDrawDistance > 0 (g_ScrapDrawActive is never set at 0).
+    if (g_ScrapDrawActive && !cull && movableObject && camera &&
+        IsScrapBeyondDrawDistance(movableObject, camera, onlyShadowCasters))
+    {
+        cull = true;
+        ++g_ScrapDrawSkipped;
+    }
+
     // Scrap glow: only the glow-pass submission of scrap, only when [Fixes]
     // ScrapGlow=0 (g_ScrapGlowActive is never set at the default).
     if (g_ScrapGlowActive && !cull && !onlyShadowCasters && movableObject && camera &&
@@ -1882,10 +1955,25 @@ void InstallEntityFrustumCullingIfEnabled()
         if (TryGetUserConfigString("Fixes", "ScrapGlow", glowText))
             ScrapRender::TryParseScrapGlowSetting(glowText.c_str(), g_ScrapGlowEnabled);
         ScrapRender::TryParseScrapGlowSetting(std::getenv("OPENSHIM_SCRAP_GLOW"), g_ScrapGlowEnabled);
+
+        // [Fixes] ScrapDrawDistance, same pattern as ScrapShadowDistance.
+        long drawRequested = 0;
+        std::string drawText;
+        if (TryGetUserConfigString("Fixes", "ScrapDrawDistance", drawText))
+            drawRequested = std::strtol(drawText.c_str(), nullptr, 10);
+        if (const char* envText = std::getenv("OPENSHIM_SCRAP_DRAW_DISTANCE"))
+        {
+            char* end = nullptr;
+            const long envValue = std::strtol(envText, &end, 10);
+            if (end != envText)
+                drawRequested = envValue;
+        }
+        g_ScrapDrawDistanceMetres = ScrapRender::ClampDrawDistanceMetres(drawRequested);
     }
 
     if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled &&
-        !g_FogDistanceCullEnabled && g_ScrapShadowDistanceMetres == 0 && g_ScrapGlowEnabled)
+        !g_FogDistanceCullEnabled && g_ScrapShadowDistanceMetres == 0 && g_ScrapGlowEnabled &&
+        g_ScrapDrawDistanceMetres == 0)
         return;
     if (!GetModuleHandleA("OgreMain.dll"))
         return;
@@ -1952,7 +2040,7 @@ void InstallEntityFrustumCullingIfEnabled()
         ResolveOgreExportBody("?getParent@Node@Ogre@@UBEPAV12@XZ"));
     g_OgreFn_SceneNodeGetWorldAabb = reinterpret_cast<FnOgreSceneNodeGetWorldAabb>(
         ResolveOgreExportBody("?_getWorldAABB@SceneNode@Ogre@@UBEABVAxisAlignedBox@2@XZ"));
-    if (g_ScrapShadowDistanceMetres > 0)
+    if (g_ScrapShadowDistanceMetres > 0 || g_ScrapDrawDistanceMetres > 0)
     {
         g_OgreFn_CameraGetDerivedPosition = reinterpret_cast<FnOgreCameraGetDerivedPosition>(
             ResolveOgreExportBody("?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ"));
@@ -1968,7 +2056,7 @@ void InstallEntityFrustumCullingIfEnabled()
             LogShimA(
                 LogLevel::Warn,
                 "frustumcull",
-                "[FRUSTUMCULL] scrap shadow distance stood down: required Ogre exports "
+                "[FRUSTUMCULL] scrap shadow/draw distance stood down: required Ogre exports "
                 "unavailable (process=%s entityRq=%s transform=%s getMesh=%s "
                 "resourceName=%s derivedPos=%s)",
                 processVisibleObjectBody ? "yes" : "no",
@@ -1978,6 +2066,7 @@ void InstallEntityFrustumCullingIfEnabled()
                 g_OgreFn_ResourceGetName ? "yes" : "no",
                 g_OgreFn_CameraGetDerivedPosition ? "yes" : "no");
             g_ScrapShadowDistanceMetres = 0;
+            g_ScrapDrawDistanceMetres = 0;
         }
     }
     if (!g_ScrapGlowEnabled)
@@ -2090,7 +2179,8 @@ void InstallEntityFrustumCullingIfEnabled()
     }
 
     if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled &&
-        !g_FogDistanceCullEnabled && g_ScrapShadowDistanceMetres == 0 && g_ScrapGlowEnabled)
+        !g_FogDistanceCullEnabled && g_ScrapShadowDistanceMetres == 0 && g_ScrapGlowEnabled &&
+        g_ScrapDrawDistanceMetres == 0)
     {
         g_EntityFrustumCullStoodDown = true;
         return;
@@ -2175,10 +2265,10 @@ void InstallEntityFrustumCullingIfEnabled()
           kExpectedProcessVisibleObject, sizeof(kExpectedProcessVisibleObject) },
     };
     // The submission hooks are needed by the private cull, the fog cull and
-    // the scrap shadow and glow options; any one patches all four.
+    // the scrap shadow, draw and glow options; any one patches all four.
     const bool needSubmissionHooks =
         g_EntityFrustumCullEnabled || g_FogDistanceCullEnabled ||
-        g_ScrapShadowDistanceMetres > 0 || !g_ScrapGlowEnabled;
+        g_ScrapShadowDistanceMetres > 0 || !g_ScrapGlowEnabled || g_ScrapDrawDistanceMetres > 0;
     const size_t requestCount = needSubmissionHooks ? 4u : 2u;
 
     // A detour that never installed leaves its trampoline null, so this is
@@ -2218,6 +2308,7 @@ void InstallEntityFrustumCullingIfEnabled()
         g_FogDistanceCullEnabled = false;
         g_ScrapShadowDistanceMetres = 0;
         g_ScrapGlowEnabled = true;
+        g_ScrapDrawDistanceMetres = 0;
         // Earlier detours in this loop stay live and must still reach their
         // originals (a null original would drop Mesh::_setBounds or skip the
         // Mesh destructor body).
@@ -2235,12 +2326,13 @@ void InstallEntityFrustumCullingIfEnabled()
     // Armed last, once every detour it relies on is in place.
     g_ScrapShadowActive = g_ScrapShadowDistanceMetres > 0;
     g_ScrapGlowActive = !g_ScrapGlowEnabled;
+    g_ScrapDrawActive = g_ScrapDrawDistanceMetres > 0;
 
     LogShimA(
         LogLevel::Info,
         "frustumcull",
         "[FRUSTUMCULL] installed privateCull=%s restoreBounds=%s fogCull=%s scrapShadowDistance=%d "
-        "scrapGlow=%s "
+        "scrapGlow=%s scrapDrawDistance=%d "
         "margin=%.2f restoreScale=%.2f restoreScope=%s restoreMode=%s trace=%s "
         "processVisibleObject=0x%p entityUpdateRenderQueue=0x%p meshSetBounds=0x%p "
         "meshDtor=0x%p optOut=OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING",
@@ -2249,6 +2341,7 @@ void InstallEntityFrustumCullingIfEnabled()
         g_FogDistanceCullEnabled ? "on" : "off",
         g_ScrapShadowDistanceMetres,
         g_ScrapGlowEnabled ? "on" : "off",
+        g_ScrapDrawDistanceMetres,
         g_FrustumCullMargin,
         g_RestoreCraftBoundsScale,
         g_RestoreCraftBoundsAllMeshes ? "all" : "shared",

@@ -764,6 +764,17 @@ DynamicGeometryFastSort = 1
 ; Env override for benches: OPENSHIM_SCRAP_SHADOW_DISTANCE
 ScrapShadowDistance = 0
 
+; Stop drawing stock scrap (npscr1/2/3 meshes) at all when it lies farther
+; than this many metres from the viewing camera: no main-view, glow or shadow
+; submission. Far scrap visibly disappears; in big battles with hundreds of
+; pieces this saves CPU per frame. Renderer only: the piece still exists,
+; collides and can be picked up; no simulation, collision, pickup, AI or
+; network effect. Mod scrap with other mesh names is always drawn.
+; The 1 Hz [FRUSTUMCULL] line reports scrapDrawSkipped (all passes).
+; Accepted: 0 (off) or 1..2000 metres. Default: 0.
+; Env override for benches: OPENSHIM_SCRAP_DRAW_DISTANCE
+ScrapDrawDistance = 0
+
 ; Scrap glows because its materials (npscr1/2/3) inherit BZBase, whose glow
 ; technique draws the piece's emissive map into the stock Glow pass (stock and
 ; Enhanced profiles alike, whenever Glow is on). 0 leaves stock scrap out of

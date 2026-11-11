@@ -55,6 +55,16 @@ int main()
     check(!ShouldSkipShadowCaster(std::numeric_limits<float>::quiet_NaN(), 100), "NaN keeps");
     check(ShouldSkipShadowCaster(std::numeric_limits<float>::infinity(), 100), "infinite distance skips");
 
+    // [Fixes] ScrapDrawDistance: clamp and decision.
+    check(ClampDrawDistanceMetres(-5) == 0, "draw: negative clamps to off");
+    check(ClampDrawDistanceMetres(0) == 0, "draw: zero is off");
+    check(ClampDrawDistanceMetres(400) == 400, "draw: in range kept");
+    check(ClampDrawDistanceMetres(100000) == kMaxDrawDistanceMetres, "draw: too large clamps");
+    check(!ShouldSkipScrapDraw(1.0e6f, 0), "draw: off never skips");
+    check(!ShouldSkipScrapDraw(400.0f * 400.0f, 400), "draw: exactly at threshold keeps");
+    check(ShouldSkipScrapDraw(400.5f * 400.5f, 400), "draw: just past threshold skips");
+    check(!ShouldSkipScrapDraw(std::numeric_limits<float>::quiet_NaN(), 400), "draw: NaN keeps");
+
     const float a[3] = {0.0f, 0.0f, 0.0f};
     const float b[3] = {3.0f, 4.0f, 12.0f};
     check(DistanceSquared(a, b) == 169.0f, "distance squared");
