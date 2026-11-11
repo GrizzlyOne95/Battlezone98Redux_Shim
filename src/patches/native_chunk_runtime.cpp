@@ -906,6 +906,19 @@ bool prepareFractureCppSafe(const std::string &meshName, const std::string &grou
         return false;
     }
 }
+// An SEH fault skips C++ destructors (/EHsc), so ForgetWithoutVerdict never
+// runs: forget the prewarm's entry here, or one bad read would mark the model
+// as non-fracturing for the whole mission.
+void forgetFractureModel(const std::string &meshName)
+{
+    try
+    {
+        fractureModels.erase(base(meshName));
+    }
+    catch (...)
+    {
+    }
+}
 bool prepareFractureSafe(const std::string &meshName, const std::string &group,
                          BZROpenShim::Hooks::SkinnedGibModelInfo &out, bool cachedOnly)
 {
@@ -915,6 +928,8 @@ bool prepareFractureSafe(const std::string &meshName, const std::string &group,
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
+        if (cachedOnly)
+            forgetFractureModel(meshName);
         return false;
     }
 }

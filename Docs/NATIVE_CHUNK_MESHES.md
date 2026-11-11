@@ -178,6 +178,22 @@ It logs `[SKINNEDGIBS] fracture prewarm pass=... ms=...`. Models first seen
 after the 8 s pass still pay on their first death.
 `OPENSHIM_DISABLE_FRACTURE_PREWARM=1` turns the prewarm off.
 
+The first fracture of each model type used to cost a 112-188 ms frame:
+the mesh and gib-cache read, then the first `createEntity` of each piece,
+whose material load probes every archive for its textures
+(`reverse_engineering/combat_hitch_and_sim_breakdown_20261021.md`). Each
+mission now prewarms that at its first sim tick, and again 2 s and 8 s later
+for script-spawned craft. It walks the live GameObjects (persons excluded),
+runs `PrepareFracturePayloads` in cache-only mode (it never runs the cutter:
+a model with no fracture cache yet still pays that once, on its first death,
+as before), and creates and at once destroys a
+detached entity per piece. The entity has no scene node and is never
+rendered. The mesh and materials stay loaded in Ogre's managers. A pass
+starts no new model after 250 ms and leaves the rest to the next pass.
+It logs `[SKINNEDGIBS] fracture prewarm pass=... ms=...`. Models first seen
+after the 8 s pass still pay on their first death.
+`OPENSHIM_DISABLE_FRACTURE_PREWARM=1` turns the prewarm off.
+
 ## Validation
 
 Piece frames and recentring (local 1.0.0.46): all 67 CTest checks pass,
