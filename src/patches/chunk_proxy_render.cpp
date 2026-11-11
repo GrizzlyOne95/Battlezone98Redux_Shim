@@ -2496,6 +2496,49 @@ namespace BZROpenShim
             TryDestroyShimObjectSeh(sceneManager, node, entity, destroyEntity, destroySceneNode);
         }
 
+        static bool TryCreateDetachedShimEntitySeh(
+            void* sceneManager,
+            FnOgreCreateEntity createEntity,
+            const char* meshName,
+            void*& created)
+        {
+            created = nullptr;
+            __try
+            {
+                return CatchOgreThrow("prewarmShimEntity", [&] {
+                    created = CreateChunkMeshProxyEntity(sceneManager, createEntity, meshName);
+                });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                // State unknown: leave anything made to the scene teardown.
+                created = nullptr;
+                return false;
+            }
+        }
+
+        // createEntity loads the mesh and sets each sub-entity's material,
+        // which loads it and its textures; all of that stays in Ogre's
+        // resource managers after the entity is gone. The entity never gets a
+        // node, so it is never queued for rendering.
+        bool PrewarmShimOwnedMesh(const char* meshName)
+        {
+            if (!meshName || !*meshName)
+                return false;
+            static FnOgreCreateEntity createEntity =
+                ResolveOgreProc<FnOgreCreateEntity>("?createEntity@SceneManager@Ogre@@UAEPAVEntity@2@ABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+            if (!createEntity)
+                return false;
+            void* const sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager || !EnsureSkinnedGibResourceLocations())
+                return false;
+            void* entity = nullptr;
+            if (!TryCreateDetachedShimEntitySeh(sceneManager, createEntity, meshName, entity) || !entity)
+                return false;
+            DestroyShimOwnedMeshObject(sceneManager, nullptr, entity);
+            return true;
+        }
+
         bool ShimPoolManualSubmitEnabled()
         {
             static const bool enabled = [] {

@@ -750,7 +750,7 @@ bool prepareGibsSafe(const std::string &meshName, const std::string &group,
 // sessions only read and hash the resources.
 std::map<std::string, GibModelEntry> fractureModels;
 bool prepareFracture(const std::string &meshName, const std::string &group,
-                     BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+                     BZROpenShim::Hooks::SkinnedGibModelInfo &out, bool cachedOnly)
 {
     using namespace BZROpenShim::Hooks;
     const std::string key = base(meshName);
@@ -765,6 +765,20 @@ bool prepareFracture(const std::string &meshName, const std::string &group,
     }
     // Any failure below is remembered for the mission: no retry per death.
     auto &entry = fractureModels[key];
+    // A cached-only call (the mission-start prewarm) that ends without a
+    // verdict from the disk cache forgets its entry, so the first real death
+    // still generates the cache or retries a failed read as before.
+    bool verdict = !cachedOnly;
+    struct ForgetWithoutVerdict
+    {
+        const std::string &key;
+        const bool &verdict;
+        ~ForgetWithoutVerdict()
+        {
+            if (!verdict)
+                fractureModels.erase(key);
+        }
+    } forget{key, verdict};
     const auto started = std::chrono::steady_clock::now();
     static auto singleton = ResolveOgreProc<Singleton>("?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
     void *manager = singleton ? singleton() : nullptr;
@@ -796,6 +810,7 @@ bool prepareFracture(const std::string &meshName, const std::string &group,
     if (std::filesystem::is_regular_file(directory / "fracture.none", ec) && !ec)
     {
         NativeChunks::TouchCacheFolder(directory);
+        verdict = true;
         return false; // known not to fracture
     }
     std::vector<NativeChunks::CachedGib> cached;
@@ -807,6 +822,10 @@ bool prepareFracture(const std::string &meshName, const std::string &group,
         int cuts = 0, fans = 0;
         if (!(stats >> cuts >> capLoops >> fans >> openLoops))
             capLoops = openLoops = -1;
+    }
+    else if (cachedOnly)
+    {
+        return false; // the cutter is left to the first death
     }
     else
     {
@@ -861,6 +880,7 @@ bool prepareFracture(const std::string &meshName, const std::string &group,
     }
     entry.info = std::move(info);
     entry.ready = entry.info.pieces.size() >= 2;
+    verdict = true;
     if (entry.ready)
     {
         NativeChunks::TouchCacheFolder(directory);
@@ -875,26 +895,41 @@ bool prepareFracture(const std::string &meshName, const std::string &group,
     return entry.ready;
 }
 bool prepareFractureCppSafe(const std::string &meshName, const std::string &group,
-                            BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+                            BZROpenShim::Hooks::SkinnedGibModelInfo &out, bool cachedOnly)
 {
     try
     {
-        return prepareFracture(meshName, group, out);
+        return prepareFracture(meshName, group, out, cachedOnly);
     }
     catch (...)
     {
         return false;
     }
 }
+// An SEH fault skips C++ destructors (/EHsc), so ForgetWithoutVerdict never
+// runs: forget the prewarm's entry here, or one bad read would mark the model
+// as non-fracturing for the whole mission.
+void forgetFractureModel(const std::string &meshName)
+{
+    try
+    {
+        fractureModels.erase(base(meshName));
+    }
+    catch (...)
+    {
+    }
+}
 bool prepareFractureSafe(const std::string &meshName, const std::string &group,
-                         BZROpenShim::Hooks::SkinnedGibModelInfo &out)
+                         BZROpenShim::Hooks::SkinnedGibModelInfo &out, bool cachedOnly)
 {
     __try
     {
-        return prepareFractureCppSafe(meshName, group, out);
+        return prepareFractureCppSafe(meshName, group, out, cachedOnly);
     }
     __except (EXCEPTION_EXECUTE_HANDLER)
     {
+        if (cachedOnly)
+            forgetFractureModel(meshName);
         return false;
     }
 }
@@ -950,13 +985,14 @@ bool PrepareSkinnedGibPayloads(const std::string &meshName, const std::string &g
     std::lock_guard<std::mutex> lock(gibModelsMutex);
     return prepareGibsSafe(meshName, group, out);
 }
-bool PrepareFracturePayloads(const std::string &meshName, const std::string &group, SkinnedGibModelInfo &out)
+bool PrepareFracturePayloads(const std::string &meshName, const std::string &group, SkinnedGibModelInfo &out,
+                             bool cachedOnly)
 {
     out = {};
     if (meshName.empty())
         return false;
     std::lock_guard<std::mutex> lock(gibModelsMutex);
-    return prepareFractureSafe(meshName, group, out);
+    return prepareFractureSafe(meshName, group, out, cachedOnly);
 }
 void ResetSkinnedGibPayloads()
 {

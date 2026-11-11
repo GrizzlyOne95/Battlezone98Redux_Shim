@@ -29,12 +29,14 @@
 #include "hook_engine.h"
 #include "pool_draw_distance_policy.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -968,7 +970,127 @@ namespace BZROpenShim
                                    }),
                     g_Suppressed.end());
             }
+
+            // ---- First-use prewarm (FractureOnePiece) ------------------------
+            // The first fracture of a model type cost a 112-188 ms frame:
+            // PrepareFracturePayloads reads the mesh and its gib cache, then
+            // the first createEntity of each piece loads the piece mesh and
+            // its materials, whose texture lookup probes every archive
+            // (combat_hitch_and_sim_breakdown_20261021.md, "114 ms at
+            // +51.4 s"). Mesh and material loads persist in Ogre's resource
+            // managers after the entity is destroyed, so doing the same
+            // preparation and a detached create/destroy per piece early in
+            // the mission moves that cost out of combat. No scene node, never
+            // rendered, no sim state or RNG touched. A failure here only
+            // leaves the original first-use path in place.
+            // Env OPENSHIM_DISABLE_FRACTURE_PREWARM=1 turns it off.
+            struct FracturePrewarmState
+            {
+                bool running = false;
+                DWORD firstTick = 0;
+                size_t nextPass = 0;
+                std::vector<std::string> seen;
+            };
+            FracturePrewarmState g_Prewarm;
+            // Measured from the mission's first sim tick. Later passes catch
+            // craft a mission script spawns in its first seconds.
+            constexpr DWORD kPrewarmPassDelayMs[] = {0, 2000, 8000};
+            // Per pass. Models left over are retried by the next pass.
+            constexpr double kPrewarmPassBudgetMs = 250.0;
+
+            void RunFracturePrewarmPass(size_t pass)
+            {
+                static void* s_objects[kGameObjectArenaSlotCapacity];
+                const size_t count = CollectLiveGameObjectsFromArena(s_objects, kGameObjectArenaSlotCapacity);
+                const auto began = std::chrono::steady_clock::now();
+                const auto elapsedMs = [&] {
+                    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began)
+                        .count();
+                };
+                size_t models = 0, pieces = 0, failed = 0, deferred = 0;
+                char className[64] = {};
+                char meshName[256] = {};
+                char group[128] = {};
+                for (size_t index = 0; index < count; ++index)
+                {
+                    void* const gameObject = s_objects[index];
+                    // Persons gib through the limb path, not fracture.
+                    if (std::strcmp(TryGetRttiClassName(gameObject, className, sizeof(className)), kPersonRtti) == 0)
+                        continue;
+                    void* bridge = nullptr;
+                    void* entity = nullptr;
+                    if (!ReadPointerSafe(gameObject, kGameObjectRenderBridgeOffset, bridge) ||
+                        !ReadPointerSafe(bridge, kRenderBridgeWorldEntityOffset, entity) ||
+                        !LooksLikeOgreObject(entity) ||
+                        !TryCaptureEntityMeshIdentity(entity, meshName, sizeof(meshName), group, sizeof(group)))
+                    {
+                        continue;
+                    }
+                    const std::string mesh = meshName;
+                    if (std::find(g_Prewarm.seen.begin(), g_Prewarm.seen.end(), mesh) != g_Prewarm.seen.end())
+                        continue;
+                    if (elapsedMs() >= kPrewarmPassBudgetMs)
+                    {
+                        ++deferred;
+                        continue;
+                    }
+                    g_Prewarm.seen.push_back(mesh);
+                    // Cache only: a model with no fracture cache yet would run
+                    // the cutter here, a cost the first death still pays (once
+                    // per install, not per mission). A cached negative needs
+                    // nothing: the real death path does nothing either.
+                    SkinnedGibModelInfo model;
+                    if (!PrepareFracturePayloads(mesh, group, model, true) || model.pieces.empty())
+                        continue;
+                    ++models;
+                    for (const SkinnedGibPieceInfo& piece : model.pieces)
+                    {
+                        if (PrewarmShimOwnedMesh(piece.resource.c_str()))
+                            ++pieces;
+                        else
+                            ++failed;
+                    }
+                }
+                LogChunkDiagnostic(
+                    "skinnedgibs",
+                    L"[SKINNEDGIBS] fracture prewarm pass=%zu objects=%zu models=%zu pieces=%zu failed=%zu "
+                    L"deferredObjects=%zu ms=%.1f\n",
+                    pass, count, models, pieces, failed, deferred, elapsedMs());
+            }
+
+            void TickFracturePrewarm()
+            {
+                static const bool disabled = EnvFlagEnabled("OPENSHIM_DISABLE_FRACTURE_PREWARM");
+                if (disabled || !g_Prewarm.running || g_Prewarm.nextPass >= std::size(kPrewarmPassDelayMs) ||
+                    !IsFractureEnabled())
+                {
+                    return;
+                }
+                const DWORD now = GetTickCount();
+                if (!g_Prewarm.firstTick)
+                    g_Prewarm.firstTick = now ? now : 1;
+                if (now - g_Prewarm.firstTick < kPrewarmPassDelayMs[g_Prewarm.nextPass])
+                    return;
+                const size_t pass = g_Prewarm.nextPass++;
+                try
+                {
+                    RunFracturePrewarmPass(pass);
+                }
+                catch (...)
+                {
+                    // Allocation failure: stand down for this mission.
+                    g_Prewarm.nextPass = std::size(kPrewarmPassDelayMs);
+                }
+            }
         } // namespace
+
+        void NotifyFracturePrewarmMissionRunState(bool running)
+        {
+            g_Prewarm.running = running;
+            g_Prewarm.firstTick = 0;
+            g_Prewarm.nextPass = 0;
+            g_Prewarm.seen.clear();
+        }
 
         bool IsSkinnedGibsEnabled()
         {
@@ -1127,6 +1249,8 @@ namespace BZROpenShim
             if (!IsSkinnedGibsEnabled() && !IsFractureEnabled())
                 return;
             PruneSuppressed(chunkEffect);
+            // Same thread and context as the fracture spawn it prepares for.
+            TickFracturePrewarm();
             if (!g_ActiveCount)
                 return;
             if (IsPauseMenuOpen())
