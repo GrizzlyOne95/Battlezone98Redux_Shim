@@ -58,6 +58,11 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         // pass is instead bound to a program pair that clips everything, so
         // nothing is drawn and nothing throws.
         SuppressPass,
+        // Technique-level path for a multi-pass true fixed-function technique
+        // whose every pass maps to FixedFuncUntextured/Textured/Textured2 by
+        // the single-pass rules (DecideMultiPassCompat). Each pass binds its
+        // own pair; ResolveCompatPrograms resolves per-pass paths, never this.
+        FixedFuncMultiPass,
     };
 
     const char* LegacyPassKindName(LegacyPassKind kind) noexcept;
@@ -110,6 +115,12 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     // Alpha is supported only in its default form, texture * current.
     bool IsDefaultStageAlpha(const TextureStageDesc& stage) noexcept;
 
+    // colorOp0 for a one-unit pass from the stage read off it: "modulate",
+    // "add", "replace" or "alpha_blend" when the stage was read, has default
+    // alpha and a recognised colour combine; "modulate" otherwise -- the
+    // historical assumption, so a pass that converts today never declines.
+    const char* OneUnitColorOp(const TextureStageDesc& stage) noexcept;
+
     // Minimal programmable-pass description. The runtime fills this from the
     // narrow Ogre ABI (hasVertexProgram/hasFragmentProgram + program names +
     // targets where resolvable); tests construct it directly.
@@ -127,11 +138,12 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         int textureUnits = 0;
         std::string colorOp0; // modulate|replace|add|alpha_blend (any case)
         // Per-stage combine state read from the pass. Drives the two-unit
-        // decision; the one-unit path keeps its historical modulate
-        // assumption (colorOp0) so existing content does not change path.
+        // decision. A one-unit pass derives colorOp0 from its stage
+        // (OneUnitColorOp), which picks the fragment but never the path.
         std::vector<TextureStageDesc> stages;
-        // Pass count of the source technique. Synthesis clones one-pass
-        // techniques only; suppression covers any count.
+        // Pass count of the source technique. Single-pass synthesis decides
+        // from this desc alone; a multi-pass technique goes through
+        // DecideMultiPassCompat with one desc per pass.
         int passCount = 1;
         // True when every technique Ogre could fall back to still contains a
         // shaderless pass, i.e. declining would leave a draw D3D11 throws on.
@@ -244,6 +256,13 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
     // `lit` selects the `lighting on` twin that adds the pass emissive
     // (surface_emissive_colour), as fixed-function lighting does.
     const char* FixedFuncTexturedFragment(bool lit = false) noexcept;
+    // One-unit true fixed-function fragment for a colorOp0: add takes
+    // OSE_FixedFunc_Textured_fragment_add[_lit], replace takes
+    // OSE_FixedFunc_Textured_fragment_replace (no lit twin: replace discards
+    // the lit colour), anything else (modulate, alpha_blend, empty) the
+    // modulate pair FixedFuncTexturedFragment returns.
+    const char* FixedFuncTexturedFragmentForOp(std::string_view colorOp0,
+                                               bool lit = false) noexcept;
     const char* FixedFuncUntexturedVertex() noexcept;
     const char* FixedFuncUntexturedFragment(bool lit = false) noexcept;
     const char* FixedFuncTextured2Vertex() noexcept;
@@ -366,6 +385,40 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
                                 const LegacyPassDesc& desc,
                                 const CompatConfig& config,
                                 bool resourcesAvailable = true) noexcept;
+
+    // The single-pass fixed-function support rule DecideCompatPath applies
+    // to a true fixed-function pass: FixedFuncUntextured, FixedFuncTextured
+    // or FixedFuncTextured2. False when the pass is outside that set (only
+    // aggressive mode or suppression could take it).
+    bool FixedFuncPathForPass(const LegacyPassDesc& desc,
+                              CompatPath& outPath) noexcept;
+
+    // Multi-pass true fixed-function decision. Converts only when EVERY pass
+    // classifies TrueFixedFunction and maps through FixedFuncPathForPass;
+    // path is then FixedFuncMultiPass and passPaths holds one FixedFunc*
+    // path per pass. Anything else -- one pass outside the set, a mix of
+    // programmable and shaderless passes, compat off, missing resources --
+    // keeps the technique's previous behaviour: path == fallback, which is
+    // DecideCompatPath on pass 0 (SuppressPass when fallbackShaderless, else
+    // SkipShaderless). No partial conversion. failingPass names the first
+    // pass that blocked conversion, or -1.
+    struct MultiPassCompatDecision
+    {
+        CompatPath path = CompatPath::SkipShaderless;
+        CompatPath fallback = CompatPath::SkipShaderless;
+        std::vector<CompatPath> passPaths;
+        int failingPass = -1;
+    };
+
+    MultiPassCompatDecision DecideMultiPassCompat(
+        const std::vector<LegacyPassDesc>& passes,
+        const CompatConfig& config,
+        bool resourcesAvailable = true);
+
+    // "[DX11COMPAT] material=<m> path=fixedfunc-multipass passes=<n>
+    //  pass-paths=<p0>,<p1>,..."
+    std::string FormatMultiPassLog(std::string_view material,
+                                   const std::vector<CompatPath>& passPaths);
 
     // Source-technique selection policy (doc: exact scheme+LOD, exact scheme+
     // closest LOD, base/default/blank scheme, first as last resort). Pure

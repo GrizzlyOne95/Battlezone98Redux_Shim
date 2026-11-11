@@ -82,7 +82,7 @@ fragment_program OSE_FixedFunc_Textured_fragment_add hlsl
 // `lighting on` twins: add the pass emissive (surface_emissive_colour) to the
 // colour the texture stage combines with, as fixed-function lighting did.
 // Bound only to passes with lighting enabled; see the .hlsl header.
-// Replace discards the lit colour, so it has no twin.
+// Replace discards the lit colour, so it has no twin; add keeps it, so it does.
 
 fragment_program OSE_FixedFunc_Textured_fragment_lit hlsl
 {
@@ -91,6 +91,22 @@ fragment_program OSE_FixedFunc_Textured_fragment_lit hlsl
     entry_point fixedfunc_fragment
 
     preprocessor_defines COMPAT_LIGHTING_EMISSIVE
+    default_params
+    {
+        param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto fogColour fog_colour
+        param_named_auto fogParams fog_params
+        param_named_auto emissiveColour surface_emissive_colour
+    }
+}
+
+fragment_program OSE_FixedFunc_Textured_fragment_add_lit hlsl
+{
+    source openshim_dx11_fixedfunc-sm4.hlsl
+    target ps_4_0
+    entry_point fixedfunc_fragment
+
+    preprocessor_defines COMPAT_OP_ADD;COMPAT_LIGHTING_EMISSIVE
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
