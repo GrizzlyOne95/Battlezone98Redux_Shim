@@ -135,6 +135,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Graphics/Renderer",
     "Display/SunFlashbang",
     "Diagnostics/TerrainRenderProbeMaxClusters",
+    # 1 = stock: scrap keeps its glow-pass submission. The opt-in is 0.
+    "Fixes/ScrapGlow",
 
     # UI: the supported doors to every other setting.
     "General/SettingsUi",

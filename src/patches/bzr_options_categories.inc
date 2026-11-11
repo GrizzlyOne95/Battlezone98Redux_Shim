@@ -29,7 +29,8 @@ static const char* const kShimCategoryEffects[] = {
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
-    "Explosion Flash", "Sun Flashbang", "Empty Craft Glow", "Fog Culling", "Scrap Shadows" };
+    "Explosion Flash", "Sun Flashbang", "Empty Craft Glow", "Fog Culling", "Scrap Shadows",
+    "Scrap Glow" };
 static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
 static const char* const kShimCategoryHud[] = {

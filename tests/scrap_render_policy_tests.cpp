@@ -83,6 +83,31 @@ int main()
     order.Reset();
     check(order.IndexFor(&c2) == 0, "reset renumbers");
 
+    // [Fixes] ScrapGlow parsing: override only on a parsed value.
+    bool glow = true;
+    check(TryParseScrapGlowSetting("0", glow) && !glow, "0 is off");
+    check(TryParseScrapGlowSetting(" 1", glow) && glow, "1 is on");
+    check(TryParseScrapGlowSetting("00", glow) && !glow, "00 is off");
+    check(TryParseScrapGlowSetting("2", glow) && glow, "non-zero is on");
+    glow = false;
+    check(!TryParseScrapGlowSetting("", glow) && !glow, "empty leaves value");
+    check(!TryParseScrapGlowSetting("off", glow) && !glow, "text leaves value");
+    check(!TryParseScrapGlowSetting(nullptr, glow) && !glow, "null leaves value");
+
+    // Glow pass identification.
+    check(IsGlowPass(true, false, "glow"), "main camera, other viewport, glow scheme");
+    check(!IsGlowPass(true, true, "glow"), "main viewport is not glow");
+    check(!IsGlowPass(false, false, "glow"), "other camera is not glow");
+    check(!IsGlowPass(true, false, "Default"), "other scheme is not glow");
+    check(!IsGlowPass(true, false, "glowx"), "longer scheme is not glow");
+    check(!IsGlowPass(true, false, nullptr), "null scheme is not glow");
+
+    // Skip only scrap, only in the glow pass, only when the setting is off.
+    check(ShouldSkipGlowSubmission(false, true, true), "off + scrap + glow skips");
+    check(!ShouldSkipGlowSubmission(true, true, true), "stock never skips");
+    check(!ShouldSkipGlowSubmission(false, false, true), "non-scrap kept");
+    check(!ShouldSkipGlowSubmission(false, true, false), "main view kept");
+
     if (g_failures)
     {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
