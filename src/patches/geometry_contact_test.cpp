@@ -45,8 +45,14 @@ namespace BZROpenShim::GeometryContactTest
         constexpr unsigned kMaxVehicles = 128;
         constexpr DWORD kMaxCachedFaces = 500000;
         State g_vehicles[kMaxVehicles]{};
-        unsigned long long g_used[kMaxVehicles]{};
-        unsigned long long g_clock = 0;
+        // Handle -> slot hint, verified on every use, so it skips the slot scan
+        // in big battles. slot == kMaxVehicles records "cache full, stock
+        // contact"; that answer holds until a slot is freed (g_freedGeneration).
+        struct Hint { DWORD handle; unsigned slot; unsigned generation; };
+        constexpr unsigned kHintSize = 256;
+        Hint g_hints[kHintSize]{};
+        unsigned g_freedGeneration = 0;
+        bool g_loggedFull = false; // Once per Clear(), not per contact pair.
         bool g_globalEnabled = false;
         DWORD g_cachedFaces = 0;
         InlineDetour32 g_detour;
@@ -271,7 +277,12 @@ namespace BZROpenShim::GeometryContactTest
         {
             g_cachedFaces -= g_vehicles[index].faces;
             FreeCaches(g_vehicles[index]);
-            g_used[index] = 0;
+            ++g_freedGeneration;
+        }
+
+        Hint& HintFor(DWORD handle)
+        {
+            return g_hints[(handle * 2654435761u) >> 24];
         }
 
         State* GlobalTarget(void* entity)
@@ -284,15 +295,26 @@ namespace BZROpenShim::GeometryContactTest
             if (!owner || !Hooks::TryGetGameObjectHandleValue(owner, handle) || !handle ||
                 GameObjectFromHandleGog(handle) != owner ||
                 !Hooks::TryGetGameObjectObj76(owner, actualRoot) || actualRoot != root) return nullptr;
+            const DWORD key = static_cast<DWORD>(handle);
+            Hint& hint = HintFor(key);
+            if (hint.handle == key)
+            {
+                if (hint.slot < kMaxVehicles)
+                {
+                    State& cached = g_vehicles[hint.slot];
+                    if (cached.handle == key && cached.owner == owner && cached.root == root) return &cached;
+                }
+                else if (hint.generation == g_freedGeneration) return nullptr;
+            }
             unsigned slot = kMaxVehicles;
             for (unsigned i = 0; i < kMaxVehicles; ++i)
             {
                 State& state = g_vehicles[i];
-                if (state.handle == static_cast<DWORD>(handle))
+                if (state.handle == key)
                 {
                     if (state.owner == owner && state.root == root)
                     {
-                        g_used[i] = ++g_clock;
+                        hint = {key, i, 0};
                         return &state; // Includes rejected targets: no repeated native allocations.
                     }
                     Retire(i); // Handle/root reuse never inherits another craft's cache.
@@ -301,35 +323,37 @@ namespace BZROpenShim::GeometryContactTest
             }
             if (slot == kMaxVehicles)
             {
-                slot = static_cast<unsigned>(std::min_element(g_used, g_used + kMaxVehicles) - g_used);
-                Retire(slot);
+                // Full: keep stock contact for this craft until a slot frees.
+                // Evicting a live craft here rebuilt meshes every frame once a
+                // battle passed 128 craft.
+                hint = {key, kMaxVehicles, g_freedGeneration};
+                if (!g_loggedFull)
+                {
+                    g_loggedFull = true;
+                    LogShimA(LogLevel::Info, "geometrycontact", "cache full (%u craft); further craft keep stock contact until a slot frees", kMaxVehicles);
+                }
+                return nullptr;
             }
             State& state = g_vehicles[slot];
-            if (!SafeBuild(state, static_cast<DWORD>(handle)))
+            const bool built = SafeBuild(state, key);
+            // Native caches have a bounded face budget as well as a bounded
+            // entry count. Over budget, this craft stays stock (no eviction).
+            const bool fits = built && g_cachedFaces + state.faces <= kMaxCachedFaces;
+            if (!fits)
             {
                 FreeCaches(state);
-                state.handle = static_cast<DWORD>(handle);
+                state.handle = key;
                 state.owner = owner; state.root = root;
-                LogShimA(LogLevel::Warn, "geometrycontact", "global handle=%08X unsupported; stock contact retained", handle);
+                LogShimA(LogLevel::Warn, "geometrycontact", "global handle=%08X %s; stock contact retained",
+                    handle, built ? "over face budget" : "unsupported");
             }
             else
             {
-                // Native caches have a bounded face budget as well as a bounded
-                // entry count. Reclaim oldest other targets before publishing.
-                while (g_cachedFaces + state.faces > kMaxCachedFaces)
-                {
-                    unsigned oldest = kMaxVehicles;
-                    for (unsigned i = 0; i < kMaxVehicles; ++i)
-                        if (i != slot && g_vehicles[i].faces &&
-                            (oldest == kMaxVehicles || g_used[i] < g_used[oldest])) oldest = i;
-                    if (oldest == kMaxVehicles) break;
-                    Retire(oldest);
-                }
                 state.enabled = true;
                 g_cachedFaces += state.faces;
                 LogShimA(LogLevel::Info, "geometrycontact", "global handle=%08X parts=%lu faces=%lu", handle, state.parts, state.faces);
             }
-            g_used[slot] = ++g_clock;
+            hint = {key, slot, 0};
             return &state;
         }
 
@@ -430,7 +454,8 @@ namespace BZROpenShim::GeometryContactTest
             FreeCaches(g_state);
             for (unsigned i = 0; i < kMaxVehicles; ++i) Retire(i);
         }
-        g_clock = 0;
+        std::memset(g_hints, 0, sizeof(g_hints));
+        g_loggedFull = false;
         return TRUE;
     }
 
