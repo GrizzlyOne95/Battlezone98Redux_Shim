@@ -1115,18 +1115,26 @@ void fractureTests()
         Require(std::abs(total - 32.0 / 3.0) < 0.1, "octahedron pieces add up to its volume (4/3 r^3)");
     }
 
-    // Skeletons: one driving bone is one piece, two are not.
+    // Skeletons: one driving bone is one piece; a bone with >= 90% of the
+    // weight is the main GEO and carries the rest; an even split is not.
     {
         const std::vector<uint16_t> one(box.positions.size(), 0);
-        std::vector<uint16_t> two(box.positions.size(), 0);
-        two[3] = 1;
+        std::vector<uint16_t> minor(box.positions.size(), 1);
+        for (size_t i = 0; i * 20 < minor.size(); ++i)
+            minor[i * 20] = 0; // bone 1 drives ~95%, bone 0 ~5%
+        std::vector<uint16_t> split(box.positions.size(), 0);
+        for (size_t i = 0; i < split.size(); i += 2)
+            split[i] = 1;
         const auto skeleton = fixtureSkeleton();
         Require(ExtractFracture(fractureMeshBytes(box, one, true), skeleton, options, pieces, error) &&
                     pieces.size() == 4 && pieces[0].bone == 0 && !pieces[0].boneName.empty(),
                 ("single bone fractures: " + error).c_str());
-        Require(!ExtractFracture(fractureMeshBytes(box, two, true), skeleton, options, pieces, error) && pieces.empty() &&
+        Require(ExtractFracture(fractureMeshBytes(box, minor, true), skeleton, options, pieces, error) &&
+                    pieces.size() == 4 && pieces[0].bone == 1,
+                ("a dominant bone fractures in its own frame: " + error).c_str());
+        Require(!ExtractFracture(fractureMeshBytes(box, split, true), skeleton, options, pieces, error) && pieces.empty() &&
                     error.find("not one piece") != std::string::npos,
-                "several driving bones is not one piece");
+                "an even split between bones is not one piece");
     }
 
     // Guards: tiny models, sparse models and junk fail closed.
@@ -1158,6 +1166,35 @@ void fractureTests()
                 "an open sheet fractures without caps or fails closed");
         for (const auto &gib : pieces)
             Require(gib.capTriangles == 0, "open source pieces are uncapped");
+
+        // Two parallel fins: their chains must not be joined into a cap across the gap.
+        FractureSource fins = sheet;
+        const size_t base = sheet.positions.size();
+        for (const auto &p : sheet.positions)
+            fins.positions.push_back({p[0], p[1], 1.5f});
+        for (const uint16_t k : sheet.indices)
+            fins.indices.push_back(static_cast<uint16_t>(k + base));
+        FractureStats finStats;
+        const bool finsOk = ExtractFracture(fractureMeshBytes(fins), {}, options, pieces, error, &finStats);
+        Require(!finsOk || finStats.capLoops == 0, "parallel open sheets are not capped across the gap");
+    }
+
+    // An open shell (a box with no floor, like a building) cuts into chains, not
+    // loops; the chains are joined across the gap so no piece is hollow.
+    {
+        auto shell = fractureBox(3.f, 2.f, 2.f, 3);
+        const size_t faceIndices = 3 * 3 * 6; // grid 3: 9 quads per face
+        shell.indices.erase(shell.indices.begin() + static_cast<std::ptrdiff_t>(2 * faceIndices),
+                            shell.indices.begin() + static_cast<std::ptrdiff_t>(3 * faceIndices)); // -y face
+        FractureStats shellStats;
+        Require(ExtractFracture(fractureMeshBytes(shell), {}, options, pieces, error, &shellStats) && pieces.size() == 4,
+                ("an open shell fractures: " + error).c_str());
+        for (const auto &gib : pieces)
+        {
+            const auto tris = readFracturePiece(gib.piece.mesh, options.interiorMaterial);
+            Require(gib.capTriangles > 0 && signedVolume(tris) > 0.5, "every open-shell piece has a cut face, wound outward");
+        }
+        Require(shellStats.capLoops >= 6, "the open chains of every cut are joined and capped");
     }
 }
 // Offline check against a real model: prints the fracture, like --gibs.
