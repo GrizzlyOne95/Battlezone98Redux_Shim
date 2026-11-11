@@ -5279,7 +5279,7 @@
       "name": "UnitTaskNearestVehicle",
       "address": "0x00463FC0",
       "expected": "55 8B EC 83 EC 28 F3 0F 10 05 B0 2E",
-      "identity": "UnitTask::NearestVehicle, GameObject* cdecl(craft, const Vector* position): closest vehicle in the object list, first minimum in list order; AttackTask's lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) calls it"
+      "identity": "UnitTask::NearestVehicle, GameObject* cdecl(craft, const Vector* position): closest vehicle in the object list, first minimum in list order; AttackTask's lazy NearestVehicle (OPENSHIM_AI_LAZY_NEAREST) calls it; OPENSHIM_AI_FAST_NEAREST detours its entry with an exact rewrite"
     },
     {
       "name": "UnitTaskDoGoto",

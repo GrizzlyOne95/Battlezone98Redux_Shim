@@ -977,6 +977,7 @@ namespace BZROpenShim
         void InstallCommunityKeyAuthHookIfPossible();
         void InstallStockLogThrottleIfPossible();
         void InstallAttackTaskLazyNearestIfRequested();
+        void InstallAiFastNearestIfRequested();
         void InstallMapFilterExtrasIfEnabled();
         // Hands a character to the Create Game map search box while it is
         // being edited; false leaves it to the caller. mp_map_filter_extras.cpp.

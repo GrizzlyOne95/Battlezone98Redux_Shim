@@ -1662,6 +1662,7 @@ namespace BZROpenShim
             {"InstallBzrNetRouteObserverIfPossible", &InstallBzrNetRouteObserverIfPossible},
             {"InstallStockLogThrottleIfPossible", &InstallStockLogThrottleIfPossible},
             {"InstallAttackTaskLazyNearestIfRequested", &InstallAttackTaskLazyNearestIfRequested},
+            {"InstallAiFastNearestIfRequested", &InstallAiFastNearestIfRequested},
             {"InstallMapFilterExtrasIfEnabled", &InstallMapFilterExtrasIfEnabled},
             {"InstallMenuThemeTextRecolor", &MenuTheme::InstallTextRecolor},
             {"EnsureInputBindingPopulateHookScaffold", &EnsureInputBindingPopulateHookScaffold},

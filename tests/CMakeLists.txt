@@ -1107,3 +1107,4 @@ openshim_add_test(steam_launcher_argument_tests STD 17 SOURCES steam_launcher_ar
 
 openshim_add_test(shell_casing_policy_tests STD 20 SOURCES shell_casing_policy_tests.cpp)
 openshim_add_test(shell_casing_finish_tests STD 20 SOURCES shell_casing_finish_tests.cpp)
+openshim_add_test(nearest_vehicle_scan_tests STD 20 SOURCES nearest_vehicle_scan_tests.cpp)
