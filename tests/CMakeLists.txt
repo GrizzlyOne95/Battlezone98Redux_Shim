@@ -487,6 +487,10 @@ add_executable(shadow_far_distance_tests
     shadow_far_distance_tests.cpp
 )
 
+openshim_add_test(fog_distance_cull_tests STD 20 SOURCES
+    fog_distance_cull_tests.cpp
+)
+
 openshim_add_test(chunk_batch_invalidation_tests STD 20 SOURCES
     chunk_batch_invalidation_tests.cpp
 )

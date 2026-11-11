@@ -719,6 +719,22 @@ UnfocusedMouseRelease = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS
 RestoreCraftBounds = 1
 
+; Skip main-view drawing of objects whose nearest point is past the linear fog
+; end (plus a 10 m margin), where the shaders paint every pixel the fog colour
+; anyway. Renderer only: nothing reaches simulation, AI, collision, targeting,
+; radar or the network. Main camera in cockpit, external and chase views only;
+; satellite, binocular, cinematic, editor, PiP/sniper and any other viewport
+; keep stock drawing, as do non-linear fog, objects with unknown bounds and
+; materials that override fog. Shadow passes are untouched. Where the sky
+; colour differs from the fog colour, a distant fog-coloured silhouette that
+; stock would draw against the sky is no longer drawn. Mod shaders that ignore
+; the fog parameters (unlit/emissive) would vanish past fog end instead of
+; showing through it. Culled entities also skip their animation update.
+; See include/fog_distance_cull.h.
+; Accepted: boolean. Default: OFF.
+; Env alias: OPENSHIM_ENABLE_FOG_DISTANCE_CULL
+FogDistanceCull = 0
+
 ; Effect sprites (smoke, flames, tracers, explosions) are drawn through
 ; Redux's DynamicGeometry, which opens a new batch piece whenever the squared
 ; view depth differs even slightly, then sorts and re-merges those pieces every

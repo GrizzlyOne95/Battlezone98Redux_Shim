@@ -1483,6 +1483,7 @@ namespace BZROpenShim
         extern bool g_FrustumCullCensusEnabled;
         extern bool g_RestoreCraftBoundsEnabled;
         extern bool g_BoundsTraceEnabled;
+        extern bool g_FogDistanceCullEnabled;
         void InstallEntityFrustumCullingIfEnabled();
 
         // --- Jump-sniping probe (diag_jump_snipe_probe.cpp) --------------------

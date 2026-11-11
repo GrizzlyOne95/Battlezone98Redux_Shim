@@ -308,6 +308,8 @@ openshim_opt:ConstructorRemoteBuild:label~Builder Cleanup~~~~~~
 openshim_opt:ConstructorRemoteBuild:desc~Clear a dead constructor's remote build state. Single player only. Restart required.~~~~~~
 openshim_opt:RestoreCraftBounds:label~Craft Culling~~~~~~
 openshim_opt:RestoreCraftBounds:desc~Give craft their real bounding boxes so off-screen and distant craft are skipped by the camera and shadows. Rendering only. Restart required.~~~~~~
+openshim_opt:FogDistanceCull:label~Fog Culling~~~~~~
+openshim_opt:FogDistanceCull:desc~Skip drawing objects that sit wholly inside the fully fogged distance. Rendering only. Restart required.~~~~~~
 openshim_opt:DynamicGeometryPieceReuse:label~Effect Batching~~~~~~
 openshim_opt:DynamicGeometryPieceReuse:desc~Add smoke, fire and tracer sprites to the current batch when they would be merged into it anyway, instead of opening a new one. Same pixels, less CPU. Restart required.~~~~~~
 openshim_opt:DynamicGeometryFastSort:label~Effect Sort~~~~~~

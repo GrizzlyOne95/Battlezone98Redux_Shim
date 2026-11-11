@@ -122,6 +122,9 @@
 //   OPENSHIM_FRUSTUM_CULL_MARGIN=<float>        private-cull half-extent margin
 //                                               (default 0.25 = 25%)
 //   OPENSHIM_FRUSTUM_CULL_CENSUS=1              per-type bounds census at 1 Hz
+//   OPENSHIM_ENABLE_FOG_DISTANCE_CULL=1         skip main-view submission past
+//                                               full fog ([Fixes] FogDistanceCull
+//                                               = 1, default off)
 
 // ---------------------------------------------------------------- state -----
 
@@ -154,6 +157,7 @@
 #include "weapon_convergence.h"
 #include "headlight_falloff.h"
 #include "shadow_far_distance.h"
+#include "fog_distance_cull.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
@@ -270,6 +274,57 @@ static uint64_t g_FrustumCullRecoveredAtLastLog = 0;
 static uint64_t g_FrustumCullUnrecoverableAtLastLog = 0;
 static uint64_t g_FrustumCullShadowSkippedAtLastLog = 0;
 static DWORD g_FrustumCullLogTick = 0;
+
+// ------------------------------------------------- fog-distance cull --------
+//
+// [Fixes] FogDistanceCull, default OFF; set once by the switch table in
+// bzr_hooks.cpp before install. Skips main-view submission of entities whose
+// nearest planar view depth is past fogEnd + nearClip + margin, where the
+// Redux shaders paint every pixel the fog colour anyway. The decision itself
+// is include/fog_distance_cull.h; this file only gathers its inputs.
+bool g_FogDistanceCullEnabled = false;
+
+using FnOgreSceneManagerGetFogMode = int(__thiscall*)(const void*);
+using FnOgreSceneManagerGetFogFloat = float(__thiscall*)(const void*);
+using FnOgreSceneManagerGetCurrentViewport = void*(__thiscall*)(const void*);
+using FnOgreViewportGetMaterialScheme = const std::string&(__thiscall*)(const void*);
+// Camera::getViewMatrix(bool ownFrustumOnly); true = this camera's own view.
+using FnOgreCameraGetViewMatrix = const float*(__thiscall*)(const void*, bool);
+using FnOgreFrustumGetFloat = float(__thiscall*)(const void*);
+using FnOgreFrustumGetProjectionType = int(__thiscall*)(const void*);
+using FnOgreEntityGetNumSubEntities = unsigned int(__thiscall*)(const void*);
+using FnOgreEntityGetSubEntity = void*(__thiscall*)(const void*, unsigned int);
+using FnOgreSubEntityGetTechnique = void*(__thiscall*)(const void*);
+using FnOgreTechniqueGetNumPasses = unsigned short(__thiscall*)(const void*);
+using FnOgreTechniqueGetPass = void*(__thiscall*)(void*, unsigned short);
+using FnOgrePassGetFogOverride = bool(__thiscall*)(const void*);
+
+static FnOgreSceneManagerGetFogMode g_OgreFn_SceneManagerGetFogMode = nullptr;
+static FnOgreSceneManagerGetFogFloat g_OgreFn_SceneManagerGetFogStart = nullptr;
+static FnOgreSceneManagerGetFogFloat g_OgreFn_SceneManagerGetFogEnd = nullptr;
+static FnOgreSceneManagerGetCurrentViewport g_OgreFn_SceneManagerGetCurrentViewport = nullptr;
+static FnOgreViewportGetMaterialScheme g_OgreFn_ViewportGetMaterialScheme = nullptr;
+static FnOgreCameraGetViewMatrix g_OgreFn_CameraGetViewMatrix = nullptr;
+static FnOgreFrustumGetFloat g_OgreFn_FrustumGetNearClip = nullptr;
+static FnOgreFrustumGetProjectionType g_OgreFn_FrustumGetProjectionType = nullptr;
+static FnOgreEntityGetNumSubEntities g_OgreFn_EntityGetNumSubEntities = nullptr;
+static FnOgreEntityGetSubEntity g_OgreFn_EntityGetSubEntity = nullptr;
+static FnOgreSubEntityGetTechnique g_OgreFn_SubEntityGetTechnique = nullptr;
+static FnOgreTechniqueGetNumPasses g_OgreFn_TechniqueGetNumPasses = nullptr;
+static FnOgreTechniqueGetPass g_OgreFn_TechniqueGetPass = nullptr;
+static FnOgrePassGetFogOverride g_OgreFn_PassGetFogOverride = nullptr;
+// Resolved once at install from the named patches.json rows "RenderGlobals"
+// (signature-checked) and "ViewRecord"; never raw addresses here.
+static uintptr_t g_FogCullRenderGlobalsSlot = 0;
+static uintptr_t g_FogCullViewRecord = 0;
+
+// 1 Hz telemetry, folded into the [FRUSTUMCULL] line.
+static uint64_t g_FogCullMain = 0;
+static uint64_t g_FogCullGlow = 0;
+static uint64_t g_FogCullKeptOverride = 0;
+static uint64_t g_FogCullMainAtLastLog = 0;
+static uint64_t g_FogCullGlowAtLastLog = 0;
+static uint64_t g_FogCullKeptOverrideAtLastLog = 0;
 
 // Restored-bounds telemetry. Bounded: the trace stops after a fixed number of
 // lines and the aggregate is folded into the existing 1 Hz report.
@@ -828,6 +883,118 @@ static FrustumCullOutcome DecideFrustumCull(
     }
 }
 
+// Gathers the fog-distance inputs for one non-shadow Entity traversal and
+// returns the decision from include/fog_distance_cull.h. Render-globals record
+// layout (reverse_engineering/redux_scene_ui_boundary_20260921.md:55-66):
+// +0x08 SceneManager, +0x10 main Camera, +0x1C main Viewport. The glow
+// compositor re-renders the main camera into a viewport whose material scheme
+// is "glow"; that pass also fades to fog (fogColour 0) and may cull too.
+// Anything unreadable keeps the object. Own function: __try with no unwinding.
+static openshim::fogcull::Decision DecideFogDistanceCull(
+    void* entity, void* camera, bool& glowPass)
+{
+    using namespace openshim::fogcull;
+    glowPass = false;
+    __try
+    {
+        Inputs in;
+        in.featureEnabled = true;
+        in.shadowPass = false;
+
+        if (!g_FogCullRenderGlobalsSlot || !g_FogCullViewRecord)
+            return Decision::KeepDisabled;
+        const uintptr_t record =
+            *reinterpret_cast<const uintptr_t*>(g_FogCullRenderGlobalsSlot);
+        if (!record)
+            return Decision::KeepDisabled;
+        void* const sceneManager = *reinterpret_cast<void* const*>(record + 0x08);
+        void* const mainCamera = *reinterpret_cast<void* const*>(record + 0x10);
+        void* const mainViewport = *reinterpret_cast<void* const*>(record + 0x1C);
+        if (!sceneManager || !mainCamera || !mainViewport)
+            return Decision::KeepDisabled;
+
+        in.isMainCamera = (camera == mainCamera);
+        if (!in.isMainCamera)
+            return Decision::KeepNotMainCamera;
+
+        void* const viewport = g_OgreFn_SceneManagerGetCurrentViewport(sceneManager);
+        if (viewport && viewport == mainViewport)
+        {
+            in.passAllowed = true;
+        }
+        else if (viewport)
+        {
+            const std::string& scheme = g_OgreFn_ViewportGetMaterialScheme(viewport);
+            glowPass = (std::strcmp(scheme.c_str(), "glow") == 0);
+            in.passAllowed = glowPass;
+        }
+
+        in.viewModeAllowed = IsAllowedViewMode(
+            *reinterpret_cast<const int32_t*>(g_FogCullViewRecord + 8));
+        in.projectionType = g_OgreFn_FrustumGetProjectionType(camera);
+        in.fogMode = g_OgreFn_SceneManagerGetFogMode(sceneManager);
+        in.fogStart = g_OgreFn_SceneManagerGetFogStart(sceneManager);
+        in.fogEnd = g_OgreFn_SceneManagerGetFogEnd(sceneManager);
+        in.nearClip = g_OgreFn_FrustumGetNearClip(camera);
+
+        // Cheap rejections first, before touching bounds or the view matrix.
+        const Decision early = DecideGeometry(in);
+        if (early != Decision::KeepNoFiniteBounds &&
+            early != Decision::KeepInsideFog && early != Decision::Cull)
+        {
+            return early;
+        }
+
+        const auto* const worldBox = static_cast<const float*>(
+            g_OgreFn_MovableGetWorldBoundingBox(entity, true));
+        if (!worldBox)
+            return Decision::KeepNoFiniteBounds;
+        std::memcpy(&in.extent, worldBox + 6, sizeof(in.extent));
+        if (in.extent != kExtentFinite)
+            return Decision::KeepNoFiniteBounds;
+
+        const float* const view = g_OgreFn_CameraGetViewMatrix(camera, true);
+        if (!view)
+            return Decision::KeepInsideFog;
+        in.nearestDepth = NearestViewDepthOfAabb(view + 8, worldBox, worldBox + 3);
+
+        const Decision geometry = DecideGeometry(in);
+        if (geometry != Decision::Cull)
+            return geometry;
+
+        // A pass with fog_override draws its own (or no) fog, so its pixels
+        // are not guaranteed to be the fog colour. Unreadable counts as such.
+        bool anyOverride = false;
+        const unsigned int subCount = g_OgreFn_EntityGetNumSubEntities(entity);
+        for (unsigned int sub = 0; sub < subCount && !anyOverride; ++sub)
+        {
+            void* const subEntity = g_OgreFn_EntityGetSubEntity(entity, sub);
+            void* const technique =
+                subEntity ? g_OgreFn_SubEntityGetTechnique(subEntity) : nullptr;
+            if (!technique)
+            {
+                anyOverride = true;
+                break;
+            }
+            const unsigned short passCount = g_OgreFn_TechniqueGetNumPasses(technique);
+            for (unsigned short p = 0; p < passCount; ++p)
+            {
+                void* const pass = g_OgreFn_TechniqueGetPass(technique, p);
+                if (!pass || g_OgreFn_PassGetFogOverride(pass))
+                {
+                    anyOverride = true;
+                    break;
+                }
+            }
+        }
+        return ApplyMaterial(geometry, anyOverride);
+    }
+    __except (EXCEPTION_EXECUTE_HANDLER)
+    {
+        return Decision::KeepDisabled;
+    }
+}
+
 // --------------------------------------------------------------- hooks ------
 
 // ------------------------------------------- restored-bounds decision -------
@@ -1323,13 +1490,20 @@ static void ReportFrustumCullIntervalIfDue()
     g_FrustumCullUnrecoverableAtLastLog = g_FrustumCullUnrecoverable;
     g_FrustumCullShadowSkippedAtLastLog = g_FrustumCullShadowSkipped;
     g_FrustumCullNonEntityAtLastLog = g_FrustumCullNonEntity;
+    const uint64_t fogMain = g_FogCullMain - g_FogCullMainAtLastLog;
+    const uint64_t fogGlow = g_FogCullGlow - g_FogCullGlowAtLastLog;
+    const uint64_t fogKeptOverride = g_FogCullKeptOverride - g_FogCullKeptOverrideAtLastLog;
+    g_FogCullMainAtLastLog = g_FogCullMain;
+    g_FogCullGlowAtLastLog = g_FogCullGlow;
+    g_FogCullKeptOverrideAtLastLog = g_FogCullKeptOverride;
 
     LogShimA(
         LogLevel::Info,
         "frustumcull",
         "[FRUSTUMCULL] windowMs=%lu tested=%llu culled=%llu (%.1f%%) "
         "recoveredBounds=%llu ineligible=%llu nonEntity=%llu shadowPassSkipped=%llu "
-        "rememberedMeshes=%u margin=%.2f",
+        "rememberedMeshes=%u margin=%.2f "
+        "fogCulledMain=%llu fogCulledGlow=%llu fogKeptOverride=%llu",
         static_cast<unsigned long>(windowMs),
         static_cast<unsigned long long>(tested),
         static_cast<unsigned long long>(culled),
@@ -1339,7 +1513,10 @@ static void ReportFrustumCullIntervalIfDue()
         static_cast<unsigned long long>(nonEntity),
         static_cast<unsigned long long>(shadowSkipped),
         g_RememberedMeshBounds.Live(),
-        g_FrustumCullMargin);
+        g_FrustumCullMargin,
+        static_cast<unsigned long long>(fogMain),
+        static_cast<unsigned long long>(fogGlow),
+        static_cast<unsigned long long>(fogKeptOverride));
 
     if (g_FrustumCullCensusEnabled)
         DumpFrustumCullCensus();
@@ -1396,6 +1573,25 @@ static void __fastcall ProcessVisibleObjectHook(
         }
     }
 
+    // Fog-distance cull: main camera, non-shadow, Entity only. Independent of
+    // the private frustum cull above and of its stand-down.
+    if (g_FogDistanceCullEnabled && !cull && !onlyShadowCasters &&
+        movableObject && camera && IsOgreEntityObject(movableObject))
+    {
+        bool glowPass = false;
+        const openshim::fogcull::Decision fog =
+            DecideFogDistanceCull(movableObject, camera, glowPass);
+        if (fog == openshim::fogcull::Decision::Cull)
+        {
+            cull = true;
+            ++(glowPass ? g_FogCullGlow : g_FogCullMain);
+        }
+        else if (fog == openshim::fogcull::Decision::KeepFogOverride)
+        {
+            ++g_FogCullKeptOverride;
+        }
+    }
+
     // The original always runs, so _notifyCurrentCamera and the visibleBounds
     // bookkeeping that feeds PSSM cascade fitting are unchanged. Only
     // Entity::_updateRenderQueue is suppressed, and only for this object.
@@ -1417,7 +1613,8 @@ void InstallEntityFrustumCullingIfEnabled()
 {
     if (g_EntityFrustumCullInstalled)
         return;
-    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled)
+    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled &&
+        !g_FogDistanceCullEnabled)
         return;
     if (!GetModuleHandleA("OgreMain.dll"))
         return;
@@ -1504,7 +1701,68 @@ void InstallEntityFrustumCullingIfEnabled()
             g_OgreFn_AabbCtor6 ? "yes" : "no",
             g_OgreFn_ResourceGetName ? "yes" : "no");
     }
-    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled)
+    if (g_FogDistanceCullEnabled)
+    {
+        g_OgreFn_SceneManagerGetFogMode = reinterpret_cast<FnOgreSceneManagerGetFogMode>(
+            ResolveOgreExportBody("?getFogMode@SceneManager@Ogre@@UBE?AW4FogMode@2@XZ"));
+        g_OgreFn_SceneManagerGetFogStart = reinterpret_cast<FnOgreSceneManagerGetFogFloat>(
+            ResolveOgreExportBody("?getFogStart@SceneManager@Ogre@@UBEMXZ"));
+        g_OgreFn_SceneManagerGetFogEnd = reinterpret_cast<FnOgreSceneManagerGetFogFloat>(
+            ResolveOgreExportBody("?getFogEnd@SceneManager@Ogre@@UBEMXZ"));
+        g_OgreFn_SceneManagerGetCurrentViewport =
+            reinterpret_cast<FnOgreSceneManagerGetCurrentViewport>(ResolveOgreExportBody(
+                "?getCurrentViewport@SceneManager@Ogre@@QBEPAVViewport@2@XZ"));
+        g_OgreFn_ViewportGetMaterialScheme =
+            reinterpret_cast<FnOgreViewportGetMaterialScheme>(ResolveOgreExportBody(
+                "?getMaterialScheme@Viewport@Ogre@@QBEABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
+        g_OgreFn_CameraGetViewMatrix = reinterpret_cast<FnOgreCameraGetViewMatrix>(
+            ResolveOgreExportBody("?getViewMatrix@Camera@Ogre@@QBEABVMatrix4@2@_N@Z"));
+        g_OgreFn_FrustumGetNearClip = reinterpret_cast<FnOgreFrustumGetFloat>(
+            ResolveOgreExportBody("?getNearClipDistance@Frustum@Ogre@@UBEMXZ"));
+        g_OgreFn_FrustumGetProjectionType =
+            reinterpret_cast<FnOgreFrustumGetProjectionType>(ResolveOgreExportBody(
+                "?getProjectionType@Frustum@Ogre@@UBE?AW4ProjectionType@2@XZ"));
+        g_OgreFn_EntityGetNumSubEntities = reinterpret_cast<FnOgreEntityGetNumSubEntities>(
+            ResolveOgreExportBody("?getNumSubEntities@Entity@Ogre@@QBEIXZ"));
+        g_OgreFn_EntityGetSubEntity = reinterpret_cast<FnOgreEntityGetSubEntity>(
+            ResolveOgreExportBody("?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z"));
+        g_OgreFn_SubEntityGetTechnique = reinterpret_cast<FnOgreSubEntityGetTechnique>(
+            ResolveOgreExportBody("?getTechnique@SubEntity@Ogre@@UBEPAVTechnique@2@XZ"));
+        g_OgreFn_TechniqueGetNumPasses = reinterpret_cast<FnOgreTechniqueGetNumPasses>(
+            ResolveOgreExportBody("?getNumPasses@Technique@Ogre@@QBEGXZ"));
+        g_OgreFn_TechniqueGetPass = reinterpret_cast<FnOgreTechniqueGetPass>(
+            ResolveOgreExportBody("?getPass@Technique@Ogre@@QAEPAVPass@2@G@Z"));
+        g_OgreFn_PassGetFogOverride = reinterpret_cast<FnOgrePassGetFogOverride>(
+            ResolveOgreExportBody("?getFogOverride@Pass@Ogre@@QBE_NXZ"));
+        g_FogCullRenderGlobalsSlot = EngineGlobals::RenderGlobals();
+        g_FogCullViewRecord = ViewRecordAddr();
+
+        const bool fogExportsReady =
+            processVisibleObjectBody && entityUpdateRenderQueueBody &&
+            g_OgreFn_MovableGetWorldBoundingBox &&
+            g_OgreFn_SceneManagerGetFogMode && g_OgreFn_SceneManagerGetFogStart &&
+            g_OgreFn_SceneManagerGetFogEnd && g_OgreFn_SceneManagerGetCurrentViewport &&
+            g_OgreFn_ViewportGetMaterialScheme && g_OgreFn_CameraGetViewMatrix &&
+            g_OgreFn_FrustumGetNearClip && g_OgreFn_FrustumGetProjectionType &&
+            g_OgreFn_EntityGetNumSubEntities && g_OgreFn_EntityGetSubEntity &&
+            g_OgreFn_SubEntityGetTechnique && g_OgreFn_TechniqueGetNumPasses &&
+            g_OgreFn_TechniqueGetPass && g_OgreFn_PassGetFogOverride &&
+            g_FogCullRenderGlobalsSlot && g_FogCullViewRecord;
+        if (!fogExportsReady)
+        {
+            g_FogDistanceCullEnabled = false;
+            LogShimA(
+                LogLevel::Warn,
+                "frustumcull",
+                "[FOGCULL] required Ogre exports or render globals unavailable "
+                "(renderGlobals=%s viewRecord=%s); fog-distance cull stood down",
+                g_FogCullRenderGlobalsSlot ? "yes" : "no",
+                g_FogCullViewRecord ? "yes" : "no");
+        }
+    }
+
+    if (!g_EntityFrustumCullEnabled && !g_RestoreCraftBoundsEnabled &&
+        !g_FogDistanceCullEnabled)
     {
         g_EntityFrustumCullStoodDown = true;
         return;
@@ -1513,6 +1771,7 @@ void InstallEntityFrustumCullingIfEnabled()
         (g_EntityFrustumCullEnabled && !cullExportsReady))
     {
         g_EntityFrustumCullStoodDown = true;
+        g_FogDistanceCullEnabled = false;
         LogShimA(
             LogLevel::Warn,
             "frustumcull",
@@ -1587,7 +1846,8 @@ void InstallEntityFrustumCullingIfEnabled()
           reinterpret_cast<void*>(ProcessVisibleObjectHook),
           kExpectedProcessVisibleObject, sizeof(kExpectedProcessVisibleObject) },
     };
-    const size_t requestCount = g_EntityFrustumCullEnabled ? 4u : 2u;
+    const bool needSubmissionHooks = g_EntityFrustumCullEnabled || g_FogDistanceCullEnabled;
+    const size_t requestCount = needSubmissionHooks ? 4u : 2u;
 
     for (size_t index = 0; index < requestCount; ++index)
     {
@@ -1607,6 +1867,7 @@ void InstallEntityFrustumCullingIfEnabled()
         // remembering asset bounds has no effect on its own.
         g_EntityFrustumCullStoodDown = true;
         g_RestoreCraftBoundsEnabled = false;
+        g_FogDistanceCullEnabled = false;
         LogShimA(
             LogLevel::Warn,
             "frustumcull",
@@ -1620,7 +1881,7 @@ void InstallEntityFrustumCullingIfEnabled()
         g_MeshSetBoundsDetour.trampoline);
     g_OgreFn_MeshDestructorOriginal = reinterpret_cast<FnOgreMeshDestructor>(
         g_MeshDestructorDetour.trampoline);
-    if (g_EntityFrustumCullEnabled)
+    if (needSubmissionHooks)
     {
         g_OgreFn_EntityUpdateRenderQueueOriginal =
             reinterpret_cast<FnOgreEntityUpdateRenderQueueBody>(
@@ -1633,12 +1894,13 @@ void InstallEntityFrustumCullingIfEnabled()
     LogShimA(
         LogLevel::Info,
         "frustumcull",
-        "[FRUSTUMCULL] installed privateCull=%s restoreBounds=%s margin=%.2f "
+        "[FRUSTUMCULL] installed privateCull=%s restoreBounds=%s fogCull=%s margin=%.2f "
         "restoreScale=%.2f restoreScope=%s restoreMode=%s trace=%s "
         "processVisibleObject=0x%p entityUpdateRenderQueue=0x%p meshSetBounds=0x%p "
         "meshDtor=0x%p optOut=OPENSHIM_DISABLE_ENTITY_FRUSTUM_CULLING",
         g_EntityFrustumCullEnabled ? "on" : "off",
         g_RestoreCraftBoundsEnabled ? "on" : "off",
+        g_FogDistanceCullEnabled ? "on" : "off",
         g_FrustumCullMargin,
         g_RestoreCraftBoundsScale,
         g_RestoreCraftBoundsAllMeshes ? "all" : "shared",
@@ -1646,8 +1908,8 @@ void InstallEntityFrustumCullingIfEnabled()
             ? "observe"
             : (g_RestoreCraftBoundsPin ? "pin" : "infinite"),
         g_BoundsTraceEnabled ? "on" : "off",
-        g_EntityFrustumCullEnabled ? processVisibleObjectBody : nullptr,
-        g_EntityFrustumCullEnabled ? entityUpdateRenderQueueBody : nullptr,
+        needSubmissionHooks ? processVisibleObjectBody : nullptr,
+        needSubmissionHooks ? entityUpdateRenderQueueBody : nullptr,
         meshSetBoundsBody,
         meshDestructorBody);
 }

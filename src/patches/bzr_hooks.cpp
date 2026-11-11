@@ -1154,6 +1154,10 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS", "BZR_DISABLE_RESTORE_CRAFT_BOUNDS"},
             {&g_BoundsTraceEnabled, EnvSwitches::Kind::OptIn,
              "OPENSHIM_BOUNDS_TRACE", "BZR_BOUNDS_TRACE"},
+            // Render-only: skip main-view submission of entities wholly past
+            // full linear fog ([Fixes] FogDistanceCull, default OFF).
+            {&g_FogDistanceCullEnabled, EnvSwitches::Kind::OptIn,
+             "OPENSHIM_ENABLE_FOG_DISTANCE_CULL", "BZR_ENABLE_FOG_DISTANCE_CULL"},
         };
         EnvSwitches::Apply(kFrustumSwitches, EnvFlagEnabled);
         if (g_RestoreCraftBoundsEnabled &&

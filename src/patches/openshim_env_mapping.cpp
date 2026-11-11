@@ -306,6 +306,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "RestoreCraftBounds", true, out);
         }
+        if (Equals(name, "OPENSHIM_ENABLE_FOG_DISTANCE_CULL") ||
+            Equals(name, "BZR_ENABLE_FOG_DISTANCE_CULL"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "FogDistanceCull", false, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_UNFOCUSED_MOUSE_RELEASE") ||
             Equals(name, "BZR_DISABLE_UNFOCUSED_MOUSE_RELEASE"))
         {
