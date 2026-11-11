@@ -570,6 +570,7 @@ namespace BZROpenShim
                 // (battlezone98redux.exe.35108.dmp).
                 DeactivateAllChunkProxySceneResources(L"left simulation");
                 DeactivateSkinnedGibs(L"left simulation");
+                NotifyFracturePrewarmMissionRunState(false);
                 DeactivateShellCasings(L"left simulation");
 
                 ResetPathBlockState(L"left simulation");
@@ -596,6 +597,7 @@ namespace BZROpenShim
                 FogWakeNotifyMissionRunStateChanged(true);
                 GpuSkinningNotifyMissionRunStateChanged(true);
                 PilotFlashlightNotifyMissionRunStateChanged(true);
+                NotifyFracturePrewarmMissionRunState(true);
                 RequestTerrainTileBlendAtFirstSimTick();
                 ApplyPlanetEnvironmentForCurrentMission();
                 NotifyExuMissionSimulationState(true);

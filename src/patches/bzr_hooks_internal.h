@@ -1662,6 +1662,9 @@ namespace BZROpenShim
         void DeactivateSkinnedGibs(const wchar_t* reason);
         // SceneManager::destroyAllEntities is about to free the pool's entities.
         void DestroySkinnedGibSceneObjects(void* sceneManager, const wchar_t* reason);
+        // Mission entered (true) or left (false) simulation: arms or stops the
+        // per-mission fracture first-use prewarm, driven from TickSkinnedGibs.
+        void NotifyFracturePrewarmMissionRunState(bool running);
         // PathBlockFaces (path_block.cpp): forget the per-mission blocker
         // registry and ODF cache. No-op when the hook is not installed.
         void ResetPathBlockState(const wchar_t* reason);
@@ -1720,6 +1723,10 @@ namespace BZROpenShim
         // as the pool nodes.
         bool TryGetMainViewCamera(float position[3], float* fovYRadians);
         void DestroyShimOwnedMeshObject(void* sceneManager, void* node, void* entity);
+        // Creates a detached (no node, never rendered) entity of the mesh in
+        // the current scene and destroys it at once, leaving the mesh and its
+        // materials loaded. False when anything failed.
+        bool PrewarmShimOwnedMesh(const char* meshName);
         bool SubmitShimOwnedEntityToRenderQueue(void* sceneManager, void* entity, void* renderQueue);
 
         // Gib payloads (native_chunk_runtime.cpp). Runtime pieces sit in their
@@ -1753,8 +1760,10 @@ namespace BZROpenShim
         bool PrepareSkinnedGibPayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out);
         // FractureOnePiece: pieces for a one-piece model, cached under
         // fracture/v1/<hash>/; a model that is not one piece (or too small)
-        // is cached as a negative result and returns false.
-        bool PrepareFracturePayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out);
+        // is cached as a negative result and returns false. cachedOnly never
+        // runs the cutter: a cache miss returns false and is not remembered.
+        bool PrepareFracturePayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out,
+                                     bool cachedOnly = false);
         void ResetSkinnedGibPayloads();
         bool TryResolveGeneratedStockChunkFallback(const char* seed, char* out, size_t capacity);
         bool TryResolveNativeChunkPayload(const char* mesh, const char* geom,
