@@ -126,12 +126,18 @@ ChunkCacheMaxAgeDays = 30
 ; Legacy env alias: OPENSHIM_DISABLE_SKINNED_GIBS
 SkinnedGibs = 1
 ; Most gibs alive at once (12..1024). When full, the oldest gib already at
-; rest is recycled first, then the oldest. Default: 160.
-SkinnedGibsMax = 160
-; Seconds a gib lies at rest before sinking away (0..60). Default: 8.
-SkinnedGibsLinger = 8
+; rest is recycled first, then the oldest. Default: 96 (160 before preset
+; revision 13).
+SkinnedGibsMax = 96
+; Seconds a gib lies at rest before sinking away (0..60). Default: 6 (8
+; before preset revision 13).
+SkinnedGibsLinger = 6
 ; Multiplier for the random part of the launch velocity (0..5). Default: 1.0.
 SkinnedGibsForce = 1.0
+; Gibs (and FractureOnePiece pieces) farther than this many metres from the
+; camera are hidden until they come back inside; they keep simulating and
+; expire as usual. Render cost only. 0 = off (0..2000). Default: 150.
+SkinnedGibsDrawDistance = 150
 
 ; Fracture one-piece models: when a craft or building whose model has at most
 ; one vertex-driving bone (or no skeleton) is fully fragmented, the engine
@@ -162,10 +168,16 @@ FractureOnePiece = 1
 ; Legacy env alias: OPENSHIM_DISABLE_SHELL_CASINGS
 ShellCasings = 0
 ; Most casings alive at once (4..512). When full, the oldest casing already
-; at rest is recycled first, then the oldest. Default: 48.
-ShellCasingsMax = 48
-; Seconds a casing lies at rest before sinking away (0..120). Default: 6.
-ShellCasingsLinger = 6
+; at rest is recycled first, then the oldest. Default: 32 (48 before preset
+; revision 13).
+ShellCasingsMax = 32
+; Seconds a casing lies at rest before sinking away (0..120). Default: 4 (6
+; before preset revision 13).
+ShellCasingsLinger = 4
+; Casings farther than this many metres from the camera are hidden until
+; they come back inside; they keep simulating and expire as usual. Render
+; cost only. 0 = off (0..2000). Default: 70.
+ShellCasingsDrawDistance = 70
 ; Which weapons eject casings, comma separated, case-insensitive. A class
 ; label (cannon, mortar, machinegun, snipergun -- the native classes whose
 ; shots are hooked) or a weapon ODF name enables; a leading "-" disables

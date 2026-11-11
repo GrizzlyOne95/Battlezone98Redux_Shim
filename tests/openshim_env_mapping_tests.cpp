@@ -144,6 +144,9 @@ namespace
         Check(Mapped(ini, "OPENSHIM_DISABLE_FRACTURE") == "0", "FractureOnePiece = on reads as DISABLE=0");
         ini.Set("General", "SkinnedGibsMax", "96");
         Check(Mapped(ini, "OPENSHIM_SKINNED_GIBS_MAX") == "96", "numeric gib tuning passes through raw");
+        Check(Mapped(ini, "OPENSHIM_SKINNED_GIBS_DRAW_DISTANCE") == "<none>", "unset gib draw distance keeps the code default");
+        ini.Set("General", "SkinnedGibsDrawDistance", "0");
+        Check(Mapped(ini, "OPENSHIM_SKINNED_GIBS_DRAW_DISTANCE") == "0", "gib draw distance passes through raw");
 
         // ShellCasings: its own inverted switch, raw numeric and list keys.
         Check(Mapped(ini, "OPENSHIM_DISABLE_SHELL_CASINGS") == "<none>", "unset ShellCasings keeps the code default");
@@ -157,6 +160,9 @@ namespace
         Check(Mapped(ini, "OPENSHIM_SHADOW_FAR_DISTANCE") == "stock", "ShadowFarDistance passes through raw");
         ini.Set("General", "ShellCasingsMax", "64");
         Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_MAX") == "64", "casing pool size passes through raw");
+        Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_DRAW_DISTANCE") == "<none>", "unset casing draw distance keeps the code default");
+        ini.Set("General", "ShellCasingsDrawDistance", "120");
+        Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_DRAW_DISTANCE") == "120", "casing draw distance passes through raw");
         ini.Set("General", "ShellCasingsClasses", "cannon,-gquake");
         Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_CLASSES") == "cannon,-gquake", "casing class list passes through raw");
         ini.Set("Diagnostics", "TraceShellCasings", "1");

@@ -182,6 +182,8 @@ namespace
             return ini(IniFile::Main, "General", "SkinnedGibsLinger", out);
         if (Equals(name, "OPENSHIM_SKINNED_GIBS_FORCE"))
             return ini(IniFile::Main, "General", "SkinnedGibsForce", out);
+        if (Equals(name, "OPENSHIM_SKINNED_GIBS_DRAW_DISTANCE"))
+            return ini(IniFile::Main, "General", "SkinnedGibsDrawDistance", out);
         if (Equals(name, "OPENSHIM_TRACE_SKINNED_GIBS"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSkinnedGibs", false, out);
         // FractureOnePiece: one-piece craft and buildings cut into capped pieces on death
@@ -199,6 +201,8 @@ namespace
             return ini(IniFile::Main, "General", "ShellCasingsMax", out);
         if (Equals(name, "OPENSHIM_SHELL_CASINGS_LINGER"))
             return ini(IniFile::Main, "General", "ShellCasingsLinger", out);
+        if (Equals(name, "OPENSHIM_SHELL_CASINGS_DRAW_DISTANCE"))
+            return ini(IniFile::Main, "General", "ShellCasingsDrawDistance", out);
         if (Equals(name, "OPENSHIM_SHELL_CASINGS_CLASSES"))
             return ini(IniFile::Main, "General", "ShellCasingsClasses", out);
         if (Equals(name, "OPENSHIM_TRACE_SHELL_CASINGS"))
