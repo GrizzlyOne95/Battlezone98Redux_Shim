@@ -45,6 +45,8 @@ switch ($Mode) {
         Set-Content -LiteralPath (Join-Path $RunDir 'flow-teardown') -Value 'x'
         @{ verdict = 'PASS' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RunDir 'flow-summary.json')
         Stop-BZRCoopWatchdog $RunDir $watchdog.Id
+        # A reused run dir is only safe once this run's watchdog has gone.
+        if (Get-Process -Id $watchdog.Id -ErrorAction SilentlyContinue) { exit 3 }
         Start-Sleep 8
         exit 0
     }

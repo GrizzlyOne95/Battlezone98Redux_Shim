@@ -46,8 +46,15 @@ function Start-BZRCoopWatchdog {
 # later kill the host and the next run's processes. The marker is named after
 # the watchdog's PID so a later run reusing the run dir cannot clear or trip it.
 function Stop-BZRCoopWatchdog([string]$RunDir, [int]$WatchdogPid) {
+    if ($WatchdogPid -le 0) { return }
     try { Set-Content -LiteralPath (Join-Path $RunDir "run-ended.$WatchdogPid") -Value (Get-Date).ToString('o') -ErrorAction Stop }
-    catch { Write-Warning "watchdog $WatchdogPid end marker not written: $_" }
+    catch { Write-Warning "watchdog $WatchdogPid end marker not written: $_"; return }
+    # The watchdog acts on the marker one poll later; wait so it cannot read the
+    # next run's harness-pids.json in a reused run dir and kill that run.
+    if (Get-Process -Id $WatchdogPid -ErrorAction SilentlyContinue) {
+        Wait-Process -Id $WatchdogPid -Timeout 60 -ErrorAction SilentlyContinue
+        if (Get-Process -Id $WatchdogPid -ErrorAction SilentlyContinue) { Write-Warning "watchdog $WatchdogPid still running after its end marker" }
+    }
 }
 
 # Removes end markers left by watchdogs that have exited; live ones keep theirs.
