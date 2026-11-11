@@ -46,8 +46,12 @@ Changed trees/geometry pointers fall back to stock and increment `fallbacks`.
 Recreate the target to qualify its new hierarchy. Cache limits: 256 nodes,
 16384 vertices per physical part, 65536 total vertices and 131072 faces per
 craft; allocation/validation failures reject selection. Automatic caches are
-bounded to 128 targets and 500000 faces with oldest-use eviction. Unsupported
-or changed targets remain stock until removed/recreated, cleared or evicted.
+bounded to 128 targets and 500000 faces. Live targets are never evicted
+(eviction rebuilt meshes every frame above 128 craft). With all 128 slots
+taken, further craft keep stock contact until a slot frees (logged once per
+cache clear). A new craft over
+the face budget, like an unsupported or changed target, remains stock until it
+is removed/recreated or the cache is cleared.
 This avoids attempting native allocations on every rejected contact.
 The generated Spitter, Spearhead and Leviathan hulls contain 9469, 9619 and
 11146 vertices respectively. Cgeom_Create uses 14 bytes of temporary stack
