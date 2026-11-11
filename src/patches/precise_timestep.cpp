@@ -14,6 +14,12 @@
 //   1 / step (float)                 -> TimestepInverse (no readers found)
 // The integer game clocks are accumulated from the integer dt inside the same
 // function, so replacing only the floats afterwards cannot move game time.
+//
+// Test-only OPENSHIM_FRAME_CAPTURE_STEP_MS=N (1..200, single player) makes each
+// frame advance game time by exactly N ms, however long the frame took: before
+// SetLoopTimes runs, its previous-clock global is set to (clock now - N), so its
+// own dt comes out as N (N+1 if the millisecond ticks in between). Frame
+// captures that take seconds to write then still play back smoothly.
 // See reverse_engineering/frame_hitch_va_measurement_20261020.md.
 
 #include "precise_timestep.h"
@@ -28,6 +34,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 
 namespace BZROpenShim
 {
@@ -42,6 +49,8 @@ namespace BZROpenShim
         // adjustment): keep the engine value.
         constexpr double kAgreementToleranceMs = 1.5;
         constexpr uint32_t kEngineClampMs = 200;
+        // Bytes from the SetLoopTimes entry in which its clock spin-wait must sit.
+        constexpr uint32_t kOwnSpinWindow = 0x30;
         // Fraction of the accumulated difference between the integer and the
         // precise step totals fed back per frame, and its per-frame cap. Keeps
         // simulated time within about a millisecond of the engine's clock.
@@ -69,6 +78,12 @@ namespace BZROpenShim
         double g_QpcToMs = 0.0;
         double g_DebtMs = 0.0;   // sum(engine ms) - sum(precise ms)
         bool g_LastPrecise = false;
+
+        // OPENSHIM_FRAME_CAPTURE_STEP_MS; 0 when off.
+        using FnClockMs = uint32_t(__cdecl*)();
+        FnClockMs g_ClockMs = nullptr;
+        uint32_t g_LastClockMs = 0;
+        uint32_t g_CaptureStepMs = 0;
 
         // The openshim.ini answer, and that answer AND'd with the single-player
         // predicate by the multiplayer gate (RefreshPreciseTimestepState).
@@ -121,6 +136,15 @@ namespace BZROpenShim
 
         void __cdecl SetLoopTimesHook()
         {
+            if (g_CaptureStepMs != 0)
+            {
+                if (Hooks::IsSinglePlayerSession() && At<uint8_t>(g_Globals.isNetGame) == 0)
+                    At<uint32_t>(g_LastClockMs) = g_ClockMs() - g_CaptureStepMs;
+                g_RealSetLoopTimes();
+                g_LastPrecise = false;
+                return;
+            }
+
             g_RealSetLoopTimes();
 
             const uint64_t now = ReadQpc();
@@ -168,6 +192,48 @@ namespace BZROpenShim
         {
             return !EnvFlagEnabled("OPENSHIM_DISABLE_PRECISE_TIMESTEP");
         }
+
+        // 0 when unset; out-of-range values are rejected with a warning.
+        uint32_t ReadCaptureStepMs()
+        {
+            char text[16] = {};
+            const DWORD length = GetEnvironmentVariableA("OPENSHIM_FRAME_CAPTURE_STEP_MS",
+                                                         text, static_cast<DWORD>(sizeof(text)));
+            if (length == 0)
+                return 0;
+            char* end = nullptr;
+            const unsigned long value = length < sizeof(text) ? std::strtoul(text, &end, 10) : 0;
+            if (end == text || end == nullptr || *end != '\0' || value == 0 || value > kEngineClampMs)
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                         "[CaptureStep] OPENSHIM_FRAME_CAPTURE_STEP_MS must be 1..%u ms; ignored",
+                         kEngineClampMs);
+                return 0;
+            }
+            return static_cast<uint32_t>(value);
+        }
+
+        bool BindCaptureClock()
+        {
+            g_ClockMs = reinterpret_cast<FnClockMs>(static_cast<uintptr_t>(
+                HookEngine::ResolveNamedAddress("SetLoopTimes::Clock")));
+            g_LastClockMs = HookEngine::ResolveNamedAddress("SetLoopTimes::LastClockMs");
+            if (g_ClockMs == nullptr || g_LastClockMs == 0)
+                return false;
+            // Fail closed unless the matched spin-wait is SetLoopTimes' own:
+            // its first bytes must hold `cmp [LastClockMs],eax` (39 05 imm32).
+            const uint32_t target = HookEngine::ResolveNamedAddress("SetLoopTimes");
+            if (target == 0)
+                return false;
+            const auto* code = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(target));
+            for (uint32_t i = 0; i + 6 <= kOwnSpinWindow; ++i)
+            {
+                if (code[i] == 0x39 && code[i + 1] == 0x05 &&
+                    *reinterpret_cast<const uint32_t*>(code + i + 2) == g_LastClockMs)
+                    return true;
+            }
+            return false;
+        }
     }
 
     namespace Hooks
@@ -180,15 +246,25 @@ namespace BZROpenShim
 
     void InitializePreciseTimestep()
     {
-        if (!ReadEnabledSetting())
-        {
+        const bool precise = ReadEnabledSetting();
+        uint32_t captureStepMs = ReadCaptureStepMs();
+        if (!precise)
             LogShimA(LogLevel::Info, kComponent, "[PreciseTimestep] disabled by [Fixes] PreciseTimestep = 0");
+        if (!precise && captureStepMs == 0)
             return;
-        }
         if (!BindGlobals())
         {
             LogShimA(LogLevel::Warn, kComponent, "[PreciseTimestep] stands down: globals unresolved");
             return;
+        }
+        if (captureStepMs != 0 && !BindCaptureClock())
+        {
+            LogShimA(LogLevel::Warn, kComponent,
+                     "[CaptureStep] stands down: clock 0x%08X or last-clock global 0x%08X unresolved",
+                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_ClockMs)), g_LastClockMs);
+            captureStepMs = 0;
+            if (!precise)
+                return;
         }
 
         const uint32_t callSite = HookEngine::ResolveNamedAddress("SetLoopTimes::FrameCall");
@@ -204,7 +280,8 @@ namespace BZROpenShim
         QueryPerformanceFrequency(&frequency);
         g_QpcToMs = 1000.0 / static_cast<double>(frequency.QuadPart);
         g_RealSetLoopTimes = reinterpret_cast<FnSetLoopTimes>(static_cast<uintptr_t>(target));
-        g_Enabled = true;
+        g_CaptureStepMs = captureStepMs;
+        g_Enabled = precise;
         Hooks::RefreshPreciseTimestepState();
         if (!Hooks::RedirectCallTarget(callSite, target, reinterpret_cast<uintptr_t>(&SetLoopTimesHook)))
         {
@@ -212,11 +289,17 @@ namespace BZROpenShim
                      "[PreciseTimestep] stands down: call at 0x%08X does not target 0x%08X",
                      callSite, target);
             g_Enabled = false;
+            g_CaptureStepMs = 0;
             Hooks::RefreshPreciseTimestepState();
             return;
         }
-        LogShimA(LogLevel::Info, kComponent,
-                 "[PreciseTimestep] enabled: frame call 0x%08X -> wrapper (single player only)", callSite);
+        if (g_CaptureStepMs != 0)
+            LogShimA(LogLevel::Info, kComponent,
+                     "[CaptureStep] enabled: every frame advances game time by %u ms (single player; "
+                     "PreciseTimestep off while it runs)", g_CaptureStepMs);
+        if (precise)
+            LogShimA(LogLevel::Info, kComponent,
+                     "[PreciseTimestep] enabled: frame call 0x%08X -> wrapper (single player only)", callSite);
     }
 
     bool ReadTimestepSample(TimestepSample& out)

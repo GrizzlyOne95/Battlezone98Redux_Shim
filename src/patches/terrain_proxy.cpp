@@ -3,6 +3,7 @@
 #include "terrain_tile_blend.h"
 #include "hook_engine.h"
 #include "engine_globals.h"
+#include "frame_capture_list.h"
 #include "frame_capture_size.h"
 
 #include "terrain_semantic.h"
@@ -856,14 +857,19 @@ namespace BZROpenShim
             return value.data();
         }
 
+        // Any length: a long OPENSHIM_FRAME_CAPTURE list once overflowed a
+        // fixed 4 KB buffer and silently switched capture off.
         bool ReadEnvString(const char* name, std::string& value)
         {
-            std::array<char, 4096> text = {};
-            const DWORD length = GetEnvironmentVariableA(
-                name, text.data(), static_cast<DWORD>(text.size()));
-            if (length == 0 || length >= text.size())
+            const DWORD needed = GetEnvironmentVariableA(name, nullptr, 0);
+            if (needed <= 1)
                 return false;
-            value.assign(text.data(), length);
+            std::string text(needed, '\0');
+            const DWORD length = GetEnvironmentVariableA(name, text.data(), needed);
+            if (length == 0 || length >= needed)
+                return false;
+            text.resize(length);
+            value = std::move(text);
             return true;
         }
 
@@ -6008,9 +6014,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         ForgetTerrainProxy(TerrainForgetReason::ProcessShutdown, false, false);
     }
 
-    // Test-only: OPENSHIM_FRAME_CAPTURE="600,1200" writes those rendered
-    // frames (counted from the first shell screen, menus included) next to
-    // the exe. Reads back the render window, so it still works when the
+    // Test-only: OPENSHIM_FRAME_CAPTURE="600,1200" or "150-899" writes those
+    // rendered frames (counted from the first shell screen, menus included)
+    // next to the exe. Reads back the render window, so it still works when the
     // desktop is locked or the session is disconnected and screen grabs come
     // back black.
     static void MaybeCaptureTestFrame()
@@ -6027,17 +6033,18 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             state = 2;
             if (!ReadEnvString("OPENSHIM_FRAME_CAPTURE", list))
                 return;
-            for (const char* p = list.c_str(); *p;)
+            if (!FrameCapture::ParseFrameList(list, frames))
             {
-                char* end = nullptr;
-                const unsigned long value = strtoul(p, &end, 10);
-                if (end == p) { ++p; continue; }
-                frames.push_back(static_cast<uint32_t>(value));
-                p = end;
+                LogShimA(LogLevel::Warn, "terrain-proxy",
+                    "[FRAME-CAPTURE] OPENSHIM_FRAME_CAPTURE rejected (%zu chars): use "
+                    "comma-separated frames or a-b ranges, at most %zu frames; capture off",
+                    list.size(), FrameCapture::kMaxListedFrames);
+                return;
             }
-            std::sort(frames.begin(), frames.end());
-            if (!frames.empty())
-                state = 1;
+            LogShimA(LogLevel::Info, "terrain-proxy",
+                "[FRAME-CAPTURE] armed: %zu frames, %u-%u",
+                frames.size(), frames.front(), frames.back());
+            state = 1;
             return;
         }
         ++renderFrames;
