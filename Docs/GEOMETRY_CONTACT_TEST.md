@@ -48,7 +48,8 @@ Recreate the target to qualify its new hierarchy. Cache limits: 256 nodes,
 craft; allocation/validation failures reject selection. Automatic caches are
 bounded to 128 targets and 500000 faces. Live targets are never evicted
 (eviction rebuilt meshes every frame above 128 craft). With all 128 slots
-taken, further craft keep stock contact until a slot frees. A new craft over
+taken, further craft keep stock contact until a slot frees (logged once per
+cache clear). A new craft over
 the face budget, like an unsupported or changed target, remains stock until it
 is removed/recreated or the cache is cleared.
 This avoids attempting native allocations on every rejected contact.

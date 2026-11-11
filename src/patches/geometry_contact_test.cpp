@@ -52,6 +52,7 @@ namespace BZROpenShim::GeometryContactTest
         constexpr unsigned kHintSize = 256;
         Hint g_hints[kHintSize]{};
         unsigned g_freedGeneration = 0;
+        bool g_loggedFull = false; // Once per Clear(), not per contact pair.
         bool g_globalEnabled = false;
         DWORD g_cachedFaces = 0;
         InlineDetour32 g_detour;
@@ -326,6 +327,11 @@ namespace BZROpenShim::GeometryContactTest
                 // Evicting a live craft here rebuilt meshes every frame once a
                 // battle passed 128 craft.
                 hint = {key, kMaxVehicles, g_freedGeneration};
+                if (!g_loggedFull)
+                {
+                    g_loggedFull = true;
+                    LogShimA(LogLevel::Info, "geometrycontact", "cache full (%u craft); further craft keep stock contact until a slot frees", kMaxVehicles);
+                }
                 return nullptr;
             }
             State& state = g_vehicles[slot];
@@ -449,6 +455,7 @@ namespace BZROpenShim::GeometryContactTest
             for (unsigned i = 0; i < kMaxVehicles; ++i) Retire(i);
         }
         std::memset(g_hints, 0, sizeof(g_hints));
+        g_loggedFull = false;
         return TRUE;
     }
 
