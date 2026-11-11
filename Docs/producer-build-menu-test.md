@@ -1,169 +1,92 @@
 # Producer nested build-menu live test
 
-> **Blocked since 2026-09-28.** `Producer Build Menu Root Hook` is parked. Its
-> only recorded site was the Lua `StopSound` binding, not
-> `Producer::UpdateModeList`, and no call in the real function fits the hook.
-> With the hook parked, the procedure below produces no `[PRODMENU]` lines.
-> See "Hook site audit" in `reverse_engineering/producer_build_menu_notes.md`.
+PRODMENU gives a Recycler, Factory or Constructor nested build pages taken from
+a native `[Builder]` tree. It replaces the producers' `UpdateModeList`,
+`SetActiveMode` and `Deselect` vtable slots and hooks ControlPanel
+PostLoad/Cleanup. See "Hook sites" and "Submenu cost" in
+`reverse_engineering/producer_build_menu_notes.md`.
 
-This is the smallest useful runtime test for the existing producer `BuildItem` bridge.
+The feature is on by default and needs no configuration file. A producer only
+gets pages when its ODF names a menu root; every other producer keeps its stock
+flat list. GOG and Steam run the same code.
 
-The goal is to answer one question before adding more hooks:
+## 1. Name a menu root in the producer ODF
 
-> Can the current `Producer::UpdateModeList` bridge expose Redux's native recursive `[Builder]` tree and carry a selected leaf into the stock producer build path?
-
-## Current implementation
-
-Current `main` already contains the experimental bridge:
-
-- the runtime patch is named `Producer Build Menu Root Hook`
-- the hook calls `MaybeApplyProducerBuildMenu` before the original producer helper
-- the selected root is loaded with Redux's native `InitBuildItem` / `CleanupBuildItem`
-- producer-specific ODF configuration is checked before generic producer-type configuration
-- `[ProducerClass] buildMenuRoot = ...` and `buildMenu = ...` are both recognized
-- `*_mp.odf` is checked before `.odf`
-- the root value is normalized to Redux's native eight-character Builder token
-- the runtime patch is enabled by the producer INI; no process environment variable is required
-
-The bridge is still experimental and currently disabled on Steam by the producer-menu config loader. Use the GOG executable for this test.
-
-## 1. Enable the producer-menu config
-
-Copy:
-
-```text
-openshim_producer_build_menus.ini.example
-```
-
-to:
-
-```text
-openshim_producer_build_menus.ini
-```
-
-beside the game executable.
-
-The example is already enabled for testing:
-
-```ini
-[ProducerBuildMenus]
-Enabled=1
-Factory=build
-```
-
-No environment variable or command-line setup is required. Set `Enabled=0` to opt out completely.
-
-`Factory=build` is a stock fallback for factories without an ODF-local override. It also ensures the experimental config path is enabled before a producer ODF is examined.
-
-## 2. Add an ODF-local root to a test Factory
-
-In the Factory ODF used by the test map/mod, add this line to its existing `[ProducerClass]` section:
+Add one line to the producer's existing `[ProducerClass]` section:
 
 ```ini
 [ProducerClass]
 buildMenuRoot = b_amcmbt
 ```
 
-Do not quote `b_amcmbt` for this first test.
+`buildMenu = ...` is accepted as an alias. The value is the native
+eight-character `[Builder]` token, unquoted. OpenShim reads
+`<producer>_mp.odf` before `<producer>.odf`, from the active campaign/mod ODF
+roots and `Edit\stock`.
 
-The bridge resolves the selected producer's ODF token, searches the active campaign/mod ODF candidate directories and `Edit\stock`, prefers `<producer>_mp.odf`, and reads `buildMenuRoot` or `buildMenu` from `[ProducerClass]`.
+## 2. Optional: `openshim_producer_build_menus.ini`
 
-You can use another native Builder root later, such as:
+The file is not needed. Copy `openshim_producer_build_menus.ini.example` beside
+the game executable only to:
 
-```ini
-buildMenuRoot = b_ambldg
-```
+- turn the feature off: `[ProducerBuildMenus] Enabled=0`;
+- give every producer of a type a root with no ODF edit
+  (`Recycler=`, `Factory=`, `ConstructionRig=`);
+- override one producer ODF's root from outside the mod.
 
-or:
-
-```ini
-buildMenuRoot = b_amprod
-```
+Root precedence: the ODF's own `buildMenuRoot`, then a per-ODF INI override,
+then the type mapping.
 
 ## 3. Expected result
 
-Enter a mission with that Factory and select the Factory.
-
-OpenShim should log records similar to:
+Enter a mission with that producer and select it. `openshim.log` shows lines
+like:
 
 ```text
-[PRODMENU] Builder bridge: GOG ready
-[PRODMENU] Config ... enabled=true ... factory=build ...
-[PRODMENU] ODF root producer=<factory odf> root=b_amcmbt path=<resolved odf path>
-[PRODMENU] Applied Factory root=b_amcmbt producer=... odf=<factory odf>
+[PRODMENU] No ...\openshim_producer_build_menus.ini; enabled for producer ODFs that name buildMenuRoot
+[PRODMENU] Mission menus open
+[PRODMENU] ODF root producer=<odf> root=b_amcmbt path=<resolved odf path>
+[PRODMENU] Menu root b_amcmbt loaded: N buildable, M submenus, depth D
+[PRODMENU] <odf> uses menu root b_amcmbt
+[PRODMENU] Submenu cost hidden: call 0x004A5300 -> thunk, sprintf slot 0x00869498
 ```
 
-The producer menu should then expose the native recursive tree rooted at `b_amcmbt` instead of only the Factory's normal flat `buildItem1..10` list.
+The last line appears once per game process, when the first submenu is built.
 
-The stock American combat Builder tree includes leaves/subentries such as:
+On screen:
 
-- `b_amscout`
-- `b_amrazr`
-- `b_amscrap`
-- `b_amhraz`
-- `b_amtank`
-- `b_ammisl`
-- `b_ambmbr`
-
-The important test is not only whether these entries appear. Select a leaf, confirm that normal build progress starts, and confirm the expected unit is actually produced.
+- submenu buttons show their label and **no** scrap cost;
+- real build items still show their scrap (and pilot, when nonzero) cost;
+- Back shows no cost (the engine never draws one for named modes);
+- selecting a submenu opens it, Back returns one level, and a leaf builds the
+  unit through the normal queue.
 
 ## 4. Regression checks
 
-After the first successful menu display:
-
-1. leave the Factory and reselect it
-2. select a Recycler or other producer, then return to the Factory
-3. if two Factories exist, alternate between them
-4. build at least two different leaves
-5. cancel a build if the normal UI supports it
-6. leave the mission normally and check for shutdown errors/crashes
+1. Deselect and reselect the producer; the page resets to the root.
+2. Switch between producer types and between two producers of the same type.
+3. Build at least two different leaves.
+4. Select a producer whose ODF has no `buildMenuRoot`: its list is stock.
+5. Leave the mission normally and check for shutdown errors.
 
 ## Failure interpretation
 
-### No `[PRODMENU]` hook/config records
+### No `ODF root` line
 
-Confirm `openshim_producer_build_menus.ini` is beside the executable, `Enabled=1`, and the GOG executable is being used. There is no longer an environment-variable prerequisite.
+The producer ODF was not found, or the key is not in `[ProducerClass]`. Check
+the ODF token the producer actually uses and where the mod keeps it.
 
-### Config loads, but no `ODF root` record
+### `Mission menus stay closed`
 
-The selected producer ODF was not found in the filesystem candidates or the field was not found in its `[ProducerClass]` section. Confirm the actual producer ODF token shown by the `Applied`/diagnostic logging and the mod's ODF location.
+The ControlPanel Cleanup slot is not hooked, so the trees cannot be released
+safely and the menus stay off. Check the patch status lines at startup.
 
-### `ODF root` and `Applied` log correctly, but the menu stays flat
+### Submenus show "00"
 
-The current `UpdateModeList` seam is too early/late or the producer UI is rebuilding its flat mode list after the root swap. The next RE target is the mode-list population/navigation path rather than ODF parsing.
+Look for `Submenu cost site not found` or `is not call [IAT]`. The engine row
+`ControlPanelModeScrapCostFormat` no longer matches this build; the menus still
+work, with a "00" on submenu buttons.
 
-### Nested entries appear, but selecting a leaf does not build the unit
+### Menus do nothing with `Enabled=0`
 
-This is the most useful failure. It means native recursive navigation works and the missing bridge is the leaf handoff. The next implementation should hook/bridge `Producer::SetActiveMode` and/or `Producer::StartBuild` so the selected `BuildItem` leaf becomes the stock producer build selection.
-
-### One producer's root leaks into another producer
-
-The global `buildMenu` lifetime is the problem. Move the bridge toward per-producer/per-root state or restore/rebuild the root at every producer selection boundary.
-
-### Crash while switching producers or changing missions
-
-Treat this as a `BuildItem` ownership/lifetime bug. The current global-root cleanup/reinitialization must not be promoted until the transition is understood.
-
-## Global smoke test without editing an ODF
-
-To separate ODF discovery from the menu bridge itself, temporarily use:
-
-```ini
-[ProducerBuildMenus]
-Enabled=1
-Factory=b_amcmbt
-```
-
-If the global mapping works but the ODF-local test does not, the submenu bridge itself is alive and the remaining issue is producer ODF discovery/parsing.
-
-## Success criterion for the next development step
-
-The experiment graduates from "root-swap probe" once all of the following are true in one session:
-
-- the ODF-local `buildMenuRoot` is recognized
-- native nested entries render and navigate
-- at least two leaf units build correctly through the normal Factory queue
-- switching between producer types does not leak roots
-- mission exit is clean
-
-At that point the remaining work becomes hardening/per-instance ownership and Steam validation rather than proving the feature concept.
+Expected: that is the opt-out. Delete the file or set `Enabled=1`.

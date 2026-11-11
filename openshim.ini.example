@@ -8,7 +8,7 @@
 ; scope, and restart/live-apply behavior where known.
 ;
 ; Separate configuration files are intentionally not duplicated here:
-;   openshim_producer_build_menus.ini  = producer/nested build-menu experiment
+;   openshim_producer_build_menus.ini  = optional producer nested build-menu opt-out/mappings
 ;   net.ini                            = low-level socket optimizer/reorder lab,
 ;                                        netcode tuning ([OpenShimSocket] Net*,
 ;                                        AutoKick*, GovernorStart) and the raw

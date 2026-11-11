@@ -425,7 +425,12 @@ namespace BZROpenShim
             DWORD attrs = GetFileAttributesA(configPathString.c_str());
             if (attrs == INVALID_FILE_ATTRIBUTES || (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0)
             {
-                Log(L"[PRODMENU] Config not found at %hs; feature disabled\n", configPathString.c_str());
+                // The file is optional: a producer ODF's own [ProducerClass]
+                // buildMenuRoot still selects a menu, and a producer without
+                // one keeps its stock list. Only the file's Enabled=0 opts out.
+                g_ProducerBuildMenuConfig.enabled = true;
+                Log(L"[PRODMENU] No %hs; enabled for producer ODFs that name buildMenuRoot\n",
+                    configPathString.c_str());
                 return;
             }
 
@@ -646,6 +651,8 @@ namespace BZROpenShim
             g_ProducerMenuStubNodes.clear();
         }
 
+        static void InstallModeScrapCostHookIfPossible();
+
         static uint8_t* GetProducerMenuStub(const BuildItem* node)
         {
             const auto found = g_ProducerMenuNodeStubs.find(node);
@@ -664,6 +671,7 @@ namespace BZROpenShim
                 if (!stub)
                     return nullptr;
                 g_ProducerMenuAllStubs.insert(reinterpret_cast<uintptr_t>(stub));
+                InstallModeScrapCostHookIfPossible();
             }
 
             char* label = reinterpret_cast<char*>(stub + kMenuStubLabelOffset);
@@ -683,6 +691,110 @@ namespace BZROpenShim
             const uint32_t value = static_cast<uint32_t>(mode);
             return value > kModeLastNamed &&
                 g_ProducerMenuAllStubs.count(static_cast<uintptr_t>(value)) != 0;
+        }
+
+        // --- Submenu cost text ----------------------------------------------
+        //
+        // ControlPanel::Render (0x004A08E0) formats a class button's scrap
+        // cost with sprintf(buf, "%02ld", cost) and draws buf, so a stub's
+        // zero cost reads "00". The row guards the code that loads the class
+        // from [ebp-0x3BC] and pushes the sprintf arguments; the call
+        // [IAT sprintf] at row+0x2F becomes a call to the thunk below, which
+        // leaves the buffer empty for a stub and forwards every other class
+        // to the IAT entry. Named modes (Back included) take another branch
+        // that never draws a cost. Installed when the first stub is made, so
+        // a game where no producer ODF names a menu root is never patched.
+        // reverse_engineering/producer_build_menu_notes.md "Submenu cost".
+        static uint32_t g_ModeScrapCostFormatAddr = 0;
+        static uintptr_t g_ModeScrapCostSprintfSlot = 0;
+        static bool g_ModeScrapCostHookInstalled = false;
+        static bool g_ModeScrapCostHookFailed = false;
+        constexpr uintptr_t kModeScrapCostCallOffset = 0x2F;
+
+        static bool __cdecl IsProducerMenuStubClass(uint32_t modeClass)
+        {
+            return !g_ProducerMenuAllStubs.empty() &&
+                g_ProducerMenuAllStubs.count(static_cast<uintptr_t>(modeClass)) != 0;
+        }
+
+#if defined(_M_IX86)
+        // Entered in place of sprintf: [esp+4] buf, [esp+8] "%02ld",
+        // [esp+0xC] cost; ebp is still ControlPanel::Render's frame.
+        static __declspec(naked) void ModeScrapCostFormatThunk()
+        {
+            __asm
+            {
+                mov eax, dword ptr [ebp - 0x3BC]
+                push eax
+                call IsProducerMenuStubClass
+                add esp, 4
+                test al, al
+                jnz hide_cost
+                mov eax, g_ModeScrapCostSprintfSlot
+                jmp dword ptr [eax]
+            hide_cost:
+                mov eax, dword ptr [esp + 4]
+                mov byte ptr [eax], 0
+                xor eax, eax
+                ret
+            }
+        }
+#endif
+
+        static void InstallModeScrapCostHookIfPossible()
+        {
+            if (g_ModeScrapCostHookInstalled || g_ModeScrapCostHookFailed)
+                return;
+#if !defined(_M_IX86)
+            g_ModeScrapCostHookFailed = true;
+#else
+            const HookEngine::EngineRow rows[] = {
+                { "ControlPanelModeScrapCostFormat", &g_ModeScrapCostFormatAddr },
+            };
+            if (!HookEngine::BindEngineRows("PRODMENU submenu cost", rows))
+            {
+                g_ModeScrapCostHookFailed = true;
+                Log(L"[PRODMENU] Submenu cost site not found; submenu buttons keep a \"00\" cost\n");
+                return;
+            }
+
+            const uintptr_t site = g_ModeScrapCostFormatAddr + kModeScrapCostCallOffset;
+            const auto* bytes = reinterpret_cast<const uint8_t*>(site);
+            const uintptr_t thunk = reinterpret_cast<uintptr_t>(&ModeScrapCostFormatThunk);
+            if (bytes[0] == 0xE8)
+            {
+                int32_t relative = 0;
+                std::memcpy(&relative, bytes + 1, sizeof(relative));
+                if (site + 5 + relative == thunk)
+                {
+                    g_ModeScrapCostHookInstalled = true;
+                    return;
+                }
+            }
+            if (bytes[0] != 0xFF || bytes[1] != 0x15)
+            {
+                g_ModeScrapCostHookFailed = true;
+                Log(L"[PRODMENU] Submenu cost call at 0x%08X is not call [IAT]; submenu buttons keep a \"00\" cost\n",
+                    static_cast<uint32_t>(site));
+                return;
+            }
+            uint32_t slot = 0;
+            std::memcpy(&slot, bytes + 2, sizeof(slot));
+            g_ModeScrapCostSprintfSlot = slot;
+
+            uint8_t patch[6] = { 0xE8, 0, 0, 0, 0, 0x90 };
+            const int32_t relative = static_cast<int32_t>(thunk - (site + 5));
+            std::memcpy(patch + 1, &relative, sizeof(relative));
+            if (!WritePatchBytes(site, patch, sizeof(patch)))
+            {
+                g_ModeScrapCostHookFailed = true;
+                Log(L"[PRODMENU] Failed patching submenu cost call at 0x%08X\n", static_cast<uint32_t>(site));
+                return;
+            }
+            g_ModeScrapCostHookInstalled = true;
+            Log(L"[PRODMENU] Submenu cost hidden: call 0x%08X -> thunk, sprintf slot 0x%08X\n",
+                static_cast<uint32_t>(site), slot);
+#endif
         }
 
         // --- Objects ------------------------------------------------------------
