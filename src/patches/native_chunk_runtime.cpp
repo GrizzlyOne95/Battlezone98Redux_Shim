@@ -793,7 +793,7 @@ bool prepareFracture(const std::string &meshName, const std::string &group,
     }
     // Bump kFractureAlgorithmVersion whenever the cutter, caps or FractureOptions
     // defaults change: it is hashed in, so old positive and negative caches miss.
-    constexpr uint8_t kFractureAlgorithmVersion = 1;
+    constexpr uint8_t kFractureAlgorithmVersion = 2; // 2: a dominant bone (>= 90% weight) is one piece; open chains are capped
     uint64_t hash = (14695981039346656037ull ^ kFractureAlgorithmVersion) * 1099511628211ull;
     for (const auto *source : {&bytes, &skeleton})
         for (uint8_t c : *source)

@@ -1141,11 +1141,12 @@ V normalize3(V a)
 }
 // Directed boundary edges (welded ids) chained into loops, tolerant of junk:
 // the same walk as the script's _boundary_loops, open chains of three or more
-// points included. The edges must be distinct (the caller de-duplicates).
+// points included (`minPoints` lowers that for callers that join fragments).
+// The edges must be distinct (the caller de-duplicates).
 // `localOf` is caller scratch, at least (max welded id + 1) entries all -1; it
 // is returned to that state.
 std::vector<std::vector<int>> boundaryLoops(const std::vector<std::pair<int, int>> &edges,
-                                            std::vector<int> &localOf)
+                                            std::vector<int> &localOf, size_t minPoints = 3)
 {
     // Dense node ids and, per node, its outgoing edges in input order (CSR).
     std::vector<int> nodes;
@@ -1199,7 +1200,7 @@ std::vector<std::vector<int>> boundaryLoops(const std::vector<std::pair<int, int
             current = head[e];
             ++guard;
         }
-        if (loop.size() >= 3)
+        if (loop.size() >= minPoints)
             loops.push_back(std::move(loop));
     }
     for (int id : nodes)
@@ -3210,9 +3211,86 @@ void splitDroppedRimPoints(CapMesh &cap, size_t first)
         }
     }
 }
+// Joins the open cut chains of one side into polygons: each chain is followed
+// by the chain whose start is nearest its end, until closing back on itself is
+// at least as near. An open shell (a building with no floor) cuts into chains,
+// not loops; the joins bridge its gaps along the cut plane so it is filled
+// instead of hollow. Chains keep their winding, so a joined loop faces like one
+// the skin closed. Flat sheets join into zero-area loops and stay open.
+std::vector<std::vector<int>> joinOpenChains(std::vector<std::vector<int>> chains, const std::vector<V> &weldPosition)
+{
+    const auto gap = [&](int a, int b) {
+        const V d = sub3(weldPosition.at(static_cast<size_t>(b)), weldPosition.at(static_cast<size_t>(a)));
+        return dot3(d, d);
+    };
+    std::vector<std::vector<int>> joined;
+    std::vector<char> taken(chains.size(), 0);
+    for (size_t i = 0; i < chains.size(); ++i)
+    {
+        if (taken[i])
+            continue;
+        taken[i] = 1;
+        std::vector<int> loop = std::move(chains[i]);
+        for (;;)
+        {
+            float best = gap(loop.back(), loop.front());
+            size_t next = chains.size();
+            for (size_t j = 0; j < chains.size(); ++j)
+                if (!taken[j])
+                {
+                    const float d = gap(loop.back(), chains[j].front());
+                    if (d < best)
+                    {
+                        best = d;
+                        next = j;
+                    }
+                }
+            if (next == chains.size())
+                break;
+            taken[next] = 1;
+            const auto &more = chains[next];
+            loop.insert(loop.end(), more.begin() + (more.front() == loop.back() ? 1 : 0), more.end());
+        }
+        if (loop.size() > 1 && loop.back() == loop.front())
+            loop.pop_back();
+        if (loop.size() >= 3)
+            joined.push_back(std::move(loop));
+    }
+    return joined;
+}
+// True when two non-adjacent edges of the loop cross, seen along `normal`.
+// Joined loops only; capped at the ear-clip size so the check stays cheap.
+bool crossesItself(const std::vector<V> &points, V normal)
+{
+    const size_t n = points.size();
+    if (n < 4)
+        return false;
+    if (n > 300)
+        return true;
+    const V u = normalize3(cross3(normal, std::abs(normal[1]) < 0.9f ? V{0, 1, 0} : V{1, 0, 0}));
+    const V w = cross3(normal, u);
+    std::vector<std::array<float, 2>> p(n);
+    for (size_t i = 0; i < n; ++i)
+        p[i] = {dot3(points[i], u), dot3(points[i], w)};
+    const auto orient = [](const std::array<float, 2> &a, const std::array<float, 2> &b, const std::array<float, 2> &c) {
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    };
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = i + 2; j < n; ++j)
+        {
+            if (i == 0 && j == n - 1)
+                continue; // adjacent through the closing edge
+            const auto &a = p[i], &b = p[(i + 1) % n], &c = p[j], &d = p[(j + 1) % n];
+            const float o1 = orient(a, b, c), o2 = orient(a, b, d), o3 = orient(c, d, a), o4 = orient(c, d, b);
+            if (((o1 > 0 && o2 < 0) || (o1 < 0 && o2 > 0)) && ((o3 > 0 && o4 < 0) || (o3 < 0 && o4 > 0)))
+                return true;
+        }
+    return false;
+}
 // Closes the cut loops of one side. `outward` points out of the piece through
 // the cut plane. Loops whose winding runs against it (holes, or a source with
-// flipped winding) are left open unless every loop does.
+// flipped winding) are left open unless every loop does. Open chains are
+// joined into loops first (joinOpenChains).
 void capSide(FracPiece &piece, const std::vector<std::pair<int, int>> &rawEdges, const std::vector<V> &weldPosition,
              V outward, const FractureOptions &options, FractureStats &stats)
 {
@@ -3221,7 +3299,17 @@ void capSide(FracPiece &piece, const std::vector<std::pair<int, int>> &rawEdges,
     if (edges.empty())
         return;
     std::vector<int> scratch(weldPosition.size(), -1);
-    const auto loops = boundaryLoops(edges, scratch);
+    std::vector<std::vector<int>> loops, open;
+    for (auto &loop : boundaryLoops(edges, scratch, 2))
+    {
+        bool isClosed = loop.size() >= 3;
+        for (size_t i = 0; isClosed && i < loop.size(); ++i)
+            isClosed = edgeSet.count({loop[i], loop[(i + 1) % loop.size()]}) != 0;
+        (isClosed ? loops : open).push_back(std::move(loop));
+    }
+    const size_t skinClosed = loops.size();
+    for (auto &loop : joinOpenChains(std::move(open), weldPosition))
+        loops.push_back(std::move(loop));
     struct Candidate
     {
         std::vector<V> points;
@@ -3230,16 +3318,9 @@ void capSide(FracPiece &piece, const std::vector<std::pair<int, int>> &rawEdges,
         float facing;
     };
     std::vector<Candidate> closed;
-    for (const auto &loop : loops)
+    for (size_t li = 0; li < loops.size(); ++li)
     {
-        bool isClosed = true;
-        for (size_t i = 0; i < loop.size(); ++i)
-            isClosed = isClosed && edgeSet.count({loop[i], loop[(i + 1) % loop.size()]}) != 0;
-        if (!isClosed)
-        {
-            ++stats.openLoops;
-            continue;
-        }
+        const auto &loop = loops[li];
         Candidate c;
         for (const int w : loop)
             c.points.push_back(weldPosition.at(static_cast<size_t>(w)));
@@ -3255,12 +3336,33 @@ void capSide(FracPiece &piece, const std::vector<std::pair<int, int>> &rawEdges,
                                        (p[0] - q[0]) * (p[1] + q[1])});
         }
         c.length = std::sqrt(dot3(c.newell, c.newell));
+        if (li >= skinClosed)
+        {
+            // A joined chain from a flat sheet is collinear: its area is only
+            // float noise. Judge it against its perimeter so it stays open.
+            float perimeter = 0.f;
+            for (size_t i = 0; i < c.points.size(); ++i)
+            {
+                const V d = sub3(c.points[i + 1 == c.points.size() ? 0 : i + 1], c.points[i]);
+                perimeter += std::sqrt(dot3(d, d));
+            }
+            // A join that bridged separate surfaces (two fins, a building and a
+            // flag) crosses itself in the cut plane: leave it open too.
+            if (!(c.length > 1e-4f * perimeter * perimeter) || crossesItself(c.points, outward))
+            {
+                c.newell = {};
+                c.length = 0.f;
+            }
+        }
         c.facing = dot3(c.newell, outward);
         closed.push_back(std::move(c));
     }
+    // Loops the skin closed decide whether the source winding is flipped; joined
+    // loops only decide it when there are no such loops (an open shell).
     bool anyOutward = false;
-    for (const Candidate &c : closed)
-        anyOutward = anyOutward || c.facing > 0;
+    for (size_t li = 0; li < closed.size(); ++li)
+        if (li < skinClosed || skinClosed == 0)
+            anyOutward = anyOutward || closed[li].facing > 0;
     CapMesh cap;
     for (Candidate &c : closed)
     {
@@ -3298,6 +3400,9 @@ uint64_t fnv1a64(const Bytes &b)
     }
     return h;
 }
+// Share of vertex weight the main GEO's bone must carry for a skinned model to
+// count as one piece (cvfigh's body: 0.96). Part of kFractureAlgorithmVersion.
+constexpr double kDominantBoneShare = 0.90;
 } // namespace
 bool ExtractFracture(const Bytes &bytes, const Bytes &skeleton, const FractureOptions &options,
                      std::vector<GibPiece> &fragments, std::string &error, FractureStats *statsOut)
@@ -3325,15 +3430,36 @@ bool ExtractFracture(const Bytes &bytes, const Bytes &skeleton, const FractureOp
             auto bs = bones(skeleton);
             for (auto &[id, b] : bs)
                 derive(id, bs);
-            std::set<uint16_t> driving;
-            for (const Sub &sub : m.subs)
-                for (const Assignment &a : sub.shared ? m.assignments : sub.assignments)
+            // One main GEO: a bone that carries at least kDominantBoneShare of the
+            // vertex weight. Small GEOs (nozzles, gun mounts) are cut with it in
+            // its frame; models with several real GEOs keep stock GEO chunks.
+            std::map<uint16_t, double> driving;
+            double totalWeight = 0;
+            const auto addWeights = [&](const std::vector<Assignment> &list) {
+                for (const Assignment &a : list)
                     if (a.weight > 0)
-                        driving.insert(a.bone);
-            if (driving.size() > 1)
-                throw std::runtime_error("not one piece: several bones drive vertices");
-            if (driving.size() == 1)
-                boneId = *driving.begin();
+                    {
+                        driving[a.bone] += a.weight;
+                        totalWeight += a.weight;
+                    }
+            };
+            bool sharedCounted = false; // shared geometry counts once, however many subs use it
+            for (const Sub &sub : m.subs)
+                if (!sub.shared)
+                    addWeights(sub.assignments);
+                else if (!sharedCounted)
+                {
+                    sharedCounted = true;
+                    addWeights(m.assignments);
+                }
+            if (!driving.empty())
+            {
+                const auto top = std::max_element(driving.begin(), driving.end(),
+                                                  [](const auto &l, const auto &r) { return l.second < r.second; });
+                if (top->second < kDominantBoneShare * totalWeight)
+                    throw std::runtime_error("not one piece: no bone drives most vertices");
+                boneId = top->first;
+            }
             else
             {
                 int roots = 0;
