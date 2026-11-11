@@ -20,6 +20,7 @@
 #include "hook_engine.h"
 #include "backend_selection.h"
 #include "startup_backend_seam.h"
+#include "dx11_draw_guard_policy.h"
 #include "dx11_legacy_material_compat.h"
 #include "enhanced_resource_bootstrap.h"
 #include "openshim_assets.h"
@@ -47,6 +48,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace BZROpenShim::Hooks
 {
@@ -2893,22 +2895,36 @@ namespace BZROpenShim::RenderProfiles
         // place with the same policy. There is no fixed pipeline to preserve
         // on D3D11, and a technique that cannot be expressed is suppressed
         // rather than left to throw. Refusals leave the technique untouched.
-        void ConvertShaderlessSiblingTechniques(void* material,
-                                                void* generated,
-                                                const Dx11Compat::CompatConfig& config,
-                                                const Dx11Compat::VertexInputs& inputs,
-                                                const std::string& materialName)
+        //
+        // Returns the number of techniques converted. declineReason, when
+        // given, receives the reason for the last refusal (the draw guard
+        // logs it); "no-fully-shaderless-technique" when nothing qualified.
+        unsigned ConvertShaderlessSiblingTechniques(void* material,
+                                                    void* generated,
+                                                    const Dx11Compat::CompatConfig& config,
+                                                    const Dx11Compat::VertexInputs& inputs,
+                                                    const std::string& materialName,
+                                                    std::string* declineReason = nullptr)
         {
             const OgreTechniqueApi& techApi = TechniqueApi();
             const OgreCompatPassApi& inspect = CompatPassApi();
             const OgreCompatMutationApi& mutate = CompatMutationApi();
+            const auto decline = [declineReason](const std::string& reason) {
+                if (declineReason != nullptr)
+                {
+                    *declineReason = reason;
+                }
+            };
+            decline("no-fully-shaderless-technique");
             if (material == nullptr || !techApi.Valid() || !inspect.CanInspect() ||
                 !mutate.CanInstantiate())
             {
-                return;
+                decline("abi-unavailable");
+                return 0;
             }
 
             bool changed = false;
+            unsigned converted = 0;
             const unsigned short count = techApi.getNumTechniques(material);
             for (unsigned short t = 0; t < count; ++t)
             {
@@ -2953,11 +2969,14 @@ namespace BZROpenShim::RenderProfiles
                                       " in-place declined " + label + " path=" +
                                       Dx11Compat::CompatPathName(path),
                                   LogLevel::Warn);
+                    decline(std::string(multiPassOk ? "path=" : "multi-pass path=") +
+                            Dx11Compat::CompatPathName(path));
                     continue;
                 }
                 // Same exclusions the clone path applies, per technique.
                 if (!IsSynthesisTarget(materialName, desc, "in-place"))
                 {
+                    decline("excluded-from-synthesis");
                     continue;
                 }
                 std::string fitted;
@@ -2969,6 +2988,7 @@ namespace BZROpenShim::RenderProfiles
                                       " in-place declined " + label +
                                       " reason=vertex-inputs",
                                   LogLevel::Warn);
+                    decline("vertex-inputs");
                     continue;
                 }
                 if (fit == Dx11Compat::VertexInputFit::Adapted)
@@ -2982,6 +3002,7 @@ namespace BZROpenShim::RenderProfiles
                                       " in-place declined " + label +
                                       " reason=program-absent vs=" + vs + " ps=" + ps,
                                   LogLevel::Warn);
+                    decline("program-absent");
                     continue;
                 }
                 try
@@ -2997,6 +3018,7 @@ namespace BZROpenShim::RenderProfiles
                         mutate.setFragmentProgram(pass, ps, true);
                     }
                     changed = true;
+                    ++converted;
                     LogCompatOnce("[DX11COMPAT] material=" + materialName +
                                       " converted-in-place " + label + " path=" +
                                       Dx11Compat::CompatPathName(path) + " vs=" + vs +
@@ -3008,6 +3030,7 @@ namespace BZROpenShim::RenderProfiles
                     LogCompatOnce("[DX11COMPAT] material=" + materialName +
                                       " in-place failed " + label,
                                   LogLevel::Warn);
+                    decline("exception");
                 }
             }
             if (changed)
@@ -3020,6 +3043,7 @@ namespace BZROpenShim::RenderProfiles
                 {
                 }
             }
+            return converted;
         }
 
         // The DX11 compat ladder proper. Its answer for a given material,
@@ -3770,6 +3794,561 @@ namespace BZROpenShim::RenderProfiles
             return generated;
         }
 
+        // ---- DX11 draw-time shaderless guard --------------------------------
+        //
+        // D3D11RenderSystem::_render throws RenderingAPIException for a pass
+        // with no vertex or no fragment program (D3D11 has no fixed
+        // pipeline), and the exception unwinds the rest of the frame's render
+        // queue. The scheme-miss ladder above only sees materials Ogre asks
+        // handleSchemeNotFound about; a shaderless technique that IS the
+        // active scheme's technique (for example a plain fixed-function
+        // Default technique) is drawn directly and throws.
+        //
+        // This detours Ogre::SceneManager::renderSingleObject. A pass missing
+        // either program is not drawn (it would only have thrown), logged once
+        // per (material handle, state count) with [DX11DRAWGUARD], and queued
+        // for one in-place compat conversion. The conversion runs from an
+        // Ogre FrameListener's frameStarted, which Root fires before any scene
+        // rendering, so no material changes inside the render queue.
+        // Bookkeeping lives in include/dx11_draw_guard_policy.h (host-tested).
+        //
+        // [Fixes] DX11ShaderlessDrawGuard gates the detour; the conversion
+        // also needs DX11LegacyMaterialCompat (per material, the same
+        // effective config and exclusions as the scheme-miss path). Fails
+        // closed: a missing export or an unexpected prologue (the Ogre
+        // animation profiler's renderSingleObject observer claims the same
+        // entry while profiler collection is active) leaves the guard off.
+
+        using FnSceneManagerRenderSingleObject =
+            void(__thiscall*)(void*, void*, const void*, bool, bool, const void*);
+        using FnPassGetParent = void* (__thiscall*)(const void*);
+        using FnTechniqueGetParent = void* (__thiscall*)(const void*);
+        using FnPassGetIndex = unsigned short(__thiscall*)(const void*);
+        using FnResourceGetHandle = unsigned long long(__thiscall*)(const void*);
+        using FnResourceGetStateCount = size_t(__thiscall*)(const void*);
+        using FnResourceManagerExistsByHandle =
+            bool(__thiscall*)(void*, unsigned long long);
+        using FnRootAddFrameListener = void(__thiscall*)(void*, void*);
+
+        struct DrawGuardApi
+        {
+            FnPassHasVertexProgram hasVertexProgram = nullptr;
+            FnPassHasFragmentProgram hasFragmentProgram = nullptr;
+            FnPassGetParent passParent = nullptr;
+            FnPassGetIndex passIndex = nullptr;
+            FnTechniqueGetParent techniqueParent = nullptr;
+            FnResourceGetHandle getHandle = nullptr;
+            FnResourceGetStateCount getStateCount = nullptr;
+            FnMaterialManagerGetSingletonPtr getMaterialManager = nullptr;
+            FnResourceManagerExistsByHandle existsByHandle = nullptr;
+            FnMaterialGetNumTechniques getNumTechniques = nullptr;
+            FnMaterialGetTechnique getTechnique = nullptr;
+            FnTechniqueGetSchemeName getSchemeName = nullptr;
+        };
+
+        // Written once by EnsureDx11DrawGuardInstalled before the detour is
+        // live; read-only afterwards.
+        DrawGuardApi g_drawGuardApi;
+        InlineDetour32 g_drawGuardDetour;
+        void* volatile g_drawGuardTrampoline = nullptr;
+        std::atomic<bool> g_drawGuardHasPending { false };
+
+        struct DrawGuardPending
+        {
+            void* material = nullptr;
+            Dx11Compat::DrawGuardKey key;
+            std::string name;
+            Dx11Compat::VertexInputs inputs;
+            bool logged = false;
+            unsigned attempts = 0; // compat attempts made so far
+        };
+
+        struct DrawGuardState
+        {
+            std::mutex lock;
+            Dx11Compat::DrawGuardLedger ledger;
+            // Bounded by the ledger: one entry per new key at most.
+            std::vector<DrawGuardPending> pending;
+        };
+
+        DrawGuardState& DrawGuard()
+        {
+            static DrawGuardState state;
+            return state;
+        }
+
+        struct DrawGuardFacts
+        {
+            void* material = nullptr;
+            void* technique = nullptr;
+            unsigned long long handle = 0;
+            size_t stateCount = 0;
+            unsigned short passIndex = 0;
+            unsigned short techniqueIndex = 0xFFFF;
+        };
+
+        __declspec(noinline) static bool GuardedReadDrawGuardFacts(
+            const DrawGuardApi* api, const void* pass, DrawGuardFacts* out)
+        {
+            __try
+            {
+                out->passIndex = api->passIndex(pass);
+                out->technique = api->passParent(pass);
+                if (out->technique == nullptr)
+                {
+                    return false;
+                }
+                out->material = api->techniqueParent(out->technique);
+                if (out->material == nullptr)
+                {
+                    return false;
+                }
+                out->handle = api->getHandle(out->material);
+                out->stateCount = api->getStateCount(out->material);
+                const unsigned short count = api->getNumTechniques(out->material);
+                for (unsigned short t = 0; t < count; ++t)
+                {
+                    if (api->getTechnique(out->material, t) == out->technique)
+                    {
+                        out->techniqueIndex = t;
+                        break;
+                    }
+                }
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        __declspec(noinline) static bool GuardedCopyDrawGuardScheme(
+            const DrawGuardApi* api, const void* technique, std::string* out)
+        {
+            __try
+            {
+                if (technique == nullptr || out == nullptr)
+                {
+                    return false;
+                }
+                *out = api->getSchemeName(technique);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // The material may have been destroyed between the skipped draw and
+        // the frame boundary. Handles are never reused, so "a resource with
+        // this handle still exists" means the pointer is still that material;
+        // an unchanged state count means nobody reloaded it meanwhile.
+        __declspec(noinline) static bool GuardedDrawGuardMaterialLive(
+            const DrawGuardApi* api, const void* material,
+            unsigned long long handle, uint32_t stateCount)
+        {
+            __try
+            {
+                void* manager = api->getMaterialManager();
+                if (manager == nullptr || !api->existsByHandle(manager, handle))
+                {
+                    return false;
+                }
+                return static_cast<uint32_t>(api->getStateCount(material)) == stateCount;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Slow path: only reached for a draw that is being skipped. Allocates
+        // only for a key the ledger has not seen.
+        __declspec(noinline) void NoteDrawGuardSkip(const void* renderable,
+                                                    const void* pass,
+                                                    bool hasVertex,
+                                                    bool hasFragment)
+        {
+            try
+            {
+                DrawGuardFacts facts;
+                const bool identified =
+                    GuardedReadDrawGuardFacts(&g_drawGuardApi, pass, &facts);
+                Dx11Compat::DrawGuardKey key;
+                if (identified)
+                {
+                    key.handle = facts.handle;
+                    key.stateCount = static_cast<uint32_t>(facts.stateCount);
+                }
+
+                DrawGuardState& state = DrawGuard();
+                Dx11Compat::DrawGuardDecision decision;
+                {
+                    std::lock_guard<std::mutex> guard(state.lock);
+                    decision = state.ledger.NoteSkip(key);
+                }
+                if (decision.logCapReached)
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11DRAWGUARD] log cap reached (%u lines, %u materials); "
+                             "further shaderless draws are skipped without a line",
+                             static_cast<unsigned>(Dx11Compat::DrawGuardLedger::kDefaultMaxLogLines),
+                             static_cast<unsigned>(Dx11Compat::DrawGuardLedger::kDefaultMaxKeys));
+                }
+                if (!decision.isNew)
+                {
+                    return;
+                }
+
+                std::string name(kUnknownMaterial);
+                std::string scheme;
+                if (identified)
+                {
+                    std::string copied;
+                    if (GuardedCopyResourceName(facts.material, &copied) && !copied.empty())
+                    {
+                        name = copied;
+                    }
+                    GuardedCopyDrawGuardScheme(&g_drawGuardApi, facts.technique, &scheme);
+                }
+                if (decision.log)
+                {
+                    char technique[16] = "?";
+                    if (facts.techniqueIndex != 0xFFFF)
+                    {
+                        snprintf(technique, sizeof(technique), "%u",
+                                 static_cast<unsigned>(facts.techniqueIndex));
+                    }
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11DRAWGUARD] skipped shaderless draw material=%s "
+                             "state=%u technique=%s scheme=%s pass=%u missing=%s",
+                             name.c_str(), static_cast<unsigned>(key.stateCount),
+                             technique, scheme.empty() ? "Default" : scheme.c_str(),
+                             static_cast<unsigned>(facts.passIndex),
+                             Dx11Compat::DrawGuardMissingPrograms(hasVertex, hasFragment));
+                }
+                if (!identified || name == kUnknownMaterial)
+                {
+                    // Nothing to convert; the draw stays skipped. Unidentified
+                    // draws all share key {0,0}, so only the first one logs.
+                    return;
+                }
+
+                DrawGuardPending entry;
+                entry.material = facts.material;
+                entry.key = key;
+                entry.name = std::move(name);
+                entry.inputs = ReadRenderableInputs(renderable);
+                entry.logged = decision.log;
+                {
+                    std::lock_guard<std::mutex> guard(state.lock);
+                    state.pending.push_back(std::move(entry));
+                }
+                g_drawGuardHasPending.store(true, std::memory_order_release);
+            }
+            catch (...)
+            {
+                // Never let bookkeeping throw into Ogre's render queue.
+            }
+        }
+
+        void __fastcall DrawGuardRenderSingleObjectHook(void* sceneManager,
+                                                        void* /*edx*/,
+                                                        void* renderable,
+                                                        const void* pass,
+                                                        bool lightScissoringClipping,
+                                                        bool doLightIteration,
+                                                        const void* manualLightList)
+        {
+            // Fast path: two atomic loads and two exported one-line getters.
+            if (pass != nullptr &&
+                s_dx11GuardEnabled.load(std::memory_order_relaxed) &&
+                s_detectedDx11Atomic.load(std::memory_order_relaxed))
+            {
+                const bool hasVertex = g_drawGuardApi.hasVertexProgram(pass);
+                const bool hasFragment = g_drawGuardApi.hasFragmentProgram(pass);
+                if (Dx11Compat::DrawGuardShouldSkip(hasVertex, hasFragment))
+                {
+                    NoteDrawGuardSkip(renderable, pass, hasVertex, hasFragment);
+                    return;
+                }
+            }
+            reinterpret_cast<FnSceneManagerRenderSingleObject>(g_drawGuardTrampoline)(
+                sceneManager, renderable, pass, lightScissoringClipping,
+                doLightIteration, manualLightList);
+        }
+
+        // One queued key, at the frame boundary. Fails closed: anything short
+        // of a live, unchanged, eligible material leaves it alone, and its
+        // draws keep being skipped silently.
+        // Returns true when the entry should be queued again for a later frame
+        // (the renderer was not ready yet); see DrawGuardShouldRetry.
+        bool ResolveDrawGuardPending(DrawGuardPending& entry)
+        {
+            ++entry.attempts;
+            std::string outcome;
+            unsigned converted = 0;
+            const Dx11Compat::CompatConfig config =
+                Dx11Compat::EffectiveCompatConfigForMaterial(CurrentCompatConfig(),
+                                                             entry.name);
+            bool sameName = false;
+            if (!config.compatEnabled)
+            {
+                outcome = "compat-disabled";
+            }
+            else if (Dx11Compat::IsGpuSkinningClone(entry.name))
+            {
+                outcome = "gpu-skinning-clone";
+            }
+            else if (!s_resourcesValidAtomic.load(std::memory_order_acquire) ||
+                     !EnhancedResourcesAvailable())
+            {
+                outcome = "renderer-resources-unavailable";
+            }
+            else if (!GuardedDrawGuardMaterialLive(&g_drawGuardApi, entry.material,
+                                                   entry.key.handle,
+                                                   entry.key.stateCount) ||
+                     !GuardedResourceNameEquals(entry.material, entry.name, &sameName) ||
+                     !sameName)
+            {
+                outcome = "material-gone-or-reloaded";
+            }
+            else
+            {
+                converted = ConvertShaderlessSiblingTechniques(
+                    entry.material, nullptr, config, entry.inputs, entry.name, &outcome);
+            }
+
+            if (converted == 0 && Dx11Compat::DrawGuardShouldRetry(outcome, entry.attempts))
+            {
+                return true;
+            }
+            if (!entry.logged)
+            {
+                return false;
+            }
+            if (converted > 0)
+            {
+                LogShimA(LogLevel::Info, kLogTag,
+                         "[DX11DRAWGUARD] material=%s state=%u converted techniques=%u",
+                         entry.name.c_str(), static_cast<unsigned>(entry.key.stateCount),
+                         converted);
+            }
+            else
+            {
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "[DX11DRAWGUARD] material=%s state=%u declined reason=%s "
+                         "attempts=%u; draws stay skipped",
+                         entry.name.c_str(), static_cast<unsigned>(entry.key.stateCount),
+                         outcome.c_str(), entry.attempts);
+            }
+            return false;
+        }
+
+        void DrainDrawGuardPending()
+        {
+            if (!g_drawGuardHasPending.exchange(false, std::memory_order_acq_rel))
+            {
+                return;
+            }
+            static bool s_firstDrainLogged = false;
+            if (!s_firstDrainLogged)
+            {
+                s_firstDrainLogged = true;
+                LogShimA(LogLevel::Info, kLogTag,
+                         "[DX11DRAWGUARD] frameStarted drain active");
+            }
+            std::vector<DrawGuardPending> work;
+            {
+                std::lock_guard<std::mutex> guard(DrawGuard().lock);
+                work.swap(DrawGuard().pending);
+            }
+            std::vector<DrawGuardPending> retry;
+            for (DrawGuardPending& entry : work)
+            {
+                try
+                {
+                    if (ResolveDrawGuardPending(entry))
+                    {
+                        retry.push_back(std::move(entry));
+                    }
+                }
+                catch (...)
+                {
+                    LogShimA(LogLevel::Warn, kLogTag,
+                             "[DX11DRAWGUARD] material=%s conversion threw; draws stay skipped",
+                             entry.name.c_str());
+                }
+            }
+            if (!retry.empty())
+            {
+                std::lock_guard<std::mutex> guard(DrawGuard().lock);
+                for (DrawGuardPending& entry : retry)
+                {
+                    DrawGuard().pending.push_back(std::move(entry));
+                }
+                g_drawGuardHasPending.store(true, std::memory_order_release);
+            }
+        }
+
+        // Ogre::FrameListener, laid out to its 1.10 vtable: frameStarted,
+        // frameRenderingQueued, frameEnded, virtual destructor (same shape as
+        // gpu_skinning.cpp). Root fires frameStarted from renderOneFrame
+        // before any scene rendering: the safe point for material edits.
+        class DrawGuardFrameListener
+        {
+        public:
+            virtual bool frameStarted(const void*)
+            {
+                DrainDrawGuardPending();
+                return true;
+            }
+            virtual bool frameRenderingQueued(const void*) { return true; }
+            virtual bool frameEnded(const void*) { return true; }
+            virtual ~DrawGuardFrameListener() = default;
+        };
+
+        uint8_t* ResolveDrawGuardExportBody(void* proc)
+        {
+            auto* body = static_cast<uint8_t*>(proc);
+            if (body != nullptr && body[0] == 0xE9) // incremental-link thunk
+            {
+                int32_t rel = 0;
+                std::memcpy(&rel, body + 1, sizeof(rel));
+                body = body + 5 + rel;
+            }
+            return body;
+        }
+
+        // Runs on the engine render thread from the setMaterialScheme hook.
+        // Waits (one atomic load per call) for DX11 to be identified; on DX9
+        // it never installs.
+        void EnsureDx11DrawGuardInstalled()
+        {
+            static bool s_settled = false;
+            static int s_attemptsLeft = 16;
+            if (s_settled || !s_detectedDx11Atomic.load(std::memory_order_acquire))
+            {
+                return;
+            }
+            if (!s_dx11GuardEnabled.load(std::memory_order_acquire))
+            {
+                s_settled = true;
+                LogShimA(LogLevel::Info, kLogTag,
+                         "[DX11DRAWGUARD] disabled by configuration "
+                         "([Fixes] DX11ShaderlessDrawGuard=0)");
+                return;
+            }
+
+            const auto fail = [](const char* what) {
+                s_settled = true;
+                LogShimA(LogLevel::Warn, kLogTag,
+                         "[DX11DRAWGUARD] not installed: %s; shaderless passes keep "
+                         "the stock D3D11 behaviour",
+                         what);
+            };
+
+            void* const renderSingleObject = ResolveOgreExport<void*>(
+                "?renderSingleObject@SceneManager@Ogre@@MAEXPAVRenderable@2@PBVPass@2@"
+                "_N2PBV?$HashedVector@PAVLight@Ogre@@@2@@Z");
+            const FnRootGetSingletonPtr getRoot =
+                ResolveOgreExport<FnRootGetSingletonPtr>("?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
+            const FnRootAddFrameListener addFrameListener =
+                ResolveOgreExport<FnRootAddFrameListener>(
+                    "?addFrameListener@Root@Ogre@@QAEXPAVFrameListener@2@@Z");
+            DrawGuardApi api;
+            api.hasVertexProgram = ResolveOgreExport<FnPassHasVertexProgram>(
+                "?hasVertexProgram@Pass@Ogre@@QBE_NXZ");
+            api.hasFragmentProgram = ResolveOgreExport<FnPassHasFragmentProgram>(
+                "?hasFragmentProgram@Pass@Ogre@@QBE_NXZ");
+            api.passParent = ResolveOgreExport<FnPassGetParent>(
+                "?getParent@Pass@Ogre@@QBEPAVTechnique@2@XZ");
+            api.passIndex = ResolveOgreExport<FnPassGetIndex>("?getIndex@Pass@Ogre@@QBEGXZ");
+            api.techniqueParent = ResolveOgreExport<FnTechniqueGetParent>(
+                "?getParent@Technique@Ogre@@QBEPAVMaterial@2@XZ");
+            // "UBE": both are virtual on Resource; Material overrides neither.
+            api.getHandle = ResolveOgreExport<FnResourceGetHandle>(
+                "?getHandle@Resource@Ogre@@UBE_KXZ");
+            api.getStateCount = ResolveOgreExport<FnResourceGetStateCount>(
+                "?getStateCount@Resource@Ogre@@UBEIXZ");
+            api.getMaterialManager = ResolveOgreExport<FnMaterialManagerGetSingletonPtr>(
+                "?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+            api.existsByHandle = ResolveOgreExport<FnResourceManagerExistsByHandle>(
+                "?resourceExists@ResourceManager@Ogre@@UAE_N_K@Z");
+            const OgreTechniqueApi& techApi = TechniqueApi();
+            api.getNumTechniques = techApi.getNumTechniques;
+            api.getTechnique = techApi.getTechnique;
+            api.getSchemeName = techApi.getSchemeName;
+
+            struct RequiredExport
+            {
+                const void* fn;
+                const char* name;
+            };
+            const RequiredExport required[] = {
+                { renderSingleObject, "SceneManager::renderSingleObject" },
+                { reinterpret_cast<const void*>(getRoot), "Root::getSingletonPtr" },
+                { reinterpret_cast<const void*>(addFrameListener), "Root::addFrameListener" },
+                { reinterpret_cast<const void*>(api.hasVertexProgram), "Pass::hasVertexProgram" },
+                { reinterpret_cast<const void*>(api.hasFragmentProgram), "Pass::hasFragmentProgram" },
+                { reinterpret_cast<const void*>(api.passParent), "Pass::getParent" },
+                { reinterpret_cast<const void*>(api.passIndex), "Pass::getIndex" },
+                { reinterpret_cast<const void*>(api.techniqueParent), "Technique::getParent" },
+                { reinterpret_cast<const void*>(api.getHandle), "Resource::getHandle" },
+                { reinterpret_cast<const void*>(api.getStateCount), "Resource::getStateCount" },
+                { reinterpret_cast<const void*>(api.getMaterialManager), "MaterialManager::getSingletonPtr" },
+                { reinterpret_cast<const void*>(api.existsByHandle), "ResourceManager::resourceExists(handle)" },
+                { reinterpret_cast<const void*>(api.getNumTechniques), "Material::getNumTechniques" },
+                { reinterpret_cast<const void*>(api.getTechnique), "Material::getTechnique" },
+                { reinterpret_cast<const void*>(api.getSchemeName), "Technique::getSchemeName" },
+            };
+            for (const RequiredExport& symbol : required)
+            {
+                if (symbol.fn == nullptr)
+                {
+                    const std::string what = std::string("missing export ") + symbol.name;
+                    fail(what.c_str());
+                    return;
+                }
+            }
+
+            void* const root = getRoot();
+            if (root == nullptr)
+            {
+                if (--s_attemptsLeft <= 0)
+                {
+                    fail("Ogre Root unavailable");
+                }
+                return;
+            }
+
+            g_drawGuardApi = api;
+            // push ebp; mov ebp, esp; push -1 (checked on the GOG OgreMain.dll)
+            static const uint8_t kRenderSingleObjectPrologue[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
+            const uintptr_t target =
+                reinterpret_cast<uintptr_t>(ResolveDrawGuardExportBody(renderSingleObject));
+            if (!InstallInlineDetour32(g_drawGuardDetour, target,
+                                       reinterpret_cast<void*>(&DrawGuardRenderSingleObjectHook),
+                                       sizeof(kRenderSingleObjectPrologue),
+                                       kRenderSingleObjectPrologue,
+                                       sizeof(kRenderSingleObjectPrologue),
+                                       &g_drawGuardTrampoline))
+            {
+                fail("renderSingleObject prologue unexpected or already patched (the "
+                     "Ogre animation profiler's renderSingleObject observer claims it "
+                     "while profiler collection is active)");
+                return;
+            }
+
+            static DrawGuardFrameListener s_listener;
+            addFrameListener(root, &s_listener);
+            s_settled = true;
+            LogShimA(LogLevel::Info, kLogTag,
+                     "[DX11DRAWGUARD] installed: shaderless D3D11 passes are skipped in "
+                     "SceneManager::renderSingleObject; compat conversion runs at frameStarted");
+        }
+
         class EnhancedSchemeFallbackListener
         {
         public:
@@ -3904,6 +4483,7 @@ namespace BZROpenShim::RenderProfiles
             s_engineThreadId.store(GetCurrentThreadId(), std::memory_order_release);
             EnsureEnhancedSchemeFallbackInstalled();
             EnsureNativeInputGuards();
+            EnsureDx11DrawGuardInstalled();
 
             const char* incomingRaw = (scheme != nullptr) ? scheme->c_str() : "";
             const std::string_view incoming(incomingRaw);

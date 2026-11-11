@@ -28,6 +28,7 @@ $testSuites = @(
     @{ Exe = "request_apply_tracker_tests.exe"; Sources = @("$repo\tests\request_apply_tracker_tests.cpp") },
     @{ Exe = "render_profile_resources_tests.exe"; Sources = @("$repo\tests\render_profile_resources_tests.cpp", "$repo\src\engine\render_profile_resources.cpp") },
     @{ Exe = "dx11_legacy_material_compat_tests.exe"; Sources = @("$repo\tests\dx11_legacy_material_compat_tests.cpp", "$repo\src\engine\dx11_legacy_material_compat.cpp"); Defines = $fixedFuncDefines },
+    @{ Exe = "dx11_draw_guard_policy_tests.exe"; Sources = @("$repo\tests\dx11_draw_guard_policy_tests.cpp") },
     @{ Exe = "enhanced_resource_bootstrap_tests.exe"; Sources = @("$repo\tests\enhanced_resource_bootstrap_tests.cpp", "$repo\src\engine\enhanced_resource_bootstrap.cpp") }
 )
 

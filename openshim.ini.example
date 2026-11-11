@@ -920,12 +920,15 @@ SunRebuildRestore = 1
 ; diagnostics where technique instantiation is not available.
 ; See also DX11ShaderlessDrawGuard / DX11LegacyMaterialAggressive below.
 DX11LegacyMaterialCompat = 1
-; DX11 shaderless-draw safety guard. When a draw would reach D3D11 without
-; both shaders bound, log once per unique material/technique/pass/program
-; combination ([DX11COMPAT] skipped shaderless draw ...) and count it for
-; the exit summary instead of throwing hundreds/thousands of exceptions.
-; Accepted: boolean. Default: ON. This changes no pixels by itself; it only
-; bounds diagnostics. Never the normal compatibility path.
+; DX11 shaderless-draw safety guard. D3D11 throws on a pass without both a
+; vertex and a fragment program, and the exception drops the rest of that
+; frame's render queue (menus and HUD flicker or vanish in bursts). ON skips
+; such a draw in Ogre's SceneManager::renderSingleObject instead, logs it once
+; per material load ([DX11DRAWGUARD] skipped shaderless draw ..., capped at
+; 64 lines), and at the next frame start tries one in-place conversion with
+; the same rules as DX11LegacyMaterialCompat (which must be ON for that step).
+; A material that cannot be converted stays skipped (invisible) silently.
+; Accepted: boolean. Default: ON. DX11 only; DX9 is untouched.
 DX11ShaderlessDrawGuard = 1
 ; Aggressive generic compatibility for unknown abandoned custom shaders.
 ; OFF by default: when a programmable pass references unsupported programs
