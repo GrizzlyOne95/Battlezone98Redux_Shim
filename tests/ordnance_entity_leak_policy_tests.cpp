@@ -24,6 +24,7 @@ namespace
     {
         TeardownObservation o;
         o.entityBefore = &g_entity;
+        o.tracked = true;
         o.entityAfter = &g_entity;
         o.hasRuntimeScene = true;
         o.queryOk = true;
@@ -41,6 +42,12 @@ int main()
     o.entityBefore = nullptr;
     o.entityAfter = nullptr;
     check(Decide(o) == Decision::NothingToDo, "no entity, nothing to do");
+
+    // Freed by destroyAllEntities (or never seen created): never touched,
+    // even when every later check would pass on a reused address.
+    o = Orphaned();
+    o.tracked = false;
+    check(Decide(o) == Decision::SkipUntracked, "untracked entity: hands off");
 
     o = Orphaned();
     o.entityAfter = nullptr;

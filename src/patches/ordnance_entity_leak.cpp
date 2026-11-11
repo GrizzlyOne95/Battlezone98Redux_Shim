@@ -24,6 +24,15 @@
 // (the SkeletonInstance belongs to the Entity) are then zeroed. +0xD0 is left
 // as stock leaves it.
 //
+// Live set: stock FUN_0067D0C0 (mission end, save load, replay) runs
+// SceneManager::destroyAllEntities, which frees every Entity while ordnance
+// keeps its +0xCC pointer. A second detour on the creator FUN_0067EC70 (cdecl,
+// one Ordnance*; callers clean with add esp,4) records each Entity it makes;
+// SceneManagerDestroyAllEntitiesHook (lifecycle_seams.cpp) clears the set
+// before the free. Teardown only touches a pointer that is in the set, so a
+// freed or reused address is never dereferenced. Without the creation detour
+// the teardown detour is not installed.
+//
 // Bench census: OPENSHIM_ORDNANCE_ENTITY_LEAK_COUNT_ONLY=1 installs the hook
 // even when the fix is off and logs "[ORDLEAK] orphaned(countOnly)=N" for
 // the Entities it would have destroyed, leaving them leaked as stock does.
@@ -38,6 +47,7 @@
 
 #include <cstdint>
 #include <string>
+#include <unordered_set>
 
 namespace BZROpenShim
 {
@@ -53,9 +63,13 @@ namespace BZROpenShim
             // Must cover the whole signature: InstallInlineDetour32 refuses an
             // expected-bytes length longer than the patch (hook_patch_helpers.cpp).
             constexpr size_t kTeardownPatchLen = 12;
+            // push ebp; mov ebp,esp; push -1; push 0x0084F6E0 (SEH frame
+            // prologue; the push imm32 is absolute, so it relocates as is).
+            constexpr size_t kCreatePatchLen = 10;
             constexpr unsigned long kMsvcCppException = 0xE06D7363UL;
 
             using FnTeardown = void(__cdecl*)(void*);
+            using FnCreate = void(__cdecl*)(void*);
             using FnIsAttached = bool(__thiscall*)(const void*);
             using FnGetName = const std::string*(__thiscall*)(const void*);
             using FnHasEntity = bool(__thiscall*)(const void*, const std::string&);
@@ -64,6 +78,9 @@ namespace BZROpenShim
 
             InlineDetour32 g_TeardownDetour = {};
             uintptr_t g_TeardownAddr = 0;
+            InlineDetour32 g_CreateDetour = {};
+            uintptr_t g_CreateAddr = 0;
+            bool g_CreateInstalled = false;
             bool g_Installed = false;
             bool g_InstallAttempted = false;
             bool g_MismatchLogged = false;
@@ -74,7 +91,13 @@ namespace BZROpenShim
             FnGetEntity g_GetEntity = nullptr;
             FnDestroyEntity g_DestroyEntity = nullptr;
 
+            // Ordnance Entities made by the creator and not yet torn down or
+            // freed by destroyAllEntities. Creation, teardown and the scene
+            // teardown all run on the game's main thread, so no lock.
+            std::unordered_set<void*> g_LiveEntities;
+
             volatile LONG g_Destroyed = 0;
+            volatile LONG g_SkipUntracked = 0;
             volatile LONG g_SkipChanged = 0;
             volatile LONG g_SkipNoScene = 0;
             volatile LONG g_SkipNotRegistered = 0;
@@ -193,17 +216,45 @@ namespace BZROpenShim
                     return;
                 if (powerOfTwo)
                     g_LastReportTick = now;
-                Log(L"[ORDLEAK] %s=%ld skipped changed=%ld noScene=%ld notRegistered=%ld attached=%ld "
-                    L"queryFailed=%ld destroyFaulted=%ld\n",
+                Log(L"[ORDLEAK] %s=%ld skipped untracked=%ld changed=%ld noScene=%ld notRegistered=%ld "
+                    L"attached=%ld queryFailed=%ld destroyFaulted=%ld\n",
                     g_CountOnly ? L"orphaned(countOnly)" : L"destroyed",
-                    destroyed, g_SkipChanged, g_SkipNoScene, g_SkipNotRegistered, g_SkipAttached,
-                    g_SkipQueryFailed, g_DestroyFaulted);
+                    destroyed, g_SkipUntracked, g_SkipChanged, g_SkipNoScene, g_SkipNotRegistered,
+                    g_SkipAttached, g_SkipQueryFailed, g_DestroyFaulted);
+            }
+
+            // Main thread only (see g_LiveEntities).
+            void TrackEntity(void* entity)
+            {
+                try
+                {
+                    g_LiveEntities.insert(entity);
+                }
+                catch (...)
+                {
+                    // Untracked is the safe side: teardown leaves it leaked.
+                }
+            }
+
+            void __cdecl OrdnanceCreateHook(uint8_t* ord)
+            {
+                reinterpret_cast<FnCreate>(g_CreateDetour.trampoline)(ord);
+                void* const entity = ord ? ReadPointerSeh(ord, kOrdnanceEntityOffset) : nullptr;
+                // Tracked only once teardown is hooked, so the set cannot
+                // grow unchecked if the teardown detour never installs.
+                if (entity && g_Installed)
+                    TrackEntity(entity);
             }
 
             void __cdecl OrdnanceTeardownHook(uint8_t* ord)
             {
                 void* const entityBefore =
                     ord ? ReadPointerSeh(ord, kOrdnanceEntityOffset) : nullptr;
+                // Membership is decided on the raw pointer value before the
+                // stock call and before any Ogre call touches it. Main thread
+                // only, like the creation hook and the scene teardown.
+                const bool tracked = entityBefore && g_CreateInstalled &&
+                    g_LiveEntities.erase(entityBefore) != 0;
 
                 reinterpret_cast<FnTeardown>(g_TeardownDetour.trampoline)(ord);
 
@@ -213,9 +264,10 @@ namespace BZROpenShim
                 void* const sceneManager = GetOgreSceneManagerRuntime();
                 OrdnanceEntityLeak::TeardownObservation o;
                 o.entityBefore = entityBefore;
+                o.tracked = tracked;
                 o.entityAfter = ReadPointerSeh(ord, kOrdnanceEntityOffset);
                 o.hasRuntimeScene = sceneManager != nullptr;
-                if (o.entityAfter == entityBefore && sceneManager)
+                if (tracked && o.entityAfter == entityBefore && sceneManager)
                 {
                     o.queryOk = QueryRegistrationSeh(
                         sceneManager, entityBefore, o.registeredInRuntimeScene, o.stillAttached);
@@ -224,6 +276,9 @@ namespace BZROpenShim
                 switch (OrdnanceEntityLeak::Decide(o))
                 {
                 case OrdnanceEntityLeak::Decision::NothingToDo:
+                    return;
+                case OrdnanceEntityLeak::Decision::SkipUntracked:
+                    InterlockedIncrement(&g_SkipUntracked);
                     return;
                 case OrdnanceEntityLeak::Decision::SkipChanged:
                     InterlockedIncrement(&g_SkipChanged);
@@ -250,13 +305,15 @@ namespace BZROpenShim
                     return;
                 }
 
-                if (!DestroyEntitySeh(sceneManager, entityBefore))
-                {
-                    // The pointers are cleared anyway: a half-destroyed Entity
-                    // must not be touched again by anyone.
-                    InterlockedIncrement(&g_DestroyFaulted);
-                }
+                const bool destroyed = DestroyEntitySeh(sceneManager, entityBefore);
+                // The pointers are cleared either way: a half-destroyed Entity
+                // must not be touched again by anyone.
                 ClearPointersSeh(ord);
+                if (!destroyed)
+                {
+                    InterlockedIncrement(&g_DestroyFaulted);
+                    return;
+                }
                 ReportIfDue(InterlockedIncrement(&g_Destroyed));
             }
 
@@ -298,11 +355,43 @@ namespace BZROpenShim
             static const bool bound = [] {
                 const HookEngine::EngineRow rows[] = {
                     { "OrdnanceNodeTeardown", &g_TeardownAddr },
+                    { "OrdnanceRenderCreate", &g_CreateAddr },
                 };
                 return HookEngine::BindEngineRows("Ordnance entity leak fix", rows);
             }();
             if (!bound)
                 return;
+
+            // The creation detour goes first: without it nothing is tracked,
+            // so the teardown detour is not installed and the fix does nothing.
+            static const uint8_t kCreateExpectedBytes[] = {
+                0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xE0, 0xF6, 0x84, 0x00,
+            };
+            static_assert(sizeof(kCreateExpectedBytes) == kCreatePatchLen,
+                          "creation patch must cover exactly the verified prologue instructions");
+            if (!g_CreateInstalled)
+            {
+                if (!InstallInlineDetour32(
+                        g_CreateDetour,
+                        g_CreateAddr,
+                        reinterpret_cast<void*>(OrdnanceCreateHook),
+                        kCreatePatchLen,
+                        kCreateExpectedBytes,
+                        sizeof(kCreateExpectedBytes)))
+                {
+                    if (!g_MismatchLogged)
+                    {
+                        Log(L"[ORDLEAK] Creation hook bytes not ready/mismatched at 0x%08X; "
+                            L"fix disabled (no live set, teardown not hooked)\n",
+                            static_cast<uint32_t>(g_CreateAddr));
+                        g_MismatchLogged = true;
+                    }
+                    if (g_IsSteamExe)
+                        g_InstallAttempted = false;
+                    return;
+                }
+                g_CreateInstalled = true;
+            }
 
             static const uint8_t kExpectedBytes[] = {
                 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C,
@@ -332,9 +421,16 @@ namespace BZROpenShim
             }
 
             g_Installed = true;
-            Log(L"[ORDLEAK] Installed ordnance entity leak %s at 0x%08X\n",
+            Log(L"[ORDLEAK] Installed ordnance entity leak %s at 0x%08X (creation tracked at 0x%08X)\n",
                 g_CountOnly ? L"census (count only, entities stay leaked)" : L"fix",
-                static_cast<uint32_t>(g_TeardownAddr));
+                static_cast<uint32_t>(g_TeardownAddr), static_cast<uint32_t>(g_CreateAddr));
+        }
+
+        void OrdnanceEntityLeakOnSceneEntitiesDestroyed() noexcept
+        {
+            // Main thread only: runs inside stock FUN_0067D0C0, like the
+            // ordnance creation and teardown hooks.
+            g_LiveEntities.clear();
         }
     }
 }
