@@ -174,6 +174,7 @@ $fatal = $null
 Write-Host "[run] $RunName -> $runDir"
 if (-not $KeepRunning) {
     foreach ($f in 'flow-failed', 'flow-teardown', 'harness-pids.json') { Remove-Item -LiteralPath (Join-Path $runDir $f) -ErrorAction SilentlyContinue }
+    Clear-BZRCoopWatchdogMarkers $runDir
     $watchdog = Start-BZRCoopWatchdog -RunDir $runDir -SessionFile (Join-Path $BZRCoopRoot 'session.json') `
         -HardTimeoutSeconds $HardTimeoutSeconds -FailureGraceSeconds $FailureGraceSeconds
     Write-Host "[run] watchdog pid $($watchdog.Id) (grace $FailureGraceSeconds s, hard $(if ($HardTimeoutSeconds) { "$HardTimeoutSeconds s" } else { 'none' }))"
@@ -336,35 +337,42 @@ try {
         }
         if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     }
+    # Ctrl+C or a stop skips the tail below; end the watchdog here then.
+    if (-not $KeepRunning -and -not $fatal -and -not $flowFinished) { Stop-BZRCoopWatchdog $runDir $watchdog.Id }
 }
-if ($fatal) {
-    # The run still records its failure before the error propagates.
-    if ($script:CRFlowRun) { $summary = Complete-CRFlowRun -Outcome "Stopped early: $($fatal.Exception.Message)" -Clients $clientIndices }
-    throw $fatal
-}
-if ($flowFinished) {
-    if ($MaxNetworkLogging -and $MuteClients -and -not $KeepRunning) {
-        try {
-            $diagnostics = @(Test-BZRCoopDiagnosticEvidence $runDir $Clients)
-            Add-CRFlowCheck 'all clients have verified audio conditions and complete maximum network captures' $true $diagnostics
-        } catch {
-            Add-CRFlowCheck 'all clients have verified audio conditions and complete maximum network captures' $false $_.Exception.Message
-        }
+# The watchdog outlives the runner's PID in a shared host; always end it.
+try {
+    if ($fatal) {
+        # The run still records its failure before the error propagates.
+        if ($script:CRFlowRun) { $summary = Complete-CRFlowRun -Outcome "Stopped early: $($fatal.Exception.Message)" -Clients $clientIndices }
+        throw $fatal
     }
-    if ($Clients -gt 2 -and -not $KeepRunning) {
-        # WM_CLOSE has archived complete native logs. Forwarding alone cannot
-        # detect the game's sustained rejection of newer position/ping data.
-        $healthPath = Join-Path $runDir 'native-network-health.json'
-        try {
-            & $Python (Join-Path $ServerRepo 'native_network_health.py') --run-dir $runDir --clients $Clients --json-out $healthPath | Out-Host
-            $healthExit = $LASTEXITCODE
-            $health = Get-Content -LiteralPath $healthPath -Raw | ConvertFrom-Json
-            Add-CRFlowCheck 'native peers have no sustained post-loading sequence rejection' ($healthExit -eq 0 -and $health.status -eq 'pass') @{ status = $health.status; report = $healthPath }
-        } catch {
-            Add-CRFlowCheck 'native peers have no sustained post-loading sequence rejection' $false $_.Exception.Message
+    if ($flowFinished) {
+        if ($MaxNetworkLogging -and $MuteClients -and -not $KeepRunning) {
+            try {
+                $diagnostics = @(Test-BZRCoopDiagnosticEvidence $runDir $Clients)
+                Add-CRFlowCheck 'all clients have verified audio conditions and complete maximum network captures' $true $diagnostics
+            } catch {
+                Add-CRFlowCheck 'all clients have verified audio conditions and complete maximum network captures' $false $_.Exception.Message
+            }
         }
+        if ($Clients -gt 2 -and -not $KeepRunning) {
+            # WM_CLOSE has archived complete native logs. Forwarding alone cannot
+            # detect the game's sustained rejection of newer position/ping data.
+            $healthPath = Join-Path $runDir 'native-network-health.json'
+            try {
+                & $Python (Join-Path $ServerRepo 'native_network_health.py') --run-dir $runDir --clients $Clients --json-out $healthPath | Out-Host
+                $healthExit = $LASTEXITCODE
+                $health = Get-Content -LiteralPath $healthPath -Raw | ConvertFrom-Json
+                Add-CRFlowCheck 'native peers have no sustained post-loading sequence rejection' ($healthExit -eq 0 -and $health.status -eq 'pass') @{ status = $health.status; report = $healthPath }
+            } catch {
+                Add-CRFlowCheck 'native peers have no sustained post-loading sequence rejection' $false $_.Exception.Message
+            }
+        }
+        $summary = Complete-CRFlowRun -Outcome $outcome -Clients $clientIndices
     }
-    $summary = Complete-CRFlowRun -Outcome $outcome -Clients $clientIndices
+    if ($summary -and $summary.verdict -eq 'PASS') { exit 0 }
+    exit 1
+} finally {
+    if (-not $KeepRunning) { Stop-BZRCoopWatchdog $runDir $watchdog.Id }
 }
-if ($summary -and $summary.verdict -eq 'PASS') { exit 0 }
-exit 1

@@ -40,6 +40,33 @@ function Start-BZRCoopWatchdog {
         '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', $command)
 }
 
+# Ends this run's watchdog. The watchdog is scoped to the runner's PID, which is
+# the shared host PID when several runs execute in one PowerShell host, so the
+# runner's exit never ends it; without this marker it would outlive the run and
+# later kill the host and the next run's processes. The marker is named after
+# the watchdog's PID so a later run reusing the run dir cannot clear or trip it.
+function Stop-BZRCoopWatchdog([string]$RunDir, [int]$WatchdogPid) {
+    if ($WatchdogPid -le 0) { return }
+    try { Set-Content -LiteralPath (Join-Path $RunDir "run-ended.$WatchdogPid") -Value (Get-Date).ToString('o') -ErrorAction Stop }
+    catch { Write-Warning "watchdog $WatchdogPid end marker not written: $_"; return }
+    # The watchdog acts on the marker one poll later; wait so it cannot read the
+    # next run's harness-pids.json in a reused run dir and kill that run.
+    if (Get-Process -Id $WatchdogPid -ErrorAction SilentlyContinue) {
+        Wait-Process -Id $WatchdogPid -Timeout 60 -ErrorAction SilentlyContinue
+        if (Get-Process -Id $WatchdogPid -ErrorAction SilentlyContinue) { Write-Warning "watchdog $WatchdogPid still running after its end marker" }
+    }
+}
+
+# Removes end markers left by watchdogs that have exited; live ones keep theirs.
+function Clear-BZRCoopWatchdogMarkers([string]$RunDir) {
+    Get-ChildItem -LiteralPath $RunDir -Filter 'run-ended.*' -ErrorAction SilentlyContinue | ForEach-Object {
+        $id = 0
+        if (-not [int]::TryParse($_.Extension.TrimStart('.'), [ref]$id) -or -not (Get-Process -Id $id -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $_.FullName -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 # Records the runner's long-lived children (server, launcher) for the watchdog.
 function Set-BZRCoopWatchdogPid([string]$RunDir, [string]$Name, [int]$ProcessId) {
     $path = Join-Path $RunDir 'harness-pids.json'
@@ -85,6 +112,8 @@ function Watch-BZRCoopRun {
     }
 
     function Test-ParentAlive {
+        # run-ended is the runner's own end-of-run signal (see Stop-BZRCoopWatchdog).
+        if (Test-Path -LiteralPath (Join-Path $RunDir "run-ended.$PID")) { return $false }
         $p = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
         [bool]($p -and $p.StartTime.ToUniversalTime().Ticks -eq $ParentStartTicks)
     }
