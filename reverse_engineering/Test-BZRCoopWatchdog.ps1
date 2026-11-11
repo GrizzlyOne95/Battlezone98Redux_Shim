@@ -20,7 +20,7 @@ param([string]$Library, [string]$RunDir, [string]$SessionFile, [string]$Mode)
 $ErrorActionPreference = 'Stop'
 . $Library
 $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-$null = Start-BZRCoopWatchdog -RunDir $RunDir -SessionFile $SessionFile -FailureGraceSeconds 3 -KillGraceSeconds 3 -PollSeconds 1
+$watchdog = Start-BZRCoopWatchdog -RunDir $RunDir -SessionFile $SessionFile -FailureGraceSeconds 3 -KillGraceSeconds 3 -PollSeconds 1
 # Redirected like server.py: inherits this process's stdout pipe.
 $server = Start-Process -FilePath $ps51 -ArgumentList '-NoProfile', '-Command', 'Start-Sleep 600' -WindowStyle Hidden -PassThru `
     -RedirectStandardError (Join-Path $RunDir 'server.log') -RedirectStandardOutput (Join-Path $RunDir 'server.out.log')
@@ -44,7 +44,7 @@ switch ($Mode) {
         # Same-host case: the runner PID stays alive after its run ends.
         Set-Content -LiteralPath (Join-Path $RunDir 'flow-teardown') -Value 'x'
         @{ verdict = 'PASS' } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RunDir 'flow-summary.json')
-        Stop-BZRCoopWatchdog $RunDir
+        Stop-BZRCoopWatchdog $RunDir $watchdog.Id
         Start-Sleep 8
         exit 0
     }
@@ -99,6 +99,14 @@ $fakeGame | Add-Member ScriptMethod Kill { throw 'game must never be terminated'
 $fakeGame | Add-Member ScriptMethod WaitForExit { throw 'game close belongs to Stop-BZRGame' }
 Stop-BZRCoopWatchdogProcess $fakeGame
 Assert $script:closedGame 'game close did not use Stop-BZRGame -NoForce'
+
+# Run-dir reuse: a new run clears only end markers whose watchdog has exited.
+$reuse = (New-Item -ItemType Directory -Path (Join-Path $root 'reuse')).FullName
+Set-Content -LiteralPath (Join-Path $reuse "run-ended.$PID") -Value x
+Set-Content -LiteralPath (Join-Path $reuse 'run-ended.999999999') -Value x
+Clear-BZRCoopWatchdogMarkers $reuse
+Assert (Test-Path -LiteralPath (Join-Path $reuse "run-ended.$PID")) 'reuse: live watchdog marker removed'
+Assert (-not (Test-Path -LiteralPath (Join-Path $reuse 'run-ended.999999999'))) 'reuse: dead watchdog marker kept'
 
 $started = @()
 try {

@@ -173,7 +173,8 @@ $flowFinished = $false
 $fatal = $null
 Write-Host "[run] $RunName -> $runDir"
 if (-not $KeepRunning) {
-    foreach ($f in 'flow-failed', 'flow-teardown', 'harness-pids.json', 'run-ended') { Remove-Item -LiteralPath (Join-Path $runDir $f) -ErrorAction SilentlyContinue }
+    foreach ($f in 'flow-failed', 'flow-teardown', 'harness-pids.json') { Remove-Item -LiteralPath (Join-Path $runDir $f) -ErrorAction SilentlyContinue }
+    Clear-BZRCoopWatchdogMarkers $runDir
     $watchdog = Start-BZRCoopWatchdog -RunDir $runDir -SessionFile (Join-Path $BZRCoopRoot 'session.json') `
         -HardTimeoutSeconds $HardTimeoutSeconds -FailureGraceSeconds $FailureGraceSeconds
     Write-Host "[run] watchdog pid $($watchdog.Id) (grace $FailureGraceSeconds s, hard $(if ($HardTimeoutSeconds) { "$HardTimeoutSeconds s" } else { 'none' }))"
@@ -337,7 +338,7 @@ try {
         if ($server -and -not $server.HasExited) { Stop-Process -Id $server.Id -Force }
     }
     # Ctrl+C or a stop skips the tail below; end the watchdog here then.
-    if (-not $KeepRunning -and -not $fatal -and -not $flowFinished) { Stop-BZRCoopWatchdog $runDir }
+    if (-not $KeepRunning -and -not $fatal -and -not $flowFinished) { Stop-BZRCoopWatchdog $runDir $watchdog.Id }
 }
 # The watchdog outlives the runner's PID in a shared host; always end it.
 try {
@@ -373,5 +374,5 @@ try {
     if ($summary -and $summary.verdict -eq 'PASS') { exit 0 }
     exit 1
 } finally {
-    if (-not $KeepRunning) { Stop-BZRCoopWatchdog $runDir }
+    if (-not $KeepRunning) { Stop-BZRCoopWatchdog $runDir $watchdog.Id }
 }

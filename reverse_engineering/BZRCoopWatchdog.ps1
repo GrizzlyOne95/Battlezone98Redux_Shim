@@ -43,9 +43,21 @@ function Start-BZRCoopWatchdog {
 # Ends this run's watchdog. The watchdog is scoped to the runner's PID, which is
 # the shared host PID when several runs execute in one PowerShell host, so the
 # runner's exit never ends it; without this marker it would outlive the run and
-# later kill the host and the next run's processes.
-function Stop-BZRCoopWatchdog([string]$RunDir) {
-    Set-Content -LiteralPath (Join-Path $RunDir 'run-ended') -Value (Get-Date).ToString('o') -ErrorAction SilentlyContinue
+# later kill the host and the next run's processes. The marker is named after
+# the watchdog's PID so a later run reusing the run dir cannot clear or trip it.
+function Stop-BZRCoopWatchdog([string]$RunDir, [int]$WatchdogPid) {
+    try { Set-Content -LiteralPath (Join-Path $RunDir "run-ended.$WatchdogPid") -Value (Get-Date).ToString('o') -ErrorAction Stop }
+    catch { Write-Warning "watchdog $WatchdogPid end marker not written: $_" }
+}
+
+# Removes end markers left by watchdogs that have exited; live ones keep theirs.
+function Clear-BZRCoopWatchdogMarkers([string]$RunDir) {
+    Get-ChildItem -LiteralPath $RunDir -Filter 'run-ended.*' -ErrorAction SilentlyContinue | ForEach-Object {
+        $id = 0
+        if (-not [int]::TryParse($_.Extension.TrimStart('.'), [ref]$id) -or -not (Get-Process -Id $id -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $_.FullName -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 # Records the runner's long-lived children (server, launcher) for the watchdog.
@@ -94,7 +106,7 @@ function Watch-BZRCoopRun {
 
     function Test-ParentAlive {
         # run-ended is the runner's own end-of-run signal (see Stop-BZRCoopWatchdog).
-        if (Test-Path -LiteralPath (Join-Path $RunDir 'run-ended')) { return $false }
+        if (Test-Path -LiteralPath (Join-Path $RunDir "run-ended.$PID")) { return $false }
         $p = Get-Process -Id $ParentPid -ErrorAction SilentlyContinue
         [bool]($p -and $p.StartTime.ToUniversalTime().Ticks -eq $ParentStartTicks)
     }
