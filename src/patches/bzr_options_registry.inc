@@ -779,6 +779,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Stop scrap pieces beyond this distance from casting shadows. Scrap stays "
       "visible and collectable; only its tiny shadow goes. Saves CPU on scrap-heavy "
       "maps. Rendering only. Restart required." },
+    { "Scrap Glow", "Fixes", "ScrapGlow", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Let scrap pieces glow. Off leaves scrap out of the glow pass, so it no "
+      "longer glows or hides the glow of things behind it. Rendering only. "
+      "Restart required." },
     { "Net Route", "Network", "RoutePreference", nullptr, 0,
       kShimSettingsNetRouteValues, kShimSettingsNetRouteLabels, 3, 0,
       ShimSettingApplyGroup::BzrNetRoute,
@@ -960,7 +966,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
     { "RoutePreference", "Stock" }, { "UdpPort", "0" }, { "GovernorTuning", "Stock" },
-    { "RemoteSmoothingMs", "0" }, { "MapListLetterJump", "0" }, { "ScrapShadowDistance", "0" },
+    { "RemoteSmoothingMs", "0" }, { "MapListLetterJump", "0" }, { "ScrapShadowDistance", "0" }, { "ScrapGlow", "1" },
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
     { "LobbyReadouts", "0" }, { "BlockFreeCamInMultiplayer", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },

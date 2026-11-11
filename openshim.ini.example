@@ -764,6 +764,19 @@ DynamicGeometryFastSort = 1
 ; Env override for benches: OPENSHIM_SCRAP_SHADOW_DISTANCE
 ScrapShadowDistance = 0
 
+; Scrap glows because its materials (npscr1/2/3) inherit BZBase, whose glow
+; technique draws the piece's emissive map into the stock Glow pass (stock and
+; Enhanced profiles alike, whenever Glow is on). 0 leaves stock scrap out of
+; that pass; the main view and shadows are untouched, so scrap stays visible
+; and collectable. Side effect: scrap no longer occludes glow from objects
+; behind it, so their glow shows through it. Looks option; the CPU saved is
+; small. Renderer only: no simulation, collision, pickup, AI or network
+; effect. Mod scrap with other mesh names keeps its glow.
+; The 1 Hz [FRUSTUMCULL] line reports scrapGlowSkipped.
+; Accepted: 1 (stock) or 0. Default: 1.
+; Env override for benches: OPENSHIM_SCRAP_GLOW
+ScrapGlow = 1
+
 ; Improve how Windows schedules the game's frame thread. Most frame hitches
 ; are waits on Present; these reduce scheduler-caused ones rather than raise
 ; the average frame rate. The thread that runs the frame loop registers with

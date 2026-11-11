@@ -2,7 +2,8 @@
 //
 // SPDX-License-Identifier: MIT
 //
-// Pure logic for [Fixes] ScrapShadowDistance (ogre_entity_frustum_cull.cpp).
+// Pure logic for [Fixes] ScrapShadowDistance and [Fixes] ScrapGlow
+// (ogre_entity_frustum_cull.cpp).
 // Scrap pieces are small (npscr1/2/3 are 4-6 triangle meshes under a metre),
 // so their PSSM shadow lands under the piece itself and is a handful of texels
 // at any distance. Past a chosen distance from the main camera the shadow-caster
@@ -152,6 +153,48 @@ namespace BZROpenShim
             const void* m_slots[Capacity] = {};
             uint32_t m_live = 0;
         };
+
+        // [Fixes] ScrapGlow: 1 (stock) keeps scrap in the glow pass, 0 leaves it
+        // out. Scrap glows because npscr1/2/3.material inherit BZBase, whose
+        // "scheme glow" technique samples the piece's EmissiveMap. Parses a
+        // leading integer (any non-zero = on); false leaves `enabled` untouched,
+        // so a stray non-numeric value never changes the setting.
+        inline bool TryParseScrapGlowSetting(const char* text, bool& enabled)
+        {
+            if (!text)
+                return false;
+            while (*text == ' ' || *text == '\t')
+                ++text;
+            if (*text < '0' || *text > '9')
+                return false;
+            bool nonZero = false;
+            for (; *text >= '0' && *text <= '9'; ++text)
+            {
+                if (*text != '0')
+                    nonZero = true;
+            }
+            enabled = nonZero;
+            return true;
+        }
+
+        // The glow compositor re-renders the main camera into its own viewport
+        // whose material scheme is "glow" (the same identification the fog
+        // cull uses). A null scheme, another camera or the main viewport is
+        // never the glow pass.
+        inline bool IsGlowPass(bool isMainCamera, bool isMainViewport, const char* scheme)
+        {
+            if (!isMainCamera || isMainViewport || !scheme)
+                return false;
+            return scheme[0] == 'g' && scheme[1] == 'l' && scheme[2] == 'o' &&
+                scheme[3] == 'w' && scheme[4] == '\0';
+        }
+
+        // Skip only a scrap entity's glow-pass submission, and only when the
+        // setting is off. Main view and shadow casters are never affected.
+        inline bool ShouldSkipGlowSubmission(bool scrapGlowEnabled, bool isScrap, bool glowPass)
+        {
+            return !scrapGlowEnabled && isScrap && glowPass;
+        }
 
         // Telemetry only: numbers the distinct shadow cameras seen since the
         // last non-shadow traversal in order of first appearance (Ogre renders

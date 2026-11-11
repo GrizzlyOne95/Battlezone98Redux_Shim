@@ -316,6 +316,8 @@ openshim_opt:DynamicGeometryFastSort:label~Effect Sort~~~~~~
 openshim_opt:DynamicGeometryFastSort:desc~Sort effect-sprite batches without calling into Ogre for every compare. Same order, same pixels. Restart required.~~~~~~
 openshim_opt:ScrapShadowDistance:label~Scrap Shadows~~~~~~
 openshim_opt:ScrapShadowDistance:desc~Stop scrap pieces beyond this distance from casting shadows. Scrap stays visible and collectable; only its tiny shadow goes. Saves CPU on scrap-heavy maps. Rendering only. Restart required.~~~~~~
+openshim_opt:ScrapGlow:label~Scrap Glow~~~~~~
+openshim_opt:ScrapGlow:desc~Let scrap pieces glow. Off leaves scrap out of the glow pass, so it no longer glows or hides the glow of things behind it. Rendering only. Restart required.~~~~~~
 openshim_opt:RoutePreference:label~Net Route~~~~~~
 openshim_opt:RoutePreference:desc~Peer path: Stock leaves Redux's choice; Prefer Direct tries LAN, then direct WAN, then the relay; Force Relay always uses BZRNet. Does not add LAN or direct-IP hosting.~~~~~~
 openshim_opt:UdpPort:label~UDP Port~~~~~~
