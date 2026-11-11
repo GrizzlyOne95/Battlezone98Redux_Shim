@@ -2375,6 +2375,69 @@ namespace BZROpenShim
             TryResetChunkProxyNode(node, setPosition, setOrientation);
         }
 
+        void HideShimOwnedEntity(void* entity)
+        {
+            static FnOgreSetVisible setVisible =
+                ResolveOgreProc<FnOgreSetVisible>("?setVisible@MovableObject@Ogre@@UAEX_N@Z");
+            TryHideChunkProxyEntity(entity, setVisible);
+        }
+
+        using FnOgreRootSingleton = void*(__cdecl*)();
+        using FnOgreRootAutoWindow = void*(__thiscall*)(void*);
+        using FnOgreTargetViewport = void*(__thiscall*)(void*, unsigned short);
+        using FnOgreViewportCamera = void*(__thiscall*)(void*);
+        using FnOgreCameraPosition = const OgreVector3*(__thiscall*)(void*);
+
+        // Own function: __try with no unwinding (no statics, no C++ objects).
+        static bool TryReadMainViewCameraSeh(
+            FnOgreRootSingleton getRoot,
+            FnOgreRootAutoWindow getWindow,
+            FnOgreTargetViewport getViewport,
+            FnOgreViewportCamera getCamera,
+            FnOgreCameraPosition getPosition,
+            float out[3])
+        {
+            __try
+            {
+                void* const root = getRoot();
+                void* const window = root ? getWindow(root) : nullptr;
+                void* const viewport = window ? getViewport(window, 0) : nullptr;
+                void* const camera = viewport ? getCamera(viewport) : nullptr;
+                const OgreVector3* const p = camera ? getPosition(camera) : nullptr;
+                if (!p)
+                    return false;
+                out[0] = p->x;
+                out[1] = p->y;
+                out[2] = p->z;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
+        }
+
+        // The camera the auto-created window's first viewport renders through
+        // (the player's view; terrain_proxy.cpp's GetActiveCamera uses the same
+        // chain). Read outside any render traversal, so unlike the scene
+        // manager's current viewport it is never a shadow or glow camera.
+        bool TryGetMainViewCameraPosition(float out[3])
+        {
+            static const FnOgreRootSingleton getRoot =
+                ResolveOgreProc<FnOgreRootSingleton>("?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
+            static const FnOgreRootAutoWindow getWindow =
+                ResolveOgreProc<FnOgreRootAutoWindow>("?getAutoCreatedWindow@Root@Ogre@@QAEPAVRenderWindow@2@XZ");
+            static const FnOgreTargetViewport getViewport =
+                ResolveOgreProc<FnOgreTargetViewport>("?getViewport@RenderTarget@Ogre@@UAEPAVViewport@2@G@Z");
+            static const FnOgreViewportCamera getCamera =
+                ResolveOgreProc<FnOgreViewportCamera>("?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ");
+            static const FnOgreCameraPosition getPosition =
+                ResolveOgreProc<FnOgreCameraPosition>("?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ");
+            if (!out || !getRoot || !getWindow || !getViewport || !getCamera || !getPosition)
+                return false;
+            return TryReadMainViewCameraSeh(getRoot, getWindow, getViewport, getCamera, getPosition, out);
+        }
+
         using FnOgreDestroySceneNodePtr = void(__thiscall*)(void*, void*);
 
         static bool TryDestroyShimObjectSeh(

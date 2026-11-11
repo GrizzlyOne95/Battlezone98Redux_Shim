@@ -88,6 +88,17 @@
 //              Rebellion stays the default server. Only the old shipped 0
 //              moves.
 //
+//   Revision 13: the SkinnedGibs and ShellCasings pools were made cheaper
+//              on 2026-11-11 (main-thread cost in big co-op battles):
+//                 General/SkinnedGibsMax          = 96  (was 160)
+//                 General/SkinnedGibsLinger       = 6   (was 8)
+//                 General/ShellCasingsMax         = 32  (was 48)
+//                 General/ShellCasingsLinger      = 4   (was 6)
+//              Only values still at the old shipped number move. The new
+//              SkinnedGibsDrawDistance / ShellCasingsDrawDistance keys are
+//              not added to old files; absent, they take the code defaults
+//              (150 m and 70 m).
+//
 // Migration policy is implemented here so it works for:
 //   - Campaign Reimagined Workshop users
 //   - standalone OpenShim releases
@@ -102,7 +113,7 @@
 namespace BZROpenShim
 {
 
-    constexpr int kCurrentPresetRevision = 12;
+    constexpr int kCurrentPresetRevision = 13;
     constexpr int kLegacyBadPresetRevision = 1;
 
     // SHA-256 of the exact e81d8b0a player preset as a Windows checkout

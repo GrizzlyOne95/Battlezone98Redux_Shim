@@ -29,6 +29,7 @@
 #include "hook_engine.h"
 #include "native_chunk_mesh.h"
 #include "native_chunk_prune.h"
+#include "pool_draw_distance_policy.h"
 #include "shell_casing_physics.h"
 #include "shell_casing_config.h"
 #include "shell_casing_policy.h"
@@ -117,8 +118,17 @@ namespace BZROpenShim
                 bool initialized = false;
                 bool enabled = false;
                 bool trace = false;
-                size_t maxCasings = 48;
-                float linger = 6.0f;
+                // Lowered from 48 for the main-thread cost of big co-op
+                // battles: casings are a few pixels each, so a third fewer at
+                // once is hard to see, and a full pool recycles the oldest
+                // resting casing first. [General] ShellCasingsMax.
+                size_t maxCasings = 32;
+                // Lowered from 6 s, same reason: fewer resting casings at
+                // once outside sustained fire. [General] ShellCasingsLinger.
+                float linger = 4.0f;
+                // [General] ShellCasingsDrawDistance (metres, 0 = off): see
+                // pool_draw_distance_policy.h for the default.
+                int drawDistance = PoolDrawDistance::kDefaultCasingDrawDistanceMetres;
                 SC::ClassFilter filter;
                 std::string classes;
             };
@@ -165,6 +175,8 @@ namespace BZROpenShim
                     g_Config.maxCasings = static_cast<size_t>(std::clamp(value, 4.0, 512.0));
                 if (ReadEnvNumber("OPENSHIM_SHELL_CASINGS_LINGER", value))
                     g_Config.linger = static_cast<float>(std::clamp(value, 0.0, 120.0));
+                if (ReadEnvNumber("OPENSHIM_SHELL_CASINGS_DRAW_DISTANCE", value))
+                    g_Config.drawDistance = PoolDrawDistance::ClampDrawDistanceMetres(value);
                 std::string classes;
                 if (!ReadEnvString("OPENSHIM_SHELL_CASINGS_CLASSES", classes))
                     classes = SC::DefaultClassList();
@@ -179,9 +191,9 @@ namespace BZROpenShim
                 }
                 LogChunkDiagnostic(
                     "shellcasings",
-                    L"[SHELLCASINGS] config enabled=%u max=%zu linger=%.2f classes=\"%hs\" trace=%u\n",
+                    L"[SHELLCASINGS] config enabled=%u max=%zu linger=%.2f drawDistance=%d classes=\"%hs\" trace=%u\n",
                     g_Config.enabled ? 1u : 0u, g_Config.maxCasings, static_cast<double>(g_Config.linger),
-                    g_Config.classes.c_str(), g_Config.trace ? 1u : 0u);
+                    g_Config.drawDistance, g_Config.classes.c_str(), g_Config.trace ? 1u : 0u);
             }
 
             volatile LONG g_LogBudget = 64;
@@ -512,6 +524,8 @@ namespace BZROpenShim
                 bool sinking = false;
                 bool hasGround = true;
                 bool clearOfShooter = false;
+                // Hidden by ShellCasingsDrawDistance; only that cull sets it.
+                bool distanceCulled = false;
                 Vec3 position = {0, 0, 0};
                 Vec3 velocity = {0, 0, 0};
                 Vec3 omega = {0, 0, 0};
@@ -557,6 +571,7 @@ namespace BZROpenShim
                 if (slot.active && g_ActiveCount)
                     --g_ActiveCount;
                 slot.active = false;
+                slot.distanceCulled = false;
                 HideShimOwnedObject(slot.node, slot.entity);
             }
 
@@ -960,6 +975,7 @@ namespace BZROpenShim
                 slot->sinking = false;
                 slot->hasGround = true;
                 slot->clearOfShooter = false;
+                slot->distanceCulled = false; // the transform below shows it
                 slot->bounces = 0;
                 slot->shooterHandle = shot.shooterHandle;
                 slot->serial = ++g_SpawnSerial;
@@ -1108,13 +1124,19 @@ namespace BZROpenShim
                 if (!g_StatSpawned && !g_ActiveCount && !g_StatFiltered && !g_StatCulled)
                     return;
                 size_t moving = 0;
+                size_t distanceCulled = 0;
                 for (const CasingSlot& slot : g_Slots)
+                {
                     if (slot.active && !slot.settled && !slot.sinking)
                         ++moving;
+                    if (slot.active && slot.distanceCulled)
+                        ++distanceCulled;
+                }
                 LogChunkDiagnostic(
                     "shellcasings",
-                    L"[SHELLCASINGS] stats spawned/s=%u filtered/s=%u culled/s=%u dropped=%u active=%zu moving=%zu pool=%zu nearby=%zu groundHits/s=%u objectHits/s=%u submits/s=%u\n",
-                    g_StatSpawned, g_StatFiltered, g_StatCulled, g_DroppedShots, g_ActiveCount, moving, g_Slots.size(),
+                    L"[SHELLCASINGS] stats spawned/s=%u filtered/s=%u culled/s=%u dropped=%u active=%zu moving=%zu distanceHidden=%zu pool=%zu nearby=%zu groundHits/s=%u objectHits/s=%u submits/s=%u\n",
+                    g_StatSpawned, g_StatFiltered, g_StatCulled, g_DroppedShots, g_ActiveCount, moving, distanceCulled,
+                    g_Slots.size(),
                     g_Nearby.size(), g_StatGroundHits, g_StatObjectHits, g_StatSubmits);
                 g_StatSpawned = g_StatFiltered = g_StatCulled = 0;
                 g_StatGroundHits = g_StatObjectHits = g_StatSubmits = 0;
@@ -1247,7 +1269,7 @@ namespace BZROpenShim
                 return;
             for (CasingSlot& slot : g_Slots)
             {
-                if (!slot.active || !slot.entity || !SceneMatches(slot, sceneManager))
+                if (!slot.active || !slot.entity || slot.distanceCulled || !SceneMatches(slot, sceneManager))
                     continue;
                 if (g_PoolSubmitCensusEnabled)
                     NotePoolManualSubmit(true);
@@ -1333,6 +1355,9 @@ namespace BZROpenShim
                 }
             }
 
+            // Draw distance: one camera read per tick, only when the cull is on.
+            float camera[3] = {};
+            const bool cameraKnown = g_Config.drawDistance > 0 && TryGetMainViewCameraPosition(camera);
             for (CasingSlot& slot : g_Slots)
             {
                 if (!slot.active)
@@ -1359,7 +1384,19 @@ namespace BZROpenShim
                     ReleaseSlot(slot);
                     continue;
                 }
-                if (wasResting && slot.settled && !slot.sinking)
+                const float at[3] = {slot.position.x, slot.position.y, slot.position.z};
+                const PoolDrawDistance::Transition cull = PoolDrawDistance::Decide(
+                    slot.distanceCulled, cameraKnown, cameraKnown ? PoolDrawDistance::DistanceSquared(at, camera) : 0.0f,
+                    g_Config.drawDistance);
+                if (cull == PoolDrawDistance::Transition::Hide)
+                {
+                    HideShimOwnedEntity(slot.entity);
+                    slot.distanceCulled = true;
+                }
+                if (slot.distanceCulled && cull != PoolDrawDistance::Transition::Show)
+                    continue; // hidden: the transform is pushed when it is shown
+                const bool show = cull == PoolDrawDistance::Transition::Show;
+                if (!show && wasResting && slot.settled && !slot.sinking)
                     continue; // nothing moved
                 const float position[3] = {slot.position.x, slot.position.y, slot.position.z};
                 const float quat[4] = {slot.orientation.w, slot.orientation.x, slot.orientation.y, slot.orientation.z};
@@ -1367,6 +1404,8 @@ namespace BZROpenShim
                 const float scale[3] = {std::max(size, 1e-4f), std::max(size, 1e-4f), std::max(size, 1e-4f)};
                 if (!SetShimOwnedObjectTransform(slot.node, slot.entity, position, quat, slot.sinking ? scale : nullptr))
                     ForgetSlot(slot);
+                else if (show)
+                    slot.distanceCulled = false;
             }
             MaybeLogStats();
         }

@@ -391,6 +391,16 @@ namespace BZROpenShim
             { "Network", "PreLobby", "0", "1" },
         };
 
+        // Revision 12 -> 13: smaller SkinnedGibs and ShellCasings pools and
+        // shorter linger (main-thread cost in big co-op battles). Only the
+        // old shipped numbers move; any other value is the player's own.
+        const SurgicalEntry kRevision12SurgicalTable[] = {
+            { "General", "SkinnedGibsMax", "160", "96" },
+            { "General", "SkinnedGibsLinger", "8", "6" },
+            { "General", "ShellCasingsMax", "48", "32" },
+            { "General", "ShellCasingsLinger", "6", "4" },
+        };
+
         // Narrow fixups that apply when migrating away from `fromRevision`:
         // that revision's table and every later one, in order, so a file
         // several revisions behind collects each step. Empty for an unknown
@@ -437,6 +447,9 @@ namespace BZROpenShim
             if (fromRevision <= 11)
                 append(kRevision11SurgicalTable,
                        sizeof(kRevision11SurgicalTable) / sizeof(kRevision11SurgicalTable[0]));
+            if (fromRevision <= 12)
+                append(kRevision12SurgicalTable,
+                       sizeof(kRevision12SurgicalTable) / sizeof(kRevision12SurgicalTable[0]));
             return entries;
         }
 

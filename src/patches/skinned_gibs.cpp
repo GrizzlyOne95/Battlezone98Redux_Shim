@@ -27,6 +27,7 @@
 #include "game_state.h"
 #include "gib_flesh_texture.h"
 #include "hook_engine.h"
+#include "pool_draw_distance_policy.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -100,9 +101,19 @@ namespace BZROpenShim
                 bool enabled = true;
                 bool fractureEnabled = true;
                 bool trace = false;
-                size_t maxGibs = 160;
-                float linger = 8.0f;
+                // Lowered from 160 for the main-thread cost of big co-op
+                // battles: a person death throws about a dozen limb gibs and a
+                // fracture 4-8 pieces, so 96 still holds the last six or more
+                // bodies, and a full pool recycles the oldest resting gib
+                // first. [General] SkinnedGibsMax.
+                size_t maxGibs = 96;
+                // Lowered from 8 s, same reason: fewer resting gibs at once
+                // outside saturated fights. [General] SkinnedGibsLinger.
+                float linger = 6.0f;
                 float force = 1.0f;
+                // [General] SkinnedGibsDrawDistance (metres, 0 = off): see
+                // pool_draw_distance_policy.h for the default.
+                int drawDistance = PoolDrawDistance::kDefaultGibDrawDistanceMetres;
             };
             GibConfig g_Config;
 
@@ -140,14 +151,17 @@ namespace BZROpenShim
                     g_Config.linger = static_cast<float>(std::clamp(value, 0.0, 60.0));
                 if (ReadEnvNumber("OPENSHIM_SKINNED_GIBS_FORCE", value))
                     g_Config.force = static_cast<float>(std::clamp(value, 0.0, 5.0));
+                if (ReadEnvNumber("OPENSHIM_SKINNED_GIBS_DRAW_DISTANCE", value))
+                    g_Config.drawDistance = PoolDrawDistance::ClampDrawDistanceMetres(value);
                 LogChunkDiagnostic(
                     "skinnedgibs",
-                    L"[SKINNEDGIBS] config enabled=%u fracture=%u max=%zu linger=%.2f force=%.2f trace=%u\n",
+                    L"[SKINNEDGIBS] config enabled=%u fracture=%u max=%zu linger=%.2f force=%.2f drawDistance=%d trace=%u\n",
                     g_Config.enabled ? 1u : 0u,
                     g_Config.fractureEnabled ? 1u : 0u,
                     g_Config.maxGibs,
                     static_cast<double>(g_Config.linger),
                     static_cast<double>(g_Config.force),
+                    g_Config.drawDistance,
                     g_Config.trace ? 1u : 0u);
             }
 
@@ -462,6 +476,8 @@ namespace BZROpenShim
                 bool impacted = false;
                 bool hasGround = true;
                 bool metal = false; // fracture piece: metal ground response
+                // Hidden by SkinnedGibsDrawDistance; only that cull sets it.
+                bool distanceCulled = false;
                 Vec3 position = {};
                 Vec3 velocity = {};
                 Vec3 omega = {};
@@ -495,6 +511,7 @@ namespace BZROpenShim
                 if (slot.active && g_ActiveCount)
                     --g_ActiveCount;
                 slot.active = false;
+                slot.distanceCulled = false;
                 HideShimOwnedObject(slot.node, slot.entity);
             }
 
@@ -797,6 +814,7 @@ namespace BZROpenShim
                     slot->impacted = false;
                     slot->hasGround = true;
                     slot->metal = capture.fracture;
+                    slot->distanceCulled = false; // the transform below shows it
                     slot->serial = ++g_SpawnSerial;
                     const float position[3] = {world.x, world.y, world.z};
                     const float quat[4] = {orientation.w, orientation.x, orientation.y, orientation.z};
@@ -1121,6 +1139,9 @@ namespace BZROpenShim
 
             void* const sceneManager = GetOgreSceneManagerRuntime();
             const FnTerrainHeightAt terrain = ResolveTerrainHeight();
+            // Draw distance: one camera read per tick, only when the cull is on.
+            float camera[3] = {};
+            const bool cameraKnown = g_Config.drawDistance > 0 && TryGetMainViewCameraPosition(camera);
             for (GibSlot& slot : g_Slots)
             {
                 if (!slot.active)
@@ -1136,12 +1157,26 @@ namespace BZROpenShim
                     ReleaseSlot(slot);
                     continue;
                 }
-                if (wasResting && slot.settled && !slot.sinking)
+                const float at[3] = {slot.position.x, slot.position.y, slot.position.z};
+                const PoolDrawDistance::Transition cull = PoolDrawDistance::Decide(
+                    slot.distanceCulled, cameraKnown, cameraKnown ? PoolDrawDistance::DistanceSquared(at, camera) : 0.0f,
+                    g_Config.drawDistance);
+                if (cull == PoolDrawDistance::Transition::Hide)
+                {
+                    HideShimOwnedEntity(slot.entity);
+                    slot.distanceCulled = true;
+                }
+                if (slot.distanceCulled && cull != PoolDrawDistance::Transition::Show)
+                    continue; // hidden: the transform is pushed when it is shown
+                const bool show = cull == PoolDrawDistance::Transition::Show;
+                if (!show && wasResting && slot.settled && !slot.sinking)
                     continue; // nothing moved
                 const float position[3] = {slot.position.x, slot.position.y, slot.position.z};
                 const float quat[4] = {slot.orientation.w, slot.orientation.x, slot.orientation.y, slot.orientation.z};
                 if (!SetShimOwnedObjectTransform(slot.node, slot.entity, position, quat, nullptr))
                     ForgetSlot(slot);
+                else if (show)
+                    slot.distanceCulled = false;
             }
         }
 
@@ -1354,7 +1389,7 @@ namespace BZROpenShim
             bool probed = false;
             for (GibSlot& slot : g_Slots)
             {
-                if (!slot.active || !slot.entity || !SceneMatches(slot, sceneManager))
+                if (!slot.active || !slot.entity || slot.distanceCulled || !SceneMatches(slot, sceneManager))
                     continue;
                 if (g_PoolSubmitCensusEnabled)
                     NotePoolManualSubmit(false);

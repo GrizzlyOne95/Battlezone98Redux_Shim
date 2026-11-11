@@ -212,7 +212,8 @@ person's death itself:
    chunk tick: gravity, a soft thud on the terrain (low bounce, high friction),
    lie still for `SkinnedGibsLinger` seconds, sink, disappear. At most
    `SkinnedGibsMax` gibs live at once; the oldest resting one is recycled
-   first.
+   first. Gibs farther than `SkinnedGibsDrawDistance` metres from the camera
+   are hidden (still simulated) until they come back inside.
 4. **No double bodies.** The body mesh is hidden, and the engine's own legacy
    chunks for that death keep simulating (their smoke and pops are unchanged)
    but the chunk renderer is told not to draw them. Nothing in the engine's

@@ -813,6 +813,56 @@ int main()
               "6l: setup screen off chosen after the revision is respected");
     }
 
+    // 6m. revision 12 -> 13: smaller gib and casing pools, shorter linger.
+    // Only the old shipped numbers move.
+    {
+        fs::path canonical = tmpRoot / "canonical6m.ini";
+        WriteLines(canonical, MakeCanonicalLines());
+        fs::path shipped = tmpRoot / "rev12_pools_shipped.ini";
+        WriteLines(shipped, {
+            "; OpenShimPresetRevision = 12",
+            "",
+            "[General]",
+            "SkinnedGibsMax = 160",
+            "SkinnedGibsLinger = 8",
+            "ShellCasingsMax = 48",
+            "ShellCasingsLinger = 6",
+        });
+        auto r = MigratePresetFileIfNeeded(shipped, canonical);
+        Check(r.action == MigrationAction::SurgicalFixed && r.fromRevision == 12,
+              "6m: revision 12 file is migrated");
+        Check(FileContains(shipped, "SkinnedGibsMax = 96") && FileContains(shipped, "SkinnedGibsLinger = 6") &&
+                  FileContains(shipped, "ShellCasingsMax = 32") && FileContains(shipped, "ShellCasingsLinger = 4"),
+              "6m: shipped pool sizes and linger move to the new defaults");
+
+        fs::path custom = tmpRoot / "rev12_pools_custom.ini";
+        WriteLines(custom, {
+            "; OpenShimPresetRevision = 12",
+            "",
+            "[General]",
+            "SkinnedGibsMax = 200",
+            "SkinnedGibsLinger = 10",
+            "ShellCasingsMax = 64",
+            "ShellCasingsLinger = 6",
+        });
+        auto c = MigratePresetFileIfNeeded(custom, canonical);
+        Check(c.fromRevision == 12 && FileContains(custom, "SkinnedGibsMax = 200") &&
+                  FileContains(custom, "SkinnedGibsLinger = 10") && FileContains(custom, "ShellCasingsMax = 64") &&
+                  FileContains(custom, "ShellCasingsLinger = 4"),
+              "6m: player-set values are kept; only the still-shipped one moves");
+
+        fs::path chosen = tmpRoot / "rev13_pools_big.ini";
+        WriteLines(chosen, {
+            "; " + CurrentRevisionMarker(),
+            "",
+            "[General]",
+            "SkinnedGibsMax = 160",
+        });
+        auto again = MigratePresetFileIfNeeded(chosen, canonical);
+        Check(again.action == MigrationAction::None && FileContains(chosen, "SkinnedGibsMax = 160"),
+              "6m: 160 chosen after the revision is respected");
+    }
+
     // 7. unknown/custom file -> untouched
     {
         fs::path custom = tmpRoot / "custom.ini";
