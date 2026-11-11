@@ -241,6 +241,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "ApcAlliedTargetDeploy", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_ORDNANCE_ENTITY_LEAK_FIX") ||
+            Equals(name, "BZR_DISABLE_ORDNANCE_ENTITY_LEAK_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "OrdnanceEntityLeak", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_SPLINTER_UNDEAD_FIX") ||
             Equals(name, "BZR_DISABLE_SPLINTER_UNDEAD_FIX"))
         {

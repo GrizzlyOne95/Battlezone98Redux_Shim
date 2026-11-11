@@ -188,6 +188,7 @@ namespace BZROpenShim
                 planeCleared ? 1 : 0);
             DestroySkinnedGibSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyShellCasingSceneObjects(sceneManager, L"destroyAllEntities");
+            OrdnanceEntityLeakOnSceneEntitiesDestroyed();
             if (g_OgreFn_DestroyAllEntitiesOriginal)
                 g_OgreFn_DestroyAllEntitiesOriginal(sceneManager);
         }

@@ -1023,6 +1023,8 @@ namespace BZROpenShim
              "OPENSHIM_DISABLE_CONSTRUCTOR_RECYCLE_FIX", "BZR_DISABLE_CONSTRUCTOR_RECYCLE_FIX"},
             {&g_ApcAlliedTargetDeployFixEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_APC_DEPLOY_FIX", "BZR_DISABLE_APC_DEPLOY_FIX"},
+            {&g_OrdnanceEntityLeakFixEnabled, EnvSwitches::Kind::KillSwitch,
+             "OPENSHIM_DISABLE_ORDNANCE_ENTITY_LEAK_FIX", "BZR_DISABLE_ORDNANCE_ENTITY_LEAK_FIX"},
             {&g_QuakeReplayFadeEnabled, EnvSwitches::Kind::KillSwitch,
              "OPENSHIM_DISABLE_QUAKE_FADE", "BZR_DISABLE_QUAKE_FADE"},
             {&g_TargetCamSatelliteFixEnabled, EnvSwitches::Kind::KillSwitch,
@@ -1650,6 +1652,7 @@ namespace BZROpenShim
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},
             {"InitializeMeshAccurateImpacts", &MeshImpact::InitializeGlobal},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
+            {"InstallOrdnanceEntityLeakFixIfPossible", &InstallOrdnanceEntityLeakFixIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
             {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},
             {"InitializeUnitVoConfig", &InitializeUnitVoConfig},
@@ -1712,6 +1715,7 @@ namespace BZROpenShim
         InstallUiManualObjectDedupeHookIfPossible();
         InstallEmissionLightFixIfPossible();
         VerifyExpectedOgreExportsIfPossible();
+        InstallOrdnanceEntityLeakFixIfPossible();
         InstallSceneTeardownForgetHooksIfPossible();
         InstallEntityReloadLifetimeHookIfPossible();
         InstallEntityFrustumCullingIfEnabled();

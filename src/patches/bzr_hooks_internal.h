@@ -1423,6 +1423,12 @@ namespace BZROpenShim
         void InstallTugCargoPostLoadFixIfPossible();
         void RefreshApcAlliedTargetDeployFixState();
         void InstallApcAlliedTargetDeployFixIfPossible();
+        // --- Ordnance entity leak fix (ordnance_entity_leak.cpp) ----------------
+        extern bool g_OrdnanceEntityLeakFixEnabled;
+        void InstallOrdnanceEntityLeakFixIfPossible();
+        // SceneManager::destroyAllEntities is about to free every Entity:
+        // forget the tracked ordnance Entities. Main thread only.
+        void OrdnanceEntityLeakOnSceneEntitiesDestroyed() noexcept;
         bool ShouldTraceConstructorRemoteBuildFix();
         void InstallConstructorRemoteBuildFixIfPossible();
 
@@ -1650,6 +1656,8 @@ namespace BZROpenShim
         void SkinnedGibsEndFullFragment(void* chunkEffect);
         void TickSkinnedGibs(void* chunkEffect, float dt);
         void SubmitSkinnedGibsToRenderQueue(void* renderQueue);
+        // True when the entity belongs to an active gib slot (diagnostics only).
+        bool IsSkinnedGibEntity(const void* entity);
         void ForgetSkinnedGibSceneResources(const wchar_t* reason);
         void DeactivateSkinnedGibs(const wchar_t* reason);
         // SceneManager::destroyAllEntities is about to free the pool's entities.
@@ -1671,6 +1679,17 @@ namespace BZROpenShim
         bool IsShellCasingsEnabled();
         void TickShellCasings(float dt);
         void SubmitShellCasingsToRenderQueue(void* renderQueue);
+        bool IsShellCasingEntity(const void* entity);
+        // Gib and casing entities hang off the root scene node, so Ogre's own
+        // traversal already queues them. The pools' manual submit queued each
+        // one again on every world render-queue pass (3x per frame measured).
+        // OPENSHIM_POOL_MANUAL_SUBMIT=1 restores it for A/B comparison only.
+        bool ShimPoolManualSubmitEnabled();
+        // OPENSHIM_POOL_SUBMIT_CENSUS=1 (ogre_entity_frustum_cull.cpp): counts
+        // render-queue submissions of gib/casing entities by path. Needs the
+        // submission hooks installed. casing=false means a skinned gib.
+        extern bool g_PoolSubmitCensusEnabled;
+        void NotePoolManualSubmit(bool casing);
         void ForgetShellCasingSceneResources(const wchar_t* reason);
         void DeactivateShellCasings(const wchar_t* reason);
         void DestroyShellCasingSceneObjects(void* sceneManager, const wchar_t* reason);

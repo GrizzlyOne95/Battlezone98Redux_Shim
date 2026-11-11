@@ -1209,6 +1209,18 @@ namespace BZROpenShim
             return g_Config.enabled;
         }
 
+        bool IsShellCasingEntity(const void* entity)
+        {
+            if (!entity)
+                return false;
+            for (const CasingSlot& slot : g_Slots)
+            {
+                if (slot.active && slot.entity == entity)
+                    return true;
+            }
+            return false;
+        }
+
         void SubmitShellCasingsToRenderQueue(void* renderQueue)
         {
             if (!renderQueue || !g_Config.initialized || !g_Config.enabled)
@@ -1229,12 +1241,16 @@ namespace BZROpenShim
                 g_CameraRender = camera;
                 g_HaveCamera = true;
             }
+            if (!ShimPoolManualSubmitEnabled())
+                return; // Ogre's scene traversal already queues every active casing.
             if (!g_ActiveCount)
                 return;
             for (CasingSlot& slot : g_Slots)
             {
                 if (!slot.active || !slot.entity || !SceneMatches(slot, sceneManager))
                     continue;
+                if (g_PoolSubmitCensusEnabled)
+                    NotePoolManualSubmit(true);
                 ++g_StatSubmits;
                 if (!SubmitShimOwnedEntityToRenderQueue(slot.sceneManager, slot.entity, renderQueue))
                 {

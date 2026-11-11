@@ -229,6 +229,57 @@ bool g_BoundsTraceEnabled = false;
 // contractually single-threaded even though Redux drives it from one thread.
 static thread_local bool t_EntityFrustumCullSuppress = false;
 
+// OPENSHIM_POOL_SUBMIT_CENSUS=1: how often shim-owned gib/casing entities
+// reach Entity::_updateRenderQueue, split into Ogre's own scene traversal
+// (processVisibleObject, main and shadow passes) and the pools' manual
+// submit from the world render-queue hook. Diagnostic only.
+bool g_PoolSubmitCensusEnabled = false;
+static thread_local int t_PoolCensusTraversalKind = 0; // 0 none, 1 gib, 2 casing
+static uint32_t g_PoolCensusManual[2] = {};
+static uint32_t g_PoolCensusTraversalMain[2] = {};
+static uint32_t g_PoolCensusTraversalShadow[2] = {};
+static uint32_t g_PoolCensusQueuedTraversal[2] = {};
+static uint32_t g_PoolCensusQueuedOther[2] = {};
+static uint32_t g_PoolCensusLastTick = 0;
+
+void NotePoolManualSubmit(bool casing)
+{
+    ++g_PoolCensusManual[casing ? 1 : 0];
+}
+
+static int ClassifyPoolEntity(const void* entity)
+{
+    if (IsSkinnedGibEntity(entity))
+        return 1;
+    if (IsShellCasingEntity(entity))
+        return 2;
+    return 0;
+}
+
+static void ReportPoolSubmitCensusIfDue()
+{
+    const uint32_t now = GetTickCount();
+    if (!g_PoolCensusLastTick)
+        g_PoolCensusLastTick = now;
+    if (now - g_PoolCensusLastTick < 5000)
+        return;
+    g_PoolCensusLastTick = now;
+    LogShimA(
+        LogLevel::Info,
+        "frustumcull",
+        "[POOLSUBMIT] 5s gib manual=%u travMain=%u travShadow=%u queuedTrav=%u queuedOther=%u | "
+        "casing manual=%u travMain=%u travShadow=%u queuedTrav=%u queuedOther=%u",
+        g_PoolCensusManual[0], g_PoolCensusTraversalMain[0], g_PoolCensusTraversalShadow[0],
+        g_PoolCensusQueuedTraversal[0], g_PoolCensusQueuedOther[0],
+        g_PoolCensusManual[1], g_PoolCensusTraversalMain[1], g_PoolCensusTraversalShadow[1],
+        g_PoolCensusQueuedTraversal[1], g_PoolCensusQueuedOther[1]);
+    std::memset(g_PoolCensusManual, 0, sizeof(g_PoolCensusManual));
+    std::memset(g_PoolCensusTraversalMain, 0, sizeof(g_PoolCensusTraversalMain));
+    std::memset(g_PoolCensusTraversalShadow, 0, sizeof(g_PoolCensusTraversalShadow));
+    std::memset(g_PoolCensusQueuedTraversal, 0, sizeof(g_PoolCensusQueuedTraversal));
+    std::memset(g_PoolCensusQueuedOther, 0, sizeof(g_PoolCensusQueuedOther));
+}
+
 using FnOgreProcessVisibleObject =
     void(__thiscall*)(void*, void*, void*, bool, void*);
 using FnOgreEntityUpdateRenderQueueBody = void(__thiscall*)(void*, void*);
@@ -1537,6 +1588,20 @@ static void __fastcall EntityUpdateRenderQueueHook(
         // found entirely outside it. Submitting nothing is the whole point.
         return;
     }
+    if (g_PoolSubmitCensusEnabled)
+    {
+        // Traversal-originated calls are tagged by ProcessVisibleObjectHook;
+        // anything else reaching here for a pool entity is the manual path.
+        const int kind = t_PoolCensusTraversalKind ? t_PoolCensusTraversalKind
+                                                   : ClassifyPoolEntity(entity);
+        if (kind)
+        {
+            if (t_PoolCensusTraversalKind)
+                ++g_PoolCensusQueuedTraversal[kind - 1];
+            else
+                ++g_PoolCensusQueuedOther[kind - 1];
+        }
+    }
     if (g_OgreFn_EntityUpdateRenderQueueOriginal)
         g_OgreFn_EntityUpdateRenderQueueOriginal(entity, renderQueue);
 }
@@ -1910,6 +1975,14 @@ static void __fastcall ProcessVisibleObjectHook(
     // Entity::_updateRenderQueue is suppressed, and only for this object.
     const bool previous = t_EntityFrustumCullSuppress;
     t_EntityFrustumCullSuppress = cull;
+    const int previousPoolKind = t_PoolCensusTraversalKind;
+    if (g_PoolSubmitCensusEnabled && movableObject)
+    {
+        const int kind = ClassifyPoolEntity(movableObject);
+        if (kind)
+            ++(onlyShadowCasters ? g_PoolCensusTraversalShadow : g_PoolCensusTraversalMain)[kind - 1];
+        t_PoolCensusTraversalKind = kind;
+    }
     if (g_OgreFn_ProcessVisibleObjectOriginal)
     {
         g_OgreFn_ProcessVisibleObjectOriginal(
@@ -1918,6 +1991,9 @@ static void __fastcall ProcessVisibleObjectHook(
     t_EntityFrustumCullSuppress = previous;
 
     ReportFrustumCullIntervalIfDue();
+    t_PoolCensusTraversalKind = previousPoolKind;
+    if (g_PoolSubmitCensusEnabled)
+        ReportPoolSubmitCensusIfDue();
 }
 
 // -------------------------------------------------------------- install -----
@@ -1978,6 +2054,9 @@ void InstallEntityFrustumCullingIfEnabled()
     if (!GetModuleHandleA("OgreMain.dll"))
         return;
     g_EntityFrustumCullInstalled = true;
+
+    if (const char* poolCensus = std::getenv("OPENSHIM_POOL_SUBMIT_CENSUS"))
+        g_PoolSubmitCensusEnabled = poolCensus[0] == '1';
 
     if (const char* marginText = std::getenv("OPENSHIM_FRUSTUM_CULL_MARGIN"))
     {

@@ -112,6 +112,11 @@ namespace
         Check(Mapped(ini, "BZR_DISABLE_APC_DEPLOY_FIX") == "1", "the BZR_ alias reads the same key");
         ini.Set("Fixes", "ApcAlliedTargetDeploy", "on");
         Check(Mapped(ini, "OPENSHIM_DISABLE_APC_DEPLOY_FIX") == "0", "fix left on reads as DISABLE=0");
+        ini.Set("Fixes", "OrdnanceEntityLeak", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_ORDNANCE_ENTITY_LEAK_FIX") == "1", "ordnance leak fix off reads as DISABLE=1");
+        Check(Mapped(ini, "BZR_DISABLE_ORDNANCE_ENTITY_LEAK_FIX") == "1", "ordnance leak BZR_ alias reads the same key");
+        ini.Set("Fixes", "OrdnanceEntityLeak", "1");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_ORDNANCE_ENTITY_LEAK_FIX") == "0", "ordnance leak fix on reads as DISABLE=0");
 
         // ENABLE_ and DISABLE_ spellings of one key always disagree.
         ini.Set("Network", "LobbyBanButton", "yes");
