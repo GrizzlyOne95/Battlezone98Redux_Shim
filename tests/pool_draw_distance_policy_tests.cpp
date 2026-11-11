@@ -1,5 +1,6 @@
 #include "pool_draw_distance_policy.h"
 
+#include <cmath>
 #include <cstdio>
 #include <limits>
 
@@ -64,6 +65,18 @@ int main()
     check(Decide(true, true, far, 0) == Transition::Show, "off shows a piece left culled");
     check(Decide(false, true, nan, 100) == Transition::Keep, "NaN distance never hides");
     check(Decide(true, true, nan, 100) == Transition::Show, "NaN distance shows a culled piece");
+
+    const float pi = 3.14159265f;
+    check(std::fabs(ZoomDistanceScale(pi / 3.0f) - 1.0f) < 1e-4f, "reference 60 degree FOV: plain distance");
+    check(ZoomDistanceScale(pi / 2.0f) == 1.0f, "wider FOV never culls closer");
+    check(std::fabs(ZoomDistanceScale(2.0f * std::atan(0.57735027f / 4.0f)) - 0.25f) < 1e-4f, "4x zoom quarters the distance");
+    check(ZoomDistanceScale(0.0f) == 1.0f && ZoomDistanceScale(-1.0f) == 1.0f, "bad FOV: plain distance");
+    check(ZoomDistanceScale(nan) == 1.0f && ZoomDistanceScale(3.2f) == 1.0f, "NaN or degenerate FOV: plain distance");
+    {
+        const float d = 400.0f; // 400 m through a 4x scope looks like 100 m
+        const float z = ZoomDistanceScale(2.0f * std::atan(0.57735027f / 4.0f));
+        check(Decide(false, true, d * d * z * z, 150) == Transition::Keep, "zoomed: far piece stays drawn");
+    }
 
     if (g_failures)
     {

@@ -2387,6 +2387,7 @@ namespace BZROpenShim
         using FnOgreTargetViewport = void*(__thiscall*)(void*, unsigned short);
         using FnOgreViewportCamera = void*(__thiscall*)(void*);
         using FnOgreCameraPosition = const OgreVector3*(__thiscall*)(void*);
+        using FnOgreFrustumFovY = const float*(__thiscall*)(void*); // const Radian&
 
         // Own function: __try with no unwinding (no statics, no C++ objects).
         static bool TryReadMainViewCameraSeh(
@@ -2395,7 +2396,9 @@ namespace BZROpenShim
             FnOgreTargetViewport getViewport,
             FnOgreViewportCamera getCamera,
             FnOgreCameraPosition getPosition,
-            float out[3])
+            FnOgreFrustumFovY getFovY,
+            float out[3],
+            float* fovY)
         {
             __try
             {
@@ -2409,8 +2412,10 @@ namespace BZROpenShim
                 out[0] = p->x;
                 out[1] = p->y;
                 out[2] = p->z;
+                const float* const fov = getFovY(camera); // Camera derives from Frustum first
+                *fovY = fov ? *fov : 0.0f;
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (OgreCallSehFilter(GetExceptionCode()))
             {
                 return false;
             }
@@ -2421,7 +2426,7 @@ namespace BZROpenShim
         // (the player's view; terrain_proxy.cpp's GetActiveCamera uses the same
         // chain). Read outside any render traversal, so unlike the scene
         // manager's current viewport it is never a shadow or glow camera.
-        bool TryGetMainViewCameraPosition(float out[3])
+        bool TryGetMainViewCamera(float out[3], float* fovY)
         {
             static const FnOgreRootSingleton getRoot =
                 ResolveOgreProc<FnOgreRootSingleton>("?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
@@ -2433,9 +2438,11 @@ namespace BZROpenShim
                 ResolveOgreProc<FnOgreViewportCamera>("?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ");
             static const FnOgreCameraPosition getPosition =
                 ResolveOgreProc<FnOgreCameraPosition>("?getDerivedPosition@Camera@Ogre@@QBEABVVector3@2@XZ");
-            if (!out || !getRoot || !getWindow || !getViewport || !getCamera || !getPosition)
+            static const FnOgreFrustumFovY getFovY =
+                ResolveOgreProc<FnOgreFrustumFovY>("?getFOVy@Frustum@Ogre@@UBEABVRadian@2@XZ");
+            if (!out || !fovY || !getRoot || !getWindow || !getViewport || !getCamera || !getPosition || !getFovY)
                 return false;
-            return TryReadMainViewCameraSeh(getRoot, getWindow, getViewport, getCamera, getPosition, out);
+            return TryReadMainViewCameraSeh(getRoot, getWindow, getViewport, getCamera, getPosition, getFovY, out, fovY);
         }
 
         using FnOgreDestroySceneNodePtr = void(__thiscall*)(void*, void*);

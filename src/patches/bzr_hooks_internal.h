@@ -1715,9 +1715,10 @@ namespace BZROpenShim
         // setVisible(false) only: the node keeps its transform. For the pools'
         // draw-distance cull; SetShimOwnedObjectTransform shows it again.
         void HideShimOwnedEntity(void* entity);
-        // Derived position of the main view camera (the auto-created window's
-        // viewport 0), in the same Ogre world space as the pool nodes.
-        bool TryGetMainViewCameraPosition(float out[3]);
+        // Derived position and vertical FOV (radians) of the main view camera
+        // (the auto-created window's viewport 0), in the same Ogre world space
+        // as the pool nodes.
+        bool TryGetMainViewCamera(float position[3], float* fovYRadians);
         void DestroyShimOwnedMeshObject(void* sceneManager, void* node, void* entity);
         bool SubmitShimOwnedEntityToRenderQueue(void* sceneManager, void* entity, void* renderQueue);
 

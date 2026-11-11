@@ -1357,7 +1357,9 @@ namespace BZROpenShim
 
             // Draw distance: one camera read per tick, only when the cull is on.
             float camera[3] = {};
-            const bool cameraKnown = g_Config.drawDistance > 0 && TryGetMainViewCameraPosition(camera);
+            float fovY = 0.0f;
+            const bool cameraKnown = g_Config.drawDistance > 0 && TryGetMainViewCamera(camera, &fovY);
+            const float zoom = PoolDrawDistance::ZoomDistanceScale(fovY);
             for (CasingSlot& slot : g_Slots)
             {
                 if (!slot.active)
@@ -1386,7 +1388,7 @@ namespace BZROpenShim
                 }
                 const float at[3] = {slot.position.x, slot.position.y, slot.position.z};
                 const PoolDrawDistance::Transition cull = PoolDrawDistance::Decide(
-                    slot.distanceCulled, cameraKnown, cameraKnown ? PoolDrawDistance::DistanceSquared(at, camera) : 0.0f,
+                    slot.distanceCulled, cameraKnown, cameraKnown ? PoolDrawDistance::DistanceSquared(at, camera) * zoom * zoom : 0.0f,
                     g_Config.drawDistance);
                 if (cull == PoolDrawDistance::Transition::Hide)
                 {

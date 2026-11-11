@@ -17,6 +17,8 @@
 // Host-tested in tests/pool_draw_distance_policy_tests.cpp.
 #pragma once
 
+#include <cmath>
+
 namespace BZROpenShim
 {
     namespace PoolDrawDistance
@@ -55,6 +57,22 @@ namespace BZROpenShim
                 return false;
             const float threshold = static_cast<float>(thresholdMetres);
             return distanceSquared > threshold * threshold;
+        }
+
+        // tan(30 degrees): half the reference vertical FOV the defaults assume.
+        constexpr float kReferenceHalfFovTan = 0.57735027f;
+
+        // Factor applied to the camera distance before the threshold test, so
+        // a piece stays drawn while it is still a few pixels wide. Zooming in
+        // (a scope, a narrower FOV) shrinks it and pushes the cull out with
+        // the zoom; a wider-than-reference FOV never culls closer than the
+        // setting. Bad or degenerate FOV -> 1 (plain distance).
+        inline float ZoomDistanceScale(float fovYRadians)
+        {
+            if (!(fovYRadians > 0.0f) || !(fovYRadians < 3.1f))
+                return 1.0f;
+            const float scale = std::tan(fovYRadians * 0.5f) / kReferenceHalfFovTan;
+            return scale < 1.0f ? scale : 1.0f;
         }
 
         inline float DistanceSquared(const float a[3], const float b[3])
