@@ -316,6 +316,8 @@ openshim_opt:DynamicGeometryFastSort:label~Effect Sort~~~~~~
 openshim_opt:DynamicGeometryFastSort:desc~Sort effect-sprite batches without calling into Ogre for every compare. Same order, same pixels. Restart required.~~~~~~
 openshim_opt:ScrapShadowDistance:label~Scrap Shadows~~~~~~
 openshim_opt:ScrapShadowDistance:desc~Stop scrap pieces beyond this distance from casting shadows. Scrap stays visible and collectable; only its tiny shadow goes. Saves CPU on scrap-heavy maps. Rendering only. Restart required.~~~~~~
+openshim_opt:ScrapDrawDistance:label~Scrap Draw Distance~~~~~~
+openshim_opt:ScrapDrawDistance:desc~Stop drawing scrap pieces beyond this distance. Far scrap disappears from view but still exists and can be collected. Saves CPU in big battles. Rendering only. Restart required.~~~~~~
 openshim_opt:ScrapGlow:label~Scrap Glow~~~~~~
 openshim_opt:ScrapGlow:desc~Let scrap pieces glow. Off leaves scrap out of the glow pass, so it no longer glows or hides the glow of things behind it. Rendering only. Restart required.~~~~~~
 openshim_opt:RoutePreference:label~Net Route~~~~~~
@@ -462,6 +464,8 @@ openshim_value:250 m~250 m~~~~~~
 openshim_value:Past 50 m~Past 50 m~~~~~~
 openshim_value:Past 100 m~Past 100 m~~~~~~
 openshim_value:Past 150 m~Past 150 m~~~~~~
+openshim_value:Past 250 m~Past 250 m~~~~~~
+openshim_value:Past 400 m~Past 400 m~~~~~~
 openshim_value:Prefer Direct~Prefer Direct~~~~~~
 openshim_value:Force Relay~Force Relay~~~~~~
 openshim_value:17770~17770~~~~~~

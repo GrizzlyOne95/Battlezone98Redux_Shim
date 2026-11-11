@@ -2,7 +2,7 @@
 //
 // SPDX-License-Identifier: MIT
 //
-// Pure logic for [Fixes] ScrapShadowDistance and [Fixes] ScrapGlow
+// Pure logic for [Fixes] ScrapShadowDistance, ScrapDrawDistance and ScrapGlow
 // (ogre_entity_frustum_cull.cpp).
 // Scrap pieces are small (npscr1/2/3 are 4-6 triangle meshes under a metre),
 // so their PSSM shadow lands under the piece itself and is a handful of texels
@@ -80,6 +80,27 @@ namespace BZROpenShim
                 return false;
             const float threshold = static_cast<float>(thresholdMetres);
             return distanceSquared > threshold * threshold;
+        }
+
+        // [Fixes] ScrapDrawDistance (metres, 0 = off): past it a scrap piece is
+        // not submitted to any pass (main view, glow, shadow). Render-only; the
+        // piece still exists, collides and can be picked up.
+        constexpr int kMaxDrawDistanceMetres = 2000;
+
+        inline int ClampDrawDistanceMetres(long value)
+        {
+            if (value <= 0)
+                return 0;
+            if (value > kMaxDrawDistanceMetres)
+                return kMaxDrawDistanceMetres;
+            return static_cast<int>(value);
+        }
+
+        // Same rule as ShouldSkipShadowCaster: strictly farther than the
+        // threshold skips; off or NaN never skips.
+        inline bool ShouldSkipScrapDraw(float distanceSquared, int thresholdMetres)
+        {
+            return ShouldSkipShadowCaster(distanceSquared, thresholdMetres);
         }
 
         inline float DistanceSquared(const float* a, const float* b)
