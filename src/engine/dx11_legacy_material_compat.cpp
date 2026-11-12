@@ -183,6 +183,7 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         case CompatPath::SkipShaderless: return "skip";
         case CompatPath::FixedFuncTextured2: return "fixedfunc-textured2";
         case CompatPath::SuppressPass: return "suppress";
+        case CompatPath::FixedFuncMultiPass: return "fixedfunc-multipass";
         }
         return "skip";
     }
@@ -244,6 +245,20 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
                 stage.alphaSrc2 == BlendSource::Current) ||
                (stage.alphaSrc1 == BlendSource::Current &&
                 stage.alphaSrc2 == BlendSource::Texture);
+    }
+
+    const char* OneUnitColorOp(const TextureStageDesc& stage) noexcept
+    {
+        if (!stage.known || !IsDefaultStageAlpha(stage))
+        {
+            return "modulate";
+        }
+        const StageCombine combine = ClassifyStageColour(stage);
+        if (combine == StageCombine::Unsupported)
+        {
+            return "modulate";
+        }
+        return StageCombineName(combine);
     }
 
     bool IsSupportedTwoStageCombo(const LegacyPassDesc& desc) noexcept
@@ -477,6 +492,22 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
                    : "OSE_FixedFunc_Textured_fragment";
     }
 
+    const char* FixedFuncTexturedFragmentForOp(std::string_view colorOp0,
+                                               bool lit) noexcept
+    {
+        const std::string_view op = TrimAscii(colorOp0);
+        if (EqualsNoCase(op, "add"))
+        {
+            return lit ? "OSE_FixedFunc_Textured_fragment_add_lit"
+                       : "OSE_FixedFunc_Textured_fragment_add";
+        }
+        if (EqualsNoCase(op, "replace"))
+        {
+            return "OSE_FixedFunc_Textured_fragment_replace";
+        }
+        return FixedFuncTexturedFragment(lit);
+    }
+
     const char* FixedFuncUntexturedVertex() noexcept
     {
         return "OSE_FixedFunc_Untextured_vertex";
@@ -691,9 +722,12 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         // whether the fixed pipeline would have added its emissive. FamilyRemap
         // and AggressiveGeneric stand in for programmable passes, whose own
         // shaders replaced fixed-function lighting, so they never take it.
+        // The unit's colour_op picks the fragment (add/replace variants);
+        // modulate and alpha_blend keep the modulate pair.
         case CompatPath::FixedFuncTextured:
             outVertex.assign(FixedFuncTexturedVertex());
-            outFragment.assign(FixedFuncTexturedFragment(desc.lightingEnabled));
+            outFragment.assign(FixedFuncTexturedFragmentForOp(
+                desc.colorOp0, desc.lightingEnabled));
             return true;
 
         case CompatPath::FixedFuncUntextured:
@@ -732,6 +766,8 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             outFragment.assign(FixedFuncSuppressFragment());
             return true;
 
+        // Technique-level only: each pass resolves its own FixedFunc* path.
+        case CompatPath::FixedFuncMultiPass:
         case CompatPath::KeepNative:
         case CompatPath::SkipShaderless:
         default:
@@ -985,25 +1021,21 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
             {
                 return CompatPath::SkipShaderless;
             }
-            // Synthesis retargets one-pass techniques only. A multi-pass
-            // fixed-function technique is suppressed when that is the only
-            // way to keep it from drawing shaderless.
+            // This decides from one pass only. A multi-pass technique is
+            // converted pass by pass by DecideMultiPassCompat; when it cannot
+            // be, this is its answer: suppressed when that is the only way to
+            // keep it from drawing shaderless, else declined.
             if (desc.passCount > 1)
             {
                 return desc.fallbackShaderless ? CompatPath::SuppressPass
                                                : CompatPath::SkipShaderless;
             }
-            if (desc.textureUnits <= 0)
             {
-                return CompatPath::FixedFuncUntextured;
-            }
-            if (IsSupportedFixedFuncCombo(desc.textureUnits, desc.colorOp0))
-            {
-                return CompatPath::FixedFuncTextured;
-            }
-            if (IsSupportedTwoStageCombo(desc))
-            {
-                return CompatPath::FixedFuncTextured2;
+                CompatPath fixedFunc = CompatPath::SkipShaderless;
+                if (FixedFuncPathForPass(desc, fixedFunc))
+                {
+                    return fixedFunc;
+                }
             }
             // Unsupported combine: aggressive generic is the only
             // best-effort render left. Failing that, declining is only safe
@@ -1023,6 +1055,102 @@ namespace BZROpenShim::RenderProfiles::Dx11Compat
         default:
             return CompatPath::KeepNative;
         }
+    }
+
+    bool FixedFuncPathForPass(const LegacyPassDesc& desc,
+                              CompatPath& outPath) noexcept
+    {
+        if (desc.textureUnits <= 0)
+        {
+            outPath = CompatPath::FixedFuncUntextured;
+            return true;
+        }
+        if (IsSupportedFixedFuncCombo(desc.textureUnits, desc.colorOp0))
+        {
+            outPath = CompatPath::FixedFuncTextured;
+            return true;
+        }
+        if (IsSupportedTwoStageCombo(desc))
+        {
+            outPath = CompatPath::FixedFuncTextured2;
+            return true;
+        }
+        return false;
+    }
+
+    MultiPassCompatDecision DecideMultiPassCompat(
+        const std::vector<LegacyPassDesc>& passes,
+        const CompatConfig& config,
+        bool resourcesAvailable)
+    {
+        MultiPassCompatDecision decision;
+        if (passes.empty())
+        {
+            return decision;
+        }
+
+        // Today's behaviour for this technique, kept whenever conversion is
+        // refused: the pass-0 decision with the technique's real pass count.
+        LegacyPassDesc first = passes.front();
+        if (first.passCount < static_cast<int>(passes.size()))
+        {
+            first.passCount = static_cast<int>(passes.size());
+        }
+        decision.fallback = DecideCompatPath(ClassifyLegacyPass(first), first,
+                                             config, resourcesAvailable);
+        decision.path = decision.fallback;
+
+        if (!resourcesAvailable || !config.compatEnabled)
+        {
+            return decision;
+        }
+
+        std::vector<CompatPath> passPaths;
+        passPaths.reserve(passes.size());
+        for (size_t i = 0; i < passes.size(); ++i)
+        {
+            CompatPath passPath = CompatPath::SkipShaderless;
+            if (ClassifyLegacyPass(passes[i]) !=
+                    LegacyPassKind::TrueFixedFunction ||
+                !FixedFuncPathForPass(passes[i], passPath))
+            {
+                decision.failingPass = static_cast<int>(i);
+                return decision;
+            }
+            passPaths.push_back(passPath);
+        }
+        decision.path = CompatPath::FixedFuncMultiPass;
+        decision.passPaths = std::move(passPaths);
+        return decision;
+    }
+
+    std::string FormatMultiPassLog(std::string_view material,
+                                   const std::vector<CompatPath>& passPaths)
+    {
+        std::string mat(material);
+        if (mat.empty())
+        {
+            mat = "<unknown>";
+        }
+        std::string paths;
+        for (const CompatPath path : passPaths)
+        {
+            if (!paths.empty())
+            {
+                paths += ',';
+            }
+            paths += CompatPathName(path);
+        }
+        if (paths.empty())
+        {
+            paths = "none";
+        }
+        char buf[768] = {};
+        std::snprintf(buf, sizeof(buf),
+                      "[DX11COMPAT] material=%s path=%s passes=%zu pass-paths=%s",
+                      mat.c_str(), CompatPathName(CompatPath::FixedFuncMultiPass),
+                      passPaths.size(), paths.c_str());
+        return std::string(buf);
     }
 
     bool CanRetargetTechniqueInPlace(std::string_view sourceScheme,

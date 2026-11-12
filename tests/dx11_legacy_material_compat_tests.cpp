@@ -1064,6 +1064,275 @@ void TestSuppressAndInPlace()
           "pass kind name");
 }
 
+namespace
+{
+    // One shaderless pass of an N-pass technique as the runtime describes it:
+    // a one-unit pass takes colorOp0 from its stage and carries the stage.
+    LegacyPassDesc FixedFuncPass(int passCount, int stage0Op,
+                                 bool fallbackShaderless)
+    {
+        LegacyPassDesc d = FixedFuncDesc(1, "modulate");
+        d.stages.push_back(Stage(stage0Op));
+        d.colorOp0 = OneUnitColorOp(d.stages[0]);
+        d.passCount = passCount;
+        d.fallbackShaderless = fallbackShaderless;
+        return d;
+    }
+
+    // BZP startdor.material: 3 passes, lighting off, one scrolling
+    // startdor.png unit each (alpha_blend / alpha_blend / add scene blends).
+    std::vector<LegacyPassDesc> StartdorPasses(bool fallbackShaderless)
+    {
+        std::vector<LegacyPassDesc> passes;
+        for (int i = 0; i < 3; ++i)
+        {
+            passes.push_back(
+                FixedFuncPass(3, BlendOpEx::Modulate, fallbackShaderless));
+        }
+        return passes;
+    }
+
+    // BZP startdom.material: pass 2 is scene_blend modulate with its unit's
+    // colour_op add.
+    std::vector<LegacyPassDesc> StartdomPasses(bool fallbackShaderless)
+    {
+        std::vector<LegacyPassDesc> passes;
+        passes.push_back(
+            FixedFuncPass(2, BlendOpEx::Modulate, fallbackShaderless));
+        passes.push_back(FixedFuncPass(2, BlendOpEx::Add, fallbackShaderless));
+        return passes;
+    }
+}
+
+void TestOneUnitColourOp()
+{
+    std::printf("TestOneUnitColourOp\n");
+    Check(std::strcmp(OneUnitColorOp(Stage(BlendOpEx::Modulate)), "modulate") ==
+              0,
+          "modulate stage");
+    Check(std::strcmp(OneUnitColorOp(Stage(BlendOpEx::Add)), "add") == 0,
+          "add stage");
+    Check(std::strcmp(OneUnitColorOp(Stage(BlendOpEx::Source1)), "replace") ==
+              0,
+          "replace stage");
+    Check(std::strcmp(OneUnitColorOp(Stage(BlendOpEx::BlendTextureAlpha)),
+                      "alpha_blend") == 0,
+          "alpha_blend stage");
+
+    // Anything the policy cannot read or represent keeps modulate, so a
+    // single-pass material never newly declines.
+    TextureStageDesc unread = Stage(BlendOpEx::Add);
+    unread.known = false;
+    Check(std::strcmp(OneUnitColorOp(unread), "modulate") == 0,
+          "unread stage stays modulate");
+    Check(std::strcmp(OneUnitColorOp(Stage(BlendOpEx::Add, 2 /* diffuse */,
+                                           BlendSource::Current)),
+                      "modulate") == 0,
+          "unsupported combine stays modulate");
+    TextureStageDesc oddAlpha = Stage(BlendOpEx::Add);
+    oddAlpha.alphaOp = BlendOpEx::Source1;
+    Check(std::strcmp(OneUnitColorOp(oddAlpha), "modulate") == 0,
+          "non-default alpha stays modulate");
+
+    // Fragment per colour_op: add has a lit twin, replace does not (it drops
+    // the lit colour), alpha_blend has no one-unit variant.
+    Check(std::strcmp(FixedFuncTexturedFragmentForOp("add", false),
+                      "OSE_FixedFunc_Textured_fragment_add") == 0,
+          "add fragment");
+    Check(std::strcmp(FixedFuncTexturedFragmentForOp("add", true),
+                      "OSE_FixedFunc_Textured_fragment_add_lit") == 0,
+          "lit add fragment");
+    Check(std::strcmp(FixedFuncTexturedFragmentForOp("replace", true),
+                      "OSE_FixedFunc_Textured_fragment_replace") == 0,
+          "replace ignores lighting");
+    Check(std::strcmp(FixedFuncTexturedFragmentForOp("alpha_blend", false),
+                      "OSE_FixedFunc_Textured_fragment") == 0,
+          "alpha_blend keeps modulate");
+    Check(std::strcmp(FixedFuncTexturedFragmentForOp("", true),
+                      "OSE_FixedFunc_Textured_fragment_lit") == 0,
+          "empty op keeps lit modulate");
+
+    std::string vs;
+    std::string ps;
+    for (const char* op : { "modulate", "add", "replace" })
+    {
+        LegacyPassDesc d = FixedFuncDesc(1, op);
+        Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured, d, vs, ps) &&
+                  vs == "OSE_FixedFunc_Textured_vertex" &&
+                  ps == FixedFuncTexturedFragmentForOp(op, false),
+              op);
+    }
+    LegacyPassDesc unknown = FixedFuncDesc(1, "modulate");
+    unknown.stages.push_back(Stage(BlendOpEx::Add));
+    unknown.stages[0].known = false;
+    unknown.colorOp0 = OneUnitColorOp(unknown.stages[0]);
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured, unknown, vs,
+                                ps) &&
+              ps == "OSE_FixedFunc_Textured_fragment",
+          "an unknown stage resolves the modulate fragment");
+}
+
+void TestMultiPassFixedFunction()
+{
+    std::printf("TestMultiPassFixedFunction\n");
+    CompatConfig on;
+    std::string vs;
+    std::string ps;
+
+    // startdor: every pass converts with the one-unit textured pair, whatever
+    // the material's fallbacks are.
+    for (const bool fallback : { true, false })
+    {
+        const MultiPassCompatDecision d =
+            DecideMultiPassCompat(StartdorPasses(fallback), on);
+        Check(d.path == CompatPath::FixedFuncMultiPass,
+              "startdor converts pass by pass");
+        Check(d.passPaths.size() == 3 &&
+                  d.passPaths[0] == CompatPath::FixedFuncTextured &&
+                  d.passPaths[1] == CompatPath::FixedFuncTextured &&
+                  d.passPaths[2] == CompatPath::FixedFuncTextured,
+              "startdor passes are each fixedfunc-textured");
+        Check(d.failingPass == -1, "startdor has no failing pass");
+        Check(d.fallback == (fallback ? CompatPath::SuppressPass
+                                      : CompatPath::SkipShaderless),
+              "startdor fallback is the old multi-pass answer");
+    }
+    const std::vector<LegacyPassDesc> startdor = StartdorPasses(true);
+    Check(ResolveCompatPrograms(CompatPath::FixedFuncTextured, startdor[1], vs,
+                                ps) &&
+              vs == "OSE_FixedFunc_Textured_vertex" &&
+              ps == "OSE_FixedFunc_Textured_fragment",
+          "an unlit startdor pass resolves the no-emissive textured pair");
+    Check(!ResolveCompatPrograms(CompatPath::FixedFuncMultiPass, startdor[0],
+                                 vs, ps) &&
+              vs.empty() && ps.empty(),
+          "the technique-level path never resolves a pair itself");
+
+    // startdom: pass 2's unit is colour_op add, so it binds the add fragment.
+    {
+        const std::vector<LegacyPassDesc> startdom = StartdomPasses(true);
+        const MultiPassCompatDecision d = DecideMultiPassCompat(startdom, on);
+        Check(d.path == CompatPath::FixedFuncMultiPass &&
+                  d.passPaths.size() == 2 &&
+                  d.passPaths[0] == CompatPath::FixedFuncTextured &&
+                  d.passPaths[1] == CompatPath::FixedFuncTextured,
+              "startdom converts");
+        Check(ResolveCompatPrograms(d.passPaths[0], startdom[0], vs, ps) &&
+                  ps == "OSE_FixedFunc_Textured_fragment",
+              "startdom pass 1 resolves the modulate fragment");
+        Check(ResolveCompatPrograms(d.passPaths[1], startdom[1], vs, ps) &&
+                  vs == "OSE_FixedFunc_Textured_vertex" &&
+                  ps == "OSE_FixedFunc_Textured_fragment_add",
+              "startdom pass 2 resolves the add fragment");
+    }
+
+    // Mixed texturing: each pass takes its own single-pass path.
+    {
+        std::vector<LegacyPassDesc> mixed;
+        mixed.push_back(FixedFuncDesc(0, nullptr));
+        mixed.push_back(XrainDesc());
+        const MultiPassCompatDecision d = DecideMultiPassCompat(mixed, on);
+        Check(d.path == CompatPath::FixedFuncMultiPass &&
+                  d.passPaths.size() == 2 &&
+                  d.passPaths[0] == CompatPath::FixedFuncUntextured &&
+                  d.passPaths[1] == CompatPath::FixedFuncTextured2,
+              "untextured + two-stage passes convert with their own paths");
+    }
+
+    // One pass outside the support set refuses the whole technique.
+    std::vector<LegacyPassDesc> threeUnits = StartdomPasses(true);
+    threeUnits[1].textureUnits = 3;
+    threeUnits[1].colorOp0.clear();
+    threeUnits[1].stages.assign(3, Stage(BlendOpEx::Modulate));
+    {
+        const MultiPassCompatDecision d = DecideMultiPassCompat(threeUnits, on);
+        Check(d.path == CompatPath::SuppressPass && d.passPaths.empty() &&
+                  d.failingPass == 1,
+              "a three-unit pass suppresses when every fallback is shaderless");
+    }
+    for (LegacyPassDesc& p : threeUnits)
+    {
+        p.fallbackShaderless = false;
+    }
+    {
+        const MultiPassCompatDecision d = DecideMultiPassCompat(threeUnits, on);
+        Check(d.path == CompatPath::SkipShaderless && d.passPaths.empty() &&
+                  d.failingPass == 1,
+              "a three-unit pass declines with a programmable fallback");
+    }
+
+    // Aggressive mode never turns a multi-pass technique into a partial or
+    // aggressive conversion.
+    {
+        CompatConfig aggressive = on;
+        aggressive.aggressiveEnabled = true;
+        std::vector<LegacyPassDesc> uv1 = StartdomPasses(false);
+        uv1[1] = XrainDesc();
+        uv1[1].stages[1].texCoordSet = 1;
+        uv1[1].passCount = 2;
+        const MultiPassCompatDecision d =
+            DecideMultiPassCompat(uv1, aggressive);
+        Check(d.path == CompatPath::SkipShaderless && d.failingPass == 1,
+              "an aggressive-only pass keeps the old multi-pass answer");
+    }
+
+    // A programmable pass next to a shaderless one is not fixed function.
+    {
+        std::vector<LegacyPassDesc> mixed = StartdomPasses(true);
+        LegacyPassDesc programmed =
+            ProgramDesc("Custom_vs", "vs_2_0", nullptr, nullptr);
+        programmed.textureUnits = 1;
+        programmed.passCount = 2;
+        mixed[1] = programmed;
+        const MultiPassCompatDecision d = DecideMultiPassCompat(mixed, on);
+        Check(d.path != CompatPath::FixedFuncMultiPass &&
+                  d.path == CompatPath::SuppressPass && d.failingPass == 1,
+              "a vertex-program pass beside a shaderless one is not multipass");
+    }
+
+    // Disabled compat and missing resources fail closed, with no failing pass.
+    {
+        CompatConfig off = on;
+        off.compatEnabled = false;
+        MultiPassCompatDecision d = DecideMultiPassCompat(StartdorPasses(true), off);
+        Check(d.path == CompatPath::SkipShaderless && d.failingPass == -1,
+              "compat off never converts or suppresses");
+        d = DecideMultiPassCompat(StartdorPasses(true), on, false);
+        Check(d.path == CompatPath::SkipShaderless && d.failingPass == -1,
+              "missing resources never convert");
+        d = DecideMultiPassCompat({}, on);
+        Check(d.path == CompatPath::SkipShaderless && d.passPaths.empty(),
+              "no passes decide nothing");
+    }
+
+    // The fallback uses the real pass count even if a desc understates it.
+    {
+        std::vector<LegacyPassDesc> understated = threeUnits;
+        for (LegacyPassDesc& p : understated)
+        {
+            p.passCount = 1;
+            p.fallbackShaderless = true;
+        }
+        const MultiPassCompatDecision d = DecideMultiPassCompat(understated, on);
+        Check(d.path == CompatPath::SuppressPass,
+              "fallback counts the passes it was given");
+    }
+
+    const MultiPassCompatDecision d =
+        DecideMultiPassCompat(StartdorPasses(true), on);
+    Check(FormatMultiPassLog("startdor", d.passPaths) ==
+              "[DX11COMPAT] material=startdor path=fixedfunc-multipass passes=3 "
+              "pass-paths=fixedfunc-textured,fixedfunc-textured,fixedfunc-textured",
+          "multipass log line");
+    Check(std::strcmp(CompatPathName(CompatPath::FixedFuncMultiPass),
+                      "fixedfunc-multipass") == 0,
+          "path name");
+    CompatPath single = CompatPath::SkipShaderless;
+    Check(FixedFuncPathForPass(XrainDesc(), single) &&
+              single == CompatPath::FixedFuncTextured2,
+          "the shared single-pass rule");
+}
+
 void TestFixedFunctionEmissive()
 {
     std::printf("TestFixedFunctionEmissive\n");
@@ -1150,6 +1419,10 @@ void TestFixedFunctionEmissive()
                             unlit) &&
               unlit == "OSE_FixedFunc_Textured2_fragment_add",
           "two-stage twin falls back to its sibling");
+    Check(UnlitFragmentTwin("OSE_FixedFunc_Textured_fragment_add_lit",
+                            unlit) &&
+              unlit == "OSE_FixedFunc_Textured_fragment_add",
+          "one-unit add twin falls back to its sibling");
     Check(!UnlitFragmentTwin("OSE_FixedFunc_Textured_fragment", unlit) &&
               unlit.empty(),
           "an unlit name has no fallback");
@@ -1174,6 +1447,9 @@ void TestFixedFunctionEmissive()
     const LitTwin twins[] = {
         { "OSE_FixedFunc_Textured_fragment_lit",
           "OSE_FixedFunc_Textured_fragment", "fixedfunc_fragment", nullptr },
+        { "OSE_FixedFunc_Textured_fragment_add_lit",
+          "OSE_FixedFunc_Textured_fragment_add", "fixedfunc_fragment",
+          "COMPAT_OP_ADD" },
         { "OSE_FixedFunc_Untextured_fragment_lit",
           "OSE_FixedFunc_Untextured_fragment", "fixedfunc_untextured_fragment",
           nullptr },
@@ -1227,6 +1503,8 @@ void TestFixedFunctionEmissive()
                    "emissive helper");
     ExpectContains(hlsl, "return min(colour + emissive, max(colour, 1.0));",
                    "black emissive is the identity");
+    ExpectContains(hlsl, "float3 albedo = saturate(lit + tex.xyz);",
+                   "one-unit add clamps like a fixed-function stage");
     size_t uniforms = 0;
     for (size_t at = hlsl.find("    uniform float4 emissiveColour,");
          at != std::string::npos;
@@ -1284,6 +1562,8 @@ int main()
     TestVertexInputFit();
     TestTwoStageFixedFunction();
     TestSuppressAndInPlace();
+    TestOneUnitColourOp();
+    TestMultiPassFixedFunction();
     TestSynthesisExclusions();
     TestSupportedTargets();
     TestParseCompatFlag();

@@ -4,8 +4,9 @@ Date: 2026-09-16
 
 Status: implemented through the first bounded instantiation slice
 (one-pass known-family and fixed-function techniques; entity-transparency
-clones preserve technique-count parity; multi-pass/aggressive paths still fail
-closed pending qualification)
+clones preserve technique-count parity; multi-pass true fixed-function
+techniques convert pass by pass; the aggressive path still fails closed pending
+qualification)
 
 Branch: `codex/entity-transparency-technique-parity`
 
@@ -68,10 +69,10 @@ its cache key reserved, as a failed append does. This fixes the identified
 clone/source mismatch; in-game reproduction has not been run, so native
 gameplay qualification is still needed to confirm the rendering result.
 
-The initial mutation slice intentionally refuses multi-pass techniques and
-the aggressive unknown-custom path. Those continue to fail closed until
-per-pass classification/retargeting is implemented and live DX11
-qualification proves the one-pass path.
+The initial mutation slice refused multi-pass techniques and the aggressive
+unknown-custom path. Multi-pass true fixed-function techniques now convert
+pass by pass (see "Multi-pass fixed function" below); multi-pass programmable
+techniques and the aggressive path still fail closed.
 
 Phase 2/3 resources ship on this branch:
 `resources/renderer/enhanced/openshim_dx11_fixedfunc.program` +
@@ -261,11 +262,21 @@ The guard runs when either `DX11LegacyMaterialCompat` or `DX11ShaderlessDrawGuar
 
 On `isdfms10` under DX11, the ISDF Chronicles rain material `xrain` threw `Attempted to render to a D3D11 device without both vertex and fragment shaders` about 7,500 times in 56 seconds. Each throw aborted the rest of the frame and hid further faults behind it.
 
-- **Two stages** (`CompatPath::FixedFuncTextured2`). The runtime reads each stage's combine state through the exported `TextureUnitState::getColourBlendMode`, `getAlphaBlendMode` and `getTextureCoordSet`, with `blendType` as a layout canary. `IsSupportedTwoStageCombo` accepts both stages on UV set 0 with default alpha, stage 0 `modulate`, and stage 1 `modulate`, `add` or `alpha_blend`. Programs: `OSE_FixedFunc_Textured2_vertex[_novc]`, which gives each stage its own `texture_matrix`, and `OSE_FixedFunc_Textured2_fragment_{modulate,add,alphablend}`. That covers the rain family (`xrain`, `xrainL`, `xrainR`, `acidrain`, `rainbox`) and the ported BZBase emissive overlays. The single-unit path keeps its historical modulate assumption.
-- **Suppression** (`CompatPath::SuppressPass`). A fixed-function pass outside the support set, or any multi-pass fixed-function technique, is suppressed when every technique Ogre could fall back to still has a shaderless pass. The pass binds `OSE_FixedFunc_Suppress_vertex/fragment`, which reads `POSITION` only, clips everything and discards: nothing is drawn and nothing throws. It is logged once as `[DX11COMPAT] material=<m> path=suppress reason=<r> ... action=skip-draw`. When a programmable fallback exists, the historical decline is kept.
+- **Two stages** (`CompatPath::FixedFuncTextured2`). The runtime reads each stage's combine state through the exported `TextureUnitState::getColourBlendMode`, `getAlphaBlendMode` and `getTextureCoordSet`, with `blendType` as a layout canary. `IsSupportedTwoStageCombo` accepts both stages on UV set 0 with default alpha, stage 0 `modulate`, and stage 1 `modulate`, `add` or `alpha_blend`. Programs: `OSE_FixedFunc_Textured2_vertex[_novc]`, which gives each stage its own `texture_matrix`, and `OSE_FixedFunc_Textured2_fragment_{modulate,add,alphablend}`. That covers the rain family (`xrain`, `xrainL`, `xrainR`, `acidrain`, `rainbox`) and the ported BZBase emissive overlays. The single-unit path reads its one stage the same way: with default alpha, `colour_op add` binds `OSE_FixedFunc_Textured_fragment_add[_lit]` (`saturate(lit + tex)`) and `colour_op replace` binds `OSE_FixedFunc_Textured_fragment_replace` (no lit twin). `alpha_blend`, an unread stage, a non-default alpha op or any other combine keep the modulate pair, so no single-pass material is newly declined.
+- **Suppression** (`CompatPath::SuppressPass`). A fixed-function pass outside the support set, or a multi-pass fixed-function technique with any pass outside it (see "Multi-pass fixed function" below), is suppressed when every technique Ogre could fall back to still has a shaderless pass. The pass binds `OSE_FixedFunc_Suppress_vertex/fragment`, which reads `POSITION` only, clips everything and discards: nothing is drawn and nothing throws. It is logged once as `[DX11COMPAT] material=<m> path=suppress reason=<r> ... action=skip-draw`. When a programmable fallback exists, the historical decline is kept.
 - **In-place conversion of sibling techniques.** A fixed-function technique whose scheme matches the active scheme never misses, so it never reaches the ladder. `water` is the live case: its only technique sits in `scheme glow`, so the main scene misses and gets a synthesized clone, but the glow compositor matched the original and drew it shaderless. Once a material has been synthesized on a miss, every other fully shaderless technique it owns is converted in place with the same policy and the same synthesis exclusions, logged as `[DX11COMPAT] material=<m> converted-in-place technique=<n> scheme=<s> path=<p> vs=<vs> ps=<ps>`. Passes this layer converted (untargeted `OSE_FixedFunc_*` / `OSE_Compat_*` pairs) classify as native on later misses.
 
 Not covered: a fixed-function technique on a material that never misses a scheme is still drawn as-is.
+
+#### Multi-pass fixed function (2026-11-11)
+
+The Workshop mod BZP's setup-area door and dome (`startdor`: 3 passes, `startdom`: 2 passes; every pass `lighting off`, one scrolling texture unit, its own `scene_blend`) were suppressed as `reason=multi-pass-fixedfunc` and drew nothing on D3D11.
+
+- `DecideMultiPassCompat` takes one `LegacyPassDesc` per pass. When every pass classifies `TrueFixedFunction` and maps to `FixedFuncUntextured`, `FixedFuncTextured` or `FixedFuncTextured2` by the single-pass rule (`FixedFuncPathForPass`, the same rule `DecideCompatPath` uses), the technique takes `CompatPath::FixedFuncMultiPass` (`fixedfunc-multipass`, counted as fixedfunc) and each pass binds its own pair from `ResolveCompatPrograms`. Otherwise, including a mix of programmable and shaderless passes or a pass only aggressive mode could take, the whole technique keeps its previous answer: suppressed when every fallback is shaderless, else declined. There is no partial conversion.
+- The runtime fits vertex inputs, applies the stale-payload unlit fallback, checks program existence and the synthesis exclusions for every pass before any mutation. A refusal on any pass sends the technique to that previous answer, logged once with the failing pass index. Scene blend, depth, cull, fog and the texture units' `scroll_anim` survive because the clone deep-copies each pass; the fixed-function programs already apply `texture_matrix 0`.
+- Sibling techniques converted in place follow the same rule.
+- Logged once on success as `[DX11COMPAT] material=<m> path=fixedfunc-multipass passes=<n> pass-paths=<p0>,<p1>,...`, followed by the usual applied or `converted-in-place` line.
+- Each one-unit pass binds the fragment for its own `colour_op` (see Two stages above), so `startdom` pass 2 (`colour_op add`) resolves `OSE_FixedFunc_Textured_fragment_add` and adds its texture as fixed function did.
 
 #### Pass emissive / self-illumination (2026-10-05)
 

@@ -1862,25 +1862,38 @@ namespace BZROpenShim::RenderProfiles
             return true;
         }
 
-        // Best-effort legacy description for the FIRST pass of the source
+        // Best-effort legacy description for one pass of the source
         // technique. Single-texture passes keep assuming the overwhelmingly
         // common modulate combine (colorOp0), so existing content keeps its
         // path. Every stage's real combine state is read into desc.stages,
         // which the pure policy checks against the bounded two-unit set and
         // the suppress log reports; wider passes stay unsupported.
-        Dx11Compat::LegacyPassDesc DescribeFirstPass(void* technique)
+        // outPassRead (optional) reports whether the pass itself was read; an
+        // unread pass describes as an untextured fixed-function default.
+        Dx11Compat::LegacyPassDesc DescribePass(void* technique,
+                                                unsigned short passIndex,
+                                                bool* outPassRead = nullptr)
         {
             Dx11Compat::LegacyPassDesc desc;
+            if (outPassRead != nullptr)
+            {
+                *outPassRead = false;
+            }
             if (technique == nullptr || !CompatPassApi().CanInspect())
             {
                 return desc;
             }
             desc.passCount = static_cast<int>(
                 GuardedGetNumPasses(CompatPassApi().getNumPasses, technique));
-            void* pass = GuardedGetPass(CompatPassApi().getPass, technique, 0);
+            void* pass =
+                GuardedGetPass(CompatPassApi().getPass, technique, passIndex);
             if (pass == nullptr)
             {
                 return desc;
+            }
+            if (outPassRead != nullptr)
+            {
+                *outPassRead = true;
             }
             desc.hasVertexRef = GuardedHasProgram(true, pass, false);
             desc.hasFragmentRef = GuardedHasProgram(false, pass, false);
@@ -1926,7 +1939,42 @@ namespace BZROpenShim::RenderProfiles
                     desc.stages.push_back(stage);
                 }
             }
+            // A one-unit pass takes its colour_op (add/replace) from the
+            // stage; an unread or unsupported stage keeps modulate.
+            if (desc.textureUnits == 1 && desc.stages.size() == 1)
+            {
+                desc.colorOp0 = Dx11Compat::OneUnitColorOp(desc.stages[0]);
+            }
             return desc;
+        }
+
+        Dx11Compat::LegacyPassDesc DescribeFirstPass(void* technique)
+        {
+            return DescribePass(technique, 0);
+        }
+
+        // One desc per pass for the multi-pass policy. False when any pass
+        // could not be read: an unread pass must never be mistaken for an
+        // untextured fixed-function one.
+        bool DescribeAllPasses(void* technique,
+                               unsigned short passCount,
+                               bool fallbackShaderless,
+                               std::vector<Dx11Compat::LegacyPassDesc>& out)
+        {
+            out.clear();
+            out.reserve(passCount);
+            for (unsigned short p = 0; p < passCount; ++p)
+            {
+                bool read = false;
+                out.push_back(DescribePass(technique, p, &read));
+                if (!read)
+                {
+                    out.clear();
+                    return false;
+                }
+                out.back().fallbackShaderless = fallbackShaderless;
+            }
+            return true;
         }
 
         void RestoreMaterialAfterCompatFailure(void* material,
@@ -2586,49 +2634,27 @@ namespace BZROpenShim::RenderProfiles
             }
         }
 
-        void* InstantiateDx11CompatTechnique(
-            void* material,
-            void* sourceTechnique,
-            const std::string& schemeName,
-            unsigned short lodIndex,
-            Dx11Compat::CompatPath path,
-            const Dx11Compat::LegacyPassDesc& desc,
-            const std::string& materialName,
-            const Dx11Compat::VertexInputs& inputs,
-            bool preserveTechniqueCount)
+        struct CompatProgramPair
         {
-            if (material == nullptr || sourceTechnique == nullptr)
-            {
-                return nullptr;
-            }
+            std::string vertex;
+            std::string fragment;
+        };
 
-            const OgreCompatPassApi& inspect = CompatPassApi();
-            const OgreCompatMutationApi& mutate = CompatMutationApi();
-            const OgreTechniqueApi& techApi = TechniqueApi();
-            if (!inspect.CanInspect() || !mutate.CanInstantiate() ||
-                !techApi.Valid())
-            {
-                return nullptr;
-            }
-
-            // First implementation slice: one-pass techniques only. The
-            // ordinary generated technique is a deep clone, so all render
-            // state and texture units survive unchanged. Entity-transparency
-            // materials instead retarget their existing technique to preserve
-            // Ogre's source/clone technique-index parity. Multi-pass
-            // conversion needs per-pass classification before it is safe.
-            // Suppression is the exception: it binds the same draw-nothing
-            // pair on every pass, which needs no per-pass classification.
-            const bool suppress = path == Dx11Compat::CompatPath::SuppressPass;
-            const unsigned short sourcePasses =
-                GuardedGetNumPasses(inspect.getNumPasses, sourceTechnique);
-            if (sourcePasses == 0 || (!suppress && sourcePasses != 1))
-            {
-                return nullptr;
-            }
-
-            std::string targetVs;
-            std::string targetPs;
+        // Every refusal that must precede mutation for one pass: resolve the
+        // pair, refuse excluded/unidentified materials, fit the vertex program
+        // to the renderable's inputs, take the unlit twin on a stale payload,
+        // and prove both programs exist. `who` names the caller in logs and
+        // passTag (" pass=<n>" or empty) the pass, so a single-pass call logs
+        // exactly what it always has.
+        bool PrepareCompatPassPrograms(Dx11Compat::CompatPath path,
+                                       const Dx11Compat::LegacyPassDesc& desc,
+                                       const std::string& materialName,
+                                       const Dx11Compat::VertexInputs& inputs,
+                                       const char* who,
+                                       const std::string& passTag,
+                                       std::string& targetVs,
+                                       std::string& targetPs)
+        {
             // ResolveCompatPrograms is stage-explicit. The older
             // MapLegacyFamilyProgram infers vertex-vs-fragment from the
             // spelling, which is right for "Effect_vertexHLSL" and wrong
@@ -2641,14 +2667,14 @@ namespace BZROpenShim::RenderProfiles
             if (!Dx11Compat::ResolveCompatPrograms(path, desc, targetVs,
                                                    targetPs))
             {
-                return nullptr;
+                return false;
             }
 
-            // Everything below this point mutates a live material, so every
-            // refusal belongs above it.
-            if (!IsSynthesisTarget(materialName, desc, "instantiate"))
+            // Everything after the caller's preparation mutates a live
+            // material, so every refusal belongs here.
+            if (!IsSynthesisTarget(materialName, desc, who))
             {
-                return nullptr;
+                return false;
             }
 
             // D3D11 needs every input the vertex shader declares to exist in
@@ -2663,19 +2689,20 @@ namespace BZROpenShim::RenderProfiles
                                                          fittedVs);
                 if (fit == Dx11Compat::VertexInputFit::Unsatisfiable)
                 {
-                    LogCompatOnce("[DX11COMPAT] instantiate declined material=" +
-                                      materialName +
+                    LogCompatOnce(std::string("[DX11COMPAT] ") + who +
+                                      " declined material=" + materialName +
+                                      passTag +
                                       " reason=vertex-inputs inputs=" +
                                       Dx11Compat::DescribeVertexInputs(inputs) +
                                       " vs=" + targetVs +
                                       " action=stock-fallback",
                                   LogLevel::Warn);
-                    return nullptr;
+                    return false;
                 }
                 if (fit == Dx11Compat::VertexInputFit::Adapted)
                 {
                     LogCompatOnce("[DX11COMPAT] material=" + materialName +
-                                      " vertex-inputs=" +
+                                      passTag + " vertex-inputs=" +
                                       Dx11Compat::DescribeVertexInputs(inputs) +
                                       " fit=adapted vs=" + targetVs + " -> " +
                                       fittedVs,
@@ -2693,10 +2720,120 @@ namespace BZROpenShim::RenderProfiles
                 // the material is left half-mutated. On an install without
                 // the OpenShim asset package NONE of the OSE_* programs
                 // resolve, so this is the common case, not the edge case.
-                LogCompatOnce("[DX11COMPAT] instantiate declined material=" +
-                                  materialName + " reason=program-absent vs=" +
+                LogCompatOnce(std::string("[DX11COMPAT] ") + who +
+                                  " declined material=" + materialName +
+                                  passTag + " reason=program-absent vs=" +
                                   targetVs + " ps=" + targetPs,
                               LogLevel::Warn);
+                return false;
+            }
+            return true;
+        }
+
+        // PrepareCompatPassPrograms for every pass of a FixedFuncMultiPass
+        // decision, all before any mutation. A refusal on any pass refuses
+        // the whole technique (no partial conversion), logged once with the
+        // failing pass and the fallback path the caller takes instead.
+        bool PrepareMultiPassPrograms(
+            const std::vector<Dx11Compat::LegacyPassDesc>& passes,
+            const Dx11Compat::MultiPassCompatDecision& decision,
+            const std::string& materialName,
+            const Dx11Compat::VertexInputs& inputs,
+            const char* who,
+            std::vector<CompatProgramPair>& out)
+        {
+            out.clear();
+            if (decision.path != Dx11Compat::CompatPath::FixedFuncMultiPass ||
+                decision.passPaths.size() != passes.size())
+            {
+                return false;
+            }
+            out.resize(passes.size());
+            for (size_t p = 0; p < passes.size(); ++p)
+            {
+                const std::string passTag = " pass=" + std::to_string(p);
+                if (!PrepareCompatPassPrograms(decision.passPaths[p], passes[p],
+                                               materialName, inputs, who,
+                                               passTag, out[p].vertex,
+                                               out[p].fragment))
+                {
+                    LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                      " path=" +
+                                      Dx11Compat::CompatPathName(decision.path) +
+                                      " " + who + " declined" + passTag +
+                                      " pass-path=" +
+                                      Dx11Compat::CompatPathName(
+                                          decision.passPaths[p]) +
+                                      " action=" +
+                                      Dx11Compat::CompatPathName(
+                                          decision.fallback),
+                                  LogLevel::Warn);
+                    out.clear();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        // perPassPrograms (FixedFuncMultiPass only) carries one prepared pair
+        // per source pass, already through PrepareMultiPassPrograms; without
+        // it one pair is resolved here and bound on every pass.
+        void* InstantiateDx11CompatTechnique(
+            void* material,
+            void* sourceTechnique,
+            const std::string& schemeName,
+            unsigned short lodIndex,
+            Dx11Compat::CompatPath path,
+            const Dx11Compat::LegacyPassDesc& desc,
+            const std::string& materialName,
+            const Dx11Compat::VertexInputs& inputs,
+            bool preserveTechniqueCount,
+            const std::vector<CompatProgramPair>* perPassPrograms = nullptr)
+        {
+            if (material == nullptr || sourceTechnique == nullptr)
+            {
+                return nullptr;
+            }
+
+            const OgreCompatPassApi& inspect = CompatPassApi();
+            const OgreCompatMutationApi& mutate = CompatMutationApi();
+            const OgreTechniqueApi& techApi = TechniqueApi();
+            if (!inspect.CanInspect() || !mutate.CanInstantiate() ||
+                !techApi.Valid())
+            {
+                return nullptr;
+            }
+
+            // The ordinary generated technique is a deep clone, so all render
+            // state (scene blend, depth, cull, fog) and texture units survive
+            // unchanged; only programs are bound per pass. Entity-
+            // transparency materials instead retarget their existing
+            // technique to preserve Ogre's source/clone technique-index
+            // parity. One resolved pair serves one-pass techniques, and
+            // suppression, which binds the same draw-nothing pair on every
+            // pass. A multi-pass technique arrives with one prepared pair per
+            // pass (FixedFuncMultiPass), and the counts must match.
+            const bool suppress = path == Dx11Compat::CompatPath::SuppressPass;
+            const bool perPass = perPassPrograms != nullptr;
+            const unsigned short sourcePasses =
+                GuardedGetNumPasses(inspect.getNumPasses, sourceTechnique);
+            if (sourcePasses == 0 ||
+                (perPass ? perPassPrograms->size() != sourcePasses
+                         : (!suppress && sourcePasses != 1)))
+            {
+                return nullptr;
+            }
+
+            std::string targetVs;
+            std::string targetPs;
+            // Everything below this point mutates a live material, so every
+            // refusal belongs above it. Per-pass pairs were already through
+            // the same checks (PrepareMultiPassPrograms).
+            if (!perPass &&
+                !PrepareCompatPassPrograms(path, desc, materialName, inputs,
+                                           "instantiate", std::string(),
+                                           targetVs, targetPs))
+            {
                 return nullptr;
             }
 
@@ -2818,8 +2955,13 @@ namespace BZROpenShim::RenderProfiles
                         return nullptr;
                     }
                     stage = kStagePassFetched;
-                    mutate.setVertexProgram(pass, targetVs, true);
-                    mutate.setFragmentProgram(pass, targetPs, true);
+                    mutate.setVertexProgram(
+                        pass, perPass ? (*perPassPrograms)[p].vertex : targetVs,
+                        true);
+                    mutate.setFragmentProgram(
+                        pass,
+                        perPass ? (*perPassPrograms)[p].fragment : targetPs,
+                        true);
                 }
                 stage = kStagePrograms;
 
@@ -2950,13 +3092,81 @@ namespace BZROpenShim::RenderProfiles
                 // This technique is drawn natively whenever its scheme is
                 // active, so declining always means a shaderless draw.
                 desc.fallbackShaderless = true;
-                const Dx11Compat::CompatPath path = Dx11Compat::DecideCompatPath(
+                Dx11Compat::CompatPath path = Dx11Compat::DecideCompatPath(
                     Dx11Compat::ClassifyLegacyPass(desc), desc, config, true);
                 const std::string scheme(techApi.getSchemeName(technique));
                 char label[256] = {};
                 snprintf(label, sizeof(label), "technique=%u scheme=%s",
                          static_cast<unsigned>(t),
                          scheme.empty() ? "Default" : scheme.c_str());
+
+                // Multi-pass: convert pass by pass when every pass is in the
+                // single-pass support set; otherwise keep the decision above
+                // (suppression, since every fallback here is shaderless).
+                if (passes > 1)
+                {
+                    std::vector<Dx11Compat::LegacyPassDesc> passDescs;
+                    Dx11Compat::MultiPassCompatDecision decision;
+                    if (DescribeAllPasses(technique, passes, true, passDescs))
+                    {
+                        decision = Dx11Compat::DecideMultiPassCompat(
+                            passDescs, config, true);
+                    }
+                    std::vector<CompatProgramPair> programs;
+                    if (decision.path ==
+                            Dx11Compat::CompatPath::FixedFuncMultiPass &&
+                        PrepareMultiPassPrograms(passDescs, decision,
+                                                 materialName, inputs,
+                                                 "in-place", programs))
+                    {
+                        try
+                        {
+                            for (unsigned short p = 0; p < passes; ++p)
+                            {
+                                void* pass =
+                                    GuardedGetPass(inspect.getPass, technique, p);
+                                if (pass == nullptr)
+                                {
+                                    continue;
+                                }
+                                mutate.setVertexProgram(pass, programs[p].vertex,
+                                                        true);
+                                mutate.setFragmentProgram(
+                                    pass, programs[p].fragment, true);
+                            }
+                            changed = true;
+                            LogCompatOnce(Dx11Compat::FormatMultiPassLog(
+                                              materialName, decision.passPaths),
+                                          LogLevel::Info);
+                            LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                              " converted-in-place " + label +
+                                              " path=" +
+                                              Dx11Compat::CompatPathName(
+                                                  decision.path),
+                                          LogLevel::Info);
+                        }
+                        catch (...)
+                        {
+                            LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                              " in-place failed " + label,
+                                          LogLevel::Warn);
+                        }
+                        continue;
+                    }
+                    if (decision.failingPass >= 0)
+                    {
+                        LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                          " " + label + " path=" +
+                                          Dx11Compat::CompatPathName(
+                                              Dx11Compat::CompatPath::
+                                                  FixedFuncMultiPass) +
+                                          " declined pass=" +
+                                          std::to_string(decision.failingPass) +
+                                          " reason=unsupported-pass action=" +
+                                          Dx11Compat::CompatPathName(path),
+                                      LogLevel::Info);
+                    }
+                }
 
                 std::string vs;
                 std::string ps;
@@ -3124,8 +3334,26 @@ namespace BZROpenShim::RenderProfiles
             {
                 desc.fallbackShaderless = MaterialFallbackIsShaderless(material);
             }
-            const Dx11Compat::CompatPath path =
+            Dx11Compat::CompatPath path =
                 Dx11Compat::DecideCompatPath(kind, desc, config, true);
+
+            // A multi-pass true fixed-function technique converts pass by pass
+            // when every pass is in the single-pass support set; otherwise it
+            // keeps the decision above (suppress or skip).
+            std::vector<Dx11Compat::LegacyPassDesc> passDescs;
+            Dx11Compat::MultiPassCompatDecision multiPass;
+            if (kind == Dx11Compat::LegacyPassKind::TrueFixedFunction &&
+                desc.passCount > 1)
+            {
+                if (DescribeAllPasses(sourceTechnique,
+                                      static_cast<unsigned short>(desc.passCount),
+                                      desc.fallbackShaderless, passDescs))
+                {
+                    multiPass =
+                        Dx11Compat::DecideMultiPassCompat(passDescs, config, true);
+                    path = multiPass.path;
+                }
+            }
 
             char sourceLabel[192] = {};
             snprintf(sourceLabel, sizeof(sourceLabel), "%s/%zu",
@@ -3141,6 +3369,28 @@ namespace BZROpenShim::RenderProfiles
             if (cached && path != Dx11Compat::CompatPath::KeepNative)
             {
                 return nullptr;
+            }
+
+            if (multiPass.failingPass >= 0)
+            {
+                LogCompatOnce("[DX11COMPAT] material=" + materialName + " path=" +
+                                  Dx11Compat::CompatPathName(
+                                      Dx11Compat::CompatPath::FixedFuncMultiPass) +
+                                  " declined pass=" +
+                                  std::to_string(multiPass.failingPass) +
+                                  " reason=unsupported-pass action=" +
+                                  Dx11Compat::CompatPathName(path),
+                              LogLevel::Info);
+            }
+            // Every per-pass refusal runs here, before any mutation; one
+            // refused pass sends the whole technique to its old path.
+            std::vector<CompatProgramPair> multiPassPrograms;
+            if (path == Dx11Compat::CompatPath::FixedFuncMultiPass &&
+                !PrepareMultiPassPrograms(passDescs, multiPass, materialName,
+                                          inputs, "instantiate",
+                                          multiPassPrograms))
+            {
+                path = multiPass.fallback;
             }
 
             CompatProbeState& state = ProbeState();
@@ -3222,6 +3472,31 @@ namespace BZROpenShim::RenderProfiles
                     materialName, inputs, preserveTechniqueCount);
                 if (generated != nullptr)
                 {
+                    LogCompatTechniqueApplied(materialName, sourceLabel, path,
+                                              preserveTechniqueCount);
+                    ConvertShaderlessSiblingTechniques(material, generated, config,
+                                                       inputs, materialName);
+                    return generated;
+                }
+                LogCompatOnce(
+                    "[DX11COMPAT] instantiation failed material=" + materialName +
+                        " path=" + Dx11Compat::CompatPathName(path) +
+                        " action=stock-fallback",
+                    LogLevel::Warn);
+                break;
+            }
+            case Dx11Compat::CompatPath::FixedFuncMultiPass:
+            {
+                state.fixedFunc.fetch_add(1, std::memory_order_relaxed);
+                void* generated = InstantiateDx11CompatTechnique(
+                    material, sourceTechnique, schemeName, lodIndex, path, desc,
+                    materialName, inputs, preserveTechniqueCount,
+                    &multiPassPrograms);
+                if (generated != nullptr)
+                {
+                    LogCompatOnce(Dx11Compat::FormatMultiPassLog(
+                                      materialName, multiPass.passPaths),
+                                  LogLevel::Info);
                     LogCompatTechniqueApplied(materialName, sourceLabel, path,
                                               preserveTechniqueCount);
                     ConvertShaderlessSiblingTechniques(material, generated, config,

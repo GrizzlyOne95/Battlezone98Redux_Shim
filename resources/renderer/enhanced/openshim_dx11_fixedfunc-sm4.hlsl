@@ -138,8 +138,8 @@ void fixedfunc_fragment(
 #endif
 
 #ifdef COMPAT_OP_REPLACE
-    // replace: texture wins, vertex colour ignored (kept as a distinct
-    // variant so future corpus work can bind it per-pass).
+    // replace: texture colour wins, vertex colour ignored. Bound to a
+    // one-unit pass whose colour_op is replace (default alpha op only).
 #endif
 
     in float4 vColor : COLOR0,
@@ -157,11 +157,14 @@ void fixedfunc_fragment(
 #else
     float3 lit = vColor.xyz;
 #endif
+    // colour_op only sets the colour combine; the policy binds add/replace
+    // only to stages whose alpha op is the default texture * current.
 #if defined(COMPAT_OP_REPLACE)
     float3 albedo = tex.xyz;
-    float alpha = tex.a;
+    float alpha = vColor.a * tex.a;
 #elif defined(COMPAT_OP_ADD)
-    float3 albedo = lit + tex.xyz;
+    // Fixed-function stages clamp their result, so the sum saturates.
+    float3 albedo = saturate(lit + tex.xyz);
     float alpha = vColor.a * tex.a;
 #else
     // modulate (default) and alpha_blend share this path: albedo is the
