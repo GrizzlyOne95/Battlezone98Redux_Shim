@@ -1218,6 +1218,90 @@ namespace BZROpenShim::RenderProfiles
                                               : nullptr;
         }
 
+        // A viewport that never had a scheme set asks for Ogre's default,
+        // which the RTShaderSystem renames "ShaderGeneratorDefaultScheme". The
+        // engine draws one world pass per frame that way (see the pass note in
+        // chunk_proxy_render.cpp), and no material declares the name, so Ogre
+        // falls back to the technique with the LOWEST scheme index. On stock
+        // content that is the plain high-pssm technique. Once the prune drops
+        // the plain family, the lowest index left is the material's "glow"
+        // technique, because glow was registered before any en-/og- scheme:
+        // a black glow map drawn as the surface (CRA Ganymede: GA_DETAIL_ATLAS,
+        // cspilo). Reproduce stock's pick instead: rank each technique by the
+        // index of its family-stripped scheme, so en-high-pssm stands in for
+        // the pruned high-pssm. Tier-less schemes (glow) rank last, so a tier
+        // whose plain name was first registered after glow cannot lose to it.
+        // A material that still has a plain tier technique keeps Ogre's answer.
+        bool IsUnsetViewportScheme(std::string_view name)
+        {
+            return name == "ShaderGeneratorDefaultScheme" || name == "Default";
+        }
+
+        void* ResolveUnsetSchemeTechnique(const OgreTechniqueApi& api,
+                                          void* material,
+                                          unsigned short lodIndex,
+                                          uint32_t families)
+        {
+            if (api.getSchemeIndex == nullptr || api.getMaterialManager == nullptr ||
+                api.managerSchemeIndex == nullptr)
+            {
+                return nullptr;
+            }
+            void* const manager = api.getMaterialManager();
+            if (manager == nullptr)
+            {
+                return nullptr;
+            }
+            // Per technique scheme index: the family-stripped name's index,
+            // its family and whether it names a tier. Indices are never
+            // renumbered, so entries hold for the process; getSchemeName is
+            // only paid once per scheme, not per draw.
+            struct SchemeFacts
+            {
+                unsigned short strippedIndex;
+                uint32_t family;
+                bool tiered;
+            };
+            thread_local std::unordered_map<unsigned short, SchemeFacts> t_facts;
+            void* best = nullptr;
+            unsigned int bestKey = ~0u;
+            const unsigned short count = api.getNumTechniques(material);
+            for (unsigned short i = 0; i < count; ++i)
+            {
+                void* technique = api.getTechnique(material, i);
+                if (technique == nullptr || !api.isSupported(technique))
+                {
+                    continue;
+                }
+                const unsigned short own = api.getSchemeIndex(technique);
+                auto it = t_facts.find(own);
+                if (it == t_facts.end())
+                {
+                    const std::string& scheme = api.getSchemeName(technique);
+                    const std::string stripped(SchemePrune::StripFamily(scheme));
+                    it = t_facts.emplace(own, SchemeFacts{ api.managerSchemeIndex(manager, stripped),
+                                                           SchemePrune::FamilyBit(scheme),
+                                                           SchemePrune::TierBit(scheme) != 0 }).first;
+                }
+                const SchemeFacts& facts = it->second;
+                if (facts.tiered && facts.family == SchemePrune::kFamilyPlain)
+                {
+                    return nullptr;   // not pruned here: Ogre's own pick is stock's
+                }
+                // Tiered first, then lowest stripped index, a seen family, the LOD.
+                const unsigned int key = (facts.tiered ? 0u : 1u << 20) |
+                                         (static_cast<unsigned int>(facts.strippedIndex) << 2) |
+                                         ((facts.family & families) != 0 ? 0u : 2u) |
+                                         (api.getLodIndex(technique) == lodIndex ? 0u : 1u);
+                if (key < bestKey)
+                {
+                    best = technique;
+                    bestKey = key;
+                }
+            }
+            return best;
+        }
+
         void* ResolveBaseSchemeTechnique(const std::string& schemeName,
                                          void* material,
                                          unsigned short lodIndex)
@@ -1237,6 +1321,14 @@ namespace BZROpenShim::RenderProfiles
                 const uint32_t families = s_seenFamilyMask.load(std::memory_order_acquire);
                 const uint32_t tiers = s_seenTierMask.load(std::memory_order_acquire);
                 const bool familyPruned = families != 0 && (families & SchemePrune::kFamilyPlain) == 0;
+                // Any en-/og- family drawn: the prune may have dropped this
+                // material's plain techniques (checked per material inside).
+                if ((families & ~SchemePrune::kFamilyPlain) != 0 && IsUnsetViewportScheme(name))
+                {
+                    const OgreTechniqueApi& api = TechniqueApi();
+                    return api.Valid() ? ResolveUnsetSchemeTechnique(api, material, lodIndex, families)
+                                       : nullptr;
+                }
                 const bool tierChanged = (tiers & (tiers - 1)) != 0;
                 if ((!familyPruned && !tierChanged) || !IsModernMaterialScheme(name))
                 {
