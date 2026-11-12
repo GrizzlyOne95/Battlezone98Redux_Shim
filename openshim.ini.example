@@ -139,16 +139,16 @@ SkinnedGibsForce = 1.0
 ; expire as usual. Render cost only. 0 = off (0..2000). Default: 150.
 SkinnedGibsDrawDistance = 150
 
-; Fracture one-piece models: when a craft or building whose model has at most
-; one vertex-driving bone (or no skeleton) is fully fragmented, the engine
-; yields at most one whole-model chunk. With this on, the model's own .mesh is
+; Fracture models: when a craft or building whose model has no turret part
+; (walkers included; tanks, gun towers and howitzers keep the engine's chunks)
+; is fully fragmented, the model's own .mesh is
 ; cut at runtime into 4..8 capped pieces (more for larger models) that are
 ; thrown like debris, using the SkinnedGibs pool and the legacy launch values
 ; with a heavier metal ground response. Cut faces use openshim_fracture_interior,
 ; written to the cache root unless a chunk payload directory ships its own
 ; openshim_fracture_interior.material. The cut pieces are cached under
-; openshim/cache/chunks/fracture. Models under 1 m, or with several driving
-; bones, are left to the engine. Visual only: the engine's own chunk
+; openshim/cache/chunks/fracture. Models under 1 m, or with a turret part,
+; are left to the engine. Visual only: the engine's own chunk
 ; simulation is untouched, and 0 restores exactly the previous behaviour.
 ; GOG build only. Per-spawn log lines under TraceSkinnedGibs.
 ; Accepted: 0 = OFF, non-zero = ON. Default: 1.

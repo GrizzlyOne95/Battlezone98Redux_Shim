@@ -998,6 +998,52 @@ namespace BZROpenShim
             // Per pass. Models left over are retried by the next pass.
             constexpr double kPrewarmPassBudgetMs = 250.0;
 
+            // A model with a turret part (GEO class 65: avtank, gun towers,
+            // howitzers) keeps its stock GEO chunks; every other craft or
+            // building fractures as one hull. Walks the object's own part tree
+            // (the root and its descendants, never the root's siblings),
+            // bounded, through the SEH-guarded readers.
+            constexpr uint32_t kTurretGeomClassId = 65;
+            bool HasTurretPart(void* obj76)
+            {
+                constexpr size_t kMaxNodes = 64;
+                const uint8_t* stack[kMaxNodes] = {};
+                size_t depth = 0, visited = 0;
+                stack[depth++] = static_cast<const uint8_t*>(obj76);
+                bool isRoot = true;
+                while (depth > 0 && visited < kMaxNodes)
+                {
+                    const uint8_t* const node = stack[--depth];
+                    ++visited;
+                    uint32_t classId = 0, flags = 0;
+                    void* geomRef = nullptr;
+                    void* owner = nullptr;
+                    if (!TryReadChunkObjectSummary(node, classId, flags, geomRef, nullptr, 0, owner))
+                        continue;
+                    if (classId == kTurretGeomClassId)
+                        return true;
+                    const uint8_t *parent = nullptr, *sibling = nullptr, *child = nullptr;
+                    if (!TryReadChunkObjectLinks(node, parent, sibling, child))
+                        continue;
+                    if (!isRoot && sibling && sibling != node && depth < kMaxNodes)
+                        stack[depth++] = sibling;
+                    if (child && child != node && depth < kMaxNodes)
+                        stack[depth++] = child;
+                    isRoot = false;
+                }
+                return false;
+            }
+
+            // Logs a turret skip once per model.
+            void LogTurretSkipOnce(const char* meshName)
+            {
+                static std::vector<std::string> logged;
+                if (std::find(logged.begin(), logged.end(), meshName) != logged.end() || logged.size() >= 256)
+                    return;
+                logged.emplace_back(meshName);
+                LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] skip mesh=%hs reason=turret part\n", meshName);
+            }
+
             void RunFracturePrewarmPass(size_t pass)
             {
                 static void* s_objects[kGameObjectArenaSlotCapacity];
@@ -1039,6 +1085,9 @@ namespace BZROpenShim
                     // the cutter here, a cost the first death still pays (once
                     // per install, not per mission). A cached negative needs
                     // nothing: the real death path does nothing either.
+                    void* obj76 = nullptr;
+                    if (!TryGetGameObjectObj76(gameObject, obj76) || !obj76 || HasTurretPart(obj76))
+                        continue;
                     SkinnedGibModelInfo model;
                     if (!PrepareFracturePayloads(mesh, group, model, true) || model.pieces.empty())
                         continue;
@@ -1125,7 +1174,7 @@ namespace BZROpenShim
 
             // Only a whole body: the root handed to FullFragmentObject must be
             // the object's own tree. Persons become limb gibs; anything else
-            // is a fracture candidate (a one-piece craft or building).
+            // is a fracture candidate (a craft or building without a turret part).
             void* gameObject = nullptr;
             if (!TryGetGameObjectFromObj76(obj76, gameObject) || !gameObject)
                 return false;
@@ -1157,6 +1206,11 @@ namespace BZROpenShim
             {
                 return false;
             }
+            if (!person && HasTurretPart(obj76))
+            {
+                LogTurretSkipOnce(capture.meshName);
+                return false;
+            }
 
             void* node = ParentSceneNodeSafe(api, entity);
             if (!LooksLikeOgreObject(node))
@@ -1186,7 +1240,7 @@ namespace BZROpenShim
             ReadVelocitySafe(velocity, capture.velocity);
 
             // The split is cached per model; the first death of a new model
-            // pays for it here, once. A fracture model that is not one piece
+            // pays for it here, once. A fracture model too small to cut
             // is a cached negative: nothing more happens on its deaths.
             const bool prepared = person ? PrepareSkinnedGibPayloads(capture.meshName, capture.group, capture.model)
                                          : PrepareFracturePayloads(capture.meshName, capture.group, capture.model);
