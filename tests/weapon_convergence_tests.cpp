@@ -463,6 +463,52 @@ namespace
             "Walker convergence added target elevation to the correction");
     }
 
+    Matrix MakePitchDownMatrix(float radians)
+    {
+        // Row-vector pitch about +X: a positive angle tips front toward -Y,
+        // the way a hovercraft barrel tilts to aim at nearby ground.
+        const float c = std::cos(radians);
+        const float s = std::sin(radians);
+        Matrix out = Identity();
+        out.upY = c;
+        out.upZ = s;
+        out.frontY = -s;
+        out.frontZ = c;
+        return out;
+    }
+
+    void TestWalkerStyleRangeStandsDownInsideTheHardpointReach()
+    {
+        // svtank (CR): the cannon tips (GC1/GC2) sit about 4.5 m ahead of the
+        // craft origin and 0.2-0.3 m off-centre. Aiming the reticle at the ground
+        // a few metres ahead gives a centre-to-centre range below that, so the
+        // stock Walker vector (-hx, 0, range - hz) points backward. Composed
+        // with a barrel pitched down at the ground, that 180-degree yaw sent
+        // the shot up and away from the ground.
+        const Matrix stock = MakePitchDownMatrix(0.5f);
+        const float hardX = 0.29f;
+        const float hardZ = 4.49f;
+
+        Solution solution = {};
+        Require(SolveWalkerStyleRange(stock, hardX, hardZ, 3.5f, solution) ==
+                SolveResult::TargetTooClose,
+            "a reticle range behind the hardpoint flipped the barrel instead of standing down");
+        Require(SolveWalkerStyleRange(stock, hardX, hardZ, hardZ + 0.5f, solution) ==
+                SolveResult::TargetTooClose,
+            "a reticle range barely past the hardpoint swung the barrel sideways");
+        Require(SolveWalkerStyleRange(stock, 3.0f, 1.0f, 3.5f, solution) ==
+                SolveResult::ExceedsDeviationLimit,
+            "a wide hardpoint at short range swung the barrel past the deviation cap");
+
+        // Just outside the reach the stock Walker correction is applied and the
+        // barrel keeps pointing down at the ground.
+        Require(SolveWalkerStyleRange(stock, hardX, hardZ, hardZ + 2.0f, solution) ==
+                SolveResult::Converged,
+            "a normal short reticle range was refused");
+        Require(solution.mountLocal.frontY < 0.0f && solution.mountLocal.frontZ > 0.0f,
+            "short-range convergence did not keep the barrel aimed down and forward");
+    }
+
     void TestSafetyStopsAndDegenerateInput()
     {
         const Matrix mountWorld = MakeYawMatrix(0.0f, 0.0, 0.0, 0.0);
@@ -507,6 +553,7 @@ int main()
     TestWalkerStyleRangeUsesHardpointRelativeOffsetsNotWeaponTranslation();
     TestWalkerStyleRangeCorrectionPreMultipliesStockAim();
     TestWalkerStyleRangeIgnoresOffAxisTargetBearing();
+    TestWalkerStyleRangeStandsDownInsideTheHardpointReach();
     TestSafetyStopsAndDegenerateInput();
     std::printf("weapon_convergence_tests: all checks passed\n");
     return 0;
