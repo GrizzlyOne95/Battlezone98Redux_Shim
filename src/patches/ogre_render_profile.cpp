@@ -3119,6 +3119,11 @@ namespace BZROpenShim::RenderProfiles
                                                  materialName, inputs,
                                                  "in-place", programs))
                     {
+                        // Counts passes this technique mutated, so a
+                        // technique with no reachable pass leaves the
+                        // material unloaded and unconverted.
+                        unsigned bound = 0;
+                        bool threw = false;
                         try
                         {
                             for (unsigned short p = 0; p < passes; ++p)
@@ -3133,8 +3138,62 @@ namespace BZROpenShim::RenderProfiles
                                                         true);
                                 mutate.setFragmentProgram(
                                     pass, programs[p].fragment, true);
+                                ++bound;
                             }
+                        }
+                        catch (...)
+                        {
+                            threw = true;
+                            // A throw part-way leaves some passes shaded and
+                            // the rest shaderless, which still throws at draw
+                            // time. Suppress every pass instead.
+                            unsigned suppressed = 0;
+                            try
+                            {
+                                for (unsigned short p = 0; p < passes; ++p)
+                                {
+                                    void* pass = GuardedGetPass(inspect.getPass,
+                                                                technique, p);
+                                    if (pass == nullptr)
+                                    {
+                                        continue;
+                                    }
+                                    mutate.setVertexProgram(
+                                        pass,
+                                        Dx11Compat::FixedFuncSuppressVertex(),
+                                        true);
+                                    mutate.setFragmentProgram(
+                                        pass,
+                                        Dx11Compat::FixedFuncSuppressFragment(),
+                                        true);
+                                    ++suppressed;
+                                }
+                            }
+                            catch (...)
+                            {
+                            }
+                            if (bound > 0 || suppressed > 0)
+                            {
+                                changed = true;
+                            }
+                            if (suppressed == passes)
+                            {
+                                ++converted;
+                            }
+                            LogCompatOnce("[DX11COMPAT] material=" + materialName +
+                                              " in-place failed " + label +
+                                              " action=suppress suppressed=" +
+                                              std::to_string(suppressed) + "/" +
+                                              std::to_string(passes),
+                                          LogLevel::Warn);
+                            decline("exception");
+                        }
+                        // Logged outside the try, so a throw while logging
+                        // cannot undo a finished bind.
+                        if (!threw && bound > 0)
+                        {
                             changed = true;
+                            ++converted;
                             LogCompatOnce(Dx11Compat::FormatMultiPassLog(
                                               materialName, decision.passPaths),
                                           LogLevel::Info);
@@ -3144,12 +3203,6 @@ namespace BZROpenShim::RenderProfiles
                                               Dx11Compat::CompatPathName(
                                                   decision.path),
                                           LogLevel::Info);
-                        }
-                        catch (...)
-                        {
-                            LogCompatOnce("[DX11COMPAT] material=" + materialName +
-                                              " in-place failed " + label,
-                                          LogLevel::Warn);
                         }
                         continue;
                     }
@@ -3502,6 +3555,33 @@ namespace BZROpenShim::RenderProfiles
                     ConvertShaderlessSiblingTechniques(material, generated, config,
                                                        inputs, materialName);
                     return generated;
+                }
+                // A stock fallback here is shaderless and throws on every
+                // draw. Suppressing the passes is the same outcome a refused
+                // pass would have had before any program was bound.
+                if (multiPass.fallback == Dx11Compat::CompatPath::SuppressPass)
+                {
+                    generated = InstantiateDx11CompatTechnique(
+                        material, sourceTechnique, schemeName, lodIndex,
+                        Dx11Compat::CompatPath::SuppressPass, desc, materialName,
+                        inputs, preserveTechniqueCount);
+                    if (generated != nullptr)
+                    {
+                        state.skipped.fetch_add(1, std::memory_order_relaxed);
+                        LogCompatOnce(
+                            "[DX11COMPAT] instantiation failed material=" +
+                                materialName + " path=" +
+                                Dx11Compat::CompatPathName(path) +
+                                " action=suppress",
+                            LogLevel::Warn);
+                        LogCompatTechniqueApplied(
+                            materialName, sourceLabel,
+                            Dx11Compat::CompatPath::SuppressPass,
+                            preserveTechniqueCount);
+                        ConvertShaderlessSiblingTechniques(
+                            material, generated, config, inputs, materialName);
+                        return generated;
+                    }
                 }
                 LogCompatOnce(
                     "[DX11COMPAT] instantiation failed material=" + materialName +

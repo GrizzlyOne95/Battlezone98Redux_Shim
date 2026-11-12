@@ -44,6 +44,7 @@ fragment_program OSE_FixedFunc_Textured_fragment hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -59,6 +60,7 @@ fragment_program OSE_FixedFunc_Textured_fragment_replace hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -74,6 +76,7 @@ fragment_program OSE_FixedFunc_Textured_fragment_add hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -94,6 +97,7 @@ fragment_program OSE_FixedFunc_Textured_fragment_lit hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
         param_named_auto emissiveColour surface_emissive_colour
@@ -110,6 +114,7 @@ fragment_program OSE_FixedFunc_Textured_fragment_add_lit hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
         param_named_auto emissiveColour surface_emissive_colour
@@ -136,6 +141,7 @@ fragment_program OSE_FixedFunc_Untextured_fragment hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -151,6 +157,7 @@ fragment_program OSE_FixedFunc_Untextured_fragment_lit hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
         param_named_auto emissiveColour surface_emissive_colour
@@ -285,6 +292,7 @@ fragment_program OSE_Compat_Textured_fragment hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -314,6 +322,7 @@ fragment_program OSE_Compat_Untextured_fragment hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -369,6 +378,7 @@ fragment_program OSE_Compat_Base_fragment hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -457,6 +467,7 @@ fragment_program OSE_Compat_Terrain_fragment hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -508,6 +519,7 @@ fragment_program OSE_FixedFunc_Textured2_fragment_modulate hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -523,6 +535,7 @@ fragment_program OSE_FixedFunc_Textured2_fragment_add hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -538,6 +551,7 @@ fragment_program OSE_FixedFunc_Textured2_fragment_alphablend hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
     }
@@ -553,6 +567,7 @@ fragment_program OSE_FixedFunc_Textured2_fragment_modulate_lit hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
         param_named_auto emissiveColour surface_emissive_colour
@@ -569,6 +584,7 @@ fragment_program OSE_FixedFunc_Textured2_fragment_add_lit hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
         param_named_auto emissiveColour surface_emissive_colour
@@ -585,6 +601,7 @@ fragment_program OSE_FixedFunc_Textured2_fragment_alphablend_lit hlsl
     default_params
     {
         param_named_auto sceneAmbient derived_ambient_light_colour
+        param_named_auto passNumber pass_number
         param_named_auto fogColour fog_colour
         param_named_auto fogParams fog_params
         param_named_auto emissiveColour surface_emissive_colour

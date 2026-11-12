@@ -131,6 +131,7 @@ void fixedfunc_fragment(
     uniform SamplerState diffuseSam : register(s0),
 
     uniform float4 sceneAmbient,
+    uniform float passNumber,
     uniform float4 fogColour,
     uniform float4 fogParams,
 #ifdef COMPAT_LIGHTING_EMISSIVE
@@ -184,7 +185,10 @@ void fixedfunc_fragment(
     // grey quad.
 #if !defined(COMPAT_FAMILY_EFFECT) && !defined(COMPAT_FAMILY_SKY) && \
     !defined(COMPAT_FAMILY_UI) && !defined(COMPAT_FAMILY_SIMPLEONETEX)
-    albedo += sceneAmbient.xyz * 0.25;
+    // Later passes of a multi-pass material blend onto pass 0, which
+    // already added the floor; adding it again brightens the result.
+    if (passNumber < 0.5)
+        albedo += sceneAmbient.xyz * 0.25;
 #endif
     oColor.xyz = albedo;
 
@@ -231,6 +235,7 @@ void fixedfunc_untextured_vertex(
 
 void fixedfunc_untextured_fragment(
     uniform float4 sceneAmbient,
+    uniform float passNumber,
     uniform float4 fogColour,
     uniform float4 fogParams,
 #ifdef COMPAT_LIGHTING_EMISSIVE
@@ -248,7 +253,9 @@ void fixedfunc_untextured_fragment(
 #else
     float3 lit = vColor.xyz;
 #endif
-    float3 albedo = lit + sceneAmbient.xyz * 0.25;
+    float3 albedo = lit;
+    if (passNumber < 0.5)
+        albedo += sceneAmbient.xyz * 0.25;
     oColor.xyz = albedo;
 
     float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);
@@ -319,6 +326,7 @@ void fixedfunc2_fragment(
     uniform SamplerState stage1Sam : register(s1),
 
     uniform float4 sceneAmbient,
+    uniform float passNumber,
     uniform float4 fogColour,
     uniform float4 fogParams,
 #ifdef COMPAT_LIGHTING_EMISSIVE
@@ -356,7 +364,8 @@ void fixedfunc2_fragment(
     alpha = alpha * tex1.a;
 
     // Same ambient floor and fog as the one-stage path.
-    current += sceneAmbient.xyz * 0.25;
+    if (passNumber < 0.5)
+        current += sceneAmbient.xyz * 0.25;
     float fogValue = saturate((vDepth - fogParams.y) * fogParams.w);
     oColor.xyz = lerp(current, fogColour.xyz, fogValue);
     oColor.a = alpha;
