@@ -6039,6 +6039,24 @@
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWave::UpdateExtents (FUN_005cf100, __fastcall ecx=this): stores [this+0xE4/E8/EC/F0] = floor/ceil((pos -/+ r) * 1/Grid_Size), r = [[this+0xC]+0x78]. Restore and Simulate walk these inclusive, one delta entry per cell, against a side*side*2 buffer (side = floor(r*2*0.2)+2) allocated in the ctor FUN_005cef80, so the stock extents overrun it. OpenShim post-hooks it (9-byte prologue detour) to clamp the max edges to the buffer."
     },
     {
+      "name": "DynamicMainAllocVertices",
+      "address": "0x0067A150",
+      "expected": "55 8B EC 83 EC 08 89 4D FC B8 00 00 01 00 2B 45 08 8B 4D FC 39 81 D4 01 00 00",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) DynamicMain vertex allocator (FUN_0067a150, __thiscall(n), ret 4): fails with \"%s: vertex buffer is full\" and returns 0 when 0x10000-n < [this+0x1D4] (vertex count), else returns [this+0x1CC] and advances it by n*[this+0x14C] (stride) and +0x1D4 by n. Callers (wrapper FUN_006856a0 with 14 call sites, and direct callers FUN_00685740..FUN_00687770) write through the result unchecked. OpenShim detours the 9-byte prologue to hand back a scratch sink instead of 0. See src/patches/dynamic_alloc_guard.cpp."
+    },
+    {
+      "name": "DynamicMainAllocIndices",
+      "address": "0x0067A1E0",
+      "expected": "55 8B EC 83 EC 08 89 4D FC B8 00 80 01 00 2B 45 08 8B 4D FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) DynamicMain index allocator (FUN_0067a1e0, __thiscall(n), ret 4): logs \"%s: index buffer is full\" and returns 0 on its full-check, else returns [this+0x1D0] and advances it by n*2 and the index count +0x1D8 by n. Callers (wrapper FUN_006856c0, PlanarRenderClass::Render FUN_00452580 at 0x452CD5) write 16-bit indices through the result unchecked. OpenShim detours the 9-byte prologue to hand back a scratch sink instead of 0. See src/patches/dynamic_alloc_guard.cpp."
+    },
+    {
+      "name": "DynamicMainIndexFullCheck",
+      "address": "0x0067A1F4",
+      "expected": "39 81 D4 01 00 00 76 26",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) cmp [ecx+0x1D4],eax inside the DynamicMain index allocator FUN_0067a1e0: the full-check compares 0x18000-n with the VERTEX count +0x1D4 instead of the index count +0x1D8 that the same function advances, and that Reserve FUN_0067a110 and commit FUN_00679f10 use. The guard also covers the following jbe (76 26). OpenShim rewrites the disp32 low byte (0x67A1F6) D4 -> D8."
+    },
+    {
       "name": "SitTaskVtable",
       "address": "0x00889F50",
       "kind": "data",

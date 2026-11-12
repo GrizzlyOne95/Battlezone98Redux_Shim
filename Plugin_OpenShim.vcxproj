@@ -207,6 +207,7 @@
     <ClCompile Include="src\patches\no_damage_slowdown.cpp" />
     <ClCompile Include="src\patches\mp_block_freecam.cpp" />
     <ClCompile Include="src\patches\seismic_wave_extent_clamp.cpp" />
+    <ClCompile Include="src\patches\dynamic_alloc_guard.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\hook_patch_helpers.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
