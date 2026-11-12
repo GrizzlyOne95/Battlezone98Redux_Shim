@@ -827,6 +827,9 @@ endif()
 
 add_test(NAME dx11_legacy_material_compat_tests COMMAND dx11_legacy_material_compat_tests)
 
+# DX11 draw-time shaderless guard bookkeeping (header-only policy).
+openshim_add_test(dx11_draw_guard_policy_tests STD 17 SOURCES dx11_draw_guard_policy_tests.cpp)
+
 # CLI parser parity defect model (PR #69). This test is engine-independent:
 # it models Redux's strtok comma defect and the pristine-snapshot repair
 # without linking any engine patch implementation. Its primary compatibility

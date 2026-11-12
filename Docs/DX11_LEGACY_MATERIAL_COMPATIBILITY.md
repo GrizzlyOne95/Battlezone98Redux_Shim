@@ -327,6 +327,29 @@ Suggested message:
 
 This converts catastrophic black-screen exception spam into a bounded compatibility miss.
 
+#### Draw-time guard (2026-11-11)
+
+Implemented in `src/patches/ogre_render_profile.cpp` ("DX11 draw-time shaderless guard"), with its bookkeeping in `include/dx11_draw_guard_policy.h` (tests: `tests/dx11_draw_guard_policy_tests.cpp`). Gated by `[Fixes] DX11ShaderlessDrawGuard`, default ON. It does nothing on DX9.
+
+- **Why.** The scheme-miss ladder only sees materials Ogre asks `handleSchemeNotFound` about. A shaderless technique that is the active scheme's own technique is drawn directly. `D3D11RenderSystem::_render` throws on it, and the exception unwinds the rest of that frame's render queue. The BZP menu broke in bursts this way.
+- **Hook.** An inline detour of the exported `Ogre::SceneManager::renderSingleObject` (`?renderSingleObject@SceneManager@Ogre@@MAEXPAVRenderable@2@PBVPass@2@_N2PBV?$HashedVector@PAVLight@Ogre@@@2@@Z`). The detour follows the export's incremental-link `E9` thunk to the body, and the expected prologue is `55 8B EC 6A FF`.
+  - If the pass lacks a vertex program or a fragment program (`Pass::hasVertexProgram` / `hasFragmentProgram`), the draw is skipped. Otherwise the original runs unchanged.
+- **Logging.** Each material is keyed by `(Resource::getHandle, Resource::getStateCount)`, found through `Pass::getParent` -> `Technique::getParent`.
+  - Each new key logs one line: `[DX11DRAWGUARD] skipped shaderless draw material=... state=... technique=... scheme=... pass=... missing=vs|ps|vs+ps`.
+  - Lines are capped at 64 and keys at 256. One notice marks the cap.
+  - A reloaded material gets a new state count, so it counts as a new key.
+- **Conversion.** Nothing is changed inside the render queue. Each new key is queued once, and an Ogre `FrameListener::frameStarted` resolves it before any scene rendering.
+  - Resolution checks that the material is still alive (`ResourceManager::resourceExists(handle)`, same state count, same name). It then runs the existing in-place converter with the material's effective compat config.
+  - The converter applies the same `IsExcludedFromSynthesis` exclusions, fail-closed paths and program-existence checks. It also skips GPU-skinning clones and requires valid renderer resources.
+  - The outcome is logged once: `converted techniques=N` or `declined reason=...`. Conversion needs `DX11LegacyMaterialCompat=1`; otherwise the reason is `compat-disabled`.
+  - A pass missing only one program is never converted (`no-fully-shaderless-technique`).
+  - A decline because the renderer is not ready yet (`renderer-resources-unavailable`, `abi-unavailable`) is retried on later frames, up to 600 attempts, before the outcome is logged. Other declines are final for that key.
+  - Whatever is not converted stays skipped, without further log lines.
+  - The first frameStarted drain logs `[DX11DRAWGUARD] frameStarted drain active` once, which confirms that the listener fires.
+- **Coverage.** Only draws through `renderSingleObject` are guarded. `SceneManager::manualRender` (compositor `render_quad`) and the stencil shadow-volume path call `RenderSystem::_render` directly, so a shaderless pass there still throws.
+- **Conflict.** The Ogre animation profiler (`ogre_animation_profiler/observer_install.inl`) detours the same entry while profiler collection or isolation is active. Whichever installs first wins. The other fails closed on the prologue check and logs that it was not installed.
+- **Unverified.** These points have no live DX11 run yet: the guard's behaviour with the BZP menu, the frameStarted timing in BZR's loop, and whether D3D11 would have tolerated a missing pixel shader on a draw the guard skips (point lists, geometry-shader passes).
+
 ## Technique construction: clone state, do not reconstruct it field-by-field
 
 Where possible, copy/clone the original technique and passes, then replace only unusable GPU program references.
