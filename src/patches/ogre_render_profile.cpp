@@ -1274,6 +1274,10 @@ namespace BZROpenShim::RenderProfiles
                     continue;
                 }
                 const unsigned short own = api.getSchemeIndex(technique);
+                if (own == 0)
+                {
+                    return nullptr;   // a scheme-less (Default) technique: stock picks it
+                }
                 auto it = t_facts.find(own);
                 if (it == t_facts.end())
                 {
