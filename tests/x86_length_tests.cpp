@@ -200,6 +200,21 @@ int main()
         Check(Plan(calls, 25).status == X86StealStatus::TooManyRel32, "more than kMaxRel32 rel32 refused");
         Check(Plan(calls, 20).status == X86StealStatus::Ok, "exactly kMaxRel32 rel32 accepted");
     }
+    {
+        // Briefing-page entry prologues (GOG 2.2.301), with the bytes after the
+        // steal. briefing_pages.cpp's patch lengths must each plan Ok.
+        const std::vector<uint8_t> sehPrologue = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x51, 0x90, 0x84, 0x00,
+                                                   0x64, 0xA1, 0x00, 0x00, 0x00, 0x00 };
+        const std::vector<uint8_t> playWav = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x34, 0xA1, 0x00, 0x70, 0x8E, 0x00,
+                                               0x33, 0xC5, 0x89, 0x45, 0xFC };
+        const std::vector<uint8_t> onKey = { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x83, 0x7D, 0x08, 0x1B,
+                                             0x75, 0x0C, 0x8B, 0x4D, 0xFC };
+        Check(Plan(sehPrologue, 10).status == X86StealStatus::Ok, "briefing SEH prologue: 10-byte steal ok");
+        Check(Plan(sehPrologue, 7).status == X86StealStatus::NotOnBoundary, "briefing SEH prologue: 7 splits push imm32");
+        Check(Plan(playWav, 11).status == X86StealStatus::Ok && Plan(playWav, 11).rel32Count == 0,
+              "briefing play-wav: 11-byte steal ok, moffs32 is absolute");
+        Check(Plan(onKey, 11).status == X86StealStatus::Ok, "briefing OnKey: 11-byte steal ok");
+    }
     Check(X86StealStatusName(X86StealStatus::NotOnBoundary)[0] == 'n', "status names are populated");
 
     if (OpenShimTest::FailureCount())

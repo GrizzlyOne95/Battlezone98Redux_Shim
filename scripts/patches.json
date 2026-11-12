@@ -4921,19 +4921,19 @@
       "name": "BriefingScreenCtor",
       "address": "0x0078F030",
       "expected": "55 8B EC 6A FF 68 53 ED 85 00 64 A1 00 00 00 00",
-      "identity": "cUI_Mission (pre-launch briefing) ctor, GOG Redux 2.2.301: thiscall(this, manager, std::string missionName by value), RET 0x1C; writes vtable 0x0089E2A8 at 0x0078F081 and stores this in 0x0094552C at 0x0078F131. Briefing pages detour the entry (5 bytes) to capture page 1 and add the page widgets after it returns (reverse_engineering/briefing_pages_20261110.md)."
+      "identity": "cUI_Mission (pre-launch briefing) ctor, GOG Redux 2.2.301: thiscall(this, manager, std::string missionName by value), RET 0x1C; writes vtable 0x0089E2A8 at 0x0078F081 and stores this in 0x0094552C at 0x0078F131. Briefing pages detour the entry (10 bytes) to capture page 1 and add the page widgets after it returns (reverse_engineering/briefing_pages_20261110.md)."
     },
     {
       "name": "BriefingScreenOnKey",
       "address": "0x00790AA0",
       "expected": "55 8B EC 51 89 4D FC 83 7D 08 1B 75 0C 8B 4D FC",
-      "identity": "cUI_Mission key handler (vtable 0x0089E2A8 slot 5), thiscall(key, mods), RET 8; only handles VK_ESCAPE (0x1B -> 0x0078EDC0). Same bytes as UiScreenEscBackKey 0x00788E70, a different screen's copy. Briefing pages detour the entry (7 bytes) for Left/Right/PgUp/PgDn."
+      "identity": "cUI_Mission key handler (vtable 0x0089E2A8 slot 5), thiscall(key, mods), RET 8; only handles VK_ESCAPE (0x1B -> 0x0078EDC0). Same bytes as UiScreenEscBackKey 0x00788E70, a different screen's copy. Briefing pages detour the entry (11 bytes) for Left/Right/PgUp/PgDn."
     },
     {
       "name": "BriefingScreenPlayWav",
       "address": "0x0078EF60",
       "expected": "55 8B EC 83 EC 34 A1 00 70 8E 00 33 C5 89 45 FC",
-      "identity": "cUI_Mission play-wav, thiscall(const char* wav), RET 4: stops the sound handle at this+0x160 (0x0043AAA0) then plays the wav (0x0043AA30). Only called from the cUI_Mission ctor (0x00790202..0x00790919). Also resolved by PlanetVideo::MissionIntroSound. Briefing pages detour the entry (6 bytes) to record page 1's wav and call the original to change page sound."
+      "identity": "cUI_Mission play-wav, thiscall(const char* wav), RET 4: stops the sound handle at this+0x160 (0x0043AAA0) then plays the wav (0x0043AA30). Only called from the cUI_Mission ctor (0x00790202..0x00790919). Also resolved by PlanetVideo::MissionIntroSound. Briefing pages detour the entry (11 bytes, ending after the mov eax,[abs32]) to record page 1's wav and call the original to change page sound."
     },
     {
       "name": "BriefingScreenStopWav",
@@ -4951,7 +4951,7 @@
       "name": "DescriptionFileLoad",
       "address": "0x004889C0",
       "expected": "55 8B EC 6A FF 68 51 90 84 00 64 A1 00 00 00 00",
-      "identity": "Description loader, cdecl(const char* name, char* buffer): cuts name at the first '.', appends \".des\" (0x00488AD2), copies at most 0x1F400 bytes (0x00488CCA) plus NUL, or \"NO DESCRIPTION\" (0x00488D39). Called twice by the cUI_Mission ctor: mission text (0x0078FB8A) then planet text (0x0078FEE7). Briefing pages detour the entry (5 bytes)."
+      "identity": "Description loader, cdecl(const char* name, char* buffer): cuts name at the first '.', appends \".des\" (0x00488AD2), copies at most 0x1F400 bytes (0x00488CCA) plus NUL, or \"NO DESCRIPTION\" (0x00488D39). Called twice by the cUI_Mission ctor: mission text (0x0078FB8A) then planet text (0x0078FEE7). Briefing pages detour the entry (10 bytes)."
     },
     {
       "name": "ScrollingTextBlockSetText",
