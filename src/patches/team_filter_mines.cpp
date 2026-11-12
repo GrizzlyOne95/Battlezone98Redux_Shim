@@ -677,6 +677,8 @@ namespace BZROpenShim
             bool foundAny = false;
             bool affectAllies = true;
             bool affectEnemies = true;
+            ShieldPushMode::Mode pushMode = ShieldPushMode::Mode::Front;
+            float reflectSpeed = ShieldPushMode::kDefaultReflectSpeed;
             char line[256] = {};
             while (std::fgets(line, static_cast<int>(sizeof(line)), file))
             {
@@ -698,6 +700,7 @@ namespace BZROpenShim
                     continue;
 
                 bool parsedBool = false;
+                float parsedFloat = 0.0f;
                 bool parsedAllies = false;
                 bool parsedEnemies = false;
                 if (_stricmp(key, "teamFilter") == 0 &&
@@ -717,6 +720,17 @@ namespace BZROpenShim
                     affectEnemies = parsedBool;
                     foundAny = true;
                 }
+                else if (_stricmp(key, "shieldPushMode") == 0)
+                {
+                    // Unrecognised values fall back to the stock front push.
+                    pushMode = ShieldPushMode::ParseOrFront(value);
+                    foundAny = true;
+                }
+                else if (_stricmp(key, "shieldReflectSpeed") == 0 && TryParseFloatValue(value, parsedFloat))
+                {
+                    reflectSpeed = parsedFloat;
+                    foundAny = true;
+                }
             }
 
             std::fclose(file);
@@ -727,11 +741,15 @@ namespace BZROpenShim
             outConfig.parsed = true;
             outConfig.affectAllies = affectAllies;
             outConfig.affectEnemies = affectEnemies;
-            Log(L"[%hs] Loaded team filter odf=%hs allies=%hs enemies=%hs file=%hs\n",
+            outConfig.pushMode = pushMode;
+            outConfig.reflectSpeed = reflectSpeed;
+            Log(L"[%hs] Loaded team filter odf=%hs allies=%hs enemies=%hs pushMode=%hs reflectSpeed=%.1f file=%hs\n",
                 logTag ? logTag : "TEAMODF",
                 odfKey.token,
                 affectAllies ? "true" : "false",
                 affectEnemies ? "true" : "false",
+                pushMode == ShieldPushMode::Mode::Radial ? "radial" : "front",
+                static_cast<double>(reflectSpeed),
                 resolvedPath.string().c_str());
             return true;
         }
@@ -761,6 +779,14 @@ namespace BZROpenShim
         static bool TeamFilterNeedsCustomPath(const TeamFilterConfig& config)
         {
             return config.parsed && !(config.affectAllies && config.affectEnemies);
+        }
+
+        // A shield tower also needs the re-implemented Simulate for the radial
+        // push, even when it sets no team filter. Mines ignore pushMode.
+        static bool ShieldTowerNeedsCustomPath(const TeamFilterConfig& config)
+        {
+            return TeamFilterNeedsCustomPath(config) ||
+                   (config.parsed && config.pushMode == ShieldPushMode::Mode::Radial);
         }
 
         static bool TryGetOrdnanceWorldPosition(void* ordnance, float (&outPosition)[3])
@@ -949,6 +975,123 @@ namespace BZROpenShim
             }
         }
 
+        // Radial ("bubble") counterparts of the two force helpers above. The
+        // direction and velocity math lives in shield_push_mode.h; these only
+        // read and write the engine fields the stock helpers use.
+        static void ShieldTowerApplyRadialObjectForce(void* targetObject,
+                                                      const float (&outward)[3],
+                                                      const ShieldTowerRuntimeParams& params,
+                                                      float dt)
+        {
+            if (!targetObject)
+                return;
+
+            __try
+            {
+                const auto* targetBytes = reinterpret_cast<const uint8_t*>(targetObject);
+                const float velocity[3] =
+                {
+                    *reinterpret_cast<const float*>(targetBytes + 0x12C),
+                    *reinterpret_cast<const float*>(targetBytes + 0x130),
+                    *reinterpret_cast<const float*>(targetBytes + 0x134)
+                };
+                float delta[3] = {};
+                ShieldPushMode::RadialObjectVelocityDelta(outward, params.objPush, params.objDrag, velocity, dt, delta);
+                reinterpret_cast<void(__thiscall*)(void*, const float*)>(g_GameObjectAddVelocityAddr)(targetObject, delta);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        static void ShieldTowerApplyRadialOrdnanceForce(void* ordnance,
+                                                        const float (&outward)[3],
+                                                        const ShieldTowerRuntimeParams& params,
+                                                        float dt)
+        {
+            if (!ordnance)
+                return;
+
+            __try
+            {
+                auto* ordBytes = reinterpret_cast<uint8_t*>(ordnance);
+                auto* velocityPtr = reinterpret_cast<float*>(ordBytes + kOrdnanceVelocityOffset);
+                float velocity[3] = { velocityPtr[0], velocityPtr[1], velocityPtr[2] };
+                ShieldPushMode::RadialOrdnanceVelocity(outward, params.ordPush, params.ordDrag, dt, velocity);
+                velocityPtr[0] = velocity[0];
+                velocityPtr[1] = velocity[1];
+                velocityPtr[2] = velocity[2];
+
+                const float speed = std::sqrt(
+                    velocity[0] * velocity[0] +
+                    velocity[1] * velocity[1] +
+                    velocity[2] * velocity[2]);
+                *reinterpret_cast<float*>(ordBytes + kOrdnanceSpeedOffset) = speed;
+                *reinterpret_cast<float*>(ordBytes + kOrdnanceInvSpeedOffset) =
+                    (speed == 0.0f) ? 1.0e30f : (1.0f / speed);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+        }
+
+        // Radial-mode ricochet for fast ordnance (see shield_push_mode.h).
+        // Returns true when the shot was reflected, in which case the caller
+        // must not also push it this frame. The position is not nudged out of
+        // the box: OpenShim has no verified ordnance position write, and the
+        // reflected (outward) velocity carries the shot out on the next step.
+        // The shot's facing matrix is not re-oriented either (UNVERIFIED
+        // whether Redux's trail/sprite reads it or the velocity).
+        static bool ShieldTowerTryRicochetOrdnance(void* ordnance,
+                                                   const float (&ordWorld)[3],
+                                                   const float (&outward)[3],
+                                                   bool insideNow,
+                                                   const LegacyMat3& inverseMatrix,
+                                                   const ShieldTowerRuntimeParams& params,
+                                                   float reflectSpeed,
+                                                   float dt)
+        {
+            // ordPush = 0 means "no ordnance deflection" in both modes, ricochet included.
+            if (!ordnance || params.ordPush == 0.0f)
+                return false;
+
+            __try
+            {
+                auto* ordBytes = reinterpret_cast<uint8_t*>(ordnance);
+                auto* velocityPtr = reinterpret_cast<float*>(ordBytes + kOrdnanceVelocityOffset);
+                float velocity[3] = { velocityPtr[0], velocityPtr[1], velocityPtr[2] };
+                if (!ShieldPushMode::IsRicochetCandidate(velocity, outward, reflectSpeed))
+                    return false;
+
+                bool insideNext = false;
+                if (!insideNow)
+                {
+                    float nextLocal[3] = {};
+                    ShieldPushMode::PredictNextPosition(ordWorld, velocity, dt, nextLocal);
+                    g_BzrFn_VectorTransform(nextLocal, nextLocal, 1, &inverseMatrix);
+                    insideNext = ShieldTowerContainsLocalPosition(nextLocal, params);
+                }
+
+                if (!ShieldPushMode::ShouldRicochet(velocity, outward, reflectSpeed, insideNow, insideNext))
+                    return false;
+
+                ShieldPushMode::ReflectVelocity(outward, velocity);
+                velocityPtr[0] = velocity[0];
+                velocityPtr[1] = velocity[1];
+                velocityPtr[2] = velocity[2];
+
+                const float speed = ShieldPushMode::Length(velocity);
+                *reinterpret_cast<float*>(ordBytes + kOrdnanceSpeedOffset) = speed;
+                *reinterpret_cast<float*>(ordBytes + kOrdnanceInvSpeedOffset) =
+                    (speed == 0.0f) ? 1.0e30f : (1.0f / speed);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt)
         {
             if (!shieldTowerPtr || !g_BzrFn_ShieldTowerPowerUpdate || !g_BzrFn_BuildingSimulate ||
@@ -967,7 +1110,7 @@ namespace BZROpenShim
 
             TeamFilterConfig filter = {};
             const bool hasFilter = TryGetTeamFilterForObject(shieldTowerPtr, filter, g_ShieldTowerTeamFilterCache, "SHIELDODF");
-            if (!hasFilter || !TeamFilterNeedsCustomPath(filter))
+            if (!hasFilter || !ShieldTowerNeedsCustomPath(filter))
             {
                 if (g_BzrFn_ShieldTowerSimulateOriginal)
                     g_BzrFn_ShieldTowerSimulateOriginal(shieldTowerPtr, dt);
@@ -982,6 +1125,15 @@ namespace BZROpenShim
                     g_BzrFn_ShieldTowerSimulateOriginal(shieldTowerPtr, dt);
                 return;
             }
+
+            const bool radial = (filter.pushMode == ShieldPushMode::Mode::Radial);
+            const float towerPosition[3] =
+            {
+                static_cast<float>(towerMatrix->posit_x),
+                static_cast<float>(towerMatrix->posit_y),
+                static_cast<float>(towerMatrix->posit_z)
+            };
+            const float towerFront[3] = { towerMatrix->front_x, towerMatrix->front_y, towerMatrix->front_z };
 
             if (*reinterpret_cast<const int*>(reinterpret_cast<const uint8_t*>(shieldTowerPtr) + kShieldTowerPowerSourceOffset) != 0)
             {
@@ -1044,7 +1196,16 @@ namespace BZROpenShim
                         if (!ShieldTowerContainsLocalPosition(targetLocal, params))
                             continue;
 
-                        ShieldTowerApplyObjectForce(shieldTowerPtr, targetObject, *towerMatrix, params, dt);
+                        if (radial)
+                        {
+                            float outward[3] = {};
+                            ShieldPushMode::RadialOutwardDirection(towerPosition, targetWorld, towerFront, outward);
+                            ShieldTowerApplyRadialObjectForce(targetObject, outward, params, dt);
+                        }
+                        else
+                        {
+                            ShieldTowerApplyObjectForce(shieldTowerPtr, targetObject, *towerMatrix, params, dt);
+                        }
                     }
                 }
 
@@ -1067,10 +1228,31 @@ namespace BZROpenShim
 
                             float ordLocal[3] = { ordWorld[0], ordWorld[1], ordWorld[2] };
                             g_BzrFn_VectorTransform(ordLocal, ordLocal, 1, &inverseMatrix);
-                            if (!ShieldTowerContainsLocalPosition(ordLocal, params))
+                            const bool insideNow = ShieldTowerContainsLocalPosition(ordLocal, params);
+
+                            if (!radial)
+                            {
+                                if (!insideNow)
+                                    continue;
+
+                                ShieldTowerApplyOrdnanceForce(ordnance, *towerMatrix, params, dt);
+                                continue;
+                            }
+
+                            float outward[3] = {};
+                            ShieldPushMode::RadialOutwardDirection(towerPosition, ordWorld, towerFront, outward);
+
+                            // A fast shot may still be outside the box and
+                            // about to cross it, so the ricochet is tried
+                            // before the box test the push uses.
+                            if (ShieldTowerTryRicochetOrdnance(ordnance, ordWorld, outward, insideNow,
+                                                               inverseMatrix, params, filter.reflectSpeed, dt))
                                 continue;
 
-                            ShieldTowerApplyOrdnanceForce(ordnance, *towerMatrix, params, dt);
+                            if (!insideNow)
+                                continue;
+
+                            ShieldTowerApplyRadialOrdnanceForce(ordnance, outward, params, dt);
                         }
                     }
                 }

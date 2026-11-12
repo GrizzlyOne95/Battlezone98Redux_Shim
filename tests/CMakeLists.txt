@@ -556,6 +556,10 @@ openshim_add_test(bool_token_tests STD 20 SOURCES
     bool_token_tests.cpp
 )
 
+openshim_add_test(shield_push_mode_tests STD 17 SOURCES
+    shield_push_mode_tests.cpp
+)
+
 openshim_add_test(matchmaking_server_tests STD 17 SOURCES
     matchmaking_server_tests.cpp
 )

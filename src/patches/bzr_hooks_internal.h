@@ -18,6 +18,7 @@
 #include "stable_id_list.h"
 #include "bzr_object_layout.h"
 #include "bzr_options_ui.h"
+#include "shield_push_mode.h"
 
 namespace BZROpenShim
 {
@@ -1196,6 +1197,10 @@ namespace BZROpenShim
             bool parsed = false;
             bool affectAllies = true;
             bool affectEnemies = true;
+            // Shield towers only (`shieldPushMode`); mines ignore it.
+            ShieldPushMode::Mode pushMode = ShieldPushMode::Mode::Front;
+            // Radial mode only (`shieldReflectSpeed`); <= 0 turns ricochet off.
+            float reflectSpeed = ShieldPushMode::kDefaultReflectSpeed;
         };
         struct TeamFilterCache
         {
