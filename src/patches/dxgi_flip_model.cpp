@@ -305,8 +305,8 @@ namespace BZROpenShim
         // keep counting) as openshim_present_%05u.bmp next to the
         // exe, just before Present. Unlike OPENSHIM_FRAME_CAPTURE (Ogre's
         // frameRenderingQueued) this sees exactly the image that reaches the
-        // screen, including shell and pause-menu draws issued outside
-        // Root::renderOneFrame. Needs the flip chain ([Graphics] DxgiFlipModel).
+        // screen, including anything drawn after that point.
+        // Needs the flip chain ([Graphics] DxgiFlipModel).
         void MaybeCapturePresent(IDXGISwapChain* chain, unsigned long presentNumber)
         {
             static int state = 0; // 0 unread, 1 armed, 2 off
