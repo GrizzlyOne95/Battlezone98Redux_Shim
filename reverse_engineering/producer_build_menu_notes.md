@@ -2,8 +2,9 @@
 
 Date: 2026-03-15  
 Current implementation status updated: 2026-08-12  
-Hook site audit: 2026-09-28. **The runtime hook is parked.** See "Hook site
-audit" at the end; it supersedes the "Runtime hook" description below.
+Hook site audit: 2026-09-28. Submenu cost and INI-optional update: 2026-11-11.
+The shipped hooks are the vtable replacements in "Hook sites" near the end;
+"Runtime hook" below describes what main does now.
 
 Goal: find a viable native path for submenu-capable producer build menus so
 `Producer` descendants like Recycler, Factory, Armory, and Constructor can use
@@ -177,9 +178,8 @@ The bridge uses the native cluster around:
 - A production implementation may need per-instance/per-class `BuildItem` state
   or deterministic root restoration.
 - Constructor uses `classLabel = "constructionrig"`, not `"constructor"`.
-- Steam still needs explicit runtime validation. Current `bzr_hooks.cpp` stops
-  producer-menu config loading on Steam even though `patcher.cpp` has
-  Steam-aware rel32 target resolution for the hook.
+- (Superseded 2026-11-11: no Steam gate remains in `bzr_hooks.cpp` or
+  `producer_build_menu.cpp`; GOG and Steam run the same code.)
 - Do not promote the feature until normal mission exit and producer switching
   have both been exercised.
 
@@ -190,17 +190,16 @@ the original March note described.
 
 ### Runtime hook
 
-- patch name: `Producer Build Menu Root Hook`
-- the runtime patch is enabled through `openshim_producer_build_menus.ini`; no
-  process environment variable is required
-- `[ProducerBuildMenus] Enabled=1` is the test/default state and `Enabled=0`
-  opts out before the producer hook is applied
+- vtable slot replacements for `UpdateModeList` (23), `SetActiveMode` (11) and
+  `Deselect` (9) on Producer, Recycler, Factory and ConstructionRig, plus
+  ControlPanel PostLoad/Cleanup; see "Hook sites" below
+- the patches install by default. `openshim_producer_build_menus.ini` is
+  optional: with no file the feature is on, and only a producer whose ODF names
+  `buildMenuRoot` (or `buildMenu`) gets pages. `[ProducerBuildMenus] Enabled=0`
+  in that file turns it off
+- the old rel32 `MaybeApplyProducerBuildMenu` hook is gone
 - legacy producer-menu environment names remain accepted only as compatibility
   aliases through OpenShim's INI-aware environment shim
-- the rel32 hook calls `MaybeApplyProducerBuildMenu(producerPtr)` before calling
-  the original producer helper
-- common producer types are classified as Recycler, Factory, Armory, and
-  ConstructionRig
 
 ### Root selection precedence
 
@@ -227,23 +226,18 @@ path. Use an unquoted token for the first validation pass.
 
 ### Config requirement
 
-`openshim_producer_build_menus.ini` must still exist and contain at least one
-configured mapping/override for the current producer config loader to become
-active. The checked-in example is ready for testing as-is after it is copied
-beside the executable:
+None. With no `openshim_producer_build_menus.ini` the loader sets
+`enabled = true` (`LoadProducerBuildMenuConfig`, producer_build_menu.cpp), so an
+ODF-local `buildMenuRoot` is enough. The file adds producer-type mappings and
+per-ODF overrides, and its `Enabled=0` is the opt-out.
 
-```ini
-[ProducerBuildMenus]
-Enabled=1
-Factory=build
-```
-
-Factories with no ODF-local field retain the stock `build` root; a test Factory
-with `buildMenuRoot = b_amcmbt` overrides it. No launch environment setup is
-needed.
-
-The remaining file/mapping requirement is a convenience limitation of the
-current experiment, not a fundamental requirement of the ODF-local design.
+Cost when no ODF names a root: `UpdateModeList` still runs the hook every frame
+for each selected or team producer. Per call that is a vtable compare, one
+deploy-state read, the ODF token read and two `unordered_map` lookups on short
+string keys. The first time each producer ODF token is seen, the loader
+searches the ODF roots for that file once; the result, a miss included, is
+cached. No mode list is rewritten, and the submenu cost patch below is never
+installed.
 
 ### What still needs live proof
 
@@ -431,8 +425,8 @@ not carry over. The INI/ODF root selection code does carry over.
 
   It must never reach `SetCommand`: the Armory's and ConstructionRig's
   `GetCommand` and the save code dereference the active value as a real class.
-  The renderer will print a "00" cost for a stub unless the cost block is
-  detoured.
+  The renderer prints a "00" cost for a stub unless the cost text is
+  suppressed; see "Submenu cost" below.
 - **State.** Keep the per-object node in a side table. Reset it on deselect and
   on `SetTeam`. No page state is saved, just as the Armory's is not.
 - **Multi-select and multiplayer.** Share one stub per node so `Intersect` keeps
@@ -444,6 +438,44 @@ not carry over. The INI/ODF root selection code does carry over.
 - **Live validation.** Everything here is static. The label fallback in the
   `names` lookup and the one-frame refresh after a page change still need a
   live check.
+
+### Submenu cost (2026-11-11)
+
+Decompile: `Battlezone_Source\BZ1\Redux\openshim_re_corpus\bzr_gog_best_effort\ghidrecomp\results\bins\battlezone98redux.exe-6777ca\decomps\FUN_004a08e0-004a08e0.c`
+(ControlPanel::Render, 0x004A08E0). Bytes checked in the GOG exe
+(SHA-256 `8d71f56c…3377413`) with capstone.
+
+- Line 1387: `if (local_290 < 0x1b)` splits named modes from classes. The
+  named branch (lines 1388-1403) draws only the `names` label, so **Back (0x16)
+  never shows a cost**. GOG: `004A51A9 cmp dword ptr [ebp-0x28c], 0x1a` /
+  `004A51B0 jbe 0x4a573f`.
+- Lines 1404-1423: the class branch draws the label at `local_290 + 100`
+  (+0x64). GOG: `004A51BC mov [ebp-0x3bc], edx` keeps the class pointer.
+- Lines 1423-1425: `local_3d8 = FUN_00461430(); local_5bc =
+  FUN_004e1b90(local_3d8, local_3c0); sprintf(local_34c, "%02ld", local_5bc);`
+  is the scrap cost text. GOG:
+  `004A52D1 mov ecx,[ebp-0x3bc]` … `004A52DF call 0x4e1b90` …
+  `004A52F4 push 0x878140` ("%02ld") / `004A52F9 lea ecx,[ebp-0x348]` /
+  `004A5300 call [0x869498]` (sprintf IAT) / `004A5306 add esp, 0xc`.
+- Lines 1426-1455: `local_34c` is measured (FUN_00689a70) and drawn
+  (FUN_00689d10) in two layouts chosen by `DAT_00915567`.
+- Line 1456: `local_4c0 = FUN_004e1c10(local_3d8, local_290); if (local_4c0 != 0)`
+  draws the pilot cost only when it is nonzero, so a stub shows none.
+
+Patch: engine row `ControlPanelModeScrapCostFormat` guards 0x004A52D1..0x004A52FF
+(class load through the last sprintf argument push). The 6-byte
+`call [0x869498]` at row+0x2F becomes `call ModeScrapCostFormatThunk; nop`.
+The thunk reads the class from `[ebp-0x3BC]`; for a registered stub it writes
+an empty string to the buffer and returns, otherwise it jumps through the IAT
+slot it read from the original instruction, so a later IAT hook still runs. It
+is installed when the first stub is allocated, so a game where no producer
+names a menu root keeps the original bytes. Drawing an empty string through
+lines 1426-1455 was not proven statically. Live GOG run 2026-11-11 (no
+`openshim_producer_build_menus.ini`, CR constructors with `buildMenuRoot`):
+`openshim.log` showed `Submenu cost hidden: call 0x004A5300 -> thunk, sprintf
+slot 0x00869498`, and the captured frame shows "More" with no cost while
+S-Power 03, Gun Tower 05, Comm Tower 05, Barracks 06, Silo 03 and Supply 04
+keep theirs. Back (named mode) was not on screen in that run.
 
 ### Re-verifying
 

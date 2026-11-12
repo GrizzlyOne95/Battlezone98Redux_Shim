@@ -1,35 +1,28 @@
 [ProducerBuildMenus]
-; Producer submenu hook and ODF-local Builder roots are enabled for testing by
-; default. Set Enabled=0 to opt out completely; no environment variable is
-; required.
-Enabled=1
-
-; EXPERIMENTAL / GOG LIVE-TEST PATH
-;
-; Current bzr_hooks.cpp intentionally disables producer-menu application on
-; Steam until that runtime path is revalidated. The hook itself is safe to leave
-; installed because disabled/unconfigured paths fall through to stock behavior.
-;
-; Preferred test: add this to the existing [ProducerClass] section of one
-; Factory ODF:
+; This file is optional. Without it, producer nested build menus are on, and a
+; Recycler, Factory or Constructor gets them only when its own ODF names a
+; [Builder] root in its [ProducerClass] section:
 ;
 ;   buildMenuRoot = b_amcmbt
 ;
-; OpenShim reads buildMenuRoot (or buildMenu) from the selected producer's
-; *_mp.odf / .odf before the generic mappings below. The root is the native
-; 8-character [Builder] token, not an arbitrary filesystem path.
+; (buildMenu = ... also works.) Producers whose ODF has no such key keep the
+; stock flat list. GOG and Steam behave the same.
 ;
-; Keep Factory=build while testing ODF-local roots. It enables the config path
-; and leaves factories without a buildMenuRoot override on the stock root.
-Factory=build
+; Copy this file to openshim_producer_build_menus.ini beside the game
+; executable only to turn the feature off or to add the mappings below.
 
-; Alternative global smoke test, without editing a Factory ODF:
-; Factory=b_amcmbt
-;
-; Additional type-wide mappings can be tested independently:
+; Set Enabled=0 to turn producer nested build menus off completely.
+Enabled=1
+
+; Optional type-wide roots for producers whose ODF names none. Each value is a
+; native 8-character [Builder] token, not a file path. Leaving these unset
+; keeps those producers stock.
 ; Recycler=b_amcmbt
-; Armory=b_amprod
+; Factory=b_amcmbt
 ; ConstructionRig=b_ambldg
-;
-; Per-ODF overrides are also supported by the bridge config; see
-; Docs/producer-build-menu-test.md for the ODF-local path and diagnostics.
+
+; Optional per-ODF overrides: <producer odf>=<builder root>. An ODF's own
+; buildMenuRoot still wins over these.
+; avfact=b_amcmbt
+
+; See Docs/producer-build-menu-test.md for the live test and log lines.
