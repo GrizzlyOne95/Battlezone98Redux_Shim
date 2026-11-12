@@ -51,6 +51,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed a crash and a stuck turbo sound on hover craft whose thrust and turbo sounds share one wav file. Stock stopped the first sound with that filename, which freed the thrust loop and left the craft writing into freed memory.
 [*] Fixed a crash on hover craft models with more than 8 throttle nacelles. Stock stores nacelles in an eight-slot array with no bounds check, so a ninth overran it.
 [*] Fixed a crash from a draw_multi ODF with a missing or garbage renderCount. Stock passes the ODF count straight to a memory allocation without checking it.
+[*] Fixed a crash when a large ground decal, such as a wide explosion scorch, is drawn in a busy frame. Stock's index-buffer full check reads the vertex count instead of the index count, so valid requests fail and the game writes through the failed result.
 [*] Fixed a crash when a map or mod thumbnail BMP can't be decoded. Stock has no handler for the image decoder's error, so one bad thumbnail closed the game.
 [*] Fixed a crash when leaving a multiplayer lobby for the main menu. Stock re-reads every mod's particle scripts on the way back, and an uncaught duplicate-name error closed the game.
 [*] Fixed a crash when a mod declares a duplicate Ogre material. Stock's material loader throws on the repeated name and nothing catches it.
