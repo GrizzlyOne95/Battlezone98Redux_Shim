@@ -83,10 +83,10 @@ policy `include/briefing_pages_policy.h`, guide `docs/BRIEFING_PAGES.md`.
 
 | Row | Address | Patch |
 | --- | --- | --- |
-| BriefingScreenCtor | 0x0078F030 | 5-byte entry detour |
-| DescriptionFileLoad | 0x004889C0 | 5-byte entry detour |
-| BriefingScreenPlayWav | 0x0078EF60 | 6-byte entry detour |
-| BriefingScreenOnKey | 0x00790AA0 | 7-byte entry detour |
+| BriefingScreenCtor | 0x0078F030 | 10-byte entry detour |
+| DescriptionFileLoad | 0x004889C0 | 10-byte entry detour |
+| BriefingScreenPlayWav | 0x0078EF60 | 11-byte entry detour |
+| BriefingScreenOnKey | 0x00790AA0 | 11-byte entry detour |
 | BriefingScreenStopWav, ScrollingTextBlockSetText, TextBlockSetText, UiTextBlockSetColour, UiViewLoadMovie, UiViewPlayMovie | | called only |
 | BriefingScreenSingleton | 0x0094552C | data |
 

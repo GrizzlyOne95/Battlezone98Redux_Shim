@@ -81,6 +81,12 @@ namespace BZROpenShim
             uint32_t g_MissionSetTextAddr = 0, g_PlanetSetTextAddr = 0;
 
             InlineDetour32 g_CtorDetour, g_DesLoadDetour, g_PlayWavDetour, g_OnKeyDetour;
+            // Originals the hooks call, published before each jump is written
+            // (InstallInlineDetour32 sets detour.trampoline only afterwards).
+            void* volatile g_CtorOriginal = nullptr;
+            void* volatile g_DesLoadOriginal = nullptr;
+            void* volatile g_PlayWavOriginal = nullptr;
+            void* volatile g_OnKeyOriginal = nullptr;
             FnResourceSize g_ResourceSize = nullptr;
             FnGameNew g_GameNew = nullptr;
             void*(__cdecl* g_OgreGroupManager)() = nullptr;
@@ -302,7 +308,7 @@ namespace BZROpenShim
                     return false;
                 std::memcpy(name, file.c_str(), file.size());
                 std::vector<char> buffer(kDesBufferSize, '\0');
-                reinterpret_cast<FnDesLoad>(g_DesLoadDetour.trampoline)(name, buffer.data());
+                reinterpret_cast<FnDesLoad>(g_DesLoadOriginal)(name, buffer.data());
                 buffer.back() = '\0';
                 out.assign(buffer.data());
                 return true;
@@ -381,7 +387,7 @@ namespace BZROpenShim
                 // the new one; a page without a wav is silent.
                 const std::string& wav = extra ? extra->wav : s.page1Wav;
                 if (!wav.empty())
-                    reinterpret_cast<FnPlayWav>(g_PlayWavDetour.trampoline)(s.screen, wav.c_str());
+                    reinterpret_cast<FnPlayWav>(g_PlayWavOriginal)(s.screen, wav.c_str());
                 else
                     reinterpret_cast<FnStopWav>(static_cast<uintptr_t>(g_StopWavAddr))(s.screen);
 
@@ -541,7 +547,7 @@ namespace BZROpenShim
 
             void* __fastcall CtorHook(void* self, void* /*edx*/, int manager, StdStringBytes name)
             {
-                const auto original = reinterpret_cast<FnCtor>(g_CtorDetour.trampoline);
+                const auto original = reinterpret_cast<FnCtor>(g_CtorOriginal);
                 if (!g_Active || !g_BriefingPagesEnabled)
                     return original(self, manager, name);
 
@@ -564,7 +570,7 @@ namespace BZROpenShim
 
             uintptr_t __cdecl DesLoadHook(const char* name, char* buffer)
             {
-                const uintptr_t result = reinterpret_cast<FnDesLoad>(g_DesLoadDetour.trampoline)(name, buffer);
+                const uintptr_t result = reinterpret_cast<FnDesLoad>(g_DesLoadOriginal)(name, buffer);
                 if (g_Capturing && buffer)
                 {
                     // Call 0 is the mission text, call 1 the planet sidebar.
@@ -587,7 +593,7 @@ namespace BZROpenShim
                 // The last sound the ctor starts is page 1's.
                 if (g_Capturing && self == g_Capturing)
                     g_CapWav = wav ? wav : "";
-                reinterpret_cast<FnPlayWav>(g_PlayWavDetour.trampoline)(self, wav);
+                reinterpret_cast<FnPlayWav>(g_PlayWavOriginal)(self, wav);
             }
 
             bool __fastcall OnKeyHook(void* self, void* /*edx*/, uint32_t key, uint32_t mods)
@@ -601,15 +607,16 @@ namespace BZROpenShim
                         return true;
                     }
                 }
-                return reinterpret_cast<FnOnKey>(g_OnKeyDetour.trampoline)(self, key, mods);
+                return reinterpret_cast<FnOnKey>(g_OnKeyOriginal)(self, key, mods);
             }
 
             bool InstallOne(InlineDetour32& detour, uint32_t target, void* hook, size_t patchLen,
-                            const uint8_t* expected, size_t expectedLen, const wchar_t* what)
+                            const uint8_t* expected, size_t expectedLen, void* volatile* original,
+                            const wchar_t* what)
             {
                 if (detour.trampoline)
                     return true;
-                if (InstallInlineDetour32(detour, target, hook, patchLen, expected, expectedLen))
+                if (InstallInlineDetour32(detour, target, hook, patchLen, expected, expectedLen, original))
                     return true;
                 Log(L"[BRIEFPAGES] %ls detour failed at 0x%08X; briefing pages off\n", what, target);
                 return false;
@@ -672,16 +679,20 @@ namespace BZROpenShim
             static const uint8_t kPlayWavBytes[] = { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x34, 0xA1 };
             static const uint8_t kOnKeyBytes[] = { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC, 0x83, 0x7D, 0x08, 0x1B };
             static const uint8_t kCtorBytes[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0x53, 0xED, 0x85, 0x00 };
+            // InstallInlineDetour32 rejects a signature longer than the stolen
+            // range, so each patch length covers its whole signature and ends on
+            // an instruction boundary. play-wav steals 11 so it ends after the
+            // `mov eax,[abs32]` its 7-byte signature starts.
             // The ctor goes last: capture starts only once the others are in.
             const bool ok =
-                InstallOne(g_DesLoadDetour, g_DesLoadAddr, reinterpret_cast<void*>(&DesLoadHook), 5,
-                           kDesLoadBytes, sizeof(kDesLoadBytes), L"description loader") &&
-                InstallOne(g_PlayWavDetour, g_PlayWavAddr, reinterpret_cast<void*>(&PlayWavHook), 6,
-                           kPlayWavBytes, sizeof(kPlayWavBytes), L"play-wav") &&
-                InstallOne(g_OnKeyDetour, g_OnKeyAddr, reinterpret_cast<void*>(&OnKeyHook), 7,
-                           kOnKeyBytes, sizeof(kOnKeyBytes), L"OnKey") &&
-                InstallOne(g_CtorDetour, g_CtorAddr, reinterpret_cast<void*>(&CtorHook), 5,
-                           kCtorBytes, sizeof(kCtorBytes), L"briefing ctor");
+                InstallOne(g_DesLoadDetour, g_DesLoadAddr, reinterpret_cast<void*>(&DesLoadHook), 10,
+                           kDesLoadBytes, sizeof(kDesLoadBytes), &g_DesLoadOriginal, L"description loader") &&
+                InstallOne(g_PlayWavDetour, g_PlayWavAddr, reinterpret_cast<void*>(&PlayWavHook), 11,
+                           kPlayWavBytes, sizeof(kPlayWavBytes), &g_PlayWavOriginal, L"play-wav") &&
+                InstallOne(g_OnKeyDetour, g_OnKeyAddr, reinterpret_cast<void*>(&OnKeyHook), 11,
+                           kOnKeyBytes, sizeof(kOnKeyBytes), &g_OnKeyOriginal, L"OnKey") &&
+                InstallOne(g_CtorDetour, g_CtorAddr, reinterpret_cast<void*>(&CtorHook), 10,
+                           kCtorBytes, sizeof(kCtorBytes), &g_CtorOriginal, L"briefing ctor");
             if (!ok)
             {
                 s_failed = true;
