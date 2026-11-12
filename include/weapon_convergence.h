@@ -458,6 +458,27 @@ namespace BZROpenShim::WeaponConvergence
             convergenceRange - hardpointRelativeZ,
         };
 
+        // Not part of stock Walker, which only ever sees explicit-target
+        // ranges. The smart reticle can report a centre-to-centre range
+        // shorter than the hardpoint's forward offset (ground a few metres
+        // ahead of a long barrel), and then range - hardZ goes negative: the
+        // correction becomes a ~180-degree yaw in the barrel's own frame and a
+        // barrel pitched down at the ground fires up and backward. Keep stock
+        // aim inside that reach, and never swing a barrel past the same 45
+        // degree safety stop the world-space solver uses.
+        if (!(correctionDirection.z >= kMinTargetDistance))
+            return SolveResult::TargetTooClose;
+        {
+            const float lengthSquared =
+                correctionDirection.x * correctionDirection.x +
+                correctionDirection.z * correctionDirection.z;
+            if (!(correctionDirection.z >=
+                  kMaxDeviationCos * std::sqrt(lengthSquared)))
+            {
+                return SolveResult::ExceedsDeviationLimit;
+            }
+        }
+
         Matrix correction = {};
         if (!BuildDirectionalMatrix({ 0.0f, 0.0f, 0.0f },
                                     correctionDirection,
