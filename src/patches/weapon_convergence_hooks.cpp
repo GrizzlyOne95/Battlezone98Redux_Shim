@@ -551,7 +551,10 @@ namespace BZROpenShim
                     reinterpret_cast<FnObjRelParentMatrix>(address);
             }
 
-            int converged = 0;
+            // Counted before each write, and volatile so the __except path
+            // reports barrels already rewritten: the caller's fallback must
+            // never run the reticle pass on top of a partial target pass.
+            volatile int converged = 0;
             float lastHardpointX = 0.0f;
             float lastHardpointZ = 0.0f;
 
@@ -609,11 +612,11 @@ namespace BZROpenShim
                         continue;
                     }
 
+                    converged = converged + 1;
                     *transform = solution.mountLocal;
                     refreshWeaponTransform(weaponObject, transform);
                     lastHardpointX = hardpointX;
                     lastHardpointZ = hardpointZ;
-                    ++converged;
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -626,7 +629,7 @@ namespace BZROpenShim
                         static_cast<uint32_t>(kCraftCarrierOffset));
                     g_PlayerReticleConvergenceLayoutFaultLogged = true;
                 }
-                return 0;
+                return converged;
             }
 
             if (logReticleApplication &&
@@ -666,12 +669,32 @@ namespace BZROpenShim
             ApplyWalkerConvergencePostPass(craft, sample, true);
         }
 
-        static void ApplyExplicitTargetWeaponConvergence(void* craft)
+        // One convergence source per frame, never both. Each pass rebuilds the
+        // barrel from the mount transform the previous pass already corrected,
+        // so running the target pass and then the reticle pass stacked two
+        // yaw corrections. Policy: with a locked target (and Weapon
+        // Convergence on) converge on the target; otherwise Reticle
+        // Convergence converges on what is under the crosshair. A locked
+        // target no barrel can converge on (inside the hardpoint reach or
+        // past the deviation stop) falls back to the reticle, which is safe
+        // only because the target pass then wrote nothing.
+        static void ApplySelectedConvergence(void* craft)
         {
-            ConvergenceRangeSample sample = {};
-            if (!TryGetExplicitTargetConvergenceRange(craft, sample))
+            if (ReadLocalPlayerNetIdValue() != 0)
                 return;
-            ApplyWalkerConvergencePostPass(craft, sample, false);
+
+            if (g_ShotConvergenceEnabled)
+            {
+                ConvergenceRangeSample sample = {};
+                if (TryGetExplicitTargetConvergenceRange(craft, sample) &&
+                    ApplyWalkerConvergencePostPass(craft, sample, false) > 0)
+                {
+                    return;
+                }
+            }
+
+            if (g_PlayerReticleShotConvergenceEnabled)
+                ApplyLocalPlayerReticleConvergence(craft);
         }
 
         static void __fastcall TurretCraftUpdateWeaponAimWithConvergence(
@@ -679,18 +702,12 @@ namespace BZROpenShim
             void* /*edx*/,
             float dt)
         {
-            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
-
             // Work Order 4: TurretCraft owns classLabel="turret". Preserve its
             // native turret articulation / weapon transform construction, then
             // add only Walker's hardpoint convergence stage by range.
             reinterpret_cast<FnUpdateWeaponAim>(g_TurretCraftUpdateWeaponAimAddr)(craft, dt);
 
-            if (g_ShotConvergenceEnabled && singlePlayer)
-                ApplyExplicitTargetWeaponConvergence(craft);
-
-            if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
-                ApplyLocalPlayerReticleConvergence(craft);
+            ApplySelectedConvergence(craft);
         }
 
         static void __fastcall WingmanUpdateWeaponAimWithConvergence(
@@ -698,22 +715,13 @@ namespace BZROpenShim
             void* /*edx*/,
             float dt)
         {
-            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
-
             // Work Order 3: keep Wingman's class-specific stock aim setup, then
             // apply only Walker's convergence stage through the common post-pass.
             // The audit in PR #241 proved Wingman and Walker are identical up to
             // the point where Walker adds that stage.
             reinterpret_cast<FnUpdateWeaponAim>(g_WingmanUpdateWeaponAimAddr)(craft, dt);
 
-            if (g_ShotConvergenceEnabled && singlePlayer)
-                ApplyExplicitTargetWeaponConvergence(craft);
-
-            // Preserve the existing ordering when both features are enabled:
-            // the reticle pass follows explicit-target convergence. Interaction
-            // policy is intentionally left for the later matrix work order.
-            if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
-                ApplyLocalPlayerReticleConvergence(craft);
+            ApplySelectedConvergence(craft);
         }
 
         static void __fastcall TurretTankUpdateWeaponAimWithConvergence(
@@ -721,18 +729,12 @@ namespace BZROpenShim
             void* /*edx*/,
             float dt)
         {
-            const bool singlePlayer = ReadLocalPlayerNetIdValue() == 0;
-
             // Work Order 4: never substitute Walker::UpdateWeaponAim here.
             // TurretTank's own yaw/pitch mechanics and weapon transform setup
             // remain authoritative; convergence is strictly a post-pass.
             reinterpret_cast<FnUpdateWeaponAim>(g_TurretTankUpdateWeaponAimAddr)(craft, dt);
 
-            if (g_ShotConvergenceEnabled && singlePlayer)
-                ApplyExplicitTargetWeaponConvergence(craft);
-
-            if (g_PlayerReticleShotConvergenceEnabled && singlePlayer)
-                ApplyLocalPlayerReticleConvergence(craft);
+            ApplySelectedConvergence(craft);
         }
 
         static bool TryReadPointerValue(uintptr_t address, void*& outValue)
