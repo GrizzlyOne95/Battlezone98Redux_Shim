@@ -3400,9 +3400,6 @@ uint64_t fnv1a64(const Bytes &b)
     }
     return h;
 }
-// Share of vertex weight the main GEO's bone must carry for a skinned model to
-// count as one piece (cvfigh's body: 0.96). Part of kFractureAlgorithmVersion.
-constexpr double kDominantBoneShare = 0.90;
 } // namespace
 bool ExtractFracture(const Bytes &bytes, const Bytes &skeleton, const FractureOptions &options,
                      std::vector<GibPiece> &fragments, std::string &error, FractureStats *statsOut)
@@ -3420,8 +3417,8 @@ bool ExtractFracture(const Bytes &bytes, const Bytes &skeleton, const FractureOp
             throw std::runtime_error("invalid fracture options");
         const auto m = model(bytes);
 
-        // One piece: at most one vertex-driving bone. The cut happens in mesh
-        // space; the driving bone only decides the output frame.
+        // The cut happens in mesh space; the output bone only decides the frame
+        // the pieces are written in and spawned from.
         Frame frame;
         uint16_t boneId = 0;
         std::string boneName;
@@ -3430,17 +3427,17 @@ bool ExtractFracture(const Bytes &bytes, const Bytes &skeleton, const FractureOp
             auto bs = bones(skeleton);
             for (auto &[id, b] : bs)
                 derive(id, bs);
-            // One main GEO: a bone that carries at least kDominantBoneShare of the
-            // vertex weight. Small GEOs (nozzles, gun mounts) are cut with it in
-            // its frame; models with several real GEOs keep stock GEO chunks.
+            // The whole hull is cut as one piece in bind pose, in the frame of the
+            // skeleton's single root bone, so pieces follow the craft's body rather
+            // than an animated leg, rotor or dish; with several roots, the bone that
+            // carries the most vertex weight. Which models fracture at all (no
+            // turret part) is decided by the caller from the live part tree.
             std::map<uint16_t, double> driving;
-            double totalWeight = 0;
             const auto addWeights = [&](const std::vector<Assignment> &list) {
                 for (const Assignment &a : list)
                     if (a.weight > 0)
                     {
                         driving[a.bone] += a.weight;
-                        totalWeight += a.weight;
                     }
             };
             bool sharedCounted = false; // shared geometry counts once, however many subs use it
@@ -3452,25 +3449,21 @@ bool ExtractFracture(const Bytes &bytes, const Bytes &skeleton, const FractureOp
                     sharedCounted = true;
                     addWeights(m.assignments);
                 }
-            if (!driving.empty())
+            int roots = 0;
+            uint16_t rootId = 0;
+            for (const auto &[id, b] : bs)
+                if (b.parent < 0)
+                {
+                    ++roots;
+                    rootId = id;
+                }
+            if (roots == 1)
+                boneId = rootId;
+            else if (!driving.empty())
             {
                 const auto top = std::max_element(driving.begin(), driving.end(),
                                                   [](const auto &l, const auto &r) { return l.second < r.second; });
-                if (top->second < kDominantBoneShare * totalWeight)
-                    throw std::runtime_error("not one piece: no bone drives most vertices");
                 boneId = top->first;
-            }
-            else
-            {
-                int roots = 0;
-                for (const auto &[id, b] : bs)
-                    if (b.parent < 0)
-                    {
-                        ++roots;
-                        boneId = id;
-                    }
-                if (roots != 1)
-                    boneId = 0;
             }
             const auto bone = bs.find(boneId);
             if (bone != bs.end())
