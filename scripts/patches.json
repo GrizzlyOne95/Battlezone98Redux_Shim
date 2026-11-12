@@ -4330,6 +4330,96 @@
       "identity": "GetPerformance(float healthRatio) cdecl, result in ST0 (1.5 decompile name; called from the Hover, Producer, SAV, Torpedo, TurretCraft, TurretTank and Walker Simulate paths with [this+0x200]). Entry through comiss [0.5] and the jb at +0x12 that skips fld1. Unique in the GOG 2.2.301 exe. NoDamageSlowdown NOPs the jb."
     },
     {
+      "name": "AiBuildConstructUnit",
+      "address": "0x006A4230",
+      "expected": "55 8B EC 83 EC 08 8B 45 08 C7 40 1C 03 00 00 00",
+      "identity": "Build_ConstructUnit(record, typeInfo) cdecl (FUN_006a4230): sets record+0x1C = 3, End on failure, returns 1 after charging credits. typeInfo+0x5A is the prereq id. Called only by FUN_006919a0. AIConstructionCounterRepair hook; first 9 bytes relocated."
+    },
+    {
+      "name": "AiBuildConstructBuild",
+      "address": "0x006A4380",
+      "expected": "55 8B EC 83 EC 08 8B 45 08 C7 40 1C 03 00 00 00",
+      "identity": "Build_ConstructBuild(record, typeInfo) cdecl (FUN_006a4380): sibling of AiBuildConstructUnit for non-unit prereqs; the prereq id is the ushort at typeInfo+0. AIConstructionCounterRepair hook."
+    },
+    {
+      "name": "AiBuildCnstDoneCCAddCall",
+      "address": "0x006A35E0",
+      "expected": "8B 55 A8 52 8B 45 A8 0F BE 48 10 8B 15 04 0F 92 00 8B 04 8A 50 E8",
+      "identity": "FUN_006a3490 CNST idle check, 'building placed' branch (record +0x38 != 0): push rec; push teamAI[(char)rec+0x10]; call AIBuild_UnassignedCCAdd at +0x15. No ConstructionEnd on this path (the stalled branch gets it via FUN_0068fe40). AIConstructionCounterRepair redirects the call."
+    },
+    {
+      "name": "AiBuildAttachmentDtor",
+      "address": "0x006A1940",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 00 F4 4E 89 00",
+      "identity": "BuildAttachment destructor (FUN_006a1940, thiscall, sets the vftable at 0x00894EF4). Record = this+4 (team int at +4, cached order state at +0x20). Stock has no ConstructionEnd here, unlike the 1.5 AI_BuildingRemove order==3 clause. AIConstructionCounterRepair hook."
+    },
+    {
+      "name": "AiConstructionCounts",
+      "address": "0x00930FC0",
+      "kind": "data",
+      "identity": "number_under_construction: int* [16], one calloc'd int table per team indexed by prereq id (FUN_00690630 allocates, FUN_006906b0 frees)."
+    },
+    {
+      "name": "AiConstructionAllocated",
+      "address": "0x00930F80",
+      "kind": "data",
+      "identity": "int [16]: 1 while the team's AiConstructionCounts table is allocated (AIBuild_ConstructionNew/Delete)."
+    },
+    {
+      "name": "AIBuildConstructionBegin",
+      "address": "0x00690570",
+      "expected": "55 8B EC 8B 45 08 8B 0C 85 C0 0F 93 00 8B 55 0C",
+      "identity": "AIBuild_ConstructionBegin(team, prereq) cdecl (FUN_00690570): ++number_under_construction[team][prereq], and ++facilities_under_construction[team] for building prereqs. Sibling of AIBuildConstructionEnd (same prologue). TraceAIBuildLedger hook; first 6 bytes relocated."
+    },
+    {
+      "name": "ProducerStartBuild",
+      "address": "0x005AECB0",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC 83 B8 00 03",
+      "identity": "Producer::StartBuild(typeInfo) thiscall (FUN_005aecb0): returns 0 when the producer is busy (+0x300) or scrap/pilots are short. TraceAIBuildLedger logs failures called from Build_ConstructUnit/Build; first 6 bytes relocated."
+    },
+    {
+      "name": "AiFacilitiesUnderConstruction",
+      "address": "0x02BFDFB0",
+      "kind": "data",
+      "identity": "int [16]: facilities_under_construction per team, moved with the counter table by AIBuild_ConstructionBegin/End (FUN_00690570/FUN_006905d0)."
+    },
+    {
+      "name": "AiReservedAreaFlags",
+      "address": "0x02BFDDB0",
+      "kind": "data",
+      "identity": "char [16*0x20]: reserved-area slot in-use flags, 32 per team (FUN_00690870 AIBuild_ReservedAreaAdd)."
+    },
+    {
+      "name": "AiPrereqTable",
+      "address": "0x02CEB7E8",
+      "kind": "data",
+      "identity": "pointer to the calloc'd prereq table, stride 0x9C, kind byte (0 unit, 1 building) at +0 (FUN_0069f030, FUN_006a05c0)."
+    },
+    {
+      "name": "AiPrereqCount",
+      "address": "0x02CEB7FC",
+      "kind": "data",
+      "identity": "int: next free prereq id (valid ids are 1..count-1; FUN_0069f030 starts it at 1 and increments per assigned prereq)."
+    },
+    {
+      "name": "AiCountsTableSizeA",
+      "address": "0x009310C4",
+      "kind": "data",
+      "identity": "int: first term of the per-team counts table size; FUN_00690630 callocs (this + 1 + AiCountsTableSizeB) ints."
+    },
+    {
+      "name": "AiCountsTableSizeB",
+      "address": "0x02C00ABC",
+      "kind": "data",
+      "identity": "int: second term of the per-team counts table size (returned by FUN_006a4030)."
+    },
+    {
+      "name": "AiTickCounter",
+      "address": "0x00931014",
+      "kind": "data",
+      "identity": "int AI tick counter, incremented once per AISchedule_Simulate tick (FUN_006a3490)."
+    },
+    {
       "name": "ModSourceRegister",
       "address": "0x00820E00",
       "expected": "55 8B EC 83 EC 08 C7 45 FC 00 00 00 00",
