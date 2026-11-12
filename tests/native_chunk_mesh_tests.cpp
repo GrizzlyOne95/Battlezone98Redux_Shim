@@ -1115,8 +1115,10 @@ void fractureTests()
         Require(std::abs(total - 32.0 / 3.0) < 0.1, "octahedron pieces add up to its volume (4/3 r^3)");
     }
 
-    // Skeletons: one driving bone is one piece; a bone with >= 90% of the
-    // weight is the main GEO and carries the rest; an even split is not.
+    // Skeletons: the hull is one piece in the frame of the single root bone,
+    // however the weight is split, so an animated child (a walker leg) that
+    // carries most of the weight never carries the hull. Turret models are
+    // gated by the caller.
     {
         const std::vector<uint16_t> one(box.positions.size(), 0);
         std::vector<uint16_t> minor(box.positions.size(), 1);
@@ -1130,11 +1132,11 @@ void fractureTests()
                     pieces.size() == 4 && pieces[0].bone == 0 && !pieces[0].boneName.empty(),
                 ("single bone fractures: " + error).c_str());
         Require(ExtractFracture(fractureMeshBytes(box, minor, true), skeleton, options, pieces, error) &&
-                    pieces.size() == 4 && pieces[0].bone == 1,
-                ("a dominant bone fractures in its own frame: " + error).c_str());
-        Require(!ExtractFracture(fractureMeshBytes(box, split, true), skeleton, options, pieces, error) && pieces.empty() &&
-                    error.find("not one piece") != std::string::npos,
-                "an even split between bones is not one piece");
+                    pieces.size() == 4 && pieces[0].bone == 0,
+                ("a heavy child bone still fractures in the root frame: " + error).c_str());
+        Require(ExtractFracture(fractureMeshBytes(box, split, true), skeleton, options, pieces, error) &&
+                    pieces.size() == 4 && pieces[0].bone == 0,
+                ("an even split between bones still fractures as one hull: " + error).c_str());
     }
 
     // Guards: tiny models, sparse models and junk fail closed.

@@ -746,7 +746,7 @@ bool prepareGibsSafe(const std::string &meshName, const std::string &group,
 }
 // FractureOnePiece payloads: same piece cache as the gibs under fracture/v1/<hash>/,
 // plus fracture.txt (cap statistics) and fracture.none, the negative marker for
-// a model that is not one piece or too small, so later deaths and later
+// a model that is too small or too sparse, so later deaths and later
 // sessions only read and hash the resources.
 std::map<std::string, GibModelEntry> fractureModels;
 bool prepareFracture(const std::string &meshName, const std::string &group,
@@ -793,7 +793,7 @@ bool prepareFracture(const std::string &meshName, const std::string &group,
     }
     // Bump kFractureAlgorithmVersion whenever the cutter, caps or FractureOptions
     // defaults change: it is hashed in, so old positive and negative caches miss.
-    constexpr uint8_t kFractureAlgorithmVersion = 2; // 2: a dominant bone (>= 90% weight) is one piece; open chains are capped
+    constexpr uint8_t kFractureAlgorithmVersion = 3; // 3: any skinned hull is one piece (turret models are gated by the caller)
     uint64_t hash = (14695981039346656037ull ^ kFractureAlgorithmVersion) * 1099511628211ull;
     for (const auto *source : {&bytes, &skeleton})
         for (uint8_t c : *source)
