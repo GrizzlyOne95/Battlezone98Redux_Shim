@@ -1650,6 +1650,7 @@ namespace BZROpenShim
             {"InitializeMpWhitelistTgaConfig", &InitializeMpWhitelistTgaConfig},
             {"InitializeMpBlockFreeCam", &InitializeMpBlockFreeCam},
             {"InitializeSeismicWaveExtentClampConfig", &InitializeSeismicWaveExtentClampConfig},
+            {"InitializeDynamicAllocGuardConfig", &InitializeDynamicAllocGuardConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},

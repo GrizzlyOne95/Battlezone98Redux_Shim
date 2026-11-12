@@ -223,6 +223,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Clamps SeismicWave (Daywrecker) terrain-delta extents to the allocated
     # buffer; drops only zero-delta cells, so the simulation is unchanged.
     "Fixes/SeismicWaveExtentClamp",
+    # Fixes the DynamicMain index full-check and sinks draws that cannot fit
+    # (stock returns NULL and crashes); render-only, nothing extra drawn.
+    "Fixes/DynamicAllocGuard",
     # Skips a music decode that Play overwrites before it is heard; audio only.
     "Fixes/MusicSingleFill",
     "Fixes/MagnetZeroRangeGuard",
