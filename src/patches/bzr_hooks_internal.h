@@ -1763,8 +1763,8 @@ namespace BZROpenShim
             char* outGroup,
             size_t groupCapacity);
         bool PrepareSkinnedGibPayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out);
-        // FractureOnePiece: pieces for a one-piece model, cached under
-        // fracture/v1/<hash>/; a model with no dominant bone (or too small)
+        // FractureOnePiece: pieces for a whole model, cached under
+        // fracture/v1/<hash>/; a model too small or too sparse to cut
         // is cached as a negative result and returns false. cachedOnly never
         // runs the cutter: a cache miss returns false and is not remembered.
         bool PrepareFracturePayloads(const std::string& meshName, const std::string& group, SkinnedGibModelInfo& out,

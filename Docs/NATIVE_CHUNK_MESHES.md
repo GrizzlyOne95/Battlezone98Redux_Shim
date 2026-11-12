@@ -142,20 +142,25 @@ this is not a promise of zero overhead for arbitrary assets and hardware.
 
 ## Runtime fracture of one-piece models (FractureOnePiece)
 
-A model with one main GEO (no skeleton, or one bone carrying at least 90 % of
-the vertex weight, like cvfigh's body at 96 %) has nothing for the engine to
-fragment into, so `[General] FractureOnePiece` (default on) cuts it at death.
-Minor GEOs (nozzles, gun mounts) are cut with the main one, frozen at their
-bind pose. Models with several real GEOs (avtank) keep stock GEO chunks only. `NativeChunks::ExtractFracture` bisects the mesh recursively
+A craft or building whose part tree has no turret GEO (class 65) is cut as
+one hull at death by `[General] FractureOnePiece` (default on): every GEO,
+including rotors, fins, legs and gun mounts, is cut together in bind pose, in
+the frame of the skeleton's single root bone (the heaviest-weighted bone when
+there are several roots), so an animated leg or rotor never carries the hull.
+Walkers (cvwalk, avslf)
+therefore fracture. A model with a turret part (avtank, gun towers, howitzers,
+svrecy) keeps stock GEO chunks only; the prewarm pass and
+`SkinnedGibsBeginFullFragment` walk the object's part tree for that check, and
+the death path logs `[FRACTURE] skip mesh=... reason=turret part` once per model. `NativeChunks::ExtractFracture` bisects the mesh recursively
 (4 pieces up to a 4 m bound radius, rising to 8 at 12 m; planes through 35-65 %
 of the longest axis, tilted up to 30 degrees, all randomness hashed from the
 mesh bytes), splits straddling triangles with every vertex element
 interpolated, and closes each cut at once with an ear-clipped cap in an extra
 `openshim_fracture_interior` submesh (dark scorched metal). Later cuts slice
-earlier caps like any other face. Pieces are written in the driving bone's
+earlier caps like any other face. Pieces are written in that bone's
 bind frame (mesh space with no skeleton), centred, with `center` set, exactly
-like the gib pieces, and cached under `openshim/cache/chunks/fracture/v1/<hash>/` (the hash includes the algorithm version, now 2).
-A model that is not one piece, is under 1 m, or has too few faces is cached
+like the gib pieces, and cached under `openshim/cache/chunks/fracture/v1/<hash>/` (the hash includes the algorithm version, now 3).
+A model under 1 m or with too few faces is cached
 as a negative (`fracture.none`) and costs nothing on later deaths. The pieces
 run in the SkinnedGibs pool (same slots, tick and render path) with a metal
 ground response; each producer is gated by its own key. An open shell (abbarr,
