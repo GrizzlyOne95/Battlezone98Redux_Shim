@@ -2145,6 +2145,9 @@ namespace BZROpenShim
         // --- SeismicWave extent clamp (seismic_wave_extent_clamp.cpp) --------
         void InitializeSeismicWaveExtentClampConfig();
 
+        // --- DynamicMain allocator guard (dynamic_alloc_guard.cpp) ------------
+        void InitializeDynamicAllocGuardConfig();
+
         // --- AI construction counter repair (ai_construction_counter_repair.cpp)
         void InitializeAiConstructionCounterRepairConfig();
 

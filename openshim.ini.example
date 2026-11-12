@@ -523,6 +523,13 @@ TugCargoPostLoad = 1
 ; Accepted: boolean. Default: ON.
 SeismicWaveExtentClamp = 1
 
+; Stop very large dynamic draws (a draw_planar effect of radius ~300 or more)
+; crashing the game. Stock checks the index buffer against the vertex count and
+; returns NULL when full, which callers write through. This fixes the check and
+; skips (does not draw) any single draw that cannot fit in the buffer.
+; Accepted: boolean. Default: ON.
+DynamicAllocGuard = 1
+
 ; Clear a dead constructor's remote build state from AI_UnitRemove, so the
 ; build it was told to place does not outlive it.
 ; Accepted: boolean. Default: ON. Stands down in a network game.
