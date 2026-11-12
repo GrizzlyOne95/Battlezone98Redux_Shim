@@ -92,8 +92,8 @@ struct GibPiece
 };
 bool ExtractGibs(const std::vector<uint8_t> &mesh, const std::vector<uint8_t> &skeleton, const GibOptions &options,
                  std::vector<GibPiece> &pieces, std::string &error);
-// Runtime fracture (OpenShim FractureOnePiece): a model with at most one
-// vertex-driving bone (or no skeleton) is cut into capped pieces by recursive
+// Runtime fracture (OpenShim FractureOnePiece): a model with one main GEO
+// (no skeleton, or a bone with >= 90% of the vertex weight) is cut into capped pieces by recursive
 // bisection, so a one-piece craft or building can be thrown apart like debris.
 // Everything is deterministic: the cut planes hash the mesh bytes. Every cut is
 // closed immediately (ear-clipped on the plane, fan as a last resort) in an
@@ -101,7 +101,7 @@ bool ExtractGibs(const std::vector<uint8_t> &mesh, const std::vector<uint8_t> &s
 // stay uncapped. Pieces are written like ExtractGibs output: in the driving
 // bone's bind frame (mesh space with no skeleton, bone 0), centred, `center`
 // filled, `radius` set, named frac_<n>. Returns false (with `error`) for a
-// model that is not one piece, too small or too sparse to cut.
+// model with no dominant bone (>= 90% of the weight), too small or too sparse to cut.
 struct FractureOptions
 {
     float minRadius = 1.0f;       // bound radius below which a model is left alone
@@ -121,7 +121,7 @@ struct FractureStats
     uint32_t cuts = 0;
     uint32_t capLoops = 0;  // closed loops capped (ear-clipped or fan)
     uint32_t fanLoops = 0;  // of those, the fan fallback
-    uint32_t openLoops = 0; // open chains or hole loops left uncapped
+    uint32_t openLoops = 0; // cut loops left uncapped (inward-facing or zero area)
     bool transient = false; // failed for a reason other than the mesh itself (out of memory)
 };
 bool ExtractFracture(const std::vector<uint8_t> &mesh, const std::vector<uint8_t> &skeleton,
