@@ -56,8 +56,13 @@
 #include <d3d11.h>
 #include <dxgi1_3.h>
 
+#include "frame_capture_list.h"
+
+#include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <string>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -294,6 +299,140 @@ namespace BZROpenShim
             return chain == g_Chain && g_ChainIsFlip;
         }
 
+        // Test-only: OPENSHIM_PRESENT_CAPTURE="600,1200" or "150-899" writes
+        // the back buffer of those presents (1-based, counted from the first
+        // flip-chain present of the process; recreations
+        // keep counting) as openshim_present_%05u.bmp next to the
+        // exe, just before Present. Unlike OPENSHIM_FRAME_CAPTURE (Ogre's
+        // frameRenderingQueued) this sees exactly the image that reaches the
+        // screen, including shell and pause-menu draws issued outside
+        // Root::renderOneFrame. Needs the flip chain ([Graphics] DxgiFlipModel).
+        void MaybeCapturePresent(IDXGISwapChain* chain, unsigned long presentNumber)
+        {
+            static int state = 0; // 0 unread, 1 armed, 2 off
+            static std::vector<uint32_t> frames;
+            static size_t next = 0;
+            if (state == 2)
+                return;
+            if (state == 0)
+            {
+                char list[4096] = {};
+                const DWORD n = GetEnvironmentVariableA("OPENSHIM_PRESENT_CAPTURE", list, sizeof(list));
+                if (n == 0 || n >= sizeof(list) || !FrameCapture::ParseFrameList(list, frames))
+                {
+                    if (n != 0)
+                        LogShimA(LogLevel::Warn, kComponent, "[PRESENT-CAPTURE] list rejected; capture off");
+                    state = 2;
+                    return;
+                }
+                state = 1;
+                LogShimA(LogLevel::Info, kComponent, "[PRESENT-CAPTURE] armed: %zu presents, %u-%u",
+                         frames.size(), frames.front(), frames.back());
+            }
+            while (next < frames.size() && frames[next] < presentNumber)
+                ++next;
+            if (next >= frames.size())
+            {
+                state = 2;
+                return;
+            }
+            if (frames[next] != presentNumber)
+                return;
+            ++next;
+
+            ID3D11Texture2D* back = nullptr;
+            ID3D11Device* device = nullptr;
+            ID3D11DeviceContext* context = nullptr;
+            ID3D11Texture2D* staging = nullptr;
+            bool written = false;
+            if (SUCCEEDED(g_RealGetBuffer(chain, 0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&back))) && back)
+            {
+                D3D11_TEXTURE2D_DESC desc = {};
+                back->GetDesc(&desc);
+                back->GetDevice(&device);
+                const bool rgba = desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                const bool bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM || desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+                if (device && desc.SampleDesc.Count == 1 && (rgba || bgra))
+                {
+                    device->GetImmediateContext(&context);
+                    D3D11_TEXTURE2D_DESC sd = desc;
+                    sd.Usage = D3D11_USAGE_STAGING;
+                    sd.BindFlags = 0;
+                    sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+                    sd.MiscFlags = 0;
+                    sd.MipLevels = 1;
+                    sd.ArraySize = 1;
+                    D3D11_MAPPED_SUBRESOURCE mapped = {};
+                    if (context && SUCCEEDED(device->CreateTexture2D(&sd, nullptr, &staging)))
+                    {
+                        context->CopyResource(staging, back);
+                        if (SUCCEEDED(context->Map(staging, 0, D3D11_MAP_READ, 0, &mapped)))
+                        {
+                            char exePath[MAX_PATH] = {};
+                            const DWORD length = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
+                            if (length > 0 && length < MAX_PATH)
+                            {
+                                std::string path(exePath, length);
+                                path = path.substr(0, path.find_last_of("\\/") + 1);
+                                char name[64] = {};
+                                sprintf_s(name, "openshim_present_%05lu.bmp", presentNumber);
+                                path += name;
+                                const UINT w = desc.Width, h = desc.Height;
+                                const UINT stride = (w * 3 + 3) & ~3u;
+                                std::vector<unsigned char> row(stride, 0);
+                                BITMAPFILEHEADER fh = {};
+                                BITMAPINFOHEADER ih = {};
+                                ih.biSize = sizeof(ih);
+                                ih.biWidth = static_cast<LONG>(w);
+                                ih.biHeight = static_cast<LONG>(h); // bottom-up
+                                ih.biPlanes = 1;
+                                ih.biBitCount = 24;
+                                ih.biCompression = BI_RGB;
+                                ih.biSizeImage = stride * h;
+                                fh.bfType = 0x4D42;
+                                fh.bfOffBits = sizeof(fh) + sizeof(ih);
+                                fh.bfSize = fh.bfOffBits + ih.biSizeImage;
+                                FILE* f = nullptr;
+                                if (fopen_s(&f, path.c_str(), "wb") == 0 && f)
+                                {
+                                    fwrite(&fh, sizeof(fh), 1, f);
+                                    fwrite(&ih, sizeof(ih), 1, f);
+                                    for (UINT y = h; y-- > 0;)
+                                    {
+                                        const unsigned char* src = static_cast<const unsigned char*>(mapped.pData) + static_cast<size_t>(y) * mapped.RowPitch;
+                                        for (UINT x = 0; x < w; ++x)
+                                        {
+                                            const unsigned char* px = src + x * 4;
+                                            row[x * 3 + 0] = rgba ? px[2] : px[0];
+                                            row[x * 3 + 1] = px[1];
+                                            row[x * 3 + 2] = rgba ? px[0] : px[2];
+                                        }
+                                        fwrite(row.data(), 1, stride, f);
+                                    }
+                                    written = fclose(f) == 0;
+                                }
+                                LogShimA(LogLevel::Info, kComponent,
+                                         "[PRESENT-CAPTURE] present=%lu %ux%u format=%u written=%d path=\"%s\"",
+                                         presentNumber, w, h, static_cast<unsigned>(desc.Format), written ? 1 : 0, path.c_str());
+                            }
+                            context->Unmap(staging, 0);
+                        }
+                    }
+                }
+                else
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "[PRESENT-CAPTURE] present=%lu unsupported back buffer (format=%u samples=%u); capture off",
+                             presentNumber, static_cast<unsigned>(desc.Format), desc.SampleDesc.Count);
+                    state = 2;
+                }
+            }
+            if (staging) staging->Release();
+            if (context) context->Release();
+            if (device) device->Release();
+            if (back) back->Release();
+        }
+
         HRESULT STDMETHODCALLTYPE HookPresent(IDXGISwapChain* self, UINT syncInterval, UINT flags)
         {
             if (!IsOurFlipChain(self))
@@ -302,6 +441,7 @@ namespace BZROpenShim
             {
                 std::lock_guard<std::mutex> lock(g_StateMutex);
                 ResolveProxyLocked(self);
+                MaybeCapturePresent(self, g_Presents + 1);
             }
             const HRESULT hr = g_RealPresent(self, syncInterval, flags);
             if (!(flags & DXGI_PRESENT_TEST))
@@ -322,6 +462,7 @@ namespace BZROpenShim
             {
                 std::lock_guard<std::mutex> lock(g_StateMutex);
                 ResolveProxyLocked(self);
+                MaybeCapturePresent(self, g_Presents + 1);
             }
             const HRESULT hr = g_RealPresent1(self, syncInterval, flags, params);
             if (!(flags & DXGI_PRESENT_TEST))
