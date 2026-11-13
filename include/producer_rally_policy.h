@@ -285,32 +285,6 @@ namespace BZROpenShim
             return sx >= 0.0f && sy >= 0.0f && sx < static_cast<float>(viewW) && sy < static_cast<float>(viewH);
         }
 
-        // Evenly spaced dots strictly between two screen points (the line
-        // from producer to rally): gaps of at most `spacing` pixels, at most
-        // `maxDots` dots. Writes x/y pairs into `out`; returns how many.
-        inline size_t LineDots(float x0, float y0, float x1, float y1, float spacing, size_t maxDots, float (*out)[2])
-        {
-            const float dx = x1 - x0;
-            const float dy = y1 - y0;
-            const float lengthSq = dx * dx + dy * dy;
-            const float spacingSq = spacing * spacing;
-            if (!(spacing > 0.0f) || !(lengthSq > spacingSq) || maxDots == 0)
-                return 0;
-            // Fewest segments whose length is within `spacing` (no sqrt).
-            size_t segments = 2;
-            while (segments <= maxDots &&
-                   lengthSq > spacingSq * static_cast<float>(segments) * static_cast<float>(segments))
-                ++segments;
-            const size_t dots = segments - 1;
-            for (size_t i = 1; i <= dots; ++i)
-            {
-                const float t = static_cast<float>(i) / static_cast<float>(segments);
-                out[i - 1][0] = x0 + dx * t;
-                out[i - 1][1] = y0 + dy * t;
-            }
-            return dots;
-        }
-
         // ---- rally set mode ------------------------------------------------
         // With the three command hooks installed, V arms "set mode" instead
         // of setting the rally at once: the stock ground reticle and order
@@ -468,9 +442,40 @@ namespace BZROpenShim
                    gate.eligibleProducer;
         }
 
-        inline const char* PanelRowLabel(bool armed)
+        // The row reads "Rally" beside its V key, and "Cancel" while set mode
+        // is armed for the current selection (V then cancels it,
+        // PlanSetKey). The placement uses the wider of the two, and both
+        // start at the same x, so neither the key nor the line moves when
+        // the label changes.
+        constexpr char kPanelRowLabel[] = "Rally";
+        constexpr char kPanelRowArmedLabel[] = "Cancel";
+
+        inline const char* PanelRowLabel(bool armedAndMatching)
         {
-            return armed ? "Cancel Rally" : "Rally Point";
+            return armedAndMatching ? kPanelRowArmedLabel : kPanelRowLabel;
+        }
+
+        // ---- the SPACE row label in set mode -------------------------------
+        // ControlPanel::Render draws the SPACE label as
+        // Localize("names", table[cmd * 2]) (FUN_004a08e0.c line 604); the
+        // table entry for the Go To command is "Go To" (0x00877EAC). While set
+        // mode is armed the next ground click places the rally instead of
+        // giving that order, so the row reads "Rally". Any other key, or set
+        // mode off, keeps the stock lookup.
+        constexpr char kSpaceRowStockKey[] = "Go To";
+        constexpr char kSpaceRowArmedLabel[] = "Rally";
+
+        inline bool SpaceRowLabelOverride(bool armed, const char* key)
+        {
+            if (!armed || !key)
+                return false;
+            for (size_t i = 0;; ++i)
+            {
+                if (key[i] != kSpaceRowStockKey[i])
+                    return false;
+                if (key[i] == '\0')
+                    return true;
+            }
         }
 
         // Row anchors (x, y) from FUN_0049f9e0 lines 57-69: x is the same for
@@ -515,10 +520,172 @@ namespace BZROpenShim
             return true;
         }
 
+        // The drawn key cap: a filled rect with its four corners notched by
+        // one reference unit (scaled, at least 1 px), the shape of the stock
+        // white caps. HudFillRect (FUN_0068afb0) takes inclusive corners:
+        // FUN_0068af70 passes x2 + 1 and y2 + 1 to the quad. Returns how many
+        // rects to fill (1 when the cap is too small to notch, else 2: a
+        // full-width band and a full-height band), 0 for an empty box.
+        struct FillRect
+        {
+            int x1 = 0;
+            int y1 = 0;
+            int x2 = 0;
+            int y2 = 0;
+        };
+
+        inline int KeyCapFillRects(const PixelRect& box, float scaleX, FillRect out[2])
+        {
+            const int w = box.right - box.left;
+            const int h = box.bottom - box.top;
+            if (w <= 0 || h <= 0)
+                return 0;
+            const int scaled = static_cast<int>(scaleX);
+            const int notch = scaled >= 1 ? scaled : 1;
+            if (2 * notch >= w || 2 * notch >= h)
+            {
+                out[0] = FillRect{ box.left, box.top, box.right - 1, box.bottom - 1 };
+                return 1;
+            }
+            out[0] = FillRect{ box.left, box.top + notch, box.right - 1, box.bottom - 1 - notch };
+            out[1] = FillRect{ box.left + notch, box.top, box.right - 1 - notch, box.bottom - 1 };
+            return 2;
+        }
+
         // The stock row text call: y = (int)(rowY - textHeight / 2.0).
         inline int CenteredTextY(int rowY, float textHeight)
         {
             return static_cast<int>(static_cast<double>(rowY) - static_cast<double>(textHeight) / 2.0);
+        }
+
+        // ---- where the row goes ---------------------------------------------
+        // Preferred: on the TAB row's line (row 12), right-aligned to the
+        // scrap-cost column. The classic layout draws the cost text
+        // left-aligned at rowRect.right - (int)(scaleX * 20) (FUN_004a08e0.c
+        // lines 1436-1440; the trailing DAT_009173e0 term is 0 in the classic
+        // layout, FUN_0049f9e0.c line 43), so the column's right edge is that
+        // x plus the width of a two-digit cost ("%02ld", line 1430). The TAB
+        // label is drawn left-aligned at the TAB anchor x (lines 707-712).
+        // When that label would reach the V key, the row drops to just under
+        // the menu underlay instead: the underlay is drawn top-left anchored
+        // at CommandUI bounds.top with height (int)(spriteH * scaleY / 2.0)
+        // (lines 402-410; FUN_0068ca30.c lines 49-64), and only while the
+        // viewport is wider than 400 px (line 402). Without the underlay the
+        // row takes its old place, one row pitch under TAB.
+        enum class PanelRowPlacement
+        {
+            Hidden,
+            TabLine,       // on the TAB row's line
+            BelowUnderlay, // under the underlay's bottom edge
+            BelowTab,      // one pitch under TAB (no underlay at this width)
+        };
+
+        struct PanelRowLayoutInput
+        {
+            int tabX = 0; // CommandMenuRowAnchors row 12
+            int tabY = 0;
+            int altY = 0;       // row 11, for the pitch
+            int rowRight = 0;   // CommandMenuRowRects row 12 .right
+            float scaleX = 0.0f; // HudFeedbackScale
+            float scaleY = 0.0f;
+            int inset = 0; // CommandMenuKeyInset
+            int keyW = 0;  // key sprite size, atlas units
+            int keyH = 0;
+            float labelW = 0.0f; // the wider measured row label
+            float labelH = 0.0f; // the font's line height
+            float costW = 0.0f;  // measured "00"
+            bool cancelKnown = false;
+            float cancelW = 0.0f; // measured localized TAB label
+            int viewportW = 0;    // HudViewportWidth
+            int viewportH = 0;    // HudViewportHeight (0: unknown)
+            bool underlayKnown = false;
+            int underlayTop = 0;     // CommandUI bounds.top
+            int underlaySpriteH = 0; // atlas height of the underlay sprite
+        };
+
+        struct PanelRowLayout
+        {
+            PanelRowPlacement placement = PanelRowPlacement::Hidden;
+            int labelX = 0; // left of the label text; the key sits left of it
+            int rowY = 0;   // the row centre, as the stock rows use it
+        };
+
+        // The stock underlay draw needs a viewport wider than this (line 402).
+        constexpr int kUnderlayMinViewportWidth = 400;
+
+        // Bottom edge of the underlay as FUN_004a08e0.c lines 406-410 size it.
+        inline int UnderlayBottom(int underlayTop, int spriteH, float scaleY)
+        {
+            return underlayTop +
+                   static_cast<int>(static_cast<double>(static_cast<float>(spriteH) * scaleY) / 2.0);
+        }
+
+        inline bool PanelRowFinite(float v)
+        {
+            return v == v && v < 1.0e9f && v > -1.0e9f;
+        }
+
+        inline PanelRowLayout ChoosePanelRowLayout(const PanelRowLayoutInput& in)
+        {
+            PanelRowLayout out;
+            if (!PanelRowFinite(in.scaleX) || !PanelRowFinite(in.scaleY) || in.scaleX <= 0.0f || in.scaleY <= 0.0f)
+                return out;
+            if (!PanelRowFinite(in.labelW) || !PanelRowFinite(in.labelH) || !PanelRowFinite(in.costW) ||
+                in.labelW <= 0.0f || in.costW < 0.0f || in.labelH < 0.0f)
+                return out;
+            const int pitch = in.tabY - in.altY;
+            if (pitch <= 0 || pitch > kMaxPanelRowPitch || in.inset < 0)
+                return out;
+            const int keyWpx = static_cast<int>(static_cast<float>(in.keyW) * in.scaleX);
+            const int keyHpx = static_cast<int>(static_cast<float>(in.keyH) * in.scaleY);
+            if (keyWpx <= 0 || keyHpx <= 0)
+                return out;
+
+            const int columnRight =
+                in.rowRight - static_cast<int>(in.scaleX * 20.0f) + static_cast<int>(in.costW);
+            const int labelX = columnRight - static_cast<int>(in.labelW);
+            const int groupLeft = labelX - in.inset - keyWpx;
+            // The key must stay right of the row's own key slot and on screen.
+            if (groupLeft <= in.tabX - in.inset || (in.viewportW > 0 && columnRight > in.viewportW))
+                return out;
+
+            // Key or text, whichever is taller, sets the row's half height.
+            const int textH = static_cast<int>(in.labelH);
+            const int half = ((keyHpx > textH ? keyHpx : textH) + 1) / 2;
+
+            int rowY = 0;
+            PanelRowPlacement placement = PanelRowPlacement::Hidden;
+            const bool cancelFits = in.cancelKnown && PanelRowFinite(in.cancelW) && in.cancelW >= 0.0f &&
+                                    in.tabX + static_cast<int>(in.cancelW) + 2 * in.inset <= groupLeft;
+            if (cancelFits)
+            {
+                placement = PanelRowPlacement::TabLine;
+                rowY = in.tabY;
+            }
+            else if (in.viewportW > 0 && in.viewportW <= kUnderlayMinViewportWidth)
+            {
+                placement = PanelRowPlacement::BelowTab;
+                rowY = in.tabY + pitch;
+            }
+            else if (in.viewportW > kUnderlayMinViewportWidth && in.underlayKnown && in.underlaySpriteH > 0)
+            {
+                // Clear of the underlay's bottom edge by one key inset, and
+                // never above the old one-pitch-down place.
+                placement = PanelRowPlacement::BelowUnderlay;
+                rowY = UnderlayBottom(in.underlayTop, in.underlaySpriteH, in.scaleY) + in.inset + half;
+                if (rowY < in.tabY + pitch)
+                    rowY = in.tabY + pitch;
+            }
+            else
+            {
+                return out;
+            }
+            if (in.viewportH > 0 && rowY + half > in.viewportH)
+                return out;
+            out.placement = placement;
+            out.labelX = labelX;
+            out.rowY = rowY;
+            return out;
         }
 
         // ---- producer type: beacon lamp colour and HUD label ---------------
