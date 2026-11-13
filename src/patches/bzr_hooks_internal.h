@@ -1398,6 +1398,16 @@ namespace BZROpenShim
         void RefreshTurretAttackOrdersState();
         void ResetTurretAttackOrders();
 
+        // --- Producer rally points (producer_rally_points.cpp) -----------------
+        void InstallProducerRallyPointsIfPossible();
+        void ReloadProducerRallyPointsConfig();
+        void RefreshProducerRallyPointsState();
+        void ResetProducerRallyPoints();
+        // The input-method-independent entry points. Main thread, outside the
+        // render traversal (they spawn and remove the nav marker).
+        bool SetProducerRally(void* producer, const float pos[3]);
+        bool ClearProducerRally(void* producer);
+
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
         extern bool g_ApcAlliedTargetDeployFixEnabled;
         extern bool g_ApcAlliedTargetDeployFixInstalled;

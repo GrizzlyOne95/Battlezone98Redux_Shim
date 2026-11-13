@@ -256,6 +256,8 @@ openshim_opt:AiMultiProducerMakers:label~AI Multi-Producer~~~~~~
 openshim_opt:AiMultiProducerMakers:desc~A built class gets every producer that can make it, not just the first one found. Single player only.~~~~~~
 openshim_opt:AllowNeutralAttackOrders:label~Attack Neutrals~~~~~~
 openshim_opt:AllowNeutralAttackOrders:desc~Allow explicit player attack orders against team-0 neutral objects. Diplomacy and autonomous targeting remain stock.~~~~~~
+openshim_opt:ProducerRallyPoints:label~Rally Points~~~~~~
+openshim_opt:ProducerRallyPoints:desc~With a Recycler or Factory selected, V sets its rally point to the ground under the reticle and Shift+V clears it. New units from it drive there; scavengers and constructors do not. Single player only.~~~~~~
 openshim_opt:Turbo:label~Global Turbo~~~~~~
 openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~~~~~~
 openshim_opt:NoDamageSlowdown:label~No Damage Slowdown~~~~~~

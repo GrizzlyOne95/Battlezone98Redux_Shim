@@ -2945,6 +2945,30 @@
       "identity": "ConstructionRig primary vtable (RTTI COL 0x008A67D8)."
     },
     {
+      "name": "ProducerFinishBuild",
+      "address": "0x005AF160",
+      "expected": "55 8B EC 81 EC 34 02 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Producer::FinishBuild on exact GOG Redux 2.2.301, thiscall with no stack arguments, plain ret at 0x005AF7A5. Virtual only: no direct call in .text; slot 42 of ProducerVtable (0x0088616C), RecyclerVtable (0x008864FC), FactoryVtable (0x00879430) and ConstructionRigVtable (0x00877A3C). It zeroes [ebp-0x160] at 0x005AF18E, stores GameObjectClass::Build's result there (0x005AF20B, 0x005AF6BA), hands it to AiMission vtable+0x1C at 0x005AF754, clears the producer's build class (+0x300) at 0x005AF786 and returns the new GameObject* (or 0) in eax from [ebp-0x160] at 0x005AF790. 1.5 counterpart Producer::FinishBuild 004ab3f5. ProducerRallyPoints replaces slot 42 of Recycler and Factory only. EXU detours this entry (ExtraUtilities BuildEvents.cpp) after startup; the row binds once at startup, before EXU loads."
+    },
+    {
+      "name": "GameObjectSetCommandWhere",
+      "address": "0x004DBE70",
+      "expected": "55 8B EC 6A FF 68 BC 77 84 00 64 A1 00 00 00 00",
+      "identity": "GameObject::SetCommand(AiCommand what, const VECTOR_3D* where, int64 param) on exact GOG Redux 2.2.301, thiscall ret 0x10. Writes nextCmd: priority +0xC8 = 0, what +0xCC, who +0xD0 = 0, a new AiPath from the object's position (DistributedObject +0x18 vtable+0xC) to where at +0xD4, param at +0xE0/+0xE4; forwards to the network when the object is remote (0x004B9830/0x004B7B00). ControlPanel::BroadcastCommand(VECTOR) 0x004A70C0 calls it at 0x004A712A for each selected, commandable object with (cmd, where, selectNum sign-extended). 1.5 counterpart GameObject::SetCommand 004956c1."
+    },
+    {
+      "name": "ControlPanelGlobal",
+      "address": "0x00978E20",
+      "kind": "data",
+      "identity": "The global ControlPanel on exact GOG Redux 2.2.301: `mov ecx,0x978E20` before every ControlPanel command call from OverView (0x00588184, 0x00588605) and Reticle::Simulate (0x005BAA78, 0x005BAA9E). ControlPanel::BroadcastCommand(VECTOR) 0x004A70C0 loops i < [this+0x188] (selectNum, 0x004A70E1) over handles [this+0x1C+4*i] (0x004A70EF) resolved with GameObject::GetObj 0x004DA060. Read only, by ProducerRallyPoints."
+    },
+    {
+      "name": "InputEditModeFlag",
+      "address": "0x009181B8",
+      "kind": "data",
+      "identity": "int, 1 while the stock EditMode input program is on, on exact GOG Redux 2.2.301. FUN_005B08B0 builds the active input-program mask (bit 0 ControlMode, bit 1 AlwaysOn, bit 2 EditMode, names at 0x008E8F90) and sets bit 2 when this is 1; FUN_005B0920 stores (arg == 1), called with 1 by the editor-enter routine FUN_004C82D0 and with 0 by editor-exit FUN_004C8310. Not TerrainEditMode (0x009454B8), which unscripted missions also carry. Read only, by ProducerRallyPoints to leave V/Ctrl+V to edit_vertflip/edit_paste."
+    },
+    {
       "name": "ClassLoadAssetsFlag",
       "address": "0x008E7732",
       "kind": "data",

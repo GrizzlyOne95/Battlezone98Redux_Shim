@@ -398,6 +398,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # team only, hard-disabled in network games. Default on by design.
     "SinglePlayer/TurretAttackOrders",
 
+    # Producer rally points: V/Shift+V set and clear a Recycler/Factory rally
+    # point that its new units drive to. Player team only, nothing happens until
+    # the player presses V, and hard-disabled in network games. Default on by design.
+    "Gameplay/ProducerRallyPoints",
+
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
     "Fixes/AiMultiProducerMakers",
@@ -570,6 +575,7 @@ $shippingPolicyChecks = @{
     "SinglePlayer/SatelliteVisibilityFix" = "1"
     "SinglePlayer/PilotTeamRestore" = "1"
     "SinglePlayer/TurretAttackOrders" = "1"
+    "Gameplay/ProducerRallyPoints" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }
