@@ -699,7 +699,7 @@ namespace BZROpenShim::Hooks
                     if (ClearProducerRally(producer))
                         ++applied;
                 });
-                LogBudgeted(L"[RALLY] Shift+V: rally cleared for %d producer(s)\n", applied);
+                LogBudgeted(L"[RALLY] Shift+rally key: rally cleared for %d producer(s)\n", applied);
                 return;
             }
 
@@ -1367,6 +1367,9 @@ namespace BZROpenShim::Hooks
         // Two digits: no stock ODF costs over 99, and a wider cost would run
         // into the stock "P" at right - scaleX * 6 (lines 1464-1480) anyway.
         constexpr char kCostSample[] = "00";
+        // The ALT row's label while no command is aimed (the Clear row's fit
+        // test measures this; the live ALT label can differ, UNVERIFIED).
+        constexpr char kAltLabelKey[] = "No Action";
         // A mod's key_V sprite wins; otherwise the cap is drawn at key_0's
         // size (the stock single-character cap).
         constexpr char kKeyVSpriteName[] = "key_V";
@@ -1412,6 +1415,7 @@ namespace BZROpenShim::Hooks
         int g_KeyZeroH = 0;
         bool g_PanelRowFaultLogged = false;
         Policy::PanelRowPlacement g_LastPlacement = Policy::PanelRowPlacement::Hidden;
+        Policy::ClearRowPlacement g_LastClearPlacement = Policy::ClearRowPlacement::Hidden;
 
         struct PanelRowInputs
         {
@@ -1645,8 +1649,52 @@ namespace BZROpenShim::Hooks
         // anchor x - CommandMenuKeyInset, centred on the row y (the stock
         // call passes flags 0x60001, FUN_004a08e0.c lines 698-701), and the
         // label at anchor x, y - height / 2 (lines 707-712).
+        // One key cap right-aligned at anchorX - inset, centred on y. Must be
+        // called inside the caller's __try, which restores spriteZ and the
+        // font colour from savedZ / zRaised and its own saved colour.
+        void DrawKeyCapUnsafe(const PanelRowInputs& in, const KeyCapSpec& capSpec, int capWidthPx, int anchorX, int y,
+                              float sx, float sy, float& savedZ, bool& zRaised)
+        {
+            const auto fontDraw = reinterpret_cast<FnFontDraw>(g_PanelFontDrawAddr);
+            const auto textHeight = reinterpret_cast<FnTextHeight>(g_PanelTextHeightAddr);
+            float* const spriteZ = reinterpret_cast<float*>(g_SpriteZAddr);
+            uint32_t* const fontColour = reinterpret_cast<uint32_t*>(in.font);
+            if (capSpec.sprite)
+            {
+                reinterpret_cast<FnSpriteDraw>(g_PanelSpriteAddr)(in.pane, g_KeyVSprite, anchorX - in.inset, y,
+                                                                  kKeySpriteFlags, 0.0f);
+                return;
+            }
+            Policy::PixelRect box;
+            Policy::FillRect cap[2];
+            const int bands = Policy::KeyBoxRect(anchorX, y, in.inset, capSpec.atlasW, capSpec.atlasH, sx, sy, box,
+                                                 capWidthPx)
+                                  ? Policy::KeyCapFillRects(box, sx, cap)
+                                  : 0;
+            if (bands <= 0)
+                return;
+            // The cap one depth step behind the glyph drawn on it.
+            const auto fill = reinterpret_cast<FnFillRect>(g_PanelFillAddr);
+            savedZ = *spriteZ;
+            *spriteZ = savedZ + kKeyCapZStep;
+            zRaised = true;
+            for (int i = 0; i < bands; ++i)
+                fill(in.pane, cap[i].x1, cap[i].y1, cap[i].x2, cap[i].y2, kKeyCapArgb, 0);
+            *spriteZ = savedZ;
+            zRaised = false;
+            float w = 0.0f, h = 0.0f;
+            reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr)(in.font, capSpec.name, &w, &h);
+            *fontColour = kKeyGlyphArgb;
+            const int cx = (box.left + box.right) / 2 - static_cast<int>(w / 2.0f);
+            const int cy = (box.top + box.bottom) / 2;
+            fontDraw(in.font, in.pane, cx, Policy::CenteredTextY(cy, textHeight(in.font)), capSpec.name);
+        }
+
+        // shiftCap != null (the Clear row) draws a second cap one inset left
+        // of the key cap, whose pixel width is keyWidthPx.
         bool DrawPanelRowSeh(const PanelRowInputs& in, const KeyCapSpec& capSpec, int capWidthPx, int x, int y, float sx,
-                             float sy, const char* label)
+                             float sy, const char* label, const KeyCapSpec* shiftCap = nullptr, int shiftWidthPx = 0,
+                             int keyWidthPx = 0)
         {
             const auto fontDraw = reinterpret_cast<FnFontDraw>(g_PanelFontDrawAddr);
             const auto textHeight = reinterpret_cast<FnTextHeight>(g_PanelTextHeightAddr);
@@ -1662,38 +1710,10 @@ namespace BZROpenShim::Hooks
                 // here and restored on both paths.
                 savedColour = *fontColour;
                 colourSaved = true;
-                if (capSpec.sprite)
-                {
-                    reinterpret_cast<FnSpriteDraw>(g_PanelSpriteAddr)(in.pane, g_KeyVSprite, x - in.inset, y,
-                                                                      kKeySpriteFlags, 0.0f);
-                }
-                else
-                {
-                    Policy::PixelRect box;
-                    Policy::FillRect cap[2];
-                    const int bands = Policy::KeyBoxRect(x, y, in.inset, capSpec.atlasW, capSpec.atlasH, sx, sy, box,
-                                                         capWidthPx)
-                                          ? Policy::KeyCapFillRects(box, sx, cap)
-                                          : 0;
-                    if (bands > 0)
-                    {
-                        // The cap one depth step behind the glyph drawn on it.
-                        const auto fill = reinterpret_cast<FnFillRect>(g_PanelFillAddr);
-                        savedZ = *spriteZ;
-                        *spriteZ = savedZ + kKeyCapZStep;
-                        zRaised = true;
-                        for (int i = 0; i < bands; ++i)
-                            fill(in.pane, cap[i].x1, cap[i].y1, cap[i].x2, cap[i].y2, kKeyCapArgb, 0);
-                        *spriteZ = savedZ;
-                        zRaised = false;
-                        float w = 0.0f, h = 0.0f;
-                        reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr)(in.font, capSpec.name, &w, &h);
-                        *fontColour = kKeyGlyphArgb;
-                        const int cx = (box.left + box.right) / 2 - static_cast<int>(w / 2.0f);
-                        const int cy = (box.top + box.bottom) / 2;
-                        fontDraw(in.font, in.pane, cx, Policy::CenteredTextY(cy, textHeight(in.font)), capSpec.name);
-                    }
-                }
+                DrawKeyCapUnsafe(in, capSpec, capWidthPx, x, y, sx, sy, savedZ, zRaised);
+                if (shiftCap)
+                    DrawKeyCapUnsafe(in, *shiftCap, shiftWidthPx, x - in.inset - keyWidthPx, y, sx, sy, savedZ,
+                                     zRaised);
                 *fontColour = in.colour;
                 fontDraw(in.font, in.pane, x, Policy::CenteredTextY(y, textHeight(in.font)), label);
                 *fontColour = savedColour;
@@ -1712,6 +1732,66 @@ namespace BZROpenShim::Hooks
                 {
                 }
                 return false;
+            }
+        }
+
+        // Widths for the Clear row: its Shift cap text, "Clear", and the
+        // ALT label (altKnown false without UiLocalize).
+        bool MeasureClearRowSeh(const PanelRowInputs& in, float& shiftTextW, float& clearW, bool& altKnown,
+                                float& altW)
+        {
+            const auto measure = reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr);
+            __try
+            {
+                float h = 0.0f;
+                shiftTextW = clearW = altW = 0.0f;
+                altKnown = false;
+                measure(in.font, Policy::kClearRowShiftCap, &shiftTextW, &h);
+                h = 0.0f;
+                measure(in.font, Policy::kClearRowLabel, &clearW, &h);
+                if (g_UiLocalizeAddr)
+                {
+                    const char* alt = reinterpret_cast<FnLocalize>(g_UiLocalizeAddr)("names", kAltLabelKey);
+                    if (alt)
+                    {
+                        h = 0.0f;
+                        measure(in.font, alt, &altW, &h);
+                        altKnown = true;
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        // True when any selected eligible producer has a rally stored.
+        bool SelectedProducerHasRally()
+        {
+            if (TableSize() == 0)
+                return false;
+            bool any = false;
+            ForEachSelectedProducer([&](void* producer, uint32_t) {
+                if (any)
+                    return;
+                TableShared lock;
+                any = g_Table.Find(reinterpret_cast<uintptr_t>(producer)) != nullptr;
+            });
+            return any;
+        }
+
+        const wchar_t* ClearPlacementName(Policy::ClearRowPlacement p)
+        {
+            switch (p)
+            {
+            case Policy::ClearRowPlacement::AltLine:
+                return L"on the ALT line";
+            case Policy::ClearRowPlacement::BelowRally:
+                return L"one row under the Rally row";
+            default:
+                return L"hidden (layout unreadable or off screen)";
             }
         }
 
@@ -1813,8 +1893,61 @@ namespace BZROpenShim::Hooks
             }
             if (placed.placement == Policy::PanelRowPlacement::Hidden)
                 return;
+            const bool armed = ArmedAndMatching();
             if (!DrawPanelRowSeh(in, capSpec, capWidthPx, placed.labelX, placed.rowY, sx, sy,
-                                 Policy::PanelRowLabel(ArmedAndMatching())))
+                                 Policy::PanelRowLabel(armed)))
+                PanelRowFault();
+            if (armed || !SelectedProducerHasRally())
+                return;
+
+            // The Clear row: "[Shift] [key] Clear".
+            KeyCapSpec shiftSpec;
+            shiftSpec.valid = true;
+            std::memcpy(shiftSpec.name, Policy::kClearRowShiftCap, sizeof(Policy::kClearRowShiftCap));
+            shiftSpec.nameLen = sizeof(Policy::kClearRowShiftCap) - 1;
+            shiftSpec.atlasW = g_KeyZeroW > 0 ? g_KeyZeroW : capSpec.atlasW;
+            shiftSpec.atlasH = g_KeyZeroW > 0 ? g_KeyZeroH : capSpec.atlasH;
+            float shiftTextW = 0.0f, clearW = 0.0f, altW = 0.0f;
+            bool altKnown = false;
+            if (!MeasureClearRowSeh(in, shiftTextW, clearW, altKnown, altW))
+            {
+                PanelRowFault();
+                return;
+            }
+            const int shiftWidthPx = Policy::KeyCapWidthPx(shiftSpec.atlasW, sx, shiftSpec.nameLen, shiftTextW);
+            const int keyWidthPx = capWidthPx > 0 ? capWidthPx
+                                                  : static_cast<int>(static_cast<float>(capSpec.atlasW) * sx);
+            Policy::ClearRowLayoutInput clearIn;
+            clearIn.rally = placed;
+            clearIn.rallyLabelW = layout.labelW;
+            clearIn.tabX = in.tabX;
+            clearIn.tabY = in.tabY;
+            clearIn.altY = in.altY;
+            clearIn.inset = in.inset;
+            clearIn.shiftWidthPx = shiftWidthPx;
+            clearIn.keyWidthPx = keyWidthPx;
+            clearIn.keyHeightPx = static_cast<int>(static_cast<float>(capSpec.atlasH) * sy);
+            clearIn.clearW = clearW;
+            clearIn.labelH = layout.labelH;
+            clearIn.altKnown = altKnown;
+            clearIn.altW = altW;
+            clearIn.viewportW = in.viewportW;
+            clearIn.viewportH = in.viewportH;
+            clearIn.underlayKnown = layout.underlayKnown;
+            clearIn.underlayTop = layout.underlayTop;
+            clearIn.underlaySpriteH = layout.underlaySpriteH;
+            clearIn.scaleY = layout.scaleY;
+            clearIn.costW = layout.costW;
+            const Policy::ClearRowLayout clearPlaced = Policy::ChooseClearRowLayout(clearIn);
+            if (clearPlaced.placement != g_LastClearPlacement)
+            {
+                g_LastClearPlacement = clearPlaced.placement;
+                Log(L"[RALLY] command panel Clear row %ls\n", ClearPlacementName(clearPlaced.placement));
+            }
+            if (clearPlaced.placement == Policy::ClearRowPlacement::Hidden)
+                return;
+            if (!DrawPanelRowSeh(in, capSpec, capWidthPx, clearPlaced.labelX, clearPlaced.rowY, sx, sy,
+                                 Policy::kClearRowLabel, &shiftSpec, shiftWidthPx, keyWidthPx))
                 PanelRowFault();
         }
 
@@ -2318,7 +2451,7 @@ namespace BZROpenShim::Hooks
             all = InstallSlot(p) && all;
         g_HooksInstalled = all;
         Log(L"[RALLY] Producer rally points %hs\n",
-            all ? "installed (V sets or toggles set mode, Shift+V clears)" : "partially installed; feature stays off");
+            all ? "installed (the rally key sets or toggles set mode, Shift+key clears)" : "partially installed; feature stays off");
         if (!all)
             MarkFailed();
         else

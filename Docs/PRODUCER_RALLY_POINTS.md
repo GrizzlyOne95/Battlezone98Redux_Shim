@@ -49,6 +49,15 @@ checked by `scripts/audit_vtable_hooks.py`.
   `[RALLY] set mode unavailable (command hooks installed mask=...)` once, on
   the first V.
 - **Shift+V** clears the rally of the selected producers.
+- **Clear row:** while set mode is not armed and a selected producer has a
+  rally stored, a second row "[Shift] [key] Clear" teaches that chord. It is
+  on the ALT line when the Rally row is on the TAB line: right-aligned to the
+  Rally row, or slid right just past the ALT label ("No Action", measured,
+  two insets of room) by at most two cost-digit widths. Otherwise it goes one
+  row pitch below the Rally row, clear of the panel's bottom border
+  (`ChooseClearRowLayout`). The live ALT label can differ from the measured
+  one (UNVERIFIED). Live at 1600x900: on the ALT line, inside the panel. The
+  log names its placement each time it changes (`command panel Clear row`).
 - **Command panel row:** while a Recycler or Factory of yours is selected
   (the V key gate's test) and the stock green command panel shows its unit
   orders, a V key and the label "Rally" sit on the "TAB Cancel" line,
