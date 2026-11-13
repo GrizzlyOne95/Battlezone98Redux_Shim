@@ -79,7 +79,7 @@ HOOKS = [
      [VT(f"TurretTank{s}Vtable", 24) for s in ("Process", "Friend", "Enemy")]),
     ("ProducerFinishBuild", "ProducerFinishBuild",
      [VT("RecyclerVtable", 42), VT("FactoryVtable", 42)],
-     "ProducerRallyPoints covers Recycler and Factory only; the Producer base and ConstructionRig copies stay stock"),
+     "ProducerRallyPoints and AutoGroupNewUnits cover Recycler and Factory only; the Producer base and ConstructionRig copies stay stock"),
     ("TurretTankProcessDoAttack", "TurretTankProcessDoAttack",
      [VT(f"TurretTank{s}Vtable", 26) for s in ("Process", "Friend", "Enemy")],
      "shared AiProcess DoAttack; TurretAttackOrders manages turret deploy only"),

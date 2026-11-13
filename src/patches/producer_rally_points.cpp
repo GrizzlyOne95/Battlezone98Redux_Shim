@@ -2060,6 +2060,9 @@ namespace BZROpenShim::Hooks
             void* built = g_StockFinishBuild(producer);
             if (g_Active.load(std::memory_order_acquire) && TableSize() != 0)
                 OnUnitBuilt(producer, built);
+            // Shared with AutoGroupNewUnits (auto_group_new_units.cpp), which
+            // checks its own setting.
+            AutoGroupOnUnitBuilt(producer, built);
             return built;
         }
 
@@ -2077,7 +2080,7 @@ namespace BZROpenShim::Hooks
             return p.vtable + kFinishBuildSlot * sizeof(void*);
         }
 
-        bool SlotReady(const SlotPlan& p)
+        bool SlotReadyFor(const SlotPlan& p, uint32_t stockFinishBuild)
         {
             if (!VtableTypeNameMatches(p.vtable, p.rttiName))
             {
@@ -2086,14 +2089,19 @@ namespace BZROpenShim::Hooks
             }
             void* current = ReadPtr(SlotAddress(p));
             if (current != reinterpret_cast<void*>(&ProducerFinishBuildHook) &&
-                current != reinterpret_cast<void*>(static_cast<uintptr_t>(g_FinishBuildAddr)))
+                current != reinterpret_cast<void*>(static_cast<uintptr_t>(stockFinishBuild)))
             {
                 Log(L"[RALLY] %ls slot mismatch slot=0x%08X current=0x%08X expected=0x%08X; not installed\n",
                     p.label, static_cast<uint32_t>(SlotAddress(p)),
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)), g_FinishBuildAddr);
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(current)), stockFinishBuild);
                 return false;
             }
             return true;
+        }
+
+        bool SlotReady(const SlotPlan& p)
+        {
+            return SlotReadyFor(p, g_FinishBuildAddr);
         }
 
         bool InstallSlot(const SlotPlan& p)
@@ -2174,6 +2182,48 @@ namespace BZROpenShim::Hooks
     {
         TableExclusive lock;
         return g_Table.Clear(reinterpret_cast<uintptr_t>(producer));
+    }
+
+    // The FinishBuild slot hook on its own, for a consumer other than the
+    // rally (AutoGroupNewUnits). It binds its own copy of the shared rows, so
+    // it does not depend on the rally's key path or rally-only rows, and it
+    // leaves the rally's state alone; the rally's install accepts a slot that
+    // already holds the hook. True once both slots hold the hook.
+    bool EnsureProducerFinishBuildHook()
+    {
+        static std::atomic<bool> s_installed{ false };
+        if (s_installed.load(std::memory_order_acquire))
+            return true;
+        if (reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) != 0x00400000)
+            return false;
+        uint32_t recycler = 0;
+        uint32_t factory = 0;
+        uint32_t finishBuild = 0;
+        const HookEngine::EngineRow rows[] = {
+            { "RecyclerVtable", &recycler },
+            { "FactoryVtable", &factory },
+            { "ProducerFinishBuild", &finishBuild },
+        };
+        if (!HookEngine::BindEngineRows("Producer FinishBuild hook", rows))
+            return false;
+        const SlotPlan plans[] = {
+            { L"Recycler::FinishBuild", recycler, ".?AVRecycler@@" },
+            { L"Factory::FinishBuild", factory, ".?AVFactory@@" },
+        };
+        for (const SlotPlan& p : plans)
+        {
+            if (!SlotReadyFor(p, finishBuild))
+                return false;
+        }
+        // The stock pointer must be set before a slot points at the hook.
+        if (!g_StockFinishBuild)
+            g_StockFinishBuild = reinterpret_cast<FnFinishBuild>(finishBuild);
+        bool all = true;
+        for (const SlotPlan& p : plans)
+            all = InstallSlot(p) && all;
+        if (all)
+            s_installed.store(true, std::memory_order_release);
+        return all;
     }
 
     namespace

@@ -2640,6 +2640,7 @@ namespace BZROpenShim
             InstallAiNativeOrdersHooksIfPossible();
             InstallTurretAttackOrdersHooksIfPossible();
             InstallProducerRallyPointsIfPossible();
+            InstallAutoGroupNewUnitsIfPossible();
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();

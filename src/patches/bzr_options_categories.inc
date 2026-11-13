@@ -60,7 +60,7 @@ static const char* const kShimCategoryPalette[] = {
 static const char* const kShimCategoryControls[] = {
     kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "No Smoothing", "Per-Frame Mouse",
     "Satellite Zoom", "Satellite Pan", "Editor Placement", "Background Mouse",
-    "Run in Background", "Rally Points" };
+    "Run in Background", "Rally Points", "Auto Group", "Group Strip" };
 static const char* const kShimCategoryGameplay[] = {
     "Aim Convergence", "Reticle Converge", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",

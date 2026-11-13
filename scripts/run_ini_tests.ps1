@@ -403,6 +403,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # the player presses V, and hard-disabled in network games. Default on by design.
     "Gameplay/ProducerRallyPoints",
 
+    # HUD group strip: a read-only row listing the F1-F7 groups next to the
+    # scrap/pilot gauge. Writes nothing the game reads. Default on by design.
+    "Gameplay/GroupStrip",
+
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
     "Fixes/AiMultiProducerMakers",
@@ -583,6 +587,8 @@ $shippingPolicyChecks = @{
     "SinglePlayer/PilotTeamRestore" = "1"
     "SinglePlayer/TurretAttackOrders" = "1"
     "Gameplay/ProducerRallyPoints" = "1"
+    "Gameplay/AutoGroupNewUnits" = "0"
+    "Gameplay/GroupStrip" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }
