@@ -157,6 +157,18 @@ At both callsites the current hovercraft `this` pointer is still available at
 `[ebp-0x698]`, which makes them the best current hook points for team-aware
 routing before stock blue exhaust wins.
 
+The second site is conditional. In the Ghidra decompile of `FUN_004ea300`
+(GOG 2.2.301), the first `FUN_004c8800(local_1b4, ...)` call runs for every
+engine hardpoint that passes the thrust test. The second
+`FUN_004c8800(local_1f4, local_6b0)` call is nested inside
+`if (DAT_009b5104 != 0)` and inside `if (iVar1 != 0)`, where iVar1 is the
+result of the ray test `FUN_00784620(...)` on the flame's position and
+direction. Its transform is the hit point (`local_1cc` / `local_1c4` /
+`local_1bc` = origin + `local_6b0` * dir). So the second manager only gets
+flames from a surface hit, and a whole mission can pass without it. Variant
+setup must not wait for it: OpenShim builds the colour clones from the primary
+manager and clones the secondary set when it first shows up.
+
 ## What This Means For Modding
 
 ### What ODF can do now
