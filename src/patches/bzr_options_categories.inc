@@ -60,7 +60,7 @@ static const char* const kShimCategoryPalette[] = {
 static const char* const kShimCategoryControls[] = {
     kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "No Smoothing", "Per-Frame Mouse",
     "Satellite Zoom", "Satellite Pan", "Editor Placement", "Background Mouse",
-    "Run in Background" };
+    "Run in Background", "Rally Points" };
 static const char* const kShimCategoryGameplay[] = {
     "Aim Convergence", "Reticle Converge", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
@@ -77,7 +77,7 @@ static const char* const kShimCategoryNetwork[] = {
     "MP Setup Screen", "Map Letter Jump", "Block Free Camera", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install", "Skip Launcher", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
-    "AutoSave", "AutoSave Interval", "AutoSave Backups", "Menu Caching" };
+    "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching" };
 
 struct ShimSettingsCategory
 {

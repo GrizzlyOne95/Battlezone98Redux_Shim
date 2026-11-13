@@ -111,6 +111,21 @@ Unreadable data, invalid fields or an unexpected class fail fully visible.
 The touch/alternate command layout stays fully visible pending qualification.
 The other three groups remain independently available if command guards fail.
 
+This file is the only writer of render slot 6 (`HudFadeCommandRenderSlot`,
+`0x00877E68`). The wrapper is installed only when something needs it: the
+command fade, an EXU command claim, or a post-draw callback registered with
+`ContextualHud::RegisterCommandPanelPostDraw` (one consumer; today the producer
+rally row, `Docs/PRODUCER_RALLY_POINTS.md`). With the fade off and no EXU
+claim the wrapper is the stock renderer plus that callback: opacity stays 1,
+the command sample is not taken, and the original render runs unchanged. The
+callback runs after the original render, inside the same draw scope (so its
+native sprite, fill and text calls fade with the panel) and inside SEH. It is
+skipped while EXU owns the command presentation: EXU then restyles the native
+rows inside its own entry detour, and a stock-styled extra row would not match.
+The slot is still written only while it holds `0x004A08E0`. Once the rally row
+has registered, the wrapper stays for the rest of the process, as it does after
+the fade installs; the callback returns at once while rally is stood down.
+
 The initial adapter is gated to GOG 2.2.301. Steam is disabled; Steam, Wine,
 Proton and other renderers require qualification before release. There are no
 new dependencies, paths, asset files, SDK APIs or mission overrides.

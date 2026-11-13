@@ -962,6 +962,170 @@ Piece CasingMesh(unsigned sides)
     chunk(out, 0x3000, body);
     return {"openshim_casing", std::move(out), triangles};
 }
+Piece RallyBeaconMesh(bool amberLamp)
+{
+    // Producer rally "drop-off beacon" (after BZ2's ipdrop), Ogre axes, Y up,
+    // origin at the base centre, min y = 0, about 5.9 m tall. Convex solids
+    // with flat-shaded facets; each solid is wound outward by testing against
+    // an interior point, so the winding matches CasingMesh (CCW front faces).
+    // Frame submesh: hex plinth with a chamfered top, mast and three braces
+    // (mast and braces start inside the plinth, the mast ends inside the
+    // lamp). Lamp submesh: octahedron diamond and four inward chevron plates.
+    constexpr float kPi = 3.14159265358979f;
+    struct Vertex
+    {
+        V p, n;
+        float u, v;
+    };
+    using Poly = std::vector<V>;
+    std::vector<Vertex> frame, lamp;
+    auto sub = [](V a, V b) { return V{a[0] - b[0], a[1] - b[1], a[2] - b[2]}; };
+    auto cross = [](V a, V b) {
+        return V{a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+    };
+    auto dot = [](V a, V b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+    // Fan-triangulate a convex polygon; flip it if its normal opposes `want`.
+    auto facet = [&](std::vector<Vertex> &out, Poly poly, V want) {
+        V n = cross(sub(poly[1], poly[0]), sub(poly[2], poly[0]));
+        if (dot(n, want) < 0.0f)
+        {
+            std::reverse(poly.begin(), poly.end());
+            n = {-n[0], -n[1], -n[2]};
+        }
+        const float l = std::sqrt(dot(n, n));
+        if (l < 1e-9f)
+            return;
+        n = {n[0] / l, n[1] / l, n[2] / l};
+        const auto vertex = [&](V p) { return Vertex{p, n, 0.5f, std::clamp(p[1] / 6.0f, 0.0f, 1.0f)}; };
+        for (size_t i = 1; i + 1 < poly.size(); ++i)
+        {
+            out.push_back(vertex(poly[0]));
+            out.push_back(vertex(poly[i]));
+            out.push_back(vertex(poly[i + 1]));
+        }
+    };
+    // A closed convex solid: every facet faces away from the interior point.
+    auto solid = [&](std::vector<Vertex> &out, const std::vector<Poly> &polys, V inside) {
+        for (const auto &poly : polys)
+        {
+            V centre{0, 0, 0};
+            for (const V &p : poly)
+                centre = {centre[0] + p[0], centre[1] + p[1], centre[2] + p[2]};
+            const float k = 1.0f / static_cast<float>(poly.size());
+            centre = {centre[0] * k, centre[1] * k, centre[2] * k};
+            facet(out, poly, sub(centre, inside));
+        }
+    };
+    auto hex = [&](unsigned i, float r, float y) {
+        const float a = 2.0f * kPi * static_cast<float>(i % 6) / 6.0f;
+        return V{std::cos(a) * r, y, std::sin(a) * r};
+    };
+    // Hexagonal prism or frustum between two rings, with end caps.
+    auto prism = [&](std::vector<Vertex> &out, float r0, float y0, float r1, float y1, V inside) {
+        std::vector<Poly> polys;
+        for (unsigned i = 0; i < 6; ++i)
+            polys.push_back({hex(i, r0, y0), hex(i + 1, r0, y0), hex(i + 1, r1, y1), hex(i, r1, y1)});
+        Poly bottom, top;
+        for (unsigned i = 0; i < 6; ++i)
+        {
+            bottom.push_back(hex(i, r0, y0));
+            top.push_back(hex(i, r1, y1));
+        }
+        polys.push_back(bottom);
+        polys.push_back(top);
+        solid(out, polys, inside);
+    };
+    // Plinth: wall to y 0.22, chamfer to a smaller top at y 0.3.
+    prism(frame, 1.2f, 0.0f, 1.2f, 0.22f, {0, 0.1f, 0});
+    prism(frame, 1.2f, 0.22f, 1.0f, 0.3f, {0, 0.26f, 0});
+    // Mast: buried in the plinth at the bottom, in the lamp at the top.
+    prism(frame, 0.15f, 0.2f, 0.15f, 4.5f, {0, 2.3f, 0});
+    // Three braces: triangular wedges in a radial plane, 0.08 m thick.
+    for (unsigned k = 0; k < 3; ++k)
+    {
+        const float a = kPi * 0.5f + 2.0f * kPi * static_cast<float>(k) / 3.0f;
+        const float c = std::cos(a), s = std::sin(a);
+        auto at = [&](float radial, float y, float side) {
+            return V{c * radial - s * side, y, s * radial + c * side};
+        };
+        const float t = 0.04f;
+        const V a0 = at(0.8f, 0.25f, t), b0 = at(0.1f, 0.25f, t), c0 = at(0.1f, 1.4f, t);
+        const V a1 = at(0.8f, 0.25f, -t), b1 = at(0.1f, 0.25f, -t), c1 = at(0.1f, 1.4f, -t);
+        solid(frame, {{a0, b0, c0}, {a1, b1, c1}, {a0, b0, b1, a1}, {b0, c0, c1, b1}, {a0, c0, c1, a1}},
+              at(0.35f, 0.6f, 0.0f));
+    }
+    // Lamp diamond: octahedron centred at y 5, tips at 4.1 and 5.9.
+    {
+        const V bottom{0, 4.1f, 0}, top{0, 5.9f, 0};
+        const V e[4] = {{0.6f, 5.0f, 0}, {0, 5.0f, 0.6f}, {-0.6f, 5.0f, 0}, {0, 5.0f, -0.6f}};
+        std::vector<Poly> polys;
+        for (unsigned i = 0; i < 4; ++i)
+        {
+            polys.push_back({e[i], e[(i + 1) % 4], top});
+            polys.push_back({e[(i + 1) % 4], e[i], bottom});
+        }
+        solid(lamp, polys, {0, 5.0f, 0});
+    }
+    // Landing-zone chevrons: flat, both faces, 0.05 m above the ground.
+    for (unsigned k = 0; k < 4; ++k)
+    {
+        const float a = 2.0f * kPi * static_cast<float>(k) / 4.0f;
+        const float c = std::cos(a), s = std::sin(a);
+        auto at = [&](float radial, float side) { return V{c * radial - s * side, 0.05f, s * radial + c * side}; };
+        const Poly arms[2] = {{at(2.2f, 0), at(2.8f, 0.6f), at(3.2f, 0.6f), at(2.6f, 0)},
+                              {at(2.2f, 0), at(2.6f, 0), at(3.2f, -0.6f), at(2.8f, -0.6f)}};
+        for (const auto &arm : arms)
+        {
+            facet(lamp, arm, {0, 1, 0});
+            facet(lamp, arm, {0, -1, 0});
+        }
+    }
+
+    V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+    float radius = 0;
+    Bytes body{0};
+    uint32_t triangles = 0;
+    for (const auto &[material, vertices] :
+         {std::pair<const char *, const std::vector<Vertex> *>{"openshim_rally_beacon_frame", &frame},
+          std::pair<const char *, const std::vector<Vertex> *>{amberLamp ? "openshim_rally_beacon_lamp_fac" : "openshim_rally_beacon_lamp", &lamp}})
+    {
+        Geometry g;
+        g.count = static_cast<uint32_t>(vertices->size());
+        // Position, normal, uv0: the same declaration as CasingMesh.
+        g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
+        Buffer buffer{32, {}};
+        std::vector<uint32_t> indices;
+        for (const auto &v : *vertices)
+        {
+            for (float value : {v.p[0], v.p[1], v.p[2], v.n[0], v.n[1], v.n[2], v.u, v.v})
+                put(buffer.data, value);
+            indices.push_back(static_cast<uint32_t>(indices.size()));
+        }
+        g.buffers.emplace(uint16_t{0}, std::move(buffer));
+        Bytes submesh;
+        line(submesh, material);
+        put(submesh, uint8_t{0});
+        put(submesh, g.count);
+        put(submesh, uint8_t{0});
+        for (auto index : indices)
+            put(submesh, static_cast<uint16_t>(index));
+        chunk(submesh, 0x5000, emitGeometry(g, indices, Frame{}, lo, hi, radius));
+        chunk(body, 0x4000, submesh);
+        triangles += g.count / 3;
+    }
+    Bytes bounds;
+    for (float v : lo)
+        put(bounds, v);
+    for (float v : hi)
+        put(bounds, v);
+    put(bounds, radius);
+    chunk(body, 0x9000, bounds);
+    Bytes out;
+    put(out, uint16_t{0x1000});
+    line(out, "[MeshSerializer_v1.8]");
+    chunk(out, 0x3000, body);
+    return {amberLamp ? "openshim_rally_beacon_fac" : "openshim_rally_beacon", std::move(out), triangles};
+}
 std::string SkeletonName(const Bytes &b)
 {
     try

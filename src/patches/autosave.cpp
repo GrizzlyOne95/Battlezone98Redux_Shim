@@ -17,6 +17,7 @@
 #include "game_state.h"
 #include "memory_access.h"
 #include "native_save_flag.h"
+#include "quicksave.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -338,6 +339,16 @@ namespace BZROpenShim
             g_config.intervalMs = static_cast<ULONGLONG>(intervalSeconds) * 1000ULL;
             g_config.initialDelayMs = static_cast<ULONGLONG>(initialDelaySeconds) * 1000ULL;
             g_config.retryMs = static_cast<ULONGLONG>(retrySeconds) * 1000ULL;
+
+            // QuickSave shares the resolved SaveGame call and this main-thread
+            // hook, so its switch is read alongside AutoSave's.
+            QuickSave::LoadConfig(ini.c_str());
+        }
+
+        // The hook and SaveGame are needed when either feature is on.
+        bool AnySaveFeatureEnabled()
+        {
+            return g_config.enabled || QuickSave::IsEnabled();
         }
 
         const uint8_t* FindPattern(const uint8_t* start, size_t size) noexcept
@@ -615,7 +626,7 @@ namespace BZROpenShim
             return true;
         }
 
-        void WriteAutoSaveLabel()
+        void WriteSaveLabel(const std::filesystem::path& labelPath, const char* suffix)
         {
             // This file is the text drawn on the injected AutoSave load button,
             // so it is for the player, not for parsing. Naming the mission is
@@ -624,24 +635,34 @@ namespace BZROpenShim
             char missionName[kQueuedLoadNameBufferLen + 1] = {};
             const bool haveMission = SafeReadMissionName(missionName);
 
-            std::ofstream label(g_autoSaveLabelPath, std::ios::binary | std::ios::trunc);
+            std::ofstream label(labelPath, std::ios::binary | std::ios::trunc);
             if (label.is_open())
             {
                 if (haveMission)
-                    label << missionName << " - AutoSave";
+                    label << missionName << " - " << suffix;
                 else
-                    label << "AutoSave";
+                    label << suffix;
             }
             else
                 LogShimA(
                     LogLevel::Warn,
                     "autosave",
-                    "Could not write AutoSave label %s",
-                    g_autoSaveLabelPath.string().c_str());
+                    "Could not write %s label %s",
+                    suffix,
+                    labelPath.string().c_str());
         }
 
-        bool PerformAutoSave(const AutoSaveGate::ObservedState& gateState)
+        // One SaveGame call to savePath with the shared fault handling. Only the
+        // rolling autosave slot is backed up and has its write time tracked;
+        // other slots (QuickSave) are written in place.
+        bool PerformSave(
+            const AutoSaveGate::ObservedState& gateState,
+            const std::filesystem::path& savePath,
+            const std::filesystem::path& labelPath,
+            const char* labelSuffix,
+            const char* noticeText)
         {
+            const bool isAutoSaveSlot = savePath == g_autoSavePath;
             if (!g_nativeSaveGame || InterlockedCompareExchange(&g_saveInProgress, 1, 0) != 0)
                 return false;
 
@@ -649,23 +670,23 @@ namespace BZROpenShim
             try
             {
                 std::error_code error;
-                std::filesystem::create_directories(g_autoSavePath.parent_path(), error);
+                std::filesystem::create_directories(savePath.parent_path(), error);
                 if (error)
                 {
                     LogShimA(
                         LogLevel::Error,
                         "autosave",
                         "Could not create Save directory for %s (error=%d)",
-                        g_autoSavePath.string().c_str(),
+                        savePath.string().c_str(),
                         error.value());
                 }
-                else if (!PreserveExistingAutoSave())
+                else if (isAutoSaveSlot && !PreserveExistingAutoSave())
                 {
                     LogShimA(LogLevel::Warn, "autosave", "Autosave aborted because backup preservation failed");
                 }
                 else
                 {
-                    std::string filename = g_autoSavePath.string();
+                    std::string filename = savePath.string();
                     DWORD exceptionCode = 0;
                     const bool saved = InvokeNativeNormalSaveGame(
                         g_nativeSaveGame,
@@ -680,7 +701,8 @@ namespace BZROpenShim
                         // moved; re-observe it here or ObserveExternalAutoSave
                         // reports our own half-written file as somebody else's
                         // autosave and silently pushes the deadline out.
-                        CaptureAutoSaveWriteTime();
+                        if (isAutoSaveSlot)
+                            CaptureAutoSaveWriteTime();
 
                         g_missionSaveFaulted = true;
                         ++g_saveFaultCount;
@@ -693,7 +715,7 @@ namespace BZROpenShim
                             filename.c_str(),
                             g_saveFaultCount,
                             kMaxSaveFaultsPerProcess,
-                            g_autoSavePath.filename().string().c_str());
+                            savePath.filename().string().c_str());
                         // The gate said this state was safe and it was not, so
                         // record what it saw: that snapshot is the only way to
                         // learn which global actually discriminates.
@@ -722,8 +744,8 @@ namespace BZROpenShim
                     }
                     else
                     {
-                        WriteAutoSaveLabel();
-                        AutoSaveNotice::Show();
+                        WriteSaveLabel(labelPath, labelSuffix);
+                        AutoSaveNotice::Show(noticeText);
                         success = true;
                         g_saveFaultCount = 0;
                         LogShimA(LogLevel::Info, "autosave", "Saved %s", filename.c_str());
@@ -736,9 +758,23 @@ namespace BZROpenShim
             }
 
             InterlockedExchange(&g_saveInProgress, 0);
-            if (success)
+            if (success && isAutoSaveSlot)
                 CaptureAutoSaveWriteTime();
             return success;
+        }
+
+        bool PerformAutoSave(const AutoSaveGate::ObservedState& gateState)
+        {
+            return PerformSave(gateState, g_autoSavePath, g_autoSaveLabelPath, "AutoSave", "Game autosaved.");
+        }
+
+        // SaveGame serializes the current AiMission without a null check, and
+        // the player object can exist while that global is still (or already)
+        // null: observed as a 0xC0000005 at 0x005D7593 about 10 s into a mission.
+        bool HaveCurrentAiMission() noexcept
+        {
+            void* aiMission = nullptr;
+            return SafeReadPointer(g_CurrentAiMissionAddr, aiMission) && aiMission != nullptr;
         }
 
         void __fastcall AutoSaveWorldUpdateRenderQueueHook(void* thisPtr, void*, void* renderQueue)
@@ -747,6 +783,7 @@ namespace BZROpenShim
             if (previous)
                 previous(thisPtr, renderQueue);
             AutoSaveTick();
+            QuickSave::Tick();
         }
 
         bool InstallMainThreadHook()
@@ -865,10 +902,9 @@ namespace BZROpenShim
 
         LoadConfig();
         if (!g_config.enabled)
-        {
             LogShimA(LogLevel::Info, "autosave", "Engine-level autosave disabled by openshim.ini");
+        if (!AnySaveFeatureEnabled())
             return true;
-        }
 
         g_nativeSaveGame = ResolveNativeSaveGame();
         g_missionSaveFlag = ResolveMissionSaveFlag(g_nativeSaveGame);
@@ -880,6 +916,8 @@ namespace BZROpenShim
         }
 
         ResetMissionState();
+        if (!g_config.enabled)
+            return true; // the hook runs for QuickSave only
         if (GetModuleHandleA("exu.dll") != nullptr)
         {
             LogShimA(
@@ -926,13 +964,21 @@ namespace BZROpenShim
 
         if (!g_config.enabled)
         {
-            ResetMissionState();
-            LogShimA(LogLevel::Info, "autosave", "Disabled live from OpenShim settings");
-            return true;
+            // Only on an actual on->off change: QuickSave shares this settings
+            // group, and resetting here would clear the per-mission SaveGame
+            // fault latch that still guards Ctrl+Home.
+            if (wasEnabled)
+            {
+                ResetMissionState();
+                LogShimA(LogLevel::Info, "autosave", "Disabled live from OpenShim settings");
+            }
+            if (!QuickSave::IsEnabled())
+                return true;
         }
 
-        // A game launched with AutoSave disabled never resolved SaveGame or
-        // installed the recurring hook, so enabling it must finish setup live.
+        // A game launched with AutoSave and QuickSave disabled never resolved
+        // SaveGame or installed the recurring hook, so enabling either must
+        // finish setup live.
         if (!g_nativeSaveGame || !g_missionSaveFlag)
         {
             g_nativeSaveGame = ResolveNativeSaveGame();
@@ -946,6 +992,9 @@ namespace BZROpenShim
             g_missionSaveFlag = nullptr;
             return false;
         }
+
+        if (!g_config.enabled)
+            return true; // QuickSave only
 
         if (!wasEnabled)
         {
@@ -991,7 +1040,9 @@ namespace BZROpenShim
 
     void AutoSaveTick()
     {
-        if (!g_config.enabled || !g_nativeSaveGame || g_saveDisabledForProcess)
+        // Mission tracking also runs for QuickSave alone: it is what clears a
+        // per-mission SaveGame fault latch when the next mission starts.
+        if (!AnySaveFeatureEnabled() || !g_nativeSaveGame || g_saveDisabledForProcess)
             return;
 
         // Outside a single-player mission (the shell, any network game) the
@@ -1022,16 +1073,20 @@ namespace BZROpenShim
             g_missionActive = true;
             g_nextSaveTick = now + g_config.initialDelayMs;
             CaptureAutoSaveWriteTime();
-            LogShimA(
-                LogLevel::Info,
-                "autosave",
-                "Single-player mission detected; first autosave eligible in %llu ms",
-                g_config.initialDelayMs);
+            if (g_config.enabled)
+                LogShimA(
+                    LogLevel::Info,
+                    "autosave",
+                    "Single-player mission detected; first autosave eligible in %llu ms",
+                    g_config.initialDelayMs);
             // Pair every "mission detected" with what convinced it, so a log
             // from a repro says which globals the gate believed.
             LogGateSnapshot(LogLevel::Debug, "Gate state at mission detect:", gateState);
             return;
         }
+
+        if (!g_config.enabled)
+            return;
 
         // Deadline first: ObserveExternalAutoSave stats Save\auto.sav, and
         // evaluating it before the cheap tick compare made every frame of a
@@ -1063,11 +1118,7 @@ namespace BZROpenShim
             return;
         }
 
-        // SaveGame serializes the current AiMission without a null check, and
-        // the player object can exist while that global is still (or already)
-        // null: observed as a 0xC0000005 at 0x005D7593 about 10 s into a mission.
-        void* aiMission = nullptr;
-        if (!SafeReadPointer(g_CurrentAiMissionAddr, aiMission) || !aiMission)
+        if (!HaveCurrentAiMission())
         {
             static ULONGLONG s_lastNoMissionLogTick = 0;
             if (now - s_lastNoMissionLogTick >= 5000ULL)
@@ -1080,5 +1131,52 @@ namespace BZROpenShim
 
         const ULONGLONG base = GetTickCount64();
         g_nextSaveTick = base + (PerformAutoSave(gateState) ? g_config.intervalMs : g_config.retryMs);
+    }
+
+    MissionSaveResult SaveMissionNow(
+        const char* stem, const char* labelSuffix, const char* noticeText, const char*& reason)
+    {
+        reason = "saved";
+        if (!g_nativeSaveGame || !g_missionSaveFlag || g_gameDirectory.empty() || !stem || !*stem)
+        {
+            reason = "native SaveGame not resolved";
+            return MissionSaveResult::Refused;
+        }
+
+        const AutoSaveGate::ObservedState gateState = ObserveState();
+        const AutoSaveGate::GateResult gate = AutoSaveGate::Evaluate(gateState);
+        if (!gate.MaySave())
+        {
+            reason = gate.reason;
+            return gate.decision == AutoSaveGate::Decision::FaultLatched ? MissionSaveResult::Failed
+                                                                         : MissionSaveResult::Refused;
+        }
+        if (!HaveCurrentAiMission())
+        {
+            reason = "no current AiMission yet";
+            return MissionSaveResult::Refused;
+        }
+
+        const std::filesystem::path saveDir = g_gameDirectory / "Save";
+        const std::string name(stem);
+        if (!PerformSave(gateState, saveDir / (name + ".sav"), saveDir / (name + ".label.txt"),
+                         labelSuffix, noticeText))
+        {
+            reason = "SaveGame failed (see log)";
+            return MissionSaveResult::Failed;
+        }
+        return MissionSaveResult::Saved;
+    }
+
+    bool IsMissionLiveForLoad(const char*& reason)
+    {
+        // The save gate without its fault latch: a load is the way out of a
+        // mission whose save faulted, so that latch must not block it.
+        AutoSaveGate::ObservedState state = ObserveState();
+        state.missionSaveFaulted = false;
+        state.saveDisabledForProcess = false;
+        const AutoSaveGate::GateResult gate = AutoSaveGate::Evaluate(state);
+        reason = gate.reason;
+        return gate.MaySave();
     }
 }

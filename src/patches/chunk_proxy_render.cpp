@@ -2218,7 +2218,11 @@ namespace BZROpenShim
             }
         }
 
-        bool CreateShimOwnedMeshObject(const char* meshName, void*& outSceneManager, void*& outNode, void*& outEntity)
+        // needPayloadGroup: the mesh lives in the chunk payload group, so it
+        // must be registered first. A stock mesh (already in an engine group)
+        // passes false and does not depend on the payload directories.
+        static bool CreateShimOwnedMeshObjectImpl(
+            const char* meshName, bool needPayloadGroup, void*& outSceneManager, void*& outNode, void*& outEntity)
         {
             outSceneManager = nullptr;
             outNode = nullptr;
@@ -2240,7 +2244,7 @@ namespace BZROpenShim
                 return false;
 
             void* const sceneManager = GetOgreSceneManagerRuntime();
-            if (!sceneManager || !EnsureSkinnedGibResourceLocations())
+            if (!sceneManager || (needPayloadGroup && !EnsureSkinnedGibResourceLocations()))
                 return false;
             void* const rootNode = TryGetChunkMeshProxyRootNode(sceneManager, getRootSceneNode);
             if (!rootNode)
@@ -2256,6 +2260,16 @@ namespace BZROpenShim
             }
             outSceneManager = sceneManager;
             return true;
+        }
+
+        bool CreateShimOwnedMeshObject(const char* meshName, void*& outSceneManager, void*& outNode, void*& outEntity)
+        {
+            return CreateShimOwnedMeshObjectImpl(meshName, true, outSceneManager, outNode, outEntity);
+        }
+
+        bool CreateShimOwnedStockMeshObject(const char* meshName, void*& outSceneManager, void*& outNode, void*& outEntity)
+        {
+            return CreateShimOwnedMeshObjectImpl(meshName, false, outSceneManager, outNode, outEntity);
         }
 
         using FnOgreDestroyEntityPtr = void(__thiscall*)(void*, void*);

@@ -41,6 +41,10 @@ namespace BZROpenShim::ContextualHud
         State g_state;
         bool g_read = false;
         std::atomic<bool> g_ready{false}, g_resources{false}, g_commandsReady{false}, g_metersReady{false}, g_radarReady{false};
+        // The slot wrapper is in (fade, EXU claim or post-draw callback);
+        // g_commandsReady additionally means the command fade samples input.
+        std::atomic<bool> g_commandSlotReady{false};
+        std::atomic<CommandPanelPostDraw> g_commandPostDraw{nullptr};
         std::atomic<bool> g_keepCompass{false};
         std::atomic<uint32_t> g_externalOwner{0};
         std::atomic<float> g_opacity[kGroups] = {1,1,1,1,1,1,1};
@@ -373,13 +377,28 @@ namespace BZROpenShim::ContextualHud
             g_opacity[kCommands].store(opacity,std::memory_order_relaxed);
         }
 
+        // A fault in the post-draw consumer must not reach the engine.
+        void CallCommandPostDraw(CommandPanelPostDraw post, void* self, float opacity) noexcept
+        {
+            __try { post(self,opacity); }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+
         void __fastcall CommandDraw(void* self, void*)
         {
             if (g_commandsReady.load(std::memory_order_acquire)) UpdateCommandOpacity(self);
             const float previous = BeginDraw(Group::Commands);
             // Rendering also processes native command input, selection and
             // menu sounds. Always execute it, including when alpha is zero.
-            __try { reinterpret_cast<CommandRender>(g_commandRender)(self); }
+            __try
+            {
+                reinterpret_cast<CommandRender>(g_commandRender)(self);
+                // Inside the fade scope, so the consumer's native draws fade
+                // with the panel. EXU's command claim restyles the native
+                // rows itself; a stock-styled extra row would not match.
+                const auto post = g_commandPostDraw.load(std::memory_order_acquire);
+                if (post && !ExternallyOwned(Group::Commands)) CallCommandPostDraw(post,self,g_drawOpacity);
+            }
             __finally { EndDraw(previous); }
         }
 
@@ -409,11 +428,15 @@ namespace BZROpenShim::ContextualHud
             return g_commandBound > 0;
         }
 
-        bool InstallCommand()
+        // The one writer of the command render slot. With the fade off and no
+        // EXU claim the wrapper is stock plus the post-draw callback: opacity
+        // stays 1 and the stock renderer runs unchanged.
+        bool InstallCommandSlot()
         {
-            if (g_commandsReady.load(std::memory_order_acquire)) return true;
+            if (g_commandSlotReady.load(std::memory_order_acquire)) return true;
             if (!BindCommand()) return false;
             HookEngine::CodePatchLock lock;
+            if (g_commandSlotReady.load(std::memory_order_acquire)) return true;
             const uint32_t hook = reinterpret_cast<uint32_t>(CommandDraw);
             uint32_t current = 0;
             SIZE_T read = 0;
@@ -421,6 +444,15 @@ namespace BZROpenShim::ContextualHud
                 &current,sizeof(current),&read) || read != sizeof(current) || current != g_commandRender)
                 return false;
             if (!WritePatchBytes(g_commandSlot,reinterpret_cast<const uint8_t*>(&hook),sizeof(hook))) return false;
+            g_commandSlotReady.store(true,std::memory_order_release);
+            Log(L"[HUDFADE] Command interface render slot wrapper installed\n");
+            return true;
+        }
+
+        bool InstallCommand()
+        {
+            if (g_commandsReady.load(std::memory_order_acquire)) return true;
+            if (!InstallCommandSlot()) return false;
             g_commandsReady.store(true,std::memory_order_release);
             Log(L"[HUDFADE] Command interface sprite/text scope installed\n");
             return true;
@@ -676,6 +708,19 @@ namespace BZROpenShim::ContextualHud
         g_externalOwner.store(mask,std::memory_order_release);
         Log(L"[HUD-OWNER] EXU presentation mask=0x%02X; OpenShim yields claimed draws, palette and fading\n",mask);
         return mask;
+    }
+    bool RegisterCommandPanelPostDraw(CommandPanelPostDraw callback)
+    {
+        if (!callback || !IsCompatibleGameVersion()) return false;
+        CommandPanelPostDraw expected = nullptr;
+        if (!g_commandPostDraw.compare_exchange_strong(expected,callback,std::memory_order_acq_rel) &&
+            expected != callback)
+            return false;
+        HookEngine::FrameThreadSitesScope frameSites;
+        if (InstallCommandSlot()) return true;
+        g_commandPostDraw.store(nullptr,std::memory_order_release);
+        Log(L"[HUDFADE] Command panel post-draw not installed: render slot unavailable\n");
+        return false;
     }
     float RadarDrawOpacity() noexcept { return !ExternallyOwned(Group::Radar) && g_inRadar && g_radarFrame.active ? g_drawOpacity : 1; }
     float BeginDraw(Group group) noexcept

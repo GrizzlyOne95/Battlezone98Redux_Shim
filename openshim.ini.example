@@ -1651,6 +1651,30 @@ BackupExisting = 1
 RespectExternalAutoSave = 1
 
 
+[QuickSave]
+
+; SaveKey (default Ctrl+Home) saves the running single-player mission to
+; Save\quick.sav (label in Save\quick.label.txt); LoadKey (default Ctrl+End)
+; loads it. Only the exact chord is taken: plain and other-modifier presses of
+; the key are left alone. Uses the AutoSave save gate but works with
+; [AutoSave] Enabled = 0. The load screen shows a QuickSave button below the
+; AutoSave one while quick.sav exists.
+; Accepted: 0 = OFF, non-zero = ON. Default: 1.
+QuickSaveEnabled = 1
+
+; The two chords, also editable as "Quick Save" / "Quick Load" under Options >
+; Input > RTS Actions. Format: optional Ctrl, Shift, Alt joined with +, then one
+; key: A-Z, 0-9, F1-F24, Home, End, Insert, Delete, PageUp, PageDown or an arrow
+; (Up, Down, Left, Right). Examples: Ctrl+Home, Alt+F5, Ctrl+Shift+Q.
+; A chord needs a modifier (Shift alone is not enough on a letter or digit), may
+; not be Alt+F4, and the two may not be equal. An invalid value is logged and
+; the default is used. A chord shadows any stock binding of the same keys while
+; a mission is running. Default: Ctrl+Home / Ctrl+End. Restart to apply an
+; edit made by hand; the editor applies immediately.
+SaveKey = Ctrl+Home
+LoadKey = Ctrl+End
+
+
 [Diagnostics]
 
 ; Per-gib SkinnedGibs log lines (mesh, bone, launch position and velocity) and
@@ -2485,6 +2509,30 @@ RecurseModSubfolders = 0
 ; Accepted: boolean. Default: OFF (exact legacy behavior).
 ; Exposed on the OpenShim Settings page as "Attack Neutrals".
 AllowNeutralAttackOrders = 0
+
+; Producer rally points. With a Recycler or Factory selected, V enters rally
+; mode: the stock ground reticle and order line preview the point exactly like
+; a Go order, the Reticle Command key (menu_press, normally Space) sets the
+; rally there, and V again cancels. Shift+V clears it. If the command hooks
+; are missing on a build, V sets the rally at once to the ground under the
+; reticle instead. While that producer is selected the HUD shows a
+; "Rally" marker there (drawn only, no nav object). Each unit that producer
+; finishes afterwards gets a Go order to the rally point.
+; Scavengers and constructors are left alone. Off in the map editor (V and
+; Ctrl+V are editor keys there). Not saved with the game. Single player only.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Rally Points".
+ProducerRallyPoints = 1
+
+; The rally key. One key with no modifier: it arms and cancels rally mode,
+; Shift+key clears the rally. Rebind it in Options > Input > RTS Actions
+; ("Rally Point"), which writes this line. Accepted: a letter, F11/F12 or a
+; navigation key (Insert, Delete, Home, End, PageUp, PageDown, arrows).
+; Refused, with a log line and a fall back to V: any modifier, digits, F1-F10,
+; Space, Tab, Alt, Enter, Esc, and a key that is a Shift-only QuickSave chord.
+; Default: V.
+RallyKey = V
 
 
 [Updater]
