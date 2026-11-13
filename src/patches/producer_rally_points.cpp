@@ -26,8 +26,11 @@
 #include "hook_engine.h"
 #include "hud_gauge_overlay.h"
 #include "iat_patch.h"
+#include "native_chunk_mesh.h"
+#include "native_chunk_prune.h"
 #include "patcher.h"
 #include "producer_rally_policy.h"
+#include "rally_beacon_assets.h"
 #include "shell_casing_physics.h"
 #include "shim_log.h"
 
@@ -36,6 +39,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 
 namespace BZROpenShim::Hooks
 {
@@ -560,10 +566,19 @@ namespace BZROpenShim::Hooks
         }
 
         // ---- the 3D rally beacon ------------------------------------------
-        // The stock nav beacon's mesh (apcamr.odf baseName "apcamr"; shipped
-        // as BZ_ASSETS/common/models/apcamr.mesh) on a shim-owned Ogre node:
-        // no game object, no collision, nothing saved. Its origin is at its
-        // base (mesh AABB min y = 0.0015), so the node sits at the rally
+        // A generated "drop-off beacon" (after BZ2's ipdrop): a hex plinth,
+        // mast and braces in dark gunmetal under an emissive green octahedron
+        // lamp, ringed by four inward chevrons on the ground, ~5.9 m tall.
+        // NativeChunks::RallyBeaconMesh writes it to the chunk cache
+        // (rally/v1/openshim_rally_beacon.mesh, materials at the cache root)
+        // before the payload resource group initialises, so the DLL ships no
+        // asset. If that mesh cannot be created the stock nav beacon's mesh
+        // (apcamr.odf baseName "apcamr"; BZ_ASSETS/common/models/apcamr.mesh)
+        // is used instead, and if that fails too the HUD square stays alone.
+        // Either way it is a shim-owned Ogre node:
+        // no game object, no collision, nothing saved. Both meshes have their
+        // origin at the base (generated: min y = 0; apcamr: AABB min y =
+        // 0.0015), so the node sits at the rally
         // point, which is already ground height. Same visibility rule as the
         // HUD marker. Every function here runs on the game thread: the tick
         // from ChunkEffect::Simulate (the shell casings' point), the rest
@@ -571,7 +586,12 @@ namespace BZROpenShim::Hooks
         // A producer whose rally has no beacon (mesh unavailable, pool full)
         // keeps the HUD square.
 
-        constexpr char kRallyMeshName[] = "apcamr.mesh";
+        constexpr char kRallyBeaconResource[] = OPENSHIM_CHUNK_CACHE_RALLY_DIR "openshim_rally_beacon.mesh";
+        constexpr char kRallyMeshName[] = "apcamr.mesh"; // stock fallback
+        bool g_BeaconFallback = false;                  // generated mesh failed: stock mesh from then on
+        bool g_BeaconInUseLogged = false;
+        constexpr int kMaxBeaconCreateFailures = 3;
+        int g_BeaconCreateFailures = 0;
         constexpr size_t kMeshPoolSize = 8;
         // apcamr.odf [CameraPodClass] omegaSpin = 1.0 (rad/s).
         constexpr double kMeshSpinRadPerSec = 1.0;
@@ -739,7 +759,34 @@ namespace BZROpenShim::Hooks
                 if (!slot.entity)
                 {
                     slot = RallyMeshSlot{};
-                    if (!CreateShimOwnedStockMeshObject(kRallyMeshName, slot.sceneManager, slot.node, slot.entity))
+                    bool created = false;
+                    if (!g_BeaconFallback)
+                    {
+                        created = CreateShimOwnedMeshObject(kRallyBeaconResource, slot.sceneManager, slot.node, slot.entity);
+                        if (created)
+                            g_BeaconCreateFailures = 0;
+                        else
+                        {
+                            // A not-yet-ready scene also lands here: retry on
+                            // later ticks, and switch to stock only once the
+                            // failure repeats.
+                            slot = RallyMeshSlot{};
+                            if (++g_BeaconCreateFailures < kMaxBeaconCreateFailures)
+                                return;
+                            g_BeaconFallback = true;
+                            Log(L"[RALLY] generated beacon mesh %hs could not be created %d times; using stock %hs\n",
+                                kRallyBeaconResource, g_BeaconCreateFailures, kRallyMeshName);
+                        }
+                    }
+                    if (!created)
+                        created = CreateShimOwnedStockMeshObject(kRallyMeshName, slot.sceneManager, slot.node, slot.entity);
+                    if (created && !g_BeaconInUseLogged)
+                    {
+                        g_BeaconInUseLogged = true;
+                        Log(L"[RALLY] rally beacon mesh in use: %hs\n",
+                            g_BeaconFallback ? kRallyMeshName : kRallyBeaconResource);
+                    }
+                    if (!created)
                     {
                         slot = RallyMeshSlot{};
                         g_MeshUnavailable = true;
@@ -1024,6 +1071,122 @@ namespace BZROpenShim::Hooks
             Log(L"[RALLY] Baseline enabled=%hs (SP-only)\n", g_Enabled ? "yes" : "no");
         g_ConfigRead = true;
         RefreshProducerRallyPointsState();
+    }
+
+    // The generated beacon mesh and materials, written into the chunk cache
+    // root before the payload resource group initialises. Same rules as
+    // EnsureShellCasingAssets: the mesh is rewritten only when its bytes
+    // differ; a same-named material in another payload directory wins (our
+    // marked copies are removed); unmarked files belong to the user.
+    void EnsureRallyBeaconAssets(
+        const std::filesystem::path& cacheRoot,
+        const std::vector<std::filesystem::path>& payloadDirectories)
+    {
+        // Not gated on [Gameplay] ProducerRallyPoints: the Options row turns
+        // the feature on live, after the payload group is initialised, so
+        // the few KB must already be on disk.
+        if (cacheRoot.empty())
+            return;
+        try
+        {
+            namespace RB = BZROpenShim::RallyBeacon;
+            std::error_code ec;
+            const NativeChunks::Piece piece = NativeChunks::RallyBeaconMesh();
+            const auto meshPath = cacheRoot / std::filesystem::path(kRallyBeaconResource);
+            bool current = false;
+            if (std::filesystem::file_size(meshPath, ec) == piece.mesh.size() && !ec)
+            {
+                std::ifstream existing(meshPath, std::ios::binary);
+                std::vector<uint8_t> bytes(piece.mesh.size());
+                current = existing.read(reinterpret_cast<char*>(bytes.data()),
+                                        static_cast<std::streamsize>(bytes.size())) &&
+                          bytes == piece.mesh;
+            }
+            ec.clear();
+            if (!current && !piece.mesh.empty())
+            {
+                std::filesystem::create_directories(meshPath.parent_path(), ec);
+                std::ofstream output(meshPath, std::ios::binary | std::ios::trunc);
+                output.write(reinterpret_cast<const char*>(piece.mesh.data()),
+                             static_cast<std::streamsize>(piece.mesh.size()));
+                output.close();
+                Log(L"[RALLY] wrote beacon mesh %hs triangles=%u ok=%u\n", meshPath.string().c_str(),
+                    piece.triangles, output ? 1u : 0u);
+            }
+
+            const auto ours = cacheRoot / RB::kMaterialFile;
+            for (const auto& directory : payloadDirectories)
+            {
+                if (std::filesystem::equivalent(directory, cacheRoot, ec) && !ec)
+                    continue;
+                ec.clear();
+                if (!std::filesystem::is_regular_file(directory / RB::kMaterialFile, ec) || ec)
+                {
+                    ec.clear();
+                    continue;
+                }
+                std::ifstream existing(ours);
+                std::string first;
+                if (existing && std::getline(existing, first) && first.rfind(RB::kMarker, 0) == 0)
+                {
+                    existing.close();
+                    std::filesystem::remove(ours, ec);
+                }
+                for (const auto* file : RB::kTextureFiles)
+                {
+                    const auto path = cacheRoot / file;
+                    std::ifstream texture(path, std::ios::binary);
+                    std::vector<uint8_t> header(64);
+                    texture.read(reinterpret_cast<char*>(header.data()), static_cast<std::streamsize>(header.size()));
+                    header.resize(static_cast<size_t>(texture.gcount()));
+                    texture.close();
+                    if (RB::IsGeneratedTga(header))
+                        std::filesystem::remove(path, ec);
+                }
+                Log(L"[RALLY] beacon materials overridden by %hs\n",
+                    (directory / RB::kMaterialFile).string().c_str());
+                return;
+            }
+            // Upgrade only marked generated materials.
+            if (std::filesystem::exists(ours, ec))
+            {
+                std::ifstream existing(ours);
+                std::string first;
+                if (!existing || !std::getline(existing, first) || first.rfind(RB::kMarker, 0) != 0)
+                    return;
+            }
+            std::filesystem::create_directories(cacheRoot, ec);
+            for (const auto* file : RB::kTextureFiles)
+            {
+                const auto path = cacheRoot / file;
+                const auto data = RB::TextureTga(file);
+                std::ifstream input(path, std::ios::binary);
+                const std::vector<uint8_t> existing((std::istreambuf_iterator<char>(input)), {});
+                input.close();
+                if (!existing.empty() && !RB::IsGeneratedTga(existing))
+                    continue;
+                if (existing == data)
+                    continue;
+                std::ofstream texture(path, std::ios::binary | std::ios::trunc);
+                texture.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+                if (!texture)
+                    return; // do not publish a material with incomplete textures
+            }
+            const std::string script = RB::MaterialScript();
+            std::ifstream input(ours, std::ios::binary);
+            const std::string existing((std::istreambuf_iterator<char>(input)), {});
+            if (existing == script)
+                return;
+            input.close();
+            std::ofstream output(ours, std::ios::binary | std::ios::trunc);
+            output << script;
+            output.close();
+            Log(L"[RALLY] wrote beacon materials %hs ok=%u\n", ours.string().c_str(), output ? 1u : 0u);
+        }
+        catch (...)
+        {
+            // Optional: the beacon falls back to the stock mesh.
+        }
     }
 
     // Installed regardless of the ini value, so the Options row can turn the
