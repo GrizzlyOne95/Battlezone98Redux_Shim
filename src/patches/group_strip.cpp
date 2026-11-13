@@ -19,6 +19,8 @@
 // Threads: the snapshot is taken at 4 Hz on the frame/game thread from the
 // world render tick; the HUD painter (same thread, inside the HUD pass) only
 // reads the snapshot and the HUD text primitives.
+#include <cmath>
+
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "engine_globals.h"
@@ -332,7 +334,10 @@ namespace BZROpenShim::Hooks
 
         // ---- the painter (frame thread, inside the HUD pass) ---------------
 
-        bool Measure(const HudGaugeOverlay::Frame& frame, const char* text, int& w, int& h) noexcept
+        // True when the text has a size. `faulted` is set only by a fault: a
+        // zero size (fonts reloading after a resolution change or device
+        // reset) just skips the frame, and must not turn the slot off.
+        bool Measure(const HudGaugeOverlay::Frame& frame, const char* text, int& w, int& h, bool& faulted) noexcept
         {
             float fw = 0.0f, fh = 0.0f;
             __try
@@ -341,8 +346,11 @@ namespace BZROpenShim::Hooks
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                faulted = true;
                 return false;
             }
+            if (!std::isfinite(fw) || !std::isfinite(fh))
+                return false;
             w = static_cast<int>(fw + 0.999f);
             h = static_cast<int>(fh + 0.999f);
             return w > 0 && h > 0;
@@ -360,8 +368,9 @@ namespace BZROpenShim::Hooks
                 return true;
 
             int sampleW = 0, textH = 0;
-            if (!Measure(frame, "F1 0x", sampleW, textH))
-                return false;
+            bool faulted = false;
+            if (!Measure(frame, "F1 0x", sampleW, textH, faulted))
+                return !faulted;
             const Policy::Rect gauge = snap.gaugeKnown
                 ? Policy::GaugeRectFromPoints(snap.gaugePoints, textH)
                 : Policy::EstimatedStockGaugeRect(frame.viewW, frame.viewH);
@@ -371,14 +380,14 @@ namespace BZROpenShim::Hooks
             const Policy::Layout layout = Policy::ChooseLayout(
                 snap.groups, snap.count, frame.viewW, frame.viewH, gauge, textH,
                 [&](const char* t, int& w, int& h) {
-                    if (Measure(frame, t, w, h))
+                    if (Measure(frame, t, w, h, faulted))
                         return true;
                     measureFailed = true;
                     return false;
                 },
                 text, sizeof(text));
             if (measureFailed)
-                return false;
+                return !faulted; // a zero size skips this frame only
             if (layout.placement == Policy::Placement::None || text[0] == '\0')
                 return true;
             return HudGaugeOverlay::DrawPanelText(frame, layout.panel.x1, layout.panel.y1, layout.panel.x2,
