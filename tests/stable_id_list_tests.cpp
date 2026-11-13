@@ -82,6 +82,14 @@ namespace
         CHECK(reparsed.size() == 3 && reparsed[2].name == "Bob Smith" && reparsed[1].name.empty());
     }
 
+    void TestFormatKeepsANameOnOneLine()
+    {
+        const std::vector<Record> records = { { "S1", "Eve\nS999 injected\r\nG5" } };
+        const std::vector<Record> reparsed = Parse(Format(records, "Bans", "id name"));
+        CHECK(reparsed.size() == 1);
+        CHECK(reparsed.size() == 1 && reparsed[0].id == "S1");
+    }
+
     void TestLightColourPresets()
     {
         using BZROpenShim::LightColourPresets::TryFind;
@@ -107,6 +115,7 @@ int main()
     TestParseFirstEntryWinsAndFillsName();
     TestParseSkipsLinesWithoutAnId();
     TestFormatRoundTrips();
+    TestFormatKeepsANameOnOneLine();
     TestLightColourPresets();
     if (OpenShimTest::FailureCount() == 0)
         std::printf("stable_id_list_tests: all passed\n");
