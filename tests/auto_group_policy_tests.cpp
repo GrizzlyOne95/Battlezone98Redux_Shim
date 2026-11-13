@@ -138,7 +138,14 @@ namespace
         Check(c.kind == ChoiceKind::Empty && c.group == 5, "a group of only dead handles counts as empty");
         dead[5].storedCount = kGroupCapacity;
         c = ChooseGroup(dead);
-        Check(c.kind == ChoiceKind::None && c.group == -1, "an all-dead group with no free slot is not usable");
+        Check(c.kind == ChoiceKind::Empty && c.group == 5,
+              "an all-dead group is rewritten from slot 0, so a full stored list does not matter");
+
+        // A match beats an earlier empty group.
+        GroupSummary order[kGroupCount] = {};
+        order[1] = Same(1);
+        c = ChooseGroup(order);
+        Check(c.kind == ChoiceKind::Match && c.group == 1, "a matching group wins over an earlier empty one");
 
         // Groups 7-9 have no key: never chosen, even when empty or matching.
         GroupSummary keyed[kGroupCount] = {};

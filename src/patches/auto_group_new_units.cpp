@@ -213,18 +213,21 @@ namespace BZROpenShim::Hooks
                    VtableTypeNameMatches(vtable, ".?AVControlPanel@@");
         }
 
-        bool AppendToGroup(int group, int storedCount, uint32_t handle)
+        // Writes `handle` at `writeIndex` and sets the count to writeIndex + 1.
+        // writeIndex is storedCount to append, or 0 to rewrite an empty group
+        // (dropping its dead entries, as stock BindGroup FUN_004a6f00 does).
+        bool AppendToGroup(int group, int storedCount, int writeIndex, uint32_t handle)
         {
             const uintptr_t numAddr = g_ControlPanelAddr + kGroupNumOffset + 4 * static_cast<size_t>(group);
             const uintptr_t slotAddr = g_ControlPanelAddr + kGroupListOffset + kGroupStride * static_cast<size_t>(group) +
-                                       4 * static_cast<size_t>(storedCount);
+                                       4 * static_cast<size_t>(writeIndex);
             __try
             {
                 // Same thread as the group keys; re-check the count we planned on.
                 if (*reinterpret_cast<volatile int*>(numAddr) != storedCount)
                     return false;
                 *reinterpret_cast<volatile uint32_t*>(slotAddr) = handle;
-                *reinterpret_cast<volatile int*>(numAddr) = storedCount + 1;
+                *reinterpret_cast<volatile int*>(numAddr) = writeIndex + 1;
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -336,7 +339,9 @@ namespace BZROpenShim::Hooks
         const Policy::GroupChoice choice = Policy::ChooseGroup(groups);
         bool added = false;
         if (choice.kind == Policy::ChoiceKind::Match || choice.kind == Policy::ChoiceKind::Empty)
-            added = AppendToGroup(choice.group, groups[choice.group].storedCount, handle);
+            added = AppendToGroup(choice.group, groups[choice.group].storedCount,
+                                  choice.kind == Policy::ChoiceKind::Empty ? 0 : groups[choice.group].storedCount,
+                                  handle);
         const char* what = choice.kind == Policy::ChoiceKind::Match ? "joined"
                          : choice.kind == Policy::ChoiceKind::Empty ? "started"
                          : choice.kind == Policy::ChoiceKind::AlreadyGrouped ? "already in a group"

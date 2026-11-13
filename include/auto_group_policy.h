@@ -97,8 +97,8 @@ namespace BZROpenShim
             int group = -1; // 0..kKeyedGroupCount-1 for Match and Empty
         };
 
-        // A group is empty when nothing in it is alive. Either kind of target
-        // needs a free stored slot, since entries are appended, never reused.
+        // A group is empty when nothing in it is alive. A match is appended to,
+        // so it needs a free stored slot; an empty group is rewritten.
         // Membership is checked in all ten groups; only keyed ones are chosen.
         inline GroupChoice ChooseGroup(const GroupSummary (&groups)[kGroupCount])
         {
@@ -124,7 +124,10 @@ namespace BZROpenShim
             for (int i = 0; i < kKeyedGroupCount; ++i)
             {
                 const GroupSummary& g = groups[i];
-                if (g.liveCount == 0 && g.storedCount < kGroupCapacity)
+                // An empty group is rewritten from slot 0 (as stock BindGroup,
+                // FUN_004a6f00, does), dropping its dead entries, so it never
+                // needs a free stored slot.
+                if (g.liveCount == 0)
                 {
                     choice.kind = ChoiceKind::Empty;
                     choice.group = i;
