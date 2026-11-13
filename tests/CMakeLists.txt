@@ -720,6 +720,10 @@ openshim_add_test(background_run_policy_tests STD 20 SOURCES
     background_run_policy_tests.cpp
 )
 
+openshim_add_test(quicksave_key_policy_tests STD 20 SOURCES
+    quicksave_key_policy_tests.cpp
+)
+
 openshim_add_test(never_activate_policy_tests STD 20 SOURCES
     never_activate_policy_tests.cpp
 )
