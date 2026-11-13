@@ -33,6 +33,17 @@ checked by `scripts/audit_vtable_hooks.py`.
   `[RALLY] set mode unavailable (command hooks installed mask=...)` once, on
   the first V.
 - **Shift+V** clears the rally of the selected producers.
+- **Command panel row:** while a Recycler or Factory of yours is selected
+  (the V key gate's test) and the stock green command panel shows its unit
+  orders, a 14th row sits under "TAB Cancel": a key box reading V and the
+  label "Rally Point", or "Cancel Rally" while set mode is armed. Same font,
+  colour (`HudColorWhite`), x anchor and row pitch as the SPACE/ALT/TAB rows.
+  If a mod adds a `key_V` HUD sprite it is drawn the stock way; otherwise the
+  box is an outline the size of `key_TAB` (atlas size times the UI scale) with
+  the V centred in it. Display only: the engine hit-tests rows 0-12, so the row
+  cannot be clicked. Not drawn in the alternate (touch) command layout, while
+  EXU owns the command presentation, in the editor, or with the feature off.
+  It fades with the panel when `CommandHudFade` is on.
 - Each unit the producer finishes afterwards is given a Go order (CMD_GO = 3)
   to the rally point. Scavengers, constructors (ConstructionRig), units that
   cannot be commanded, and units that already have an order are skipped.
@@ -67,6 +78,7 @@ checked by `scripts/audit_vtable_hooks.py`.
 | Ground-aim GetCommand 0x0045BD80 | JMP5 entry detour, patches.json `Producer Rally Ground Command Hook` | thiscall `(const VECTOR_3D* where)`, ret 4; 6-byte prologue `55 8B EC 83 EC 0C` relocated to a trampoline. Returns CMD_GO (3) while armed with the armed selection, so `Reticle::Simulate` hands a Go to the ControlPanel and the stock reticle and order line draw. |
 | Object-aim GetCommand 0x0045BBE0 | JMP5 entry detour, `Producer Rally Object Command Hook` | thiscall `(GameObject* target)`, ret 4; prologue `55 8B EC 83 EC 10`. Returns 0 while armed. |
 | ControlPanel::BroadcastCommand 0x004A70C0 | JMP5 entry detour, `Producer Rally Broadcast Command Hook` | thiscall `(int what, const VECTOR_3D* where)`, ret 8; prologue `55 8B EC 83 EC 0C`. While armed, a CMD_GO with a ground point on the global ControlPanel sets the rally and returns without the stock body (no SetCommand). |
+| Command panel row | `ContextualHud::RegisterCommandPanelPostDraw` (contextual_hud.cpp owns ControlPanel render slot 6, `HudFadeCommandRenderSlot` 0x00877E68) | registered from the game thread the first time the feature is active, so with rally off the slot stays stock. The wrapper refuses unless the slot holds 0x004A08E0; then there is no row (logged). The callback runs after the stock render, inside the fade scope and SEH. |
 | HUD gauge overlay | painter slot `RallyMarker` in `hud_gauge_overlay.h` | draws the marker after the stock scrap/pilot gauge, the same paint point the autosave notice and kill ticker use. |
 | ChunkEffect::Simulate (existing hook) | `TickProducerRallyMeshes()` after `TickShellCasings` in `ChunkEffectSimulateHook` | places, shows and hides the beacons. |
 | Ogre scene teardown (existing hooks, `lifecycle_seams.cpp`) | clearScene / destroyAllMovableObjects: `ForgetProducerRallyMeshes`; destroyAllEntities: `DestroyProducerRallySceneObjects` | the same seams the shell casings use. |
@@ -151,6 +163,17 @@ Decompile paths are relative to
 | GetCameraRecord (existing row) | 0x00439E60 | `FUN_00439e60-00439e60.c` line 5 returns `&DAT_008eaae0`. The stock reticle projects with it in `FUN_005bc170-005bc170.c`: line 56 gets the record, line 61 multiplies by the matrix at record `+0x40`, line 78 requires depth > 0.0001, lines 79 and 81 compute `x = rec[2]*vx/vz + rec[0]` and `y = rec[3]*vy/vz + rec[1]`. Matrix product (translation as doubles at matrix `+0x28`): `FUN_0081fe60-0081fe60.c` lines 28-36. `ProjectToScreen` repeats this arithmetic. |
 | ViewRecord (existing row) | 0x008EAAD0 | `+8` is Current_View (`DAT_008eaad8`); `FUN_005bc170-005bc170.c` line 54 draws the reticle only in views 0, 1, 2 and 7, and the marker uses the same set. |
 
+| CommandMenuRowAnchors (new) | 0x009174E8 | `FUN_0049f9e0-0049f9e0.c` lines 57-69: 13 rows, x = row left + offsets, y = (top + 1 + bottom) / 2 with top = base + (i+1)*pitch, so the pitch is constant. Lines 88-100: ALT is row 11 (0x00917540/44), TAB row 12 (0x00917548/4C), and `PTR_DAT_008e7c8c` (the TAB draw pointer) holds 0x00917548 in the exe. New row: x = TAB x, y = TAB y + (TAB y - ALT y). |
+| CommandMenuKeyInset (new) | 0x008E7BD0 | `FUN_0049f9e0-0049f9e0.c` line 51 (= UI scale x * 4). Every key sprite goes to `x - inset`: `FUN_004a08e0-004a08e0.c` lines 698-701 (TAB) and 1383-1386 (unit rows). |
+| HudFeedbackSprite (existing) | 0x0068C560 | `FUN_0068c560-0068c560.c`: size = atlas w/h (sprite record +0xC/+0xE) times the UI scale; flag 0x20000 right-aligns x, 0x40000 centres y (h >> 1). Used for a mod's `key_V` with the stock flags 0x60001 and scale 0. |
+| HudFadeFont (existing) | 0x00689D10 | cdecl (font, pane, x, y, text): `add esp,0x14` after each call in Render (0x004A210B, 0x004A274F). The decompile drops the text argument at lines 711 and 1402. |
+| CommandMenuTextHeight (new) | 0x00689A70 | body `9.0 * [0x02BF0420]`, returned with `fld` (ST0), no arguments read. Render centres the TAB label with it: `FUN_004a08e0-004a08e0.c` lines 707-711, `y - height/2`. |
+| CommandMenuTextMeasure (new) | 0x00689AB0 | `FUN_00689ab0-00689ab0.c`: (font, text, float* w, float* h). Render measures the SPACE label with it (lines 605-609). Used only to centre the V. |
+| UiFontContext / HudColorWhite / HudPaneBuffer (existing) | 0x0091552C / 0x0091755C / 0x00917580 | Render sets the label colour with `FUN_00689950(*0x0091552C, *0x0091755C)` (line 706; the decompile names it `_Init_atomic_counter`); its body is `mov [arg0], arg1`, so the font object's first dword is the colour, which the rally code writes directly. The pane is `*0x00917580`. |
+| CommandMenuAltLayoutFlag (existing) | 0x00915567 | `FUN_004a08e0-004a08e0.c` lines 402-410: the `menuunderlay` frame is drawn only when this byte is 0 (and the view is wider than 400); lines 1383 and 698-699 draw key sprites only then. The row is skipped when it is non-zero. |
+| Unit-command state | ControlPanel +0x11A0 == 4 | `FUN_004a08e0-004a08e0.c` lines 1313-1314: set in the branch taken when `DAT_00919875 == 0` and selection count `+0x188 > 0`. Render writes the field only while `FUN_00417c70()` (the user object, `GameObject::userObject` 0x00917AFC) is non-null (lines 367-368), so the row requires a user object and `DAT_00919875 == 0` (`CommandMenuUnitBranchInput`) too. The field is written only on the normal path (lines 815, 1013, 1208, 1314, 1501, 1663, 1876), so the row also requires a selection and an eligible producer. |
+| key sprites | `key_V` (absent in stock), `key_TAB` | stock exe strings hold `key_SPC`, `key_TAB`, `key_ALT` and `key_0`..`key_9`, no `key_V`; names are looked up at run time with `FUN_0068bed0` (`g_BzrFn_HudSpriteLookup`), and the size is read from the HUD sprite rect table (`TryGetHudSpriteCurrentRecord`). |
+
 `input.map` binds V only under the EditMode program (`edit_vertflip`, and
 `edit_paste` = Ctrl+V); V has no gameplay binding.
 
@@ -215,6 +238,22 @@ on live. Install runs once per process.
 - Pressing V and opening the pause menu at once does nothing later.
 - Nothing happens in multiplayer.
 - The game window is found by its title ("Battlezone 98 Redux").
+- Command panel row: the log has `command panel row registered` and one of
+  `uses the key_V sprite` / `draws its own key box`. With a Factory selected
+  the panel shows "V Rally Point" under "TAB Cancel": the label lines up with
+  SPACE/ALT/TAB, the key box lines up with theirs and is about their size,
+  and the pitch matches. V turns it to "Cancel Rally"; V again or Space turns
+  it back. With a tank only, or nothing, selected there is no row.
+- Underlay: `menuunderlay` is a fixed-size sprite drawn for 13 rows, so the
+  14th row may sit below the green background. Check at 1080p and 1440p and
+  at the smallest UI scale whether it is inside, half inside or outside; record
+  which.
+- With `CommandHudFade=1` the row fades and reappears with the panel; with
+  it off the slot wrapper is in (log `render slot wrapper installed`) and the
+  panel looks and behaves as stock. With rally off at startup the log has no
+  `render slot wrapper installed` line (fade also off).
+- Alternate (touch) command layout: no row.
+- EXU with its command presentation on: no row.
 
 # Auto-group new units
 

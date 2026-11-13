@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <limits>
+#include <string>
 #include "test_check.h"
 
 using OpenShimTest::Check;
@@ -311,6 +312,62 @@ namespace
         Check(!KeepArmed(true, true, false), "selection changed: disarm");
         Check(KeepArmed(true, true, true), "unchanged: the mode holds");
     }
+
+    void TestPanelRow()
+    {
+        PanelRowGate gate;
+        gate.active = true;
+        gate.userObject = true;
+        gate.branchInputHeld = false;
+        gate.panelState = kPanelUnitCommandState;
+        gate.selectionCount = 1;
+        gate.altLayout = false;
+        gate.eligibleProducer = true;
+        Check(PanelRowVisible(gate), "unit-command panel with a producer: row shown");
+        PanelRowGate g = gate;
+        g.active = false;
+        Check(!PanelRowVisible(g), "feature off: no row");
+        g = gate;
+        g.userObject = false;
+        Check(!PanelRowVisible(g), "no user object (dead, respawning): stale state, no row");
+        g = gate;
+        g.branchInputHeld = true;
+        Check(!PanelRowVisible(g), "DAT_00919875 set: not the unit-command branch, no row");
+        g = gate;
+        g.panelState = 2;
+        Check(!PanelRowVisible(g), "unit-type menu: no row");
+        g = gate;
+        g.selectionCount = 0;
+        Check(!PanelRowVisible(g), "stale state with no selection: no row");
+        g = gate;
+        g.altLayout = true;
+        Check(!PanelRowVisible(g), "alternate layout: no row");
+        g = gate;
+        g.eligibleProducer = false;
+        Check(!PanelRowVisible(g), "no Recycler/Factory selected: no row");
+
+        Check(std::string(PanelRowLabel(false)) == "Rally Point", "idle label");
+        Check(std::string(PanelRowLabel(true)) == "Cancel Rally", "armed label");
+
+        int x = 0, y = 0;
+        Check(PanelRowAnchor(31, 300, 278, x, y) && x == 31 && y == 322, "row 13 is one pitch below TAB");
+        Check(!PanelRowAnchor(31, 300, 300, x, y), "zero pitch is refused");
+        Check(!PanelRowAnchor(31, 278, 300, x, y), "an upward layout is refused");
+        Check(!PanelRowAnchor(31, 1000, 100, x, y), "an absurd pitch is refused");
+
+        PixelRect box;
+        // A 32x16 atlas sprite at UI scale 2, inset 8.
+        Check(KeyBoxRect(100, 322, 8, 32, 16, 2.0f, 2.0f, box), "box from a sprite");
+        Check(box.right == 92 && box.left == 28 && box.top == 306 && box.bottom == 338,
+              "right-aligned on anchor - inset, centred on the row");
+        Check(KeyBoxRect(100, 322, 8, 33, 17, 1.5f, 1.5f, box) && box.right - box.left == 49 &&
+                  box.bottom - box.top == 25 && box.top == 322 - 12,
+              "sizes truncate and odd heights centre like h >> 1");
+        Check(!KeyBoxRect(100, 322, 8, 0, 16, 2.0f, 2.0f, box), "empty sprite: no box");
+
+        Check(CenteredTextY(322, 18.0f) == 313, "text top is row centre minus half the height");
+        Check(CenteredTextY(322, 13.5f) == 315, "fractional heights truncate like the stock call");
+    }
 }
 
 int main()
@@ -324,6 +381,7 @@ int main()
     TestLineDots();
     TestTickPlan();
     TestSetMode();
+    TestPanelRow();
     if (OpenShimTest::FailureCount() != 0)
     {
         std::fprintf(stderr, "producer_rally_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());

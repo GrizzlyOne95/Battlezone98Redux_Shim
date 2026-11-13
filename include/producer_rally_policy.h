@@ -440,5 +440,85 @@ namespace BZROpenShim
             plan.livenessCheck = tableNonEmpty && livenessDue;
             return plan;
         }
+
+        // ---- the command-panel row ("V Rally Point") --------------------------
+        // ControlPanel::Render (FUN_004a08e0) sets this+0x11A0 to 4 in its
+        // unit-command branch (lines 1313-1314: DAT_00919875 == 0 and a
+        // selection), and draws key glyphs only in the classic layout
+        // (DAT_00915567 == 0, lines 402 and 1383). It writes +0x11A0 only
+        // while there is a user object (lines 367-368), so without one the
+        // field is stale and the panel is not drawn.
+        constexpr int kPanelUnitCommandState = 4;
+
+        struct PanelRowGate
+        {
+            bool active = false;           // feature on (SP, ini)
+            bool userObject = false;       // GameObject::userObject non-null
+            bool branchInputHeld = true;   // DAT_00919875 != 0
+            int panelState = 0;            // ControlPanel +0x11A0
+            int selectionCount = 0;        // ControlPanel +0x188
+            bool altLayout = true;         // DAT_00915567 != 0
+            bool eligibleProducer = false; // the V key gate's producer test
+        };
+
+        inline bool PanelRowVisible(const PanelRowGate& gate)
+        {
+            return gate.active && gate.userObject && !gate.branchInputHeld &&
+                   gate.panelState == kPanelUnitCommandState && gate.selectionCount > 0 && !gate.altLayout &&
+                   gate.eligibleProducer;
+        }
+
+        inline const char* PanelRowLabel(bool armed)
+        {
+            return armed ? "Cancel Rally" : "Rally Point";
+        }
+
+        // Row anchors (x, y) from FUN_0049f9e0 lines 57-69: x is the same for
+        // every row, y is the row centre with a constant pitch. The new row is
+        // one pitch below TAB (row 12), measured from ALT (row 11). False for a
+        // layout that is not a downward run of rows.
+        constexpr int kMaxPanelRowPitch = 256;
+
+        inline bool PanelRowAnchor(int tabX, int tabY, int altY, int& x, int& y)
+        {
+            const int pitch = tabY - altY;
+            if (pitch <= 0 || pitch > kMaxPanelRowPitch)
+                return false;
+            x = tabX;
+            y = tabY + pitch;
+            return true;
+        }
+
+        // Where FUN_0068c560 puts a key sprite for the stock call
+        // (anchorX - inset, anchorY, flags 0x60001): 0x20000 right-aligns the
+        // sprite on x, 0x40000 centres it on y (h >> 1), and the size is the
+        // atlas size times the UI scale, truncated.
+        struct PixelRect
+        {
+            int left = 0;
+            int top = 0;
+            int right = 0;
+            int bottom = 0;
+        };
+
+        inline bool KeyBoxRect(int anchorX, int anchorY, int inset, int spriteW, int spriteH, float scaleX,
+                               float scaleY, PixelRect& out)
+        {
+            const int w = static_cast<int>(static_cast<float>(spriteW) * scaleX);
+            const int h = static_cast<int>(static_cast<float>(spriteH) * scaleY);
+            if (w <= 0 || h <= 0)
+                return false;
+            out.right = anchorX - inset;
+            out.left = out.right - w;
+            out.top = anchorY - (h >> 1);
+            out.bottom = out.top + h;
+            return true;
+        }
+
+        // The stock row text call: y = (int)(rowY - textHeight / 2.0).
+        inline int CenteredTextY(int rowY, float textHeight)
+        {
+            return static_cast<int>(static_cast<double>(rowY) - static_cast<double>(textHeight) / 2.0);
+        }
     }
 }
