@@ -38,7 +38,7 @@ std::vector<TreeSpec> trees()
     return {parseTree(OPENSHIM_CHUNK_CACHE_NATIVE_DIR, true), parseTree(OPENSHIM_CHUNK_CACHE_GIBS_DIR, true),
             parseTree(OPENSHIM_CHUNK_CACHE_FALLBACK_DIR, false), parseTree(OPENSHIM_CHUNK_CACHE_CASINGS_DIR, false),
             parseTree(OPENSHIM_CHUNK_CACHE_RALLY_DIR, false),
-            parseTree(OPENSHIM_CHUNK_CACHE_FRACTURE_DIR, true)};
+            parseTree(OPENSHIM_CHUNK_CACHE_FRACTURE_DIR, true), parseTree(OPENSHIM_CHUNK_CACHE_LASERSIGHT_DIR, false)};
 }
 
 bool isLink(const std::filesystem::path &path)

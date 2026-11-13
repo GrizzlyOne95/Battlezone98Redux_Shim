@@ -1766,6 +1766,25 @@ namespace BZROpenShim
             const std::filesystem::path& cacheRoot,
             const std::vector<std::filesystem::path>& payloadDirectories);
 
+        // LaserSight (laser_sight.cpp): an optional beam from the player
+        // vehicle's selected weapon. [General] LaserSight = 0 leaves it inert.
+        // TickLaserSight runs from the world render-queue hook; the teardown
+        // calls mirror the ShellCasings ones above.
+        void TickLaserSight();
+        void ReloadLaserSightConfig();
+        void ForgetLaserSightSceneResources(const wchar_t* reason);
+        void DestroyLaserSightSceneObjects(void* sceneManager, const wchar_t* reason);
+        void DeactivateLaserSight(const wchar_t* reason);
+        // OpenShimSetLaserSightMode/OpenShimGetLaserSightMode backing (0 =
+        // default, network games off; 1 = allowed in network games).
+        int SetLaserSightMode(int mode);
+        int GetLaserSightMode();
+        // Writes the generated beam mesh, texture, shader and material into
+        // the chunk cache root. Must run before the payload group initialises.
+        void EnsureLaserSightAssets(
+            const std::filesystem::path& cacheRoot,
+            const std::vector<std::filesystem::path>& payloadDirectories);
+
         // Shim-owned mesh objects on the chunk payload group
         // (chunk_proxy_render.cpp), independent of ChunkMeshes.
         bool EnsureSkinnedGibResourceLocations();

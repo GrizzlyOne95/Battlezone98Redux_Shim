@@ -1137,3 +1137,4 @@ openshim_add_test(rally_beacon_assets_tests STD 20 SOURCES
     ../src/patches/native_chunk_cache.cpp
     ../src/patches/gib_flesh_texture.cpp
 )
+openshim_add_test(laser_sight_policy_tests STD 20 SOURCES laser_sight_policy_tests.cpp)

@@ -11,6 +11,7 @@
 #define OPENSHIM_CHUNK_CACHE_CASINGS_DIR "casings/v1/"
 #define OPENSHIM_CHUNK_CACHE_RALLY_DIR "rally/v1/"
 #define OPENSHIM_CHUNK_CACHE_FRACTURE_DIR "fracture/v1/"
+#define OPENSHIM_CHUNK_CACHE_LASERSIGHT_DIR "lasersight/v1/"
 
 #include <cstddef>
 #include <cstdint>
