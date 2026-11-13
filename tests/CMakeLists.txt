@@ -724,6 +724,14 @@ openshim_add_test(producer_rally_policy_tests STD 20 SOURCES
     producer_rally_policy_tests.cpp
 )
 
+openshim_add_test(auto_group_policy_tests STD 20 SOURCES
+    auto_group_policy_tests.cpp
+)
+
+openshim_add_test(group_strip_policy_tests STD 20 SOURCES
+    group_strip_policy_tests.cpp
+)
+
 openshim_add_test(quicksave_key_policy_tests STD 20 SOURCES
     quicksave_key_policy_tests.cpp
 )

@@ -383,3 +383,142 @@ on live. Install runs once per process.
   `render slot wrapper installed` line (fade also off).
 - Alternate (touch) command layout: no row.
 - EXU with its command presentation on: no row.
+
+# Auto-group new units
+
+`[Gameplay] AutoGroupNewUnits` (default OFF; Options page Controls, row
+"Auto Group"). Source: `src/patches/auto_group_new_units.cpp`, pure logic in
+`include/auto_group_policy.h` (tests: `tests/auto_group_policy_tests.cpp`).
+Log tag `[AUTOGROUP]`. Ported from BZCC's `SetBestGroup`
+(`SetBestGroup-004da8b0.c` lines 19-26, `FirstMatchGroup-005a4e03.c` lines
+14-18, `FirstEmptyGroup-005a4dd6.c` lines 14-16). Single player only
+(FeatureTier::SinglePlayer). **UNVERIFIED at runtime.**
+
+## Behaviour
+
+When the player's Recycler or Factory finishes a unit, the unit is appended to
+a stock number-key group:
+
+1. the first keyed group (index 0-6) in which *every* live member has the
+   new unit's ODF name (exact compare) and that has fewer than 10 live
+   members;
+2. otherwise the first keyed group with no live members (an all-dead group
+   counts as empty);
+3. otherwise nothing.
+
+Only indices 0-6 are used: the stock `input.map` (GOG install, lines 159-194)
+binds `group_select_0`..`group_select_6` to F1-F7, each with a
+`- keyboard LeftShift` line; nothing selects 7-9. The every-member rule is
+stricter than BZCC (which compares only the first member), so a mixed group
+the player built by hand is never touched.
+
+Skipped: other teams, a null unit, scavengers, constructors, pilots
+(RTTI name contains `Person`), buildings (class id 2), units that cannot be
+commanded, units whose ODF name cannot be read, and units already in any of
+the ten groups. Dead handles are not counted and the
+stored list is never compacted: stock already removes a deleted object from
+every group, and stock SelectGroup skips dead handles. A group whose 91 stored
+slots are used is skipped.
+
+It consumes the rally's FinishBuild slot-42 hook (no hook of its own).
+`EnsureProducerFinishBuildHook` installs that hook with its own copy of the
+shared rows, so auto-group works with rally points off or unavailable; the
+rally's behaviour is unchanged. Install retries up to 40 times; if a row, the
+ControlPanel identity check or the hook fails, the Options row is marked
+failed and rally points are unaffected.
+
+Multiplayer: groups are local UI state and nothing is sent, so it is probably
+safe, but FinishBuild may run for remote replicas and it is untested. Off in
+MP for v1.
+
+## Addresses and evidence (GOG 2.2.301)
+
+| Fact | Evidence |
+|---|---|
+| ControlPanelGlobal 0x00978E20 is the ControlPanel | Only ctor call: static init 0x004054E0 (`mov ecx,0x978E20; call 0x0049F8E0`); the ctor stores vtable 0x00877E50 at 0x0049F918 (`FUN_0049f8e0` line 17); RTTI `.?AVControlPanel@@`. Checked at runtime (row `ControlPanelVtable`). |
+| groupNum `+0xFC4` (int[10]), groupList `+0x18C`, 0x16C bytes (91 handles) per group | BindGroup `FUN_004a6f00` lines 7-10; SelectGroup `FUN_004a6dd0` lines 14-24. Both are called from `FUN_004a08e0` lines 530-537 (ControlPanel vtable slot 6) with `this` = ControlPanel (0x004A1D33, 0x004A1D5A). |
+| Entries are handles | SelectGroup resolves each with GetObj (`FUN_004a6dd0` line 15) and copies it into selectList, which BroadcastCommand also resolves by handle. |
+| Groups are saved | Mission save `FUN_005c7b90` line 118 calls `FUN_004a7440` (0x005C7E5D `mov ecx,0x978E20`), which writes `groupNum` (0x28 bytes) and `groupList` (0xE38 bytes) (lines 8-10). Load `FUN_005c7510` line 204 calls `FUN_004a73a0`; post-load `FUN_004a0160` lines 63-67 remaps the handles. |
+| Dead objects leave groups | GameObject cleanup `FUN_004db780` line 14 calls `FUN_004a0710`, which removes the handle from every group (lines 27-37). |
+| GameObjectClass at object `+0xF8` | `FUN_005ae660` lines 51-53 read the producer build list through `[this+0xF8]+0x608`. |
+| Class id 2 = building | IsBuilding 0x006A0810 (`AI IsBuilding` row) opens with `cmp dword [class+0x1C], 2`. **UNVERIFIED** for craft: `odf_helpers.cpp` notes the `+0xF8` chain names a different class record for Craft. A misread only skips the unit (fails safe). |
+| ODF name | `TryGetCraftOdfName` (`engine_flames.cpp`), GetClass vtable path, class `+0x30` char[8]; same reader for the unit and each live member. |
+
+Decompile paths are relative to the corpus directory named above.
+
+## Live test checklist (UNVERIFIED)
+
+- With the setting on, a new tank from the Factory is selected by F(n+1),
+  where n is the group index in the log. Whether selection is F-key alone or
+  needs the LeftShift chord is not checked.
+- A second tank of the same ODF joins the same group; an 11th goes to the
+  next empty group; a different ODF starts its own group; a hand-made mixed
+  group is left alone; nothing ever lands in groups 8-10.
+- A scavenger, a constructor and a unit already bound to a group are not
+  added.
+- Save and load keep the group.
+- The HUD group display (if any) shows the new member without a reselect.
+- Nothing happens in multiplayer or with the setting off.
+
+# Group strip
+
+`[Gameplay] GroupStrip`, default ON, independent of `AutoGroupNewUnits`.
+Code: `src/patches/group_strip.cpp`; rules and layout:
+`include/group_strip_policy.h` (tests: `tests/group_strip_policy_tests.cpp`).
+
+Stock Redux has no UI for number groups: in the decompile only init, save,
+load, select and dead-unit removal touch the group arrays. The strip draws one
+row next to the scrap/pilot gauge, for example
+`F1 4xTank  F2 2xBomber  F3 3xTank+`:
+
+- One entry for each of groups 0-6 (F1-F7) with at least one live member;
+  dead handles are not counted. Groups 7-9 have no key and are not shown.
+- The label is the first live member's ODF `unitName`, else its ODF name.
+  `+` means another live member has a different class.
+- Names are cut to 16, then 10, then 6 characters (`Assau.`), then left out,
+  until the row fits. If even that is too wide, trailing groups are replaced
+  by `...`.
+- `x` instead of `×`: the HUD font's support for that character is unknown.
+- Placement: on the gauge's top line, right of it, when every group fits there
+  with names of at least 6 characters; else centred under the gauge. The
+  strip must stay in the top third of the screen or it is not drawn. Spacing
+  scales with the text height (640x480 to 4K).
+- Hidden with no live group, with the pause menu or a non-gameplay shell
+  screen up, without a player object, and in the shell (the snapshot is
+  taken from the world render tick and is not drawn once older than 1 s).
+- Multiplayer: shown. It only reads the local ControlPanel's groups and
+  draws on the local HUD; nothing is written or sent.
+
+Threads: the world render tick (`LegacyWorldUpdateRenderQueueHook`, frame and
+game thread) takes a snapshot at 4 Hz: group counts, names, mixed flags and
+the gauge's six live layout points. The `HudGaugeOverlay` painter
+(`Slot::GroupStrip`) only copies that snapshot and calls the HUD text
+measure and draw primitives. `HudGaugeOverlay::Ensure()` and the painter
+are attached from that tick, which is the thread `Ensure()` requires.
+
+## Addresses and evidence (GOG 2.2.301)
+
+| Fact | Evidence |
+|---|---|
+| unitName is `char[0x20]` at GameObjectClass `+0x64` | GameObjectClass ctor `FUN_004e0450` line 89: `FUN_004cbc10(0xd3dd9cec, 0x45a8bc04, local_78 + 0x19, param_1 + 100)`; `FUN_004cbc10` passes size 0x20 to `FUN_00589a10`. The hash pair is BZ 1.5's `ParameterDB::Get(..., this->unitName, 0x20, ...)` (1.5 `all_decompiled.c` line 189463). Shipping exe 0x004E064F: `8B 55 8C 83 C2 64 52 68 04 BC A8 45` (`mov edx,[ebp-0x74]; add edx,0x64; push edx; push 0x45A8BC04`). Row `GroupStripUnitNameRead` guards those bytes; the strip stays down if they differ. |
+| GameObjectClass of an object | GameObject `+0x18` sub-object, vtable[0] (the `TryGetCraftOdfName` path; its ODF at class `+0x30` matches `FUN_004e0450`'s `local_78[0xc] = param_2`). |
+| Groups | ControlPanel `+0xFC4` / `+0x18C` / 0x16C stride; see "Auto-group new units" above. |
+| Gauge plates | `FUN_005c6cf0` (layout): scrap plate x = `W/2 - 176s/2` (lines 20, 34), pilot plate x = `W/2` (line 39), both y = `10s/2` (lines 22, 47-48); scrap value y = plate y + `18s/2` + `10s/2` (line 38), a drop of 14s. `FUN_005c6f70` (draw) lines 50-52 and 75-77 draw each plate at `(spriteW * s / 2, spriteH * s / 2)`; with the alternate menu layout (line 72) the pilot plate follows the scrap plate instead of its own point. `scrap_panel`/`pilot_panel` are 180 x 64 in `spritea.st` (read from Campaign Reimagined's copy; the stock copy in `bzone.zfs` was not extracted). |
+| Gauge rect used | From the six live `ScrapHud*Point` rows: s = (value y - plate y + 2) / 14 (never below the real scale); scrap plate reserves 180s x 32s, pilot plate 90s x 32s, each string +/-40s around its x and one text height below its y. At s = 1, 1280x720 (the stock plates span x 552-730, y 5-37) it reserves x 552-758, y 5-42. Without the rows: the stock formula with s = max(1, H/480). |
+
+## Live test checklist (UNVERIFIED)
+
+- The strip appears with one group bound and disappears when its last unit
+  dies; counts drop as members die.
+- A unit's `unitName` shows (for example "Tank" for `avtank`), not garbage;
+  a hand-mixed group shows `+`.
+- No overlap with the scrap/pilot plates at 640x480, 1280x720, 1920x1080 and
+  3840x2160, and with `ScrapPilotHud = Legacy`. The assumed 180 x 64 plate
+  size is from CR's sprite table.
+- Nothing else of the stock HUD sits right of the gauge on its top line
+  (objective/message text was not checked).
+- Hidden in the pause menu, the shell, satellite view, cinematic cameras and
+  with the HUD hidden. Satellite and cinematic views are not checked: the
+  painter runs whenever the gauge draw function is called, including when
+  that function skips its own drawing (`FUN_005c6f70` line 26).
+- Shown in multiplayer; nothing in the session log changes.

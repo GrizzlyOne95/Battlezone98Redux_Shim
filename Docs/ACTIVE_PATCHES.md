@@ -10,6 +10,8 @@ An item belongs here only when the failure mechanism is understood well enough t
 | --- | --- | --- | --- |
 | CLI multi-parameter / `shellmap:<W>,<H>` parser repair | **Legacy 1.5 defect / OpenShim compatibility enhancement** | **Implementation ready** | Implement the post-parser repair from the pristine command-line snapshot, then qualify Steam + GOG runtime behavior. |
 | Producer rally points (`[Gameplay] ProducerRallyPoints`) | **OpenShim gameplay enhancement** | **Implemented, runtime qualification pending** | Live SP test of the checklist in `Docs/PRODUCER_RALLY_POINTS.md` (V arms rally mode, the Reticle Command key sets the rally, V cancels, Shift+V clears, new units drive to the rally, HUD marker shows while selected, "V Rally Point" command panel row under TAB Cancel (aligned; inside or below the underlay), scavengers/constructors skipped, editor and MP untouched). |
+| Auto-group new units (`[Gameplay] AutoGroupNewUnits`) | **OpenShim gameplay enhancement** | **Implemented, runtime qualification pending** | Live SP test of the checklist in `Docs/PRODUCER_RALLY_POINTS.md` (new tank on an F1-F7 group, all-same-ODF grouping and the 10-unit cap, save/load keeps the group, MP untouched). |
+| HUD group strip (`[Gameplay] GroupStrip`) | **OpenShim UI enhancement** | **Implemented, runtime qualification pending** | Live test of the checklist in `Docs/PRODUCER_RALLY_POINTS.md` ("Group strip": unitName labels, no overlap with the scrap/pilot gauge from 640x480 to 4K, hidden in pause/shell/satellite). |
 
 ### CLI multi-parameter parser repair
 

@@ -33,7 +33,7 @@ namespace BZROpenShim::HudGaugeOverlay
         float* spriteZ = nullptr;
     };
 
-    enum class Slot : uint32_t { AutoSaveNotice = 0, KillTicker = 1, RallyMarker = 2, Count = 3 };
+    enum class Slot : uint32_t { AutoSaveNotice = 0, KillTicker = 1, RallyMarker = 2, GroupStrip = 3, Count = 4 };
 
     // A painter returns false when it faulted; the overlay then stops calling
     // that slot for the rest of the run. Painters run on the frame thread
