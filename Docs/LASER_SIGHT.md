@@ -258,8 +258,8 @@ Also used, unchanged from ShellCasings, with no new RE:
 - **Arc recompute** (gravity ordnance only), same bounds as the straight
   beam:
   - Ground: one `Terrain::HeightAt` per 8 m of path, at most 500 m, plus 6
-    bisections: about 63 + 6 samples for the longest arc, never more than
-    128 (`kMaxArcSamples`).
+    bisections: about 63 + 6 samples for the longest arc; the loop stops at
+    128 (`kMaxArcSamples`) and a final bisection can add 6, so at most 134.
   - Objects: one grid range query per span of about 50 m of path (about 10
     for 500 m); each object's box is read once per recompute and cached
     (at most 64 objects, the same five Ogre getters as the straight beam),

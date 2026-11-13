@@ -157,5 +157,8 @@ Piece LaserBeamMesh(unsigned sides);
 // LaserBeamMesh taper and texture, still spanning z 0..1, so pieces laid end
 // to end along a curve read as one beam. Section 0 of 1 is byte-identical to
 // LaserBeamMesh(sides). Out-of-range arguments return an empty piece.
-Piece LaserBeamSectionMesh(unsigned sides, unsigned section, unsigned sections);
+// `span` (0..1] is how much of the beam's taper and texture fade the whole
+// set of sections covers: 1 = the straight beam's full fade, less keeps the
+// far end brighter and thicker (the ballistic arc's ground contact).
+Piece LaserBeamSectionMesh(unsigned sides, unsigned section, unsigned sections, float span = 1.0f);
 } // namespace BZROpenShim::NativeChunks

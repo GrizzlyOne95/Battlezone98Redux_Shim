@@ -77,6 +77,9 @@ namespace BZROpenShim
             constexpr const char* kComponent = "lasersight";
             constexpr const char* kMeshResource = OPENSHIM_CHUNK_CACHE_LASERSIGHT_DIR "openshim_lasersight.mesh";
             constexpr unsigned kBeamSides = 8;
+            // The arc spans 40% of the straight beam's fade, so its ground contact stays
+            // bright and thick (the straight beam fades to 30% brightness, half radius).
+            constexpr float kArcFadeSpan = 0.4f;
             constexpr float kBeamRadius = 0.05f;  // metres at the muzzle; half that at the far end
             // Objects move without the player's muzzle moving: refresh at
             // least this often even when the pose is unchanged.
@@ -908,7 +911,9 @@ namespace BZROpenShim
                     g_Stats.arcSamples = static_cast<uint32_t>(result.samples);
                     g_Stats.arcSpans = static_cast<uint32_t>(result.spans);
                 }
-                if (SC::Length(SC::Sub(LS::ArcPoint(arc, result.endT), muzzle)) < LS::kMinBeamLength)
+                // Path length (launch speed x flight time), not the chord: a steep lob
+                // that lands next to the muzzle still draws.
+                if (result.endT * ballistics.shotSpeed < LS::kMinBeamLength)
                 {
                     HideBeam(true);
                     return true;
@@ -1207,7 +1212,7 @@ namespace BZROpenShim
                     char name[160] = {};
                     std::snprintf(name, sizeof(name), "%s%02u.mesh", kArcMeshPrefix, k);
                     writeIfChanged(cacheRoot / std::filesystem::path(name),
-                                   NativeChunks::LaserBeamSectionMesh(kBeamSides, k, LS::kArcSegments).mesh);
+                                   NativeChunks::LaserBeamSectionMesh(kBeamSides, k, LS::kArcSegments, kArcFadeSpan).mesh);
                 }
 
                 // Text and texture assets: an asset pack overrides any of them

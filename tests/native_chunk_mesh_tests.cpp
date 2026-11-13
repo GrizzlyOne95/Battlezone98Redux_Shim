@@ -1390,6 +1390,14 @@ int main(int argc, char **argv)
         Require(std::fabs(bounds[2]) < 1e-5f && std::fabs(bounds[5] - 1.0f) < 1e-5f &&
                     std::fabs(bounds[3] - (1.0f - 0.5f * 3.0f / 16.0f)) < 1e-4f,
                 "section 3 of 16 spans z 0..1 and starts at the taper's radius there");
+        const auto lastArc = LaserBeamSectionMesh(8, 15, 16, 0.4f);
+        Require(!lastArc.mesh.empty() && lastArc.mesh != LaserBeamSectionMesh(8, 15, 16).mesh,
+                "a shorter fade span changes the far section");
+        std::memcpy(bounds, lastArc.mesh.data() + lastArc.mesh.size() - sizeof(bounds), sizeof(bounds));
+        Require(std::fabs(bounds[3] - (1.0f - 0.5f * 0.4f * 15.0f / 16.0f)) < 1e-4f,
+                "span 0.4: the last arc section keeps most of the radius");
+        Require(LaserBeamSectionMesh(8, 0, 16, 0.0f).mesh.empty() && LaserBeamSectionMesh(8, 0, 16, 1.5f).mesh.empty(),
+                "invalid fade spans fail closed");
     }
     Require(SkeletonName(mesh) == "test.skeleton", "shared geometry skeleton link");
     Require(Extract(mesh, skeleton, pieces, error), "extract rigid bone group");

@@ -1130,9 +1130,10 @@ Piece LaserBeamMesh(unsigned sides)
 {
     return LaserBeamSectionMesh(sides, 0, 1);
 }
-Piece LaserBeamSectionMesh(unsigned sides, unsigned section, unsigned sections)
+Piece LaserBeamSectionMesh(unsigned sides, unsigned section, unsigned sections, float span)
 {
-    if (sides < 3 || sides > 32 || sections < 1 || sections > 64 || section >= sections)
+    if (sides < 3 || sides > 32 || sections < 1 || sections > 64 || section >= sections || !(span > 0.0f) ||
+        span > 1.0f)
         return {};
     // Open tube along local +Z from the muzzle (z = 0, radius 1) to the far
     // end (z = 1, radius kFarRadius). The node scales x/y by the beam radius
@@ -1142,8 +1143,8 @@ Piece LaserBeamSectionMesh(unsigned sides, unsigned section, unsigned sections)
     // the whole beam.
     constexpr float kFarRadius = 0.5f;
     constexpr float kPi = 3.14159265358979f;
-    const float v0 = static_cast<float>(section) / static_cast<float>(sections);
-    const float v1 = static_cast<float>(section + 1) / static_cast<float>(sections);
+    const float v0 = span * static_cast<float>(section) / static_cast<float>(sections);
+    const float v1 = span * static_cast<float>(section + 1) / static_cast<float>(sections);
     const float r0 = 1.0f - (1.0f - kFarRadius) * v0;
     const float r1 = 1.0f - (1.0f - kFarRadius) * v1;
     struct Vertex
