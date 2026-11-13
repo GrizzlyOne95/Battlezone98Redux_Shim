@@ -539,6 +539,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required." },
+    // Absent key = off, so defaultIndex 1 selects "0" (Off).
+    { "Laser Sight", "General", "LaserSight", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::LiveEngineToggle,
+      "A thin beam from your vehicle's selected weapon to whatever it points at, up to 500 m (visual only). Off in multiplayer unless a mod allows it. Applies at once." },
     // Absent key = on (inverted env mapping OPENSHIM_DISABLE_SKINNED_GIBS), so defaultIndex 0 selects "1" (On).
     { "Skinned Gibs", "General", "SkinnedGibs", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -992,7 +997,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "FastMenuTransitions", "0" }, { "SoundChannels", "0" }, { "CustomBindsUi", "0" },
     { "RawMouseInput", "0" }, { "DisableControlSmoothing", "0" }, { "MouseEveryFrame", "0" },
     { "MapFilterExtras", "0" }, { "Enabled", "0" }, { "QuickSaveEnabled", "0" }, { "WeaponConvergence", "0" },
-    { "MuzzleFlash", "0" }, { "MeshRecoil", "0" }, { "ShellCasings", "0" },
+    { "MuzzleFlash", "0" }, { "MeshRecoil", "0" }, { "ShellCasings", "0" }, { "LaserSight", "0" },
     { "SkinnedGibs", "0" }, { "FractureOnePiece", "0" }, { "GpuSkinning", "0" }, { "PlayerReticleConvergence", "0" },
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },

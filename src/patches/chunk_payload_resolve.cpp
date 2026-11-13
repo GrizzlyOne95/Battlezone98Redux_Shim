@@ -183,6 +183,8 @@ namespace BZROpenShim
                 EnsureShellCasingAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
                 // The producer rally beacon's generated mesh and materials.
                 EnsureRallyBeaconAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
+                // LaserSight's beam mesh, texture, shader and material.
+                EnsureLaserSightAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
             }
         }
 

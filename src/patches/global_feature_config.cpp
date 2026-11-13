@@ -900,6 +900,7 @@ namespace BZROpenShim
             InitializeSatelliteVisibilityFixConfig(false);
             SunFlash::ReloadConfig();
             ScreenFlash::ReloadConfig();
+            ReloadLaserSightConfig();
             break;
         case ShimSettingApplyGroup::SteamLauncher:
             SyncSteamLauncherProxy();

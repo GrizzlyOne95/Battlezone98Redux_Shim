@@ -147,4 +147,10 @@ Piece CasingMesh(unsigned sides);
 // same geometry, the lamp submesh uses openshim_rally_beacon_lamp_fac and the
 // piece is named openshim_rally_beacon_fac.
 Piece RallyBeaconMesh(bool amberLamp = false);
+// LaserSight: an open tapered tube along local +Z from z = 0 (radius 1) to
+// z = 1 (radius 0.5) with `sides` facets (3..32), position/normal/uv0 (u
+// around, v along), one submesh using openshim_lasersight_beam. The node
+// scales it to the beam. Deterministic; an out-of-range side count returns an
+// empty piece.
+Piece LaserBeamMesh(unsigned sides);
 } // namespace BZROpenShim::NativeChunks
