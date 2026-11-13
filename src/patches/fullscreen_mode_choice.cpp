@@ -19,7 +19,7 @@
 //
 // DX9 (Ogre's active render system is not Direct3D11) gets no third item, so the row
 // stays two-state. OPENSHIM_DISABLE_FULLSCREEN_MODE_CHOICE=1 turns it off.
-// RE note: reverse_engineering/fullscreen_mode_choice_20261110.md.
+// RE note: reverse_engineering/notes/fullscreen_mode_choice_20261110.md.
 #include "fullscreen_mode_choice.h"
 
 #include "bool_token.h"

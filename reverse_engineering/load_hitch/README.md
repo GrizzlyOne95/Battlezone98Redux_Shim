@@ -1,6 +1,6 @@
 # Load / first-use hitch probe
 
-Used for `Docs/OGRE_LOAD_HITCH_MEASUREMENT_20261003.md`.
+Used for `Docs/Archive/2026/OGRE_LOAD_HITCH_MEASUREMENT_20261003.md`.
 
 - `run_load_hitch_probe.ps1 -Renderer DX11|DX9 -Label <name> [-ColdShaderCache]`:
   deploys the `ncprobe` fixture into `addon\ISDF Chronicles`, launches with the

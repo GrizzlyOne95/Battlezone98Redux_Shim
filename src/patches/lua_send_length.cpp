@@ -1,6 +1,6 @@
 // lua_send_length.cpp -- make Lua Send string lengths and table counts safe
 // on the wire. Design, evidence and failure modes:
-// Docs/LUA_SEND_STRING_LENGTH_20261018.md.
+// Docs/Archive/2026/LUA_SEND_STRING_LENGTH_20261018.md.
 //
 // Mechanism:
 //   * Decoders (FUN_005059B0 strings, FUN_00505B50 tables): the extension

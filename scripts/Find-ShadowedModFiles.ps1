@@ -12,7 +12,7 @@
     The resolution rule below was read from the shipping GOG exe's decompile
     (FS init 0x00820F10, index build 0x008283E0, name lookup 0x00828850, loose
     open 0x00828DC0, cWorkshop::build*Resource 0x0076A030..0x0076B350). Details
-    and confidence per claim: reverse_engineering/loose_file_resolution_rule.md.
+    and confidence per claim: reverse_engineering/notes/loose_file_resolution_rule.md.
 
       1. The key is the file's lower-cased name, truncated to 16 characters,
          extension included. Folder structure is not part of the key.

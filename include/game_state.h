@@ -5,7 +5,7 @@
 namespace BZROpenShim
 {
     // Validated UI-state globals for Battlezone 98 Redux v2.2.301, from
-    // reverse_engineering/pause_menu_notes.md:
+    // reverse_engineering/notes/pause_menu_notes.md:
     //   0x00918320  current UI screen pointer
     //   0x00918324  UI wrapper active flag
     //   0x00918328  current UI screen type

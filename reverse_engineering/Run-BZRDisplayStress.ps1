@@ -11,7 +11,7 @@
 # Shift-F9 only works in /edit mode (the editor), so it runs only with -EditMode, and the
 # already-running game must have been launched with /edit (the script checks its command
 # line and refuses otherwise). Without -EditMode the step is skipped. Its task-mode crash is already a known open
-# roadmap item (Docs/ROADMAP_CODE_VALIDATION_20261007.md, item 300), so a failure on
+# roadmap item (Docs/Archive/2026/ROADMAP_CODE_VALIDATION_20261007.md, item 300), so a failure on
 # that step is reported as KNOWN-300 and does not by itself fail the run.
 #
 # Window geometry is checked after every step (per-monitor DPI-aware, physical pixels) and

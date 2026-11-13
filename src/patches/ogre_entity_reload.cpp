@@ -1,6 +1,6 @@
 // Preserve BZR's cached Bone/SkeletonInstance/AnimationState pointers when Ogre
 // lazily rebuilds an Entity after D3D11's MeshManager::reloadAll. See the crash
-// investigation in reverse_engineering/d3d11_restore_entity_lifetime_20261007.md.
+// investigation in reverse_engineering/notes/d3d11_restore_entity_lifetime_20261007.md.
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"

@@ -368,7 +368,7 @@ Worth reusing rather than rebuilding:
    transport picker is the one piece of this screen that cannot be made to mean
    anything: Redux has no `dp_*` transport stack, no LAN browser and no
    direct-IP join, so every row would dead-end. See
-   `reverse_engineering/redux_tcpip_lan_multiplayer_investigation_20260713.md`.
+   `reverse_engineering/notes/redux_tcpip_lan_multiplayer_investigation_20260713.md`.
    What replaced it is the **route readout and preference** below, which
    describes and controls transport behaviour Redux genuinely has.
 4. ~~**Wire the flag selector** to the existing OpenShim flag catalogue, replacing

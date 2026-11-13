@@ -1,7 +1,7 @@
 # Steam tunnel M2: live two-account test guide
 
 Step-by-step acceptance test for the M2 Steam Sockets tunnel
-([setup reference](STEAM_TUNNEL.md), [M2 results](STEAM_TUNNEL_M2_RESULTS_20261028.md)).
+([setup reference](STEAM_TUNNEL.md), [M2 results](Archive/2026/STEAM_TUNNEL_M2_RESULTS_20261028.md)).
 Use it to evaluate the remaining M2 gates: remote P2P connect, lobby, a ten-minute
 match, quality numbers and host-account coexistence.
 

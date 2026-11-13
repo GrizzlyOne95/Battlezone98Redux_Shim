@@ -108,7 +108,7 @@ namespace BZROpenShim
 
         // How the stock mode-list code reads a producer (Producer::
         // UpdateModeList 0x005AE660, ConstructionRig::UpdateModeList
-        // 0x0049D550; reverse_engineering/producer_build_menu_notes.md).
+        // 0x0049D550; reverse_engineering/notes/producer_build_menu_notes.md).
         // +0x228 is the Craft deploy state: 0 mobile, 1 deploying, 2
         // deployed, 3 packing up.
         constexpr uintptr_t kCraftDeployStateOffset = 0x228;
@@ -704,7 +704,7 @@ namespace BZROpenShim
         // to the IAT entry. Named modes (Back included) take another branch
         // that never draws a cost. Installed when the first stub is made, so
         // a game where no producer ODF names a menu root is never patched.
-        // reverse_engineering/producer_build_menu_notes.md "Submenu cost".
+        // reverse_engineering/notes/producer_build_menu_notes.md "Submenu cost".
         static uint32_t g_ModeScrapCostFormatAddr = 0;
         static uintptr_t g_ModeScrapCostSprintfSlot = 0;
         static bool g_ModeScrapCostHookInstalled = false;

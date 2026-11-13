@@ -1,5 +1,5 @@
 // lua_formation_fix.cpp -- repair the stock Lua Formation(me, him, priority)
-// binding. Design, evidence and failure modes: Docs/LUA_FORMATION_BINDING_20261014.md.
+// binding. Design, evidence and failure modes: Docs/Archive/2026/LUA_FORMATION_BINDING_20261014.md.
 //
 // Mechanism: the Lua registration table row for "Formation" (0x00872370,
 // { "Formation" 0x0087CF64, 0x005079B0 }) has its function pointer swapped for

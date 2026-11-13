@@ -4,7 +4,7 @@ This branch implements an in-process OpenShim agent and a standalone Win32
 bridge with two selectable transports: M1 plain UDP for trusted local tests,
 and M2 Steam Networking Sockets P2P/SDR. Both INI keys ship empty. Native
 gameplay and remote Steam acceptance remain pending; this is not a release.
-See [M2 evidence](STEAM_TUNNEL_M2_RESULTS_20261028.md).
+See [M2 evidence](Archive/2026/STEAM_TUNNEL_M2_RESULTS_20261028.md).
 
 The game and Python server protocol stay unchanged. TCP 1337 becomes ordered,
 reliable OPEN/DATA/CLOSE frames; UDP 1338-1369 retains individual datagrams,
@@ -423,7 +423,7 @@ its callback queue; the borrowed game's Steam session remains owned by the game.
 
 ## Acceptance and remaining work
 
-See [M1 results](STEAM_TUNNEL_M1_RESULTS_20261028.md) for measured evidence.
+See [M1 results](Archive/2026/STEAM_TUNNEL_M1_RESULTS_20261028.md) for measured evidence.
 Socket and synthetic lobby tests do **not** complete M1: the redirected game
 must log in, list, create, join and play a five-minute match through the bridge.
 Direct-LAN versus tunnel-LAN performance is also pending.

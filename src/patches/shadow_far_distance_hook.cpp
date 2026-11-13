@@ -73,7 +73,7 @@ namespace BZROpenShim
     // --- Shadow far distance correction ------------------------------------
     // (on by default; OPENSHIM_SHADOW_FAR_DISTANCE=stock opts out)
     //
-    // Root cause (reverse_engineering/shadow_cutoff_root_cause_20260825.md):
+    // Root cause (reverse_engineering/notes/shadow_cutoff_root_cause_20260825.md):
     // FUN_00680fe0 writes SceneManager::setShadowFarDistance(128.0) for every
     // shadow quality, while the PSSM receiver shaders trust cascade 3 out to
     // the 256 m outer split. Ogre's Focused/LiSPSM fit clips the cascade

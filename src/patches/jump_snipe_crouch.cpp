@@ -27,7 +27,7 @@ namespace BZROpenShim
         // ([ebp-0x351]). Rewriting the predicate to "goto sniper-check iff
         // jumpHeld <= sniper" makes the (jumpHeld && sniper) case crouch like
         // 1.5 while leaving every other path byte-identical. See
-        // reverse_engineering/jump_sniping_crouch_fix_20260713.md.
+        // reverse_engineering/notes/jump_sniping_crouch_fix_20260713.md.
         //
         // The site is the PersonCrouchBranch row. The patched form leans on
         // jumpHeld and sniperSelected being adjacent frame bytes, which the

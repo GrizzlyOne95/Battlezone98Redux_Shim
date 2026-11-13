@@ -2,7 +2,7 @@
 // BZR Open Shim - TraceAIBuildLedger ([Diagnostics], default OFF, read-only).
 //
 // Tests the "AI stops building after ~60 minutes" hypothesis (see
-// reverse_engineering/ai_long_game_build_stall_20261109.md, D1 and D2): that
+// reverse_engineering/notes/ai_long_game_build_stall_20261109.md, D1 and D2): that
 // AIBuild_ConstructionBegin runs without a matching AIBuild_ConstructionEnd, so
 // number_under_construction[team][prereq] only ever grows and the build list
 // (HowMany + uc < wanted) goes quiet.

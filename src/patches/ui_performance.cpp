@@ -202,7 +202,7 @@ namespace BZROpenShim::UiPerf
         }
 
         // Map known Redux shell screen IDs to human names (from
-        // reverse_engineering/REDUX_SHELL_UI_RE_MAP.md). Unknown IDs still
+        // reverse_engineering/notes/REDUX_SHELL_UI_RE_MAP.md). Unknown IDs still
         // produce "Screen0xNN".
         const char* ScreenNameTable(int id) noexcept
         {

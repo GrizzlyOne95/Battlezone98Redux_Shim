@@ -1,6 +1,6 @@
 // The frustum-cull / restored-bounds table: the one failure mode its design
 // forbids is handing a mesh a box that belonged to a different mesh at the
-// same address. Audit item P1-3 (Docs/CODE_AUDIT_20260925.md): the table was
+// same address. Audit item P1-3 (Docs/Archive/2026/CODE_AUDIT_20260925.md): the table was
 // keyed by the raw Mesh* and never invalidated on unload, so a reused address
 // kept the earlier mesh's asset box (the box every restored bound is derived
 // from) and could restore a too-small one. These tests pin the two defences,

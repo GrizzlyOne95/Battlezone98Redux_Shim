@@ -405,7 +405,7 @@ SuppressHopOutAttackAlert = 0
 ; ever say "Connect to internet" or "Sign into Game Center" (a mobile-port
 ; leftover), neither of which is accurate for a platform sign-in failure, so
 ; naming the real term is the better trade.
-; See reverse_engineering/mp_not_ready_readiness_chain.md.
+; See reverse_engineering/notes/mp_not_ready_readiness_chain.md.
 ; Accepted: boolean. Default: ON -- testers who hit this have no other
 ; way to report a reason. Set to 0 to restore the bare stock "Not Ready".
 ; Env override to disable: OPENSHIM_NO_EXPLAIN_MP_NOT_READY
@@ -569,7 +569,7 @@ ConstructorRecycleStaleTarget = 1
 ; Only the float step changes: the integer game clock, timers and networking
 ; are untouched. Pauses, the 200 ms clamp and any frame the two clocks disagree
 ; on keep the engine's own step. See
-; reverse_engineering/frame_hitch_va_measurement_20261020.md.
+; reverse_engineering/notes/frame_hitch_va_measurement_20261020.md.
 ; Accepted: boolean. Default: ON. Stands down in a network game.
 ; Env alias to force it off: OPENSHIM_DISABLE_PRECISE_TIMESTEP
 PreciseTimestep = 1
@@ -579,7 +579,7 @@ PreciseTimestep = 1
 ; plays it, which rewinds the stream and decodes the same 3 s again. The first
 ; decode is never heard. This skips it, removing about a quarter to a third of
 ; the 40-50 ms hitch at each track change. Playback is unchanged. See
-; reverse_engineering/frame_hitch_va_measurement_20261020.md.
+; reverse_engineering/notes/frame_hitch_va_measurement_20261020.md.
 ; Accepted: boolean. Default: ON. Client-local audio; also runs in network games.
 ; Env alias to force it off: OPENSHIM_DISABLE_MUSIC_SINGLE_FILL
 MusicSingleFill = 1
@@ -761,7 +761,7 @@ UnfocusedMouseRelease = 1
 ; shadow-cascade tests work. *_c, *_fp and *_cockpit models keep their infinite
 ; box, and a mesh with no usable serialized box is left alone. Renderer only:
 ; the executable creates no Ogre scene query, so collision, targeting and AI
-; never see the box. See reverse_engineering/craft_bounds_architecture_20260822.md.
+; never see the box. See reverse_engineering/notes/craft_bounds_architecture_20260822.md.
 ; Accepted: boolean. Default: ON. Not gated in network games.
 ; Env alias to force it off: OPENSHIM_DISABLE_RESTORE_CRAFT_BOUNDS
 RestoreCraftBounds = 1
@@ -786,7 +786,7 @@ FogDistanceCull = 0
 ; Redux's DynamicGeometry, which opens a new batch piece whenever the squared
 ; view depth differs even slightly, then sorts and re-merges those pieces every
 ; frame. These two are renderer-only CPU savings with pixel-identical output;
-; see reverse_engineering/dynamic_geometry_begin_sort_20261021.md.
+; see reverse_engineering/notes/dynamic_geometry_begin_sort_20261021.md.
 ;
 ; DynamicGeometryPieceReuse: append to the current piece instead of opening a
 ; new one when the new piece would get the same depth key (so it would sort
@@ -1718,7 +1718,7 @@ TracePathBlock = 0
 ; (team, prereq, counter after, caller), a per-team counter and reserved-area
 ; dump every 10 s, and Producer::StartBuild failures from the AI. Read-only;
 ; capped at 20000 lines. Used to test the "AI stops building after ~60 minutes"
-; counter-leak hypothesis (reverse_engineering/ai_long_game_build_stall_20261109.md).
+; counter-leak hypothesis (reverse_engineering/notes/ai_long_game_build_stall_20261109.md).
 ; Accepted: boolean. Default: OFF.
 TraceAIBuildLedger = 0
 
@@ -1731,7 +1731,7 @@ TraceAIBuildLedger = 0
 ; state it reports separates a transport failure (never leaves 0/1) from a
 ; refused Authorization (reaches 2, never 3).
 ; Read-only -- it patches nothing, and a byte-guard mismatch stands it down.
-; See reverse_engineering/mp_not_ready_readiness_chain.md.
+; See reverse_engineering/notes/mp_not_ready_readiness_chain.md.
 ; Accepted: boolean. Default: ON. It is silent unless readiness changes, and it
 ; is worthless if it has to be switched on after the player already hit this.
 ; Env override to disable: OPENSHIM_NO_MP_READY_DIAGNOSTIC
@@ -1750,7 +1750,7 @@ TraceHookHits = 0
 
 ; Identify the first-person pilot Entity by walking the Ogre scene graph every
 ; 1.5 s, and log its AnimationState traffic. Capture tool for pilot animation
-; investigation; see reverse_engineering/PILOT_FP_ANIMATION_TRACE.md.
+; investigation; see reverse_engineering/notes/PILOT_FP_ANIMATION_TRACE.md.
 ; Accepted: boolean. Default: OFF. Development-only, noisy, and it polls the
 ; scene graph on a worker thread -- leave it off for normal play.
 ; Legacy env alias: OPENSHIM_TRACE_PILOT_FP_ANIMATIONS
@@ -1862,7 +1862,7 @@ TraceJumpSniping = 0
 ; and stops once the budget is spent.
 ;
 ; Background and the live-test plan:
-;   reverse_engineering/satellite_fow_root_cause_20260817.md
+;   reverse_engineering/notes/satellite_fow_root_cause_20260817.md
 ; Legacy env aliases: OPENSHIM_TRACE_SAT_VIS,
 ;                     OPENSHIM_TRACE_SATELLITE_VISIBILITY, BZR_TRACE_SAT_VIS
 ; To force it off from the environment instead: OPENSHIM_DISABLE_SAT_VIS=1
@@ -3113,7 +3113,7 @@ InteractiveFogWakes = 0
 ; silhouettes can move by sub-pixel amounts.
 ;
 ; Default 1 (absent key = on). Env: OPENSHIM_GPU_SKINNING (0 turns it off).
-; See reverse_engineering/gpu_skinning_investigation_20261020.md.
+; See reverse_engineering/notes/gpu_skinning_investigation_20261020.md.
 GpuSkinning = 1
 
 ; GpuInstancing: draw GPU-skinned craft that share a mesh and material pass as
@@ -3123,7 +3123,7 @@ GpuSkinning = 1
 ; game restarts. Read when a mission starts.
 ;
 ; Default 0. Env: OPENSHIM_GPU_INSTANCING.
-; See reverse_engineering/gpu_instancing_design_20261021.md.
+; See reverse_engineering/notes/gpu_instancing_design_20261021.md.
 GpuInstancing = 0
 
 ; ---------------------------------------------------------------------------
@@ -3137,7 +3137,7 @@ GpuInstancing = 0
 ; largest with DisableControlSmoothing = 1. Single player only: network games
 ; and paused frames keep the stock 1/60 s batch.
 ;
-; Default 0. Experimental; see reverse_engineering/mouse_every_frame_20261020.md.
+; Default 0. Experimental; see reverse_engineering/notes/mouse_every_frame_20261020.md.
 MouseEveryFrame = 0
 
 ; DynamicGeometryMaterialCache: skip the MaterialManager name lookup when a
@@ -3146,7 +3146,7 @@ MouseEveryFrame = 0
 ; begins per frame and the cache never hit, so it buys nothing today.
 ; Accepted: boolean. Not gated in network games.
 ; Default 0. Env: OPENSHIM_DG_MATERIAL_CACHE.
-; See reverse_engineering/dynamic_geometry_begin_sort_20261021.md.
+; See reverse_engineering/notes/dynamic_geometry_begin_sort_20261021.md.
 DynamicGeometryMaterialCache = 0
 
 [NativeUiDiagnostics]

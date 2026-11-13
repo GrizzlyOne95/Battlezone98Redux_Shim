@@ -1,6 +1,6 @@
 // mp_ready_diagnostic.cpp -- reports why the main menu's multiplayer entry
 // reads "Not Ready". See include/mp_ready_diagnostic.h for the rationale and
-// reverse_engineering/mp_not_ready_readiness_chain.md for the derivation.
+// reverse_engineering/notes/mp_not_ready_readiness_chain.md for the derivation.
 
 #include "mp_ready_diagnostic.h"
 #include "lan_no_auth.h"

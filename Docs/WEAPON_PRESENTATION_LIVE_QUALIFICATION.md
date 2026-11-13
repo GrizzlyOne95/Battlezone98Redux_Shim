@@ -16,7 +16,7 @@ by name, spawn, resume, terminate or change the game installation/configuration.
 
 Use a Python environment containing `pefile`, `capstone`, and `psutil`. The
 optional trace also needs the Python `frida` package. Follow `AGENT_TOOLING.md`
-and `AGENT_TOOLING_SETUP.md` for the installed toolchain. A system `python`
+and `Docs/AGENT_TOOLING_SETUP.md` for the installed toolchain. A system `python`
 may differ from the Python environment used by a `bzr-*` wrapper; verify the
 imports in the interpreter that runs the command.
 

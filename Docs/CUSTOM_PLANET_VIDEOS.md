@@ -85,4 +85,4 @@ does not qualify these behaviors or the other platforms.
 
 Local GOG DX11 results, including a rendered 2048x1536/60 fps input and stock
 fallback checks, are recorded in
-[the qualification report](CUSTOM_PLANET_VIDEO_QUALIFICATION_20261014.md).
+[the qualification report](Archive/2026/CUSTOM_PLANET_VIDEO_QUALIFICATION_20261014.md).

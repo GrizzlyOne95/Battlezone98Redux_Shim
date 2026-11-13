@@ -82,7 +82,7 @@ namespace BZROpenShim::RenderProfiles
         // Renderer) and is NEVER derived from Ogre.cfg: stock saveConfig()
         // rewrites that file on clean exit, after in-game renderer changes,
         // and even on failed boots, so it is effective-transport only. See
-        // reverse_engineering/renderer_startup_backend_selection_20260825.md.
+        // reverse_engineering/notes/renderer_startup_backend_selection_20260825.md.
         BackendSelection::BootRequest s_bootRequest {};
         bool s_backendTransportEnabled = true;
         // Read on the render thread by the scheme hook, written under
@@ -2314,7 +2314,7 @@ namespace BZROpenShim::RenderProfiles
         //
         // The group is private on purpose. The game clears and re-initialises
         // "Modable" on every mod staging cycle (see
-        // reverse_engineering/standalone_enhanced_resource_bootstrap_20260825.md
+        // reverse_engineering/notes/standalone_enhanced_resource_bootstrap_20260825.md
         // section 2.2), which would drop OpenShim's payload mid-session.
 
         namespace Boot = EnhancedBootstrap;

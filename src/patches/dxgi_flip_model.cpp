@@ -4,7 +4,7 @@
 // (DXGI_SWAP_EFFECT_DISCARD). Under the DWM that costs a composition copy per
 // frame and leaves frame queueing to the driver; every hitch captured on
 // 2026-10-20 was a Present sleep under D3D11RenderWindowSwap::swapBuffers
-// (reverse_engineering/frame_hitch_va_measurement_20261020.md). Flip model
+// (reverse_engineering/notes/frame_hitch_va_measurement_20261020.md). Flip model
 // with a frame-latency waitable object is the documented low-latency,
 // even-pacing path, and this switch exists to A/B it against stock.
 //

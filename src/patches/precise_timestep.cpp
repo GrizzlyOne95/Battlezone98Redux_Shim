@@ -20,7 +20,7 @@
 // SetLoopTimes runs, its previous-clock global is set to (clock now - N), so its
 // own dt comes out as N (N+1 if the millisecond ticks in between). Frame
 // captures that take seconds to write then still play back smoothly.
-// See reverse_engineering/frame_hitch_va_measurement_20261020.md.
+// See reverse_engineering/notes/frame_hitch_va_measurement_20261020.md.
 
 #include "precise_timestep.h"
 

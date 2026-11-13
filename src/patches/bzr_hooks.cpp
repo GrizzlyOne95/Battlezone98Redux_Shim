@@ -1339,7 +1339,7 @@ namespace BZROpenShim
         // Satellite fog-of-war investigation (feature item 24). Defaulted ON
         // for now so an ordinary session produces a scoreable capture with no
         // launch-time setup; see
-        // reverse_engineering/satellite_fow_root_cause_20260817.md. Revert to
+        // reverse_engineering/notes/satellite_fow_root_cause_20260817.md. Revert to
         // default-OFF once the regression is characterised.
         //
         // Back to default OFF. It was temporarily default-ON only while the

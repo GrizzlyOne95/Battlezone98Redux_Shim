@@ -20,7 +20,7 @@ namespace BZROpenShim
         // -----------------------------------------------------------------
         //
         // Recovered from the GOG 2.2.301 image; see
-        // reverse_engineering/p2p_early_unreliable_receive_20261010.md.
+        // reverse_engineering/notes/p2p_early_unreliable_receive_20261010.md.
         //
         // The receive routine 0x0075D800 accepts a data packet only when its
         // stamp equals peer+0x84, the next reliable stamp it expects. Senders

@@ -3,7 +3,7 @@
 // The engine resolves item bodies through UseItem / GetItemSize / UnlockItem
 // and keeps a per-item lock count. The detours cache a processed copy per
 // name and count holders themselves. Audit item P1-7
-// (Docs/CODE_AUDIT_20260925.md): a cached UseItem hit returned the copy
+// (Docs/Archive/2026/CODE_AUDIT_20260925.md): a cached UseItem hit returned the copy
 // without calling the engine while every UnlockItem forwarded, so N holders
 // left the engine at one lock and its count ended at 1-N as they released;
 // the first release also freed the engine's bytes under every passthrough

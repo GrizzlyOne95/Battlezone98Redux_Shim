@@ -11,7 +11,7 @@
 // directory walk. The walk enumerates with FindFirstFileW/FindNextFileW and
 // then asks GetFileAttributesExW/GetFileAttributesW about the very entries it
 // was just handed. Sampled 2026-10-03
-// (Docs/OGRE_LOAD_HITCH_MEASUREMENT_20261003.md), those attribute queries were
+// (Docs/Archive/2026/OGRE_LOAD_HITCH_MEASUREMENT_20261003.md), those attribute queries were
 // ~0.75 s of the ~1.4 s Modable unload->clear phase.
 //
 // How: a per-thread scope opened by a detour on buildSingleIAResource. Inside

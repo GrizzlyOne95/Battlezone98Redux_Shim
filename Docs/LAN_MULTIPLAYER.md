@@ -54,8 +54,8 @@ provide an independent offline identity implementation.
 | No platform login / fully offline identity | Missing; stock authentication/readiness remains in use |
 
 The recommended seam comes from
-`reverse_engineering/redux_tcpip_lan_multiplayer_investigation_20260713.md` and
-`reverse_engineering/netcode_matchmaking_server_plan_20260713.md`. For Redux
+`reverse_engineering/notes/redux_tcpip_lan_multiplayer_investigation_20260713.md` and
+`reverse_engineering/notes/netcode_matchmaking_server_plan_20260713.md`. For Redux
 2.2.301, the former records socket creation at `0x006BE750`, LAN/WAN/relay peer
 selection at `0x0075EEA0`, and the online endpoint/lobby contract. The feature
 supplies that lobby contract locally through the existing server-selection

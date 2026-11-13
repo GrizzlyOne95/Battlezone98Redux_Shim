@@ -170,7 +170,7 @@ across the gap and capped, so its pieces are not hollow. Flat sheets stay open.
 The first fracture of each model type used to cost a 112-188 ms frame:
 the mesh and gib-cache read, then the first `createEntity` of each piece,
 whose material load probes every archive for its textures
-(`reverse_engineering/combat_hitch_and_sim_breakdown_20261021.md`). Each
+(`reverse_engineering/notes/combat_hitch_and_sim_breakdown_20261021.md`). Each
 mission now prewarms that at its first sim tick, and again 2 s and 8 s later
 for script-spawned craft. It walks the live GameObjects (persons excluded),
 runs `PrepareFracturePayloads` in cache-only mode (it never runs the cutter:
@@ -186,7 +186,7 @@ after the 8 s pass still pay on their first death.
 The first fracture of each model type used to cost a 112-188 ms frame:
 the mesh and gib-cache read, then the first `createEntity` of each piece,
 whose material load probes every archive for its textures
-(`reverse_engineering/combat_hitch_and_sim_breakdown_20261021.md`). Each
+(`reverse_engineering/notes/combat_hitch_and_sim_breakdown_20261021.md`). Each
 mission now prewarms that at its first sim tick, and again 2 s and 8 s later
 for script-spawned craft. It walks the live GameObjects (persons excluded),
 runs `PrepareFracturePayloads` in cache-only mode (it never runs the cutter:
