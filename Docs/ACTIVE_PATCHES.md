@@ -9,7 +9,7 @@ An item belongs here only when the failure mechanism is understood well enough t
 | Patch | Classification | Phase | Next gate |
 | --- | --- | --- | --- |
 | CLI multi-parameter / `shellmap:<W>,<H>` parser repair | **Legacy 1.5 defect / OpenShim compatibility enhancement** | **Implementation ready** | Implement the post-parser repair from the pristine command-line snapshot, then qualify Steam + GOG runtime behavior. |
-| Producer rally points (`[Gameplay] ProducerRallyPoints`) | **OpenShim gameplay enhancement** | **Implemented, runtime qualification pending** | Live SP test of the checklist in `Docs/PRODUCER_RALLY_POINTS.md` (V arms rally mode, the Reticle Command key sets the rally, V cancels, Shift+V clears, new units drive to the rally, HUD marker shows while selected, scavengers/constructors skipped, editor and MP untouched). |
+| Producer rally points (`[Gameplay] ProducerRallyPoints`) | **OpenShim gameplay enhancement** | **Implemented, runtime qualification pending** | Live SP test of the checklist in `Docs/PRODUCER_RALLY_POINTS.md` (V arms rally mode, the Reticle Command key sets the rally, V cancels, Shift+V clears, new units drive to the rally, HUD marker shows while selected, "V Rally Point" command panel row under TAB Cancel (aligned; inside or below the underlay), scavengers/constructors skipped, editor and MP untouched). |
 
 ### CLI multi-parameter parser repair
 

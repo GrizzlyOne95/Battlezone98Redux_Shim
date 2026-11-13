@@ -29,8 +29,12 @@
 //     runs inside nested modal loops (pause menu, dialogs), so it touches game
 //     state only while the world is interactive.
 //   * The shared HUD gauge overlay (hud_gauge_overlay.h) draws the marker.
+//   * The command panel's post-draw seam (ContextualHud::
+//     RegisterCommandPanelPostDraw; contextual_hud.cpp owns the render slot)
+//     adds a "V Rally Point" row under the stock TAB row.
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
+#include "contextual_hud.h"
 #include "engine_globals.h"
 #include "game_state.h"
 #include "hook_engine.h"
@@ -718,11 +722,13 @@ namespace BZROpenShim::Hooks
         }
 
         void AttachMarkerOnGameThread();
+        void AttachPanelRowOnGameThread();
 
         void MainLoopTick()
         {
             EnsureSubclass();
             AttachMarkerOnGameThread();
+            AttachPanelRowOnGameThread();
             const int pending = g_PendingAction.load(std::memory_order_acquire);
             const size_t tableSize = TableSize();
             const bool active = g_Active.load(std::memory_order_acquire);
@@ -1092,6 +1098,282 @@ namespace BZROpenShim::Hooks
                                                     kMarkerPanelArgb, x, textY, kMarkerText, kMarkerArgb, 1);
             });
             return ok;
+        }
+
+        // ---- the command-panel row -----------------------------------------
+        // A 14th row under the stock TAB row while a Recycler/Factory is
+        // selected: a key box reading V and "Rally Point" ("Cancel Rally"
+        // while set mode is armed), drawn with the stock row calls of
+        // ControlPanel::Render (FUN_004a08e0.c lines 698-711). Display only:
+        // the engine hit-tests rows 0-12 alone. Evidence:
+        // Docs/PRODUCER_RALLY_POINTS.md.
+
+        using FnFontDraw = void(__cdecl*)(void* font, void* pane, int x, int y, const char* text);
+        using FnTextHeight = float(__cdecl*)(void* font);
+        using FnTextMeasure = void(__cdecl*)(void* font, const char* text, float* width, float* height);
+        using FnSpriteDraw = void(__cdecl*)(void* pane, int sprite, int x, int y, uint32_t flags, float scale);
+        using FnFillRect = void(__cdecl*)(void* pane, int x1, int y1, int x2, int y2, uint32_t colour, uint32_t mode);
+        using FnUiScale = uint64_t(__cdecl*)(); // EAX = x, EDX = y (float bits)
+
+        // ControlPanel +0x11A0: the branch Render took this frame.
+        constexpr size_t kPanelStateOffset = 0x11A0;
+        // CommandMenuRowAnchors rows: 11 ALT, 12 TAB ({x, y} ints).
+        constexpr size_t kAltAnchorOffset = 11 * 8;
+        constexpr size_t kTabAnchorOffset = 12 * 8;
+        // The stock key sprite flags (right-align x, centre y, colour mode 1).
+        constexpr uint32_t kKeySpriteFlags = 0x60001;
+        constexpr char kKeyLetter[] = "V";
+
+        uint32_t g_PanelPaneAddr = 0;      // HudPaneBuffer
+        uint32_t g_PanelFontAddr = 0;      // UiFontContext
+        uint32_t g_PanelColourAddr = 0;    // HudColorWhite
+        uint32_t g_PanelAltLayoutAddr = 0; // CommandMenuAltLayoutFlag
+        uint32_t g_PanelBranchInputAddr = 0; // CommandMenuUnitBranchInput
+        uint32_t g_PanelAnchorsAddr = 0;   // CommandMenuRowAnchors
+        uint32_t g_PanelKeyInsetAddr = 0;  // CommandMenuKeyInset
+        uint32_t g_PanelFontDrawAddr = 0;  // HudFadeFont
+        uint32_t g_PanelTextHeightAddr = 0;
+        uint32_t g_PanelTextMeasureAddr = 0;
+        uint32_t g_PanelSpriteAddr = 0;    // HudFeedbackSprite
+        uint32_t g_PanelFillAddr = 0;      // HudFillRect
+        uint32_t g_PanelScaleAddr = 0;     // HudFeedbackScale
+        // Set once the rows bind (patch thread); the seam is registered from
+        // the game thread the first time the feature is active, so with
+        // rally off the stock render slot is never touched.
+        std::atomic<bool> g_PanelRowPending{ false };
+
+        // Game thread only (the post-draw callback). A miss is retried at
+        // most once a second, so an early first draw does not hide the row
+        // for the rest of the process.
+        constexpr ULONGLONG kKeySpriteRetryMs = 1000;
+        bool g_KeySpritesResolved = false;
+        ULONGLONG g_KeySpriteLastTry = 0;
+        bool g_KeySpriteMissLogged = false;
+        int g_KeyVSprite = 0;   // a mod's key_V sprite, else 0
+        int g_KeyBoxW = 0;      // key_TAB atlas size, for our own box
+        int g_KeyBoxH = 0;
+        bool g_PanelRowFaultLogged = false;
+
+        struct PanelRowInputs
+        {
+            int panelState = 0;
+            int selectionCount = 0;
+            bool altLayout = true;
+            bool branchInputHeld = true;
+            int tabX = 0;
+            int tabY = 0;
+            int altY = 0;
+            int inset = 0;
+            void* pane = nullptr;
+            void* font = nullptr;
+            uint32_t colour = 0;
+        };
+
+        bool ReadPanelRowInputs(uintptr_t panel, PanelRowInputs& in)
+        {
+            __try
+            {
+                in.panelState = *reinterpret_cast<const int*>(panel + kPanelStateOffset);
+                in.selectionCount = *reinterpret_cast<const int*>(panel + kSelectCountOffset);
+                in.altLayout = *reinterpret_cast<const uint8_t*>(g_PanelAltLayoutAddr) != 0;
+                in.branchInputHeld = *reinterpret_cast<const uint8_t*>(g_PanelBranchInputAddr) != 0;
+                in.tabX = *reinterpret_cast<const int*>(g_PanelAnchorsAddr + kTabAnchorOffset);
+                in.tabY = *reinterpret_cast<const int*>(g_PanelAnchorsAddr + kTabAnchorOffset + 4);
+                in.altY = *reinterpret_cast<const int*>(g_PanelAnchorsAddr + kAltAnchorOffset + 4);
+                in.inset = *reinterpret_cast<const int*>(g_PanelKeyInsetAddr);
+                in.pane = *reinterpret_cast<void* const*>(g_PanelPaneAddr);
+                in.font = *reinterpret_cast<void* const*>(g_PanelFontAddr);
+                in.colour = *reinterpret_cast<const uint32_t*>(g_PanelColourAddr);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return in.pane && in.font;
+        }
+
+        int SafeSpriteLookup(const char* name)
+        {
+            if (!g_BzrFn_HudSpriteLookup)
+                return 0;
+            __try
+            {
+                return g_BzrFn_HudSpriteLookup(name);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        // A mod's key_V wins; otherwise our box takes key_TAB's size. Cached
+        // once either is found; a miss retries at most once a second.
+        void ResolveKeySprites()
+        {
+            if (g_KeySpritesResolved)
+                return;
+            const ULONGLONG now = GetTickCount64();
+            if (g_KeySpriteLastTry != 0 && now - g_KeySpriteLastTry < kKeySpriteRetryMs)
+                return;
+            g_KeySpriteLastTry = now;
+            g_KeyVSprite = SafeSpriteLookup("key_V");
+            if (g_KeyVSprite > 0)
+            {
+                g_KeySpritesResolved = true;
+                Log(L"[RALLY] command panel row uses the key_V sprite (id %d)\n", g_KeyVSprite);
+                return;
+            }
+            g_KeyVSprite = 0;
+            HudSpriteRectRecord tab = {};
+            const int tabId = SafeSpriteLookup("key_TAB");
+            if (tabId > 0 && TryGetHudSpriteCurrentRecord(tabId, tab) && tab.w > 0 && tab.h > 0)
+            {
+                g_KeySpritesResolved = true;
+                g_KeyBoxW = tab.w;
+                g_KeyBoxH = tab.h;
+                Log(L"[RALLY] command panel row draws its own key box (key_TAB size %dx%d)\n", g_KeyBoxW,
+                    g_KeyBoxH);
+                return;
+            }
+            if (!g_KeySpriteMissLogged)
+            {
+                g_KeySpriteMissLogged = true;
+                Log(L"[RALLY] no key_V sprite and key_TAB size unreadable (id %d); panel row hidden, retrying\n",
+                    tabId);
+            }
+        }
+
+        bool DrawPanelRowSeh(const PanelRowInputs& in, int x, int y, const char* label)
+        {
+            const auto fontDraw = reinterpret_cast<FnFontDraw>(g_PanelFontDrawAddr);
+            const auto textHeight = reinterpret_cast<FnTextHeight>(g_PanelTextHeightAddr);
+            __try
+            {
+                if (g_KeyVSprite > 0)
+                {
+                    reinterpret_cast<FnSpriteDraw>(g_PanelSpriteAddr)(in.pane, g_KeyVSprite, x - in.inset, y,
+                                                                      kKeySpriteFlags, 0.0f);
+                }
+                else
+                {
+                    const uint64_t scale = reinterpret_cast<FnUiScale>(g_PanelScaleAddr)();
+                    float sx = 1.0f, sy = 1.0f;
+                    const uint32_t sxBits = static_cast<uint32_t>(scale);
+                    const uint32_t syBits = static_cast<uint32_t>(scale >> 32);
+                    std::memcpy(&sx, &sxBits, sizeof(sx));
+                    std::memcpy(&sy, &syBits, sizeof(sy));
+                    // No usable scale this frame: label only.
+                    const bool scaleOk = std::isfinite(sx) && std::isfinite(sy) && sx > 0.0f && sy > 0.0f;
+                    Policy::PixelRect box;
+                    if (scaleOk && Policy::KeyBoxRect(x, y, in.inset, g_KeyBoxW, g_KeyBoxH, sx, sy, box))
+                    {
+                        const auto fill = reinterpret_cast<FnFillRect>(g_PanelFillAddr);
+                        const int t = sx >= 2.0f ? static_cast<int>(sx) : 1;
+                        fill(in.pane, box.left, box.top, box.right, box.top + t, in.colour, 0);
+                        fill(in.pane, box.left, box.bottom - t, box.right, box.bottom, in.colour, 0);
+                        fill(in.pane, box.left, box.top, box.left + t, box.bottom, in.colour, 0);
+                        fill(in.pane, box.right - t, box.top, box.right, box.bottom, in.colour, 0);
+                        float w = 0.0f, h = 0.0f;
+                        reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr)(in.font, kKeyLetter, &w, &h);
+                        // FUN_00689950: the font's first dword is its colour.
+                        *reinterpret_cast<uint32_t*>(in.font) = in.colour;
+                        const int cx = (box.left + box.right) / 2 - static_cast<int>(w / 2.0f);
+                        const int cy = (box.top + box.bottom) / 2;
+                        fontDraw(in.font, in.pane, cx, Policy::CenteredTextY(cy, textHeight(in.font)), kKeyLetter);
+                    }
+                }
+                *reinterpret_cast<uint32_t*>(in.font) = in.colour;
+                fontDraw(in.font, in.pane, x, Policy::CenteredTextY(y, textHeight(in.font)), label);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // ContextualHud post-draw callback: frame thread, right after the
+        // stock render, inside the fade scope (the native sprite, fill and
+        // text colours are already scaled, so `opacity` is not applied
+        // again) and never while EXU owns the command presentation.
+        void PanelRowPostDraw(void* panel, float /*opacity*/)
+        {
+            if (!g_Active.load(std::memory_order_acquire) ||
+                reinterpret_cast<uintptr_t>(panel) != g_ControlPanelAddr)
+                return;
+            PanelRowInputs in;
+            if (!ReadPanelRowInputs(reinterpret_cast<uintptr_t>(panel), in))
+                return;
+            Policy::PanelRowGate gate;
+            gate.active = true;
+            // Render writes +0x11A0 only while there is a user object
+            // (FUN_004a08e0.c:367-368) and takes the unit branch only while
+            // DAT_00919875 is 0 (:1313).
+            gate.userObject = UserObject() != nullptr;
+            gate.branchInputHeld = in.branchInputHeld;
+            gate.panelState = in.panelState;
+            gate.selectionCount = in.selectionCount;
+            gate.altLayout = in.altLayout;
+            // Cheap checks first; the producer walk only when they pass.
+            gate.eligibleProducer = true;
+            if (!Policy::PanelRowVisible(gate))
+                return;
+            gate.eligibleProducer = !EditorActive() && EligibleProducerSelected();
+            if (!Policy::PanelRowVisible(gate))
+                return;
+            int x = 0, y = 0;
+            if (!Policy::PanelRowAnchor(in.tabX, in.tabY, in.altY, x, y))
+                return;
+            ResolveKeySprites();
+            if (g_KeyVSprite <= 0 && (g_KeyBoxW <= 0 || g_KeyBoxH <= 0))
+                return;
+            const char* label = Policy::PanelRowLabel(g_Armed.load(std::memory_order_acquire));
+            if (!DrawPanelRowSeh(in, x, y, label) && !g_PanelRowFaultLogged)
+            {
+                g_PanelRowFaultLogged = true;
+                Log(L"[RALLY] command panel row draw faulted\n");
+            }
+        }
+
+        // Patch thread, after the hooks are in. Optional like the marker.
+        void InstallPanelRow()
+        {
+            const HookEngine::EngineRow rows[] = {
+                { "HudPaneBuffer", &g_PanelPaneAddr },
+                { "UiFontContext", &g_PanelFontAddr },
+                { "HudColorWhite", &g_PanelColourAddr },
+                { "CommandMenuAltLayoutFlag", &g_PanelAltLayoutAddr },
+                { "CommandMenuUnitBranchInput", &g_PanelBranchInputAddr },
+                { "CommandMenuRowAnchors", &g_PanelAnchorsAddr },
+                { "CommandMenuKeyInset", &g_PanelKeyInsetAddr },
+                { "HudFadeFont", &g_PanelFontDrawAddr },
+                { "CommandMenuTextHeight", &g_PanelTextHeightAddr },
+                { "CommandMenuTextMeasure", &g_PanelTextMeasureAddr },
+                { "HudFeedbackSprite", &g_PanelSpriteAddr },
+                { "HudFillRect", &g_PanelFillAddr },
+                { "HudFeedbackScale", &g_PanelScaleAddr },
+            };
+            if (!HookEngine::BindEngineRows("Producer rally panel row", rows) || !EngineGlobals::UserObjectSlot())
+            {
+                Log(L"[RALLY] command panel rows did not bind; panel row hidden\n");
+                return;
+            }
+            g_PanelRowPending.store(true, std::memory_order_release);
+        }
+
+        // Game thread (main-loop tick). One attempt, the first time the
+        // feature is active: a refusal (slot not stock, another callback,
+        // incompatible build) would repeat.
+        void AttachPanelRowOnGameThread()
+        {
+            if (!g_PanelRowPending.load(std::memory_order_acquire) || !g_Active.load(std::memory_order_acquire))
+                return;
+            if (!g_PanelRowPending.exchange(false, std::memory_order_acq_rel))
+                return;
+            if (ContextualHud::RegisterCommandPanelPostDraw(&PanelRowPostDraw))
+                Log(L"[RALLY] command panel row registered\n");
+            else
+                Log(L"[RALLY] command panel post-draw seam unavailable; panel row hidden\n");
         }
 
         // ---- the build side ------------------------------------------------
@@ -1474,7 +1756,10 @@ namespace BZROpenShim::Hooks
         if (!all)
             MarkFailed();
         else
+        {
             InstallMarker();
+            InstallPanelRow();
+        }
         RefreshProducerRallyPointsState();
     }
 
