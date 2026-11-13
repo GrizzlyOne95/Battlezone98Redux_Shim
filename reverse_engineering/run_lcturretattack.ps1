@@ -6,8 +6,8 @@
 # file and openshim.ini when the game exits. Requires the lcbench baseline in
 # addon\lcbench and the build deployed with scripts/Deploy-OpenShim.ps1.
 #
-#   pwsh -File reverse_engineering/run_lcturretattack.ps1 -RunSeconds 100              # feature on
-#   pwsh -File reverse_engineering/run_lcturretattack.ps1 -RunSeconds 100 -FeatureOff  # A/B: stock deploy-in-place
+#   pwsh -File reverse_engineering/run_lcturretattack.ps1              # feature on
+#   pwsh -File reverse_engineering/run_lcturretattack.ps1 -FeatureOff  # A/B: stock deploy-in-place
 #
 # Runs in the background (never takes the foreground): RunInBackground is set
 # to 1 for the run. Takes bzr_livetest.lock in the game root and refuses if
@@ -16,7 +16,7 @@
 param(
     [string]$GameRoot = "C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux",
     [ValidateRange(0, 300)]
-    [int]$RunSeconds = 100,
+    [int]$RunSeconds = 130,   # ~18 s of loading + the 90 s script
     [switch]$FeatureOff,
     [ValidateRange(50, 900)]
     [int]$EnemyGap = 450,
@@ -34,6 +34,8 @@ $overlay = Join-Path $PSScriptRoot "test_missions\lcbench_turretattack\turretatt
 $ini = Join-Path $GameRoot "openshim.ini"
 $logRoot = Join-Path $GameRoot "logs"
 $lock = Join-Path $GameRoot "bzr_livetest.lock"
+$watchdog = Join-Path $env:TEMP "bzr_foreground_watchdog.log"
+$watchdogStart = if (Test-Path -LiteralPath $watchdog) { @(Get-Content -LiteralPath $watchdog).Count } else { 0 }
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $tag = if ($FeatureOff) { "off" } else { "on" }
 if (-not $OutputRoot) { $OutputRoot = Join-Path $GameRoot "openshim_test_results\lcturretattack_${tag}_$stamp" }
@@ -92,8 +94,9 @@ try {
     }
     Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
 }
-$watchdog = Join-Path $env:TEMP "bzr_foreground_watchdog.log"
-if ((Test-Path -LiteralPath $watchdog) -and (Select-String -LiteralPath $watchdog -Pattern "FOREGROUND-STOLEN" -Quiet)) {
+# Only lines this run added; the watchdog log is cumulative.
+if ((Test-Path -LiteralPath $watchdog) -and
+    (@(Get-Content -LiteralPath $watchdog | Select-Object -Skip $watchdogStart) -match "FOREGROUND-STOLEN").Count -gt 0) {
     Write-Warning "FOREGROUND-STOLEN in $watchdog - stop launching and report."
 }
 Write-Host "Logs: $OutputRoot (look for [LCTATK] in BZLogger.txt and [TURRETATK] in openshim.log)"
