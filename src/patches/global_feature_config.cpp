@@ -491,6 +491,8 @@ namespace BZROpenShim
             ReloadProducerRallyPointsConfig();
             // [Gameplay] AutoGroupNewUnits, likewise.
             ReloadAutoGroupNewUnitsConfig();
+            // [Gameplay] GroupStrip, likewise.
+            ReloadGroupStripConfig();
 
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;
             if (TryGetUserConfigBool(

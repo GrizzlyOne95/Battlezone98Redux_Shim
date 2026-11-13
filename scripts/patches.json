@@ -2969,6 +2969,12 @@
       "identity": "ControlPanel primary vtable on exact GOG Redux 2.2.301 (RTTI COL 0x008A6AE4, type .?AVControlPanel@@ at 0x0090013C). The only ControlPanel constructor call is the static initializer 0x004054E0 (`mov ecx,0x978E20; call 0x0049F8E0`), which stores this vtable at 0x0049F918. Slot 6 (0x00877E68) is the input/group-key routine FUN_004A08E0. AutoGroupNewUnits requires [ControlPanelGlobal] == this and the RTTI name before it writes a group."
     },
     {
+      "name": "GroupStripUnitNameRead",
+      "address": "0x004E064F",
+      "expected": "8B 55 8C 83 C2 64 52 68 04 BC A8 45 68 EC 9C DD D3",
+      "identity": "Code guard, never patched or called: the GameObjectClass constructor FUN_004e0450 line 89 reads ODF key \"unitName\" (hash 0x45A8BC04 in section 0xD3DD9CEC, the same pair BZ 1.5's GameObjectClass ctor passes ParameterDB::Get for this->unitName, 1.5 all_decompiled.c line 189463) through FUN_004cbc10, which calls FUN_00589a10 with size 0x20. These bytes are `mov edx,[ebp-0x74]` (the new class), `add edx,0x64`, `push edx`, `push 0x45A8BC04`, `push 0xD3DD9CEC`, so unitName is char[0x20] at GameObjectClass +0x64 (the next key, 0x98D7239C, goes to +0x84). The group strip (group_strip.cpp) reads that field read-only and stays down when these bytes do not match."
+    },
+    {
       "name": "InputEditModeFlag",
       "address": "0x009181B8",
       "kind": "data",

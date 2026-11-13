@@ -655,6 +655,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Units your Recycler or Factory builds join a group on F1-F7: the first group where "
       "every unit is the same type and there are fewer than 10, else the first empty group. "
       "Scavengers, constructors and pilots are left out. Single player only." },
+    // [Gameplay], Controls page next to Auto Group. Ships ON: default "On" (0).
+    { "Group Strip", "Gameplay", "GroupStrip", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Shows each F1-F7 group that has units in a strip beside the scrap and pilot gauge: "
+      "the key, how many units are alive and the first unit's name, with + when the group "
+      "mixes types. Read only, so it also works in multiplayer." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalTurbo,
@@ -984,7 +991,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
-    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "GroupStrip", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },

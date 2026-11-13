@@ -2509,6 +2509,18 @@ ProducerRallyPoints = 1
 ; Exposed on the OpenShim Settings page as "Auto Group".
 AutoGroupNewUnits = 0
 
+; HUD group strip (from BZCC). A row beside the scrap/pilot gauge lists every
+; F1-F7 group that has a live unit: key, live count and the first unit's ODF
+; unitName, with "+" when the group holds more than one type, for example
+; "F1 4xTank  F2 2xBomber  F3 3xTank+". Long names are shortened to fit the
+; screen. Hidden with no groups, in the pause menu and in the shell.
+; Independent of AutoGroupNewUnits. It only reads the groups, so it also
+; shows in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Group Strip".
+GroupStrip = 1
+
 
 [Updater]
 ; Stage a newer OpenShim from the Steam Workshop when the main menu first appears (Steam builds, never in multiplayer); it installs when you quit. 0 = manual "Check for Updates" only. Default: 1.

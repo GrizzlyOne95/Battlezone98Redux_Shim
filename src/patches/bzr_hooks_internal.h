@@ -1426,6 +1426,13 @@ namespace BZROpenShim
         // Called by the shared FinishBuild hook after the stock call.
         void AutoGroupOnUnitBuilt(void* producer, void* built);
 
+        // --- HUD group strip (group_strip.cpp) ---------------------------------
+        // Read-only F1-F7 group row on the HUD. Tick: the world render tick
+        // (frame/game thread), throttled to 4 Hz internally.
+        void ReloadGroupStripConfig();
+        void TickGroupStrip();
+        void ResetGroupStrip();
+
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
         extern bool g_ApcAlliedTargetDeployFixEnabled;
         extern bool g_ApcAlliedTargetDeployFixInstalled;

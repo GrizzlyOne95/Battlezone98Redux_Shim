@@ -252,3 +252,66 @@ Decompile paths are relative to the corpus directory named above.
 - Save and load keep the group.
 - The HUD group display (if any) shows the new member without a reselect.
 - Nothing happens in multiplayer or with the setting off.
+
+# Group strip
+
+`[Gameplay] GroupStrip`, default ON, independent of `AutoGroupNewUnits`.
+Code: `src/patches/group_strip.cpp`; rules and layout:
+`include/group_strip_policy.h` (tests: `tests/group_strip_policy_tests.cpp`).
+
+Stock Redux has no UI for number groups: in the decompile only init, save,
+load, select and dead-unit removal touch the group arrays. The strip draws one
+row next to the scrap/pilot gauge, for example
+`F1 4xTank  F2 2xBomber  F3 3xTank+`:
+
+- One entry for each of groups 0-6 (F1-F7) with at least one live member;
+  dead handles are not counted. Groups 7-9 have no key and are not shown.
+- The label is the first live member's ODF `unitName`, else its ODF name.
+  `+` means another live member has a different class.
+- Names are cut to 16, then 10, then 6 characters (`Assau.`), then left out,
+  until the row fits. If even that is too wide, trailing groups are replaced
+  by `...`.
+- `x` instead of `×`: the HUD font's support for that character is unknown.
+- Placement: on the gauge's top line, right of it, when every group fits there
+  with names of at least 6 characters; else centred under the gauge. The
+  strip must stay in the top third of the screen or it is not drawn. Spacing
+  scales with the text height (640x480 to 4K).
+- Hidden with no live group, with the pause menu or a non-gameplay shell
+  screen up, without a player object, and in the shell (the snapshot is
+  taken from the world render tick and is not drawn once older than 1 s).
+- Multiplayer: shown. It only reads the local ControlPanel's groups and
+  draws on the local HUD; nothing is written or sent.
+
+Threads: the world render tick (`LegacyWorldUpdateRenderQueueHook`, frame and
+game thread) takes a snapshot at 4 Hz: group counts, names, mixed flags and
+the gauge's six live layout points. The `HudGaugeOverlay` painter
+(`Slot::GroupStrip`) only copies that snapshot and calls the HUD text
+measure and draw primitives. `HudGaugeOverlay::Ensure()` and the painter
+are attached from that tick, which is the thread `Ensure()` requires.
+
+## Addresses and evidence (GOG 2.2.301)
+
+| Fact | Evidence |
+|---|---|
+| unitName is `char[0x20]` at GameObjectClass `+0x64` | GameObjectClass ctor `FUN_004e0450` line 89: `FUN_004cbc10(0xd3dd9cec, 0x45a8bc04, local_78 + 0x19, param_1 + 100)`; `FUN_004cbc10` passes size 0x20 to `FUN_00589a10`. The hash pair is BZ 1.5's `ParameterDB::Get(..., this->unitName, 0x20, ...)` (1.5 `all_decompiled.c` line 189463). Shipping exe 0x004E064F: `8B 55 8C 83 C2 64 52 68 04 BC A8 45` (`mov edx,[ebp-0x74]; add edx,0x64; push edx; push 0x45A8BC04`). Row `GroupStripUnitNameRead` guards those bytes; the strip stays down if they differ. |
+| GameObjectClass of an object | GameObject `+0x18` sub-object, vtable[0] (the `TryGetCraftOdfName` path; its ODF at class `+0x30` matches `FUN_004e0450`'s `local_78[0xc] = param_2`). |
+| Groups | ControlPanel `+0xFC4` / `+0x18C` / 0x16C stride; see "Auto-group new units" above. |
+| Gauge plates | `FUN_005c6cf0` (layout): scrap plate x = `W/2 - 176s/2` (lines 20, 34), pilot plate x = `W/2` (line 39), both y = `10s/2` (lines 22, 47-48); scrap value y = plate y + `18s/2` + `10s/2` (line 38), a drop of 14s. `FUN_005c6f70` (draw) lines 50-52 and 75-77 draw each plate at `(spriteW * s / 2, spriteH * s / 2)`; with the alternate menu layout (line 72) the pilot plate follows the scrap plate instead of its own point. `scrap_panel`/`pilot_panel` are 180 x 64 in `spritea.st` (read from Campaign Reimagined's copy; the stock copy in `bzone.zfs` was not extracted). |
+| Gauge rect used | From the six live `ScrapHud*Point` rows: s = (value y - plate y + 2) / 14 (never below the real scale); scrap plate reserves 180s x 32s, pilot plate 90s x 32s, each string +/-40s around its x and one text height below its y. At s = 1, 1280x720 (the stock plates span x 552-730, y 5-37) it reserves x 552-758, y 5-42. Without the rows: the stock formula with s = max(1, H/480). |
+
+## Live test checklist (UNVERIFIED)
+
+- The strip appears with one group bound and disappears when its last unit
+  dies; counts drop as members die.
+- A unit's `unitName` shows (for example "Tank" for `avtank`), not garbage;
+  a hand-mixed group shows `+`.
+- No overlap with the scrap/pilot plates at 640x480, 1280x720, 1920x1080 and
+  3840x2160, and with `ScrapPilotHud = Legacy`. The assumed 180 x 64 plate
+  size is from CR's sprite table.
+- Nothing else of the stock HUD sits right of the gauge on its top line
+  (objective/message text was not checked).
+- Hidden in the pause menu, the shell, satellite view, cinematic cameras and
+  with the HUD hidden. Satellite and cinematic views are not checked: the
+  painter runs whenever the gauge draw function is called, including when
+  that function skips its own drawing (`FUN_005c6f70` line 26).
+- Shown in multiplayer; nothing in the session log changes.

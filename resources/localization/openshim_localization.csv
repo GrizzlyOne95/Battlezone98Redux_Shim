@@ -260,6 +260,8 @@ openshim_opt:ProducerRallyPoints:label~Rally Points~~~~~~
 openshim_opt:ProducerRallyPoints:desc~With a Recycler or Factory selected, V sets its rally point to the ground under the reticle and Shift+V clears it. New units from it drive there; scavengers and constructors do not. Single player only.~~~~~~
 openshim_opt:AutoGroupNewUnits:label~Auto Group~~~~~~
 openshim_opt:AutoGroupNewUnits:desc~Units your Recycler or Factory builds join a group on F1-F7: the first group where every unit is the same type and there are fewer than 10, else the first empty group. Scavengers, constructors and pilots are left out. Single player only.~~~~~~
+openshim_opt:GroupStrip:label~Group Strip~~~~~~
+openshim_opt:GroupStrip:desc~Shows each F1-F7 group that has units in a strip beside the scrap and pilot gauge: the key, how many units are alive and the first unit's name, with + when the group mixes types. Read only, so it also works in multiplayer.~~~~~~
 openshim_opt:Turbo:label~Global Turbo~~~~~~
 openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~~~~~~
 openshim_opt:NoDamageSlowdown:label~No Damage Slowdown~~~~~~

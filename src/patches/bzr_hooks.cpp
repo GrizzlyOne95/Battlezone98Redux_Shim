@@ -1824,6 +1824,8 @@ namespace BZROpenShim
         HudFeedback::Tick();
         ContextualHud::Tick();
         HudPalette::Tick();
+        // F1-F7 group strip: 4 Hz group snapshot for its HUD painter.
+        TickGroupStrip();
 
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.
