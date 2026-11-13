@@ -58,6 +58,8 @@ namespace BZROpenShim
         // by WM_ACTIVATEAPP. Activation is blocked, so the flag would stay 0 and
         // the sim would idle. Only the EXECUTABLE's GetActiveWindow import reports
         // the game window; focus (GetFocus), keyboard and raw mouse stay real.
+        // That seed alone proved unreliable, so this mode also enables
+        // RunInBackground (background_run.cpp), which holds the flag up.
         //
         // A physical click on the game window (WH_GETMESSAGE hook; button physically
         // down and the game window is the one under the cursor, so harness
