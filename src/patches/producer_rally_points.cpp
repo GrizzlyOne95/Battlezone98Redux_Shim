@@ -8,6 +8,9 @@
 // point; it is drawn only, never a game object, so nothing is saved and no nav
 // slot is used. Addresses, evidence and limits: Docs/PRODUCER_RALLY_POINTS.md.
 //
+// A 3D beacon (the stock nav beacon mesh on a shim-owned Ogre node) marks
+// the same rally; without it the HUD square is drawn instead.
+//
 // Engine touch points:
 //   * Recycler/Factory vtable slot 42 (Producer::FinishBuild, which returns the
 //     new GameObject*): after the stock call, a Go order for the new unit.
@@ -25,6 +28,7 @@
 #include "iat_patch.h"
 #include "patcher.h"
 #include "producer_rally_policy.h"
+#include "shell_casing_physics.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -555,9 +559,233 @@ namespace BZROpenShim::Hooks
             return g_RealPeekMessageA ? g_RealPeekMessageA(msg, hwnd, min, max, remove) : FALSE;
         }
 
+        // ---- the 3D rally beacon ------------------------------------------
+        // The stock nav beacon's mesh (apcamr.odf baseName "apcamr"; shipped
+        // as BZ_ASSETS/common/models/apcamr.mesh) on a shim-owned Ogre node:
+        // no game object, no collision, nothing saved. Its origin is at its
+        // base (mesh AABB min y = 0.0015), so the node sits at the rally
+        // point, which is already ground height. Same visibility rule as the
+        // HUD marker. Every function here runs on the game thread: the tick
+        // from ChunkEffect::Simulate (the shell casings' point), the rest
+        // from SetRunning, the Lua mission reset and Ogre's scene teardown.
+        // A producer whose rally has no beacon (mesh unavailable, pool full)
+        // keeps the HUD square.
+
+        constexpr char kRallyMeshName[] = "apcamr.mesh";
+        constexpr size_t kMeshPoolSize = 8;
+        // apcamr.odf [CameraPodClass] omegaSpin = 1.0 (rad/s).
+        constexpr double kMeshSpinRadPerSec = 1.0;
+
+        struct RallyMeshSlot
+        {
+            void* sceneManager = nullptr;
+            void* node = nullptr;
+            void* entity = nullptr;
+            bool visible = false;
+        };
+
+        RallyMeshSlot g_MeshSlots[kMeshPoolSize];
+        bool g_MeshUnavailable = false; // creation failed once: HUD square from then on
+        bool g_MeshUnavailableLogged = false;
+        constexpr int kMaxMeshTransformFailures = 3;
+        int g_MeshTransformFailures = 0;
+        bool g_AnyMeshVisible = false;
+        // Producers whose rally a beacon shows; the painter skips their
+        // square. Under g_TableLock.
+        uintptr_t g_MeshShown[kMeshPoolSize] = {};
+        size_t g_MeshShownCount = 0;
+
+        // Caller holds g_TableLock (shared or exclusive).
+        bool MeshShownLocked(uintptr_t producer)
+        {
+            for (size_t i = 0; i < g_MeshShownCount; ++i)
+                if (g_MeshShown[i] == producer)
+                    return true;
+            return false;
+        }
+
+        void SetMeshShown(const uintptr_t* producers, size_t count)
+        {
+            TableExclusive lock;
+            g_MeshShownCount = count < kMeshPoolSize ? count : kMeshPoolSize;
+            for (size_t i = 0; i < g_MeshShownCount; ++i)
+                g_MeshShown[i] = producers[i];
+        }
+
+        bool ReadRenderOrigin(ShellCasings::Vec3& out)
+        {
+            const uintptr_t originAddr = WorldRenderOriginAddr();
+            if (!originAddr)
+                return false;
+            __try
+            {
+                const float* origin = reinterpret_cast<const float*>(originAddr);
+                out = { origin[0], origin[1], origin[2] };
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return std::isfinite(out.x) && std::isfinite(out.y) && std::isfinite(out.z);
+        }
+
+        void HideAllMeshes()
+        {
+            for (RallyMeshSlot& slot : g_MeshSlots)
+            {
+                if (slot.visible)
+                    HideShimOwnedEntity(slot.entity);
+                slot.visible = false;
+            }
+            g_AnyMeshVisible = false;
+            SetMeshShown(nullptr, 0);
+        }
+
+        // Drops the pointers without an Ogre call: the scene that made them
+        // is gone or is being torn down (Ogre frees the objects).
+        void ForgetMeshSlots(const wchar_t* reason)
+        {
+            size_t held = 0;
+            for (RallyMeshSlot& slot : g_MeshSlots)
+            {
+                if (slot.node || slot.entity)
+                    ++held;
+                slot = RallyMeshSlot{};
+            }
+            g_AnyMeshVisible = false;
+            SetMeshShown(nullptr, 0);
+            if (held)
+                Log(L"[RALLY] forgot %zu rally beacon(s) (%ls)\n", held, reason ? reason : L"unspecified");
+        }
+
+        // Destroys the beacons made by sceneManager (DestroyShimOwnedMeshObject
+        // does nothing unless it is the live scene), then forgets them all.
+        void DestroyMeshSlots(void* sceneManager, const wchar_t* reason)
+        {
+            for (const RallyMeshSlot& slot : g_MeshSlots)
+            {
+                if (slot.sceneManager && slot.sceneManager == sceneManager)
+                    DestroyShimOwnedMeshObject(slot.sceneManager, slot.node, slot.entity);
+            }
+            ForgetMeshSlots(reason);
+        }
+
+        void MeshTick()
+        {
+            if (g_MeshUnavailable)
+                return;
+            uintptr_t producers[kMeshPoolSize] = {};
+            float positions[kMeshPoolSize][3] = {};
+            size_t wanted = 0;
+            if (g_Active.load(std::memory_order_acquire) && TableSize() != 0)
+            {
+                ForEachSelectedProducer([&](void* producer, uint32_t) {
+                    if (wanted >= kMeshPoolSize)
+                        return; // the rest keep the HUD square
+                    TableShared lock;
+                    const Policy::RallyEntry* entry = g_Table.Find(reinterpret_cast<uintptr_t>(producer));
+                    if (!entry)
+                        return;
+                    producers[wanted] = reinterpret_cast<uintptr_t>(producer);
+                    positions[wanted][0] = entry->pos[0];
+                    positions[wanted][1] = entry->pos[1];
+                    positions[wanted][2] = entry->pos[2];
+                    ++wanted;
+                });
+            }
+            if (wanted == 0)
+            {
+                if (g_AnyMeshVisible)
+                    HideAllMeshes();
+                return;
+            }
+
+            void* const sceneManager = GetOgreSceneManagerRuntime();
+            ShellCasings::Vec3 origin = {};
+            if (!sceneManager || !ReadRenderOrigin(origin))
+            {
+                HideAllMeshes();
+                return;
+            }
+            for (const RallyMeshSlot& slot : g_MeshSlots)
+            {
+                if (slot.sceneManager && slot.sceneManager != sceneManager)
+                {
+                    ForgetMeshSlots(L"scene manager changed");
+                    break;
+                }
+            }
+
+            // Frozen while the pause menu is up, like the shell casings
+            // (shell_casings.cpp, TickShellCasings): the beacon stays put.
+            if (IsPauseMenuOpen())
+                return;
+            const double angle = std::fmod(static_cast<double>(GetTickCount64()) * 0.001 * kMeshSpinRadPerSec,
+                                           6.283185307179586);
+            const float quat[4] = { static_cast<float>(std::cos(angle * 0.5)), 0.0f,
+                                    static_cast<float>(std::sin(angle * 0.5)), 0.0f };
+            uintptr_t shown[kMeshPoolSize] = {};
+            size_t shownCount = 0;
+            for (size_t i = 0; i < kMeshPoolSize; ++i)
+            {
+                RallyMeshSlot& slot = g_MeshSlots[i];
+                if (i >= wanted)
+                {
+                    if (slot.visible)
+                        HideShimOwnedEntity(slot.entity);
+                    slot.visible = false;
+                    continue;
+                }
+                if (!slot.entity)
+                {
+                    slot = RallyMeshSlot{};
+                    if (!CreateShimOwnedStockMeshObject(kRallyMeshName, slot.sceneManager, slot.node, slot.entity))
+                    {
+                        slot = RallyMeshSlot{};
+                        g_MeshUnavailable = true;
+                        if (!g_MeshUnavailableLogged)
+                        {
+                            g_MeshUnavailableLogged = true;
+                            Log(L"[RALLY] rally beacon mesh %hs could not be created; HUD marker only\n",
+                                kRallyMeshName);
+                        }
+                        HideAllMeshes();
+                        return;
+                    }
+                }
+                const ShellCasings::Vec3 render = ShellCasings::SimToRenderPoint(
+                    { positions[i][0], positions[i][1], positions[i][2] }, origin);
+                const float at[3] = { render.x, render.y, render.z };
+                if (!SetShimOwnedObjectTransform(slot.node, slot.entity, at, quat, nullptr))
+                {
+                    // Destroy rather than forget, so a stale beacon is not left
+                    // on screen and a failure that repeats every tick does not
+                    // build a new pair each time. A few failures end the mesh.
+                    DestroyShimOwnedMeshObject(slot.sceneManager, slot.node, slot.entity);
+                    slot = RallyMeshSlot{};
+                    if (++g_MeshTransformFailures >= kMaxMeshTransformFailures)
+                    {
+                        g_MeshUnavailable = true;
+                        Log(L"[RALLY] rally beacon transform failed %d times; HUD marker only\n",
+                            g_MeshTransformFailures);
+                        HideAllMeshes();
+                        return;
+                    }
+                    continue;
+                }
+                slot.visible = true;
+                shown[shownCount++] = producers[i];
+            }
+            g_AnyMeshVisible = shownCount != 0;
+            SetMeshShown(shown, shownCount);
+        }
+
         // ---- the HUD marker ------------------------------------------------
 
         // Shown only while a rallied producer is selected (BZCC behaviour).
+        // With a 3D beacon on the rally the square is left out; the dotted
+        // line and the "Rally" label stay, so the beacon reads as this
+        // producer's rally rather than a stock nav.
         // Reads only: the camera record, the selection and the table.
         bool PaintRally(const HudGaugeOverlay::Frame& frame) noexcept
         {
@@ -572,6 +800,7 @@ namespace BZROpenShim::Hooks
                 if (!ok)
                     return;
                 float rally[3] = {};
+                bool beacon = false;
                 {
                     TableShared lock;
                     const Policy::RallyEntry* entry = g_Table.Find(reinterpret_cast<uintptr_t>(producer));
@@ -580,6 +809,7 @@ namespace BZROpenShim::Hooks
                     rally[0] = entry->pos[0];
                     rally[1] = entry->pos[1];
                     rally[2] = entry->pos[2];
+                    beacon = MeshShownLocked(reinterpret_cast<uintptr_t>(producer));
                 }
                 float rx = 0.0f, ry = 0.0f;
                 if (!Policy::ProjectToScreen(cam, rally, rx, ry))
@@ -605,8 +835,9 @@ namespace BZROpenShim::Hooks
                     return;
                 const int x = static_cast<int>(rx);
                 const int y = static_cast<int>(ry);
-                ok = SafeFill(frame, x - kMarkerHalf, y - kMarkerHalf, x + kMarkerHalf, y + kMarkerHalf,
-                              kMarkerArgb);
+                if (!beacon)
+                    ok = SafeFill(frame, x - kMarkerHalf, y - kMarkerHalf, x + kMarkerHalf, y + kMarkerHalf,
+                                  kMarkerArgb);
                 if (!ok)
                     return;
                 const int textY = y + kMarkerHalf + 2;
@@ -897,9 +1128,11 @@ namespace BZROpenShim::Hooks
     }
 
     // Mission end/load. Rallies are not persisted, and there is no game
-    // object to clean up: the marker is drawn only.
+    // object to clean up: the marker is drawn only, and the beacons are
+    // shim-owned Ogre objects, destroyed here and rebuilt on demand.
     void ResetProducerRallyPoints()
     {
+        DestroyMeshSlots(GetOgreSceneManagerRuntime(), L"rally reset");
         {
             TableExclusive lock;
             g_Table.ClearAll();
@@ -908,5 +1141,20 @@ namespace BZROpenShim::Hooks
         g_LastLivenessCheck = 0;
         g_LogBudget = 48;
         RefreshProducerRallyPointsState();
+    }
+
+    void TickProducerRallyMeshes()
+    {
+        MeshTick();
+    }
+
+    void ForgetProducerRallyMeshes(const wchar_t* reason)
+    {
+        ForgetMeshSlots(reason);
+    }
+
+    void DestroyProducerRallySceneObjects(void* sceneManager, const wchar_t* reason)
+    {
+        DestroyMeshSlots(sceneManager, reason);
     }
 }

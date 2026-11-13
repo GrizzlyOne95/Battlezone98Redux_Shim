@@ -1407,6 +1407,13 @@ namespace BZROpenShim
         // edit the rally table (the marker is drawn, not a game object).
         bool SetProducerRally(void* producer, const float pos[3]);
         bool ClearProducerRally(void* producer);
+        // The 3D rally beacon (an Ogre-only node + entity, never a game
+        // object). Tick: ChunkEffect::Simulate, after the shell casings.
+        // Forget: clearScene / destroyAllMovableObjects (Ogre frees them).
+        // Destroy: destroyAllEntities, before the stock call.
+        void TickProducerRallyMeshes();
+        void ForgetProducerRallyMeshes(const wchar_t* reason);
+        void DestroyProducerRallySceneObjects(void* sceneManager, const wchar_t* reason);
 
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
         extern bool g_ApcAlliedTargetDeployFixEnabled;
@@ -1727,6 +1734,9 @@ namespace BZROpenShim
         // (chunk_proxy_render.cpp), independent of ChunkMeshes.
         bool EnsureSkinnedGibResourceLocations();
         bool CreateShimOwnedMeshObject(const char* meshName, void*& outSceneManager, void*& outNode, void*& outEntity);
+        // The same for a stock mesh (in an engine resource group): skips the
+        // chunk payload group registration. Created hidden.
+        bool CreateShimOwnedStockMeshObject(const char* meshName, void*& outSceneManager, void*& outNode, void*& outEntity);
         bool ReplaceShimOwnedMeshEntity(void* sceneManager, void* node, void*& entity, const char* meshName);
         bool SetShimOwnedObjectTransform(
             void* node,

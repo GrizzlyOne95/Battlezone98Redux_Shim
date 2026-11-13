@@ -1955,6 +1955,8 @@ namespace BZROpenShim
         TickSkinnedGibs(thisPtr, dt);
         // Shim-owned shell casings, same clock. No-op when disabled.
         TickShellCasings(dt);
+        // The 3D rally beacon, same thread and point. No-op without a rally.
+        TickProducerRallyMeshes();
     }
 
 }

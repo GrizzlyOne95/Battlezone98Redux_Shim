@@ -19,11 +19,17 @@ checked by `scripts/audit_vtable_hooks.py`.
 - Each unit the producer finishes afterwards is given a Go order (CMD_GO = 3)
   to the rally point. Scavengers, constructors (ConstructionRig), units that
   cannot be commanded, and units that already have an order are skipped.
-- **Marker:** while a producer with a rally is selected (as in BZCC), the HUD
-  shows a small square with the label "Rally" at the rally point and a dotted
-  line from the producer to it. It is hidden when the point is behind the
-  camera or off screen, and outside the views the stock reticle draws in. The
-  marker is drawn only: no game object, nothing saved, no nav slot used.
+- **Beacon:** while a producer with a rally is selected (as in BZCC), the
+  stock nav beacon mesh (`apcamr.mesh`) stands at the rally point in the 3D
+  world, spinning slowly (1 rad/s, the beacon's own `omegaSpin`). It is an
+  Ogre scene node and entity only: no game object, no collision, nothing
+  saved, no nav slot used, no effect on the simulation.
+- **HUD marker:** a dotted line from the producer to the rally point and the
+  label "Rally" under it, so the beacon reads as a rally and not as a stock
+  nav. When there is no beacon for that rally (the mesh could not be created,
+  or more than 8 rallied producers are selected), a small square is drawn at
+  the point too. The HUD parts are hidden when the point is behind the camera
+  or off screen, and outside the views the stock reticle draws in.
 - The rally goes away when the producer dies, when the mission ends or is
   reloaded, or when the feature is switched off. Rallies are not saved.
 - V passes through untouched when: no eligible producer is selected, the map
@@ -42,6 +48,8 @@ checked by `scripts/audit_vtable_hooks.py`.
 | Game window | `SetWindowLongPtrA(GWLP_WNDPROC)` subclass | reacts only to WM_KEYDOWN/WM_KEYUP with VK `V`; everything else goes to `CallWindowProcA(previous)`. |
 | PeekMessageA | IAT patch | the main-loop tick: applies the queued V request and drops dead producers (every 250 ms). |
 | HUD gauge overlay | painter slot `RallyMarker` in `hud_gauge_overlay.h` | draws the marker after the stock scrap/pilot gauge, the same paint point the autosave notice and kill ticker use. |
+| ChunkEffect::Simulate (existing hook) | `TickProducerRallyMeshes()` after `TickShellCasings` in `ChunkEffectSimulateHook` | places, shows and hides the beacons. |
+| Ogre scene teardown (existing hooks, `lifecycle_seams.cpp`) | clearScene / destroyAllMovableObjects: `ForgetProducerRallyMeshes`; destroyAllEntities: `DestroyProducerRallySceneObjects` | the same seams the shell casings use. |
 
 The WndProc only records the request (an atomic). The PeekMessageA tick also
 runs inside nested modal loops (FUN_005d4690 lines 25-62 into FUN_00434600,
@@ -53,6 +61,47 @@ the HUD painter under an SRW lock.
 
 The marker is optional: if the camera rows or the HUD overlay do not bind,
 rallies still work and the log says the marker is hidden.
+
+### The 3D beacon
+
+- Mesh: `apcamr.mesh`, the stock nav beacon. Stock `apcamr.odf` (classLabel
+  `camerapod`, unitName "Nav", `omegaSpin = 1.0`; text copy in
+  `Battlezone_Source\BZ1\1.5\Battlezone_Install\stock\apcamr.odf`) has
+  baseName `apcamr`; Redux ships `BZ_ASSETS/common/models/apcamr.mesh` with
+  `apcamr.skeleton` and `pc/materials/apcamr.material`, and a GOG
+  `BZOgreLogfile.log` shows `Mesh: Loading apcamr.mesh.` during a mission.
+  Read with the BZ98RBlenderToolKit serializer: AABB y from 0.0015 to 4.66, so
+  the origin is at the base and the node sits at the rally point unlifted.
+- Objects: up to 8 node+entity pairs, made lazily with
+  `CreateShimOwnedStockMeshObject` (`chunk_proxy_render.cpp`: the shim-owned
+  mesh helper without the chunk payload group, since the mesh is in an engine
+  group) and reused. Shown and placed with `SetShimOwnedObjectTransform`,
+  hidden with `HideShimOwnedEntity`.
+- Space: render = (x - ox, y - oy, -z - oz) with the origin from the
+  `WorldRenderOrigin` row, via `ShellCasings::SimToRenderPoint`
+  (`include/shell_casing_physics.h`), the shell casings' conversion.
+- Thread and timing: every create, move, hide and destroy runs on the game
+  thread: the tick in ChunkEffect::Simulate (the point the shell casings and
+  skinned gibs use), `ResetProducerRallyPoints` (SetRunning "left
+  simulation", the Lua mission reset, the feature revert) and Ogre's scene
+  teardown. Never from the WndProc or the HUD painter. The one patch-thread
+  caller is the startup revert (`ResolveBzrHooks` →
+  `RevertRegisteredFeaturesToBaseline`), which runs before any beacon exists.
+  While the pause menu is open the beacon is left as it was (no spin).
+  A failed transform destroys that beacon; three failures fall back to the HUD
+  square for the rest of the process.
+- Lifetime: `ResetProducerRallyPoints` destroys the beacons (only when their
+  scene manager is the live one) and forgets them; clearScene and
+  destroyAllMovableObjects forget them (Ogre frees them); destroyAllEntities
+  destroys them first, as for the casing pool. A changed scene manager makes
+  the tick forget the old pointers. Nothing is kept across missions.
+- Fail closed: no new engine address (Ogre exports by name and the existing
+  `WorldRenderOrigin` row). If the entity cannot be created, the log says
+  `[RALLY] rally beacon mesh apcamr.mesh could not be created; HUD marker only`
+  once, no beacon is tried again in that process, and the HUD square returns.
+- Bounds: not touched. Mesh bounds are shared with the stock nav beacons, and
+  Redux sets craft meshes to infinite bounds at runtime, so the beacons may be
+  submitted to every camera; at most 8 small entities.
 
 ### Coexistence with other subclasses and IAT hooks
 
@@ -97,12 +146,25 @@ on live. Install runs once per process.
 - Not saved: a loaded game has no rallies.
 - The dotted line needs the producer's position on screen; when the producer
   is behind the camera only the marker is drawn.
+- The beacon looks the same as a stock nav beacon; the HUD label tells them
+  apart. No tint.
+- While the game is paused the beacons stay as they were (the tick is the
+  simulation's).
 - Single player only (FeatureTier::SinglePlayer).
 
 ## Live test checklist (UNVERIFIED)
 
 - V with a Factory selected shows the "Rally" marker under the reticle,
   only while that Factory is selected, with a dotted line from it.
+- A spinning nav beacon stands on the ground at the rally point (not floating,
+  not sunk, not mirrored to another spot), textured (not flat grey), only
+  while that Factory is selected, with no square under the label. Deselecting
+  hides it; selecting again shows it. The log has no "could not be created"
+  line.
+- The beacon has no collision (a tank drives through it) and is not
+  targetable or on radar.
+- After a mission restart, a save load and a return to the shell and back,
+  V again shows a beacon, and no crash or Ogre error mentions apcamr.
 - The marker sits on the rally point (the camera record's pixel space is the
   same as the HUD text pane's) in cockpit, chase and satellite views, and
   hides when you turn away.
