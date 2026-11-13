@@ -519,7 +519,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "QuickSave Keys", "QuickSave", "QuickSaveEnabled", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::AutoSave,
-      "Ctrl+Home saves to a QuickSave slot and Ctrl+End loads it, in single-player missions." },
+      "Saves and loads a QuickSave slot in single-player missions (Ctrl+Home / Ctrl+End by default; rebind in Input > RTS Actions)." },
     { "Aim Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,

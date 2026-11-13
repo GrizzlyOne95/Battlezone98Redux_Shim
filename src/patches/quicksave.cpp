@@ -1,5 +1,5 @@
 // quicksave.cpp
-// BZR Open Shim - Ctrl+Home QuickSave / Ctrl+End QuickLoad (single player)
+// BZR Open Shim - QuickSave / QuickLoad (default Ctrl+Home / Ctrl+End, single player)
 //
 // Copyright (C) 2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
@@ -67,8 +67,12 @@ namespace BZROpenShim::QuickSave
         std::atomic<LONG> g_request{kNone};
         std::atomic<ULONGLONG> g_requestTickMs{0};
 
-        // Main (window) thread only: both filters run there.
+        // Main (window) thread only: both filters run there, and so does the
+        // key-binding editor that calls SetChordText.
         QuickSaveKeyPolicy::SwallowState g_swallow;
+        QuickSaveKeyPolicy::Chords g_chords;
+        std::string g_saveText = QuickSaveKeyPolicy::kDefaultSaveText;
+        std::string g_loadText = QuickSaveKeyPolicy::kDefaultLoadText;
 
         HWND g_window = nullptr;
         WNDPROC g_prevWndProc = nullptr;
@@ -90,7 +94,7 @@ namespace BZROpenShim::QuickSave
             using namespace QuickSaveKeyPolicy;
             if (msg != kWmKeyDown && msg != kWmKeyUp && msg != kWmSysKeyDown && msg != kWmSysKeyUp)
                 return false;
-            if (wParam != kVkHome && wParam != kVkEnd)
+            if (!IsChordKey(g_chords, static_cast<unsigned>(wParam)))
                 return false;
 
             KeyMessage key;
@@ -102,7 +106,7 @@ namespace BZROpenShim::QuickSave
             key.shift = GetKeyState(VK_SHIFT) < 0;
             key.alt = GetKeyState(VK_MENU) < 0;
 
-            const Action action = Decide(key, KeyFilterActive(), g_swallow);
+            const Action action = Decide(key, g_chords, KeyFilterActive(), g_swallow);
             if (action == Action::Pass)
                 return false;
             if (action == Action::SwallowRequestSave || action == Action::SwallowRequestLoad)
@@ -188,7 +192,8 @@ namespace BZROpenShim::QuickSave
             g_prevWndProc = prev;
             g_window = ctx.found;
             LogShimA(LogLevel::Info, "quicksave",
-                     "Ctrl+Home QuickSave / Ctrl+End QuickLoad active (hwnd=%p previous=%p)", ctx.found, prev);
+                     "QuickSave (%s) / QuickLoad (%s) active (hwnd=%p previous=%p)", g_saveText.c_str(),
+                     g_loadText.c_str(), ctx.found, prev);
         }
 
         void RunQuickSave()
@@ -290,6 +295,51 @@ namespace BZROpenShim::QuickSave
     {
         const bool enabled = GetPrivateProfileIntA("QuickSave", "QuickSaveEnabled", 1, iniPath) != 0;
         g_enabled.store(enabled, std::memory_order_relaxed);
+
+        char saveText[64] = {};
+        char loadText[64] = {};
+        GetPrivateProfileStringA("QuickSave", "SaveKey", QuickSaveKeyPolicy::kDefaultSaveText, saveText,
+                                 sizeof(saveText), iniPath);
+        GetPrivateProfileStringA("QuickSave", "LoadKey", QuickSaveKeyPolicy::kDefaultLoadText, loadText,
+                                 sizeof(loadText), iniPath);
+        const QuickSaveKeyPolicy::ResolvedChords resolved = QuickSaveKeyPolicy::ResolveChords(saveText, loadText);
+        if (resolved.saveProblem)
+            LogShimA(LogLevel::Warn, "quicksave", "[QuickSave] SaveKey=\"%s\" ignored (%s); using %s", saveText,
+                     resolved.saveProblem, QuickSaveKeyPolicy::kDefaultSaveText);
+        if (resolved.loadProblem)
+            LogShimA(LogLevel::Warn, "quicksave", "[QuickSave] LoadKey=\"%s\" ignored (%s); using %s", loadText,
+                     resolved.loadProblem, QuickSaveKeyPolicy::kDefaultLoadText);
+        g_chords = resolved.chords;
+        // Same as SetChordText: a mark left by an old chord could never clear.
+        g_swallow = QuickSaveKeyPolicy::SwallowState{};
+        g_saveText = resolved.saveProblem ? QuickSaveKeyPolicy::kDefaultSaveText : saveText;
+        g_loadText = resolved.loadProblem ? QuickSaveKeyPolicy::kDefaultLoadText : loadText;
+        // A collision reverts both to defaults, whatever the strings said.
+        if (resolved.saveProblem && resolved.loadProblem)
+        {
+            g_saveText = QuickSaveKeyPolicy::kDefaultSaveText;
+            g_loadText = QuickSaveKeyPolicy::kDefaultLoadText;
+        }
+    }
+
+    const char* ChordText(bool save)
+    {
+        return (save ? g_saveText : g_loadText).c_str();
+    }
+
+    const char* SetChordText(bool save, const char* text)
+    {
+        using namespace QuickSaveKeyPolicy;
+        Chord chord;
+        if (const char* reason = CheckChordText(text, save ? g_chords.load : g_chords.save, chord))
+            return reason;
+        (save ? g_chords.save : g_chords.load) = chord;
+        (save ? g_saveText : g_loadText) = text;
+        // Decide matches by the new keys only, so a mark left by the old chord
+        // could never be cleared by a key-up: drop it.
+        g_swallow = SwallowState{};
+        LogShimA(LogLevel::Info, "quicksave", "%s rebound to %s", save ? "QuickSave" : "QuickLoad", text);
+        return nullptr;
     }
 
     bool IsEnabled()

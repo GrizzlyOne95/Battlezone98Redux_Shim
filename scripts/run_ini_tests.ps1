@@ -422,9 +422,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # (preset revision 12). Rebellion stays the default server.
     "Network/PreLobby",
 
-    # Ctrl+Home QuickSave / Ctrl+End QuickLoad, on at the user's request. Inert
-    # until the player presses the Ctrl chord: plain and Shift Home/End
-    # are left alone, it never touches game1-10.sav or auto.sav,
+    # QuickSave / QuickLoad (default Ctrl+Home / Ctrl+End; SaveKey and LoadKey are
+    # chord text, not enabled-looking), on at the user's request. Inert
+    # until the player presses the chord: plain and other-modifier presses
+    # of the key are left alone, it never touches game1-10.sav or auto.sav,
     # and saving uses the AutoSave gate (single player, no pause/shell UI).
     "QuickSave/QuickSaveEnabled"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
