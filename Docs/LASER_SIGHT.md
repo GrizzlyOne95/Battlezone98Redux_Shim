@@ -301,7 +301,7 @@ into the chunk cache root `<game>\openshim\cache\chunks\`:
 | file | content |
 |------|---------|
 | `lasersight\v1\openshim_lasersight.mesh` | 8-sided open tube, z 0..1, radius 1 at the muzzle and 0.5 at the far end |
-| `lasersight\v1\openshim_lasersight_arc00.mesh` .. `arc15.mesh` | the same tube cut into 16 sections of its taper and v range, each still z 0..1 (ballistic arc pieces) |
+| `lasersight\v1\openshim_lasersight_arc00.mesh` .. `arc15.mesh` | the same tube cut into 16 sections covering the first 0.4 of its taper and v range, each still z 0..1 (ballistic arc pieces) |
 | `openshim_lasersight_beam.tga` | 64x128 red "cone smoke" streaks, bright at the muzzle and fading along the beam |
 | `openshim_lasersight-sm4.hlsl` | `lasersight_vertex` / `lasersight_fragment` (SM4) |
 | `openshim_lasersight.material` | programs plus material `openshim_lasersight_beam` |

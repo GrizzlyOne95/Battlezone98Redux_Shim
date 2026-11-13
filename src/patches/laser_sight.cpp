@@ -911,7 +911,7 @@ namespace BZROpenShim
                     g_Stats.arcSamples = static_cast<uint32_t>(result.samples);
                     g_Stats.arcSpans = static_cast<uint32_t>(result.spans);
                 }
-                // Path length (launch speed x flight time), not the chord: a steep lob
+                // Approximate path length (launch speed x flight time), not the chord: a steep lob
                 // that lands next to the muzzle still draws.
                 if (result.endT * ballistics.shotSpeed < LS::kMinBeamLength)
                 {
