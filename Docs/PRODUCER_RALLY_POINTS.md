@@ -12,6 +12,22 @@ checked by `scripts/audit_vtable_hooks.py`.
 
 ## Behaviour
 
+- **The key is rebindable.** `[Gameplay] RallyKey` (default `V`) is one key
+  with no modifier: a plain press arms/cancels, Shift+key clears; this
+  document says "V" for the default. Rebind it in Options > Input > RTS
+  Actions, row "Rally Point" (reserved command `OpenShim:RallyKey`): the
+  capture applies live (`SetRallyKeyText`), is written to openshim.ini with
+  the same rollback on a write failure as the Quick Save/Quick Load rows, and
+  shows a note when a stock gamekey.map action uses the same key (with an
+  eligible producer selected the rally key takes it). Refused (the editor
+  says why; in the ini the value falls back to V with a `[RALLY]` log line):
+  any modifier, digits 0-9, F1-F10, Space, Tab, Alt, Enter, Esc, anything
+  `ParseChord` does not know, and a key that is a Shift-only QuickSave or
+  QuickLoad chord (Shift+key is the clear). The check runs both ways: the
+  QuickSave rows refuse Shift plus the rally key, and the rally key is
+  re-checked after the QuickSave chords load. An extended key (Insert, Home,
+  arrows, ...) does not match its numpad twin. Ctrl+key and Alt+key are never
+  ours, so a Ctrl chord on the same key (the default Ctrl+Home) is fine.
 - Select a Recycler or Factory (yours, or several) and press **V** to arm
   **rally set mode**. While it is armed the engine's own ground reticle and
   order line show the target exactly as for a Go order; the stock confirm key
@@ -50,10 +66,16 @@ checked by `scripts/audit_vtable_hooks.py`.
   screen, it is not drawn. The log names the placement each time it changes
   (`command panel row on the TAB line` / `under the menu underlay` /
   `one row under TAB` / `hidden`).
-  The key is a mod's `key_V` HUD sprite when one loads with a material;
+  The cap shows the bound key's name ("V", "F11", "Ins", "PgUp", "Right";
+  `RallyKeyCapName`). A mod's `key_V` HUD sprite is used only while the bound
+  key is V and the sprite loads with a material;
   otherwise OpenShim draws the cap: `key_0`'s size (9x9 atlas units times the
-  UI scale), filled opaque white with `HudFillRect` with its corners notched
-  by one unit, one `HudSpriteZ` step behind a black "V" in the stock HUD
+  UI scale) for a one-character name, widened for a longer one to the
+  measured text plus two reference units of padding a side (`KeyCapWidthPx`;
+  the padding is a choice, not read from key_TAB/key_SPACE: UNVERIFIED), and
+  `ChoosePanelRowLayout` takes that width (`keyWidthPx`) when placing the row.
+  The cap is filled opaque white with `HudFillRect` with its corners notched
+  by one unit, one `HudSpriteZ` step behind a black name in the stock HUD
   font, centred on it. The font colour is saved before the row is drawn and
   restored after it, also when a draw faults. It sits where the stock caps sit: right edge at the
   label x minus `CommandMenuKeyInset`, centred on the row y. No sprite asset
@@ -121,7 +143,7 @@ checked by `scripts/audit_vtable_hooks.py`.
 | Hook | Kind | Notes |
 |---|---|---|
 | Recycler/Factory FinishBuild | vtable slot 42 (RecyclerVtable 0x00886454 slot at 0x008864FC; FactoryVtable 0x00879388 slot at 0x00879430) | calls stock, then orders the returned unit. Producer base (0x0088616C) and ConstructionRig (0x00877A3C) copies stay stock. All or nothing, RTTI checked. |
-| Game window | `SetWindowLongPtrA(GWLP_WNDPROC)` subclass | reacts only to WM_KEYDOWN/WM_KEYUP with VK `V`; everything else goes to `CallWindowProcA(previous)`. |
+| Game window | `SetWindowLongPtrA(GWLP_WNDPROC)` subclass | reacts only to WM_KEYDOWN/WM_KEYUP with the rally key (VK `V` by default); everything else goes to `CallWindowProcA(previous)`. |
 | PeekMessageA | IAT patch | the main-loop tick: applies the queued V request, cancels set mode when the selection changed, and drops dead producers (every 250 ms). |
 | Ground-aim GetCommand 0x0045BD80 | JMP5 entry detour, patches.json `Producer Rally Ground Command Hook` | thiscall `(const VECTOR_3D* where)`, ret 4; 6-byte prologue `55 8B EC 83 EC 0C` relocated to a trampoline. Returns CMD_GO (3) while armed with the armed selection, so `Reticle::Simulate` hands a Go to the ControlPanel and the stock reticle and order line draw. |
 | Object-aim GetCommand 0x0045BBE0 | JMP5 entry detour, `Producer Rally Object Command Hook` | thiscall `(GameObject* target)`, ret 4; prologue `55 8B EC 83 EC 10`. Returns 0 while armed. |
@@ -189,7 +211,7 @@ rallies still work and the log says the marker is hidden.
 The quicksave Ctrl+F5/F9 subclass and `background_run.cpp` each subclass the
 same window independently and chain to the previous procedure. None of them
 unhooks, so install order does not matter: whichever is outermost sees the
-message first and forwards anything it does not own. Rally owns only VK `V`
+message first and forwards anything it does not own. Rally owns only the rally key (VK `V` by default)
 without Ctrl/Alt, so it never competes with Ctrl+F5/F9. The PeekMessageA IAT
 patch chains in the same way with background_run and UiPerf (UiPerf restores
 with a compare-and-swap, so it does not drop a later hook).
@@ -301,6 +323,20 @@ on live. Install runs once per process.
 - A freshly built unit has `nextCmd.what == 0` after FinishBuild (else every
   unit reads "already ordered") and CanCommand is true for it.
 - V in the map editor still flips; Ctrl+V still pastes.
+- Rebinding: Options > Input > RTS Actions lists "Rally Point" with V. Press
+  Ins on it: the status line says bound, the row reads the key, openshim.ini
+  has `RallyKey = GreyInsert` (or the spelling the capture wrote), and with a
+  Factory selected Ins arms set mode at once (no restart), V no longer does,
+  Shift+Ins clears, and numpad 0 (NumLock off) is left to the game. The
+  panel row cap reads "Ins", is wider than the 9-unit cap, the row stays
+  clear of "Cancel" (or drops under the underlay), and the label and line
+  keep their x. A one-letter key keeps the 9x9 cap; V with a `key_V` mod
+  sprite uses the sprite, any other key the drawn cap. Try Shift+V, 5, F1
+  and Space: each is refused with a reason and the old key stays. Make
+  openshim.ini read-only and rebind: the status says the old key was kept and
+  the key still works as before. Bind a key a stock action uses: the status
+  names that action. A bad `RallyKey =` line in the ini logs `[RALLY]
+  [Gameplay] RallyKey=... ignored` and V works.
 - Pressing V and opening the pause menu at once does nothing later.
 - Nothing happens in multiplayer.
 - The game window is found by its title ("Battlezone 98 Redux").

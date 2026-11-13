@@ -4,7 +4,8 @@
 // toggles rally set mode: while it is armed the stock ground reticle and order
 // line preview the point exactly like a Go order, the stock confirm key
 // (menu_press, "Reticle Command") sets the rally there, and V again cancels.
-// Shift+V clears the rally. Without the three command hooks below, V sets the
+// Shift+V clears the rally. V is the default of [Gameplay] RallyKey, which the
+// key-binding editor rebinds live (Policy::CheckRallyKeyText). Without the three command hooks below, V sets the
 // rally at once to the ground under the reticle (the original behaviour). Each
 // unit that producer finishes afterwards (not scavengers or constructors) gets
 // a Go order to the rally point. While a rallied producer is selected, a HUD
@@ -45,6 +46,8 @@
 #include "native_chunk_prune.h"
 #include "patcher.h"
 #include "producer_rally_policy.h"
+#include "quicksave.h"
+#include "quicksave_key_policy.h"
 #include "rally_beacon_assets.h"
 #include "shell_casing_physics.h"
 #include "shim_log.h"
@@ -146,6 +149,25 @@ namespace BZROpenShim::Hooks
         // Set by the window procedure, consumed by the PeekMessageA tick.
         std::atomic<int> g_PendingAction{ 0 };
         Policy::KeyLatch g_KeyLatch;
+        // The bound rally key ([Gameplay] RallyKey): vk in the low 16 bits,
+        // the extended flag in bit 16. Written by the config reload and the
+        // key-binding editor, read by the window procedure and the panel row.
+        std::atomic<uint32_t> g_RallyKeyPacked{ Policy::kVkV };
+        std::string g_RallyKeyText = Policy::kDefaultRallyKeyText; // key-binding editor thread only
+
+        Policy::RallyKey CurrentRallyKey()
+        {
+            const uint32_t packed = g_RallyKeyPacked.load(std::memory_order_acquire);
+            Policy::RallyKey key;
+            key.vk = packed & 0xFFFFu;
+            key.extended = (packed & 0x10000u) != 0;
+            return key;
+        }
+
+        void StoreRallyKey(const Policy::RallyKey& key)
+        {
+            g_RallyKeyPacked.store(key.vk | (key.extended ? 0x10000u : 0u), std::memory_order_release);
+        }
         std::atomic<HWND> g_Window{ nullptr };
         std::atomic<WNDPROC> g_PrevWndProc{ nullptr };
         ULONGLONG g_LastLivenessCheck = 0;
@@ -572,12 +594,15 @@ namespace BZROpenShim::Hooks
 
         LRESULT CALLBACK RallyWndProc(HWND h, UINT msg, WPARAM w, LPARAM l)
         {
-            if ((msg == Policy::kWmKeyDown || msg == Policy::kWmKeyUp) && w == Policy::kVkV)
+            const Policy::RallyKey bound = CurrentRallyKey();
+            if ((msg == Policy::kWmKeyDown || msg == Policy::kWmKeyUp) && w == bound.vk &&
+                ((static_cast<uint32_t>(l) >> 24) & 1u) == (bound.extended ? 1u : 0u))
             {
                 Policy::KeyEvent key;
                 key.msg = msg;
                 key.vk = static_cast<unsigned>(w);
                 key.lParam = static_cast<unsigned long long>(static_cast<uint32_t>(l));
+                key.extended = bound.extended;
                 key.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
                 key.ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
                 key.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
@@ -596,7 +621,7 @@ namespace BZROpenShim::Hooks
                         gate.eligibleProducerSelected = gate.worldInteractive && EligibleProducerSelected();
                     }
                 }
-                const Policy::KeyDecision decision = Policy::ClassifyRallyKey(key, gate, g_KeyLatch);
+                const Policy::KeyDecision decision = Policy::ClassifyRallyKey(key, gate, g_KeyLatch, bound);
                 if (decision.action != Policy::KeyAction::None)
                     g_PendingAction.store(static_cast<int>(decision.action), std::memory_order_release);
                 if (decision.swallow)
@@ -668,7 +693,7 @@ namespace BZROpenShim::Hooks
                 return;
             if (action == Policy::KeyAction::ClearRally)
             {
-                Disarm(L"Shift+V");
+                Disarm(L"Shift+rally key");
                 int applied = 0;
                 ForEachSelectedProducer([&](void* producer, uint32_t) {
                     if (ClearProducerRally(producer))
@@ -683,7 +708,7 @@ namespace BZROpenShim::Hooks
                 Policy::PlanSetKey(SetModeAvailable(), armed, armed && SelectionMatchesArmed());
             if (plan == Policy::SetKeyPlan::Cancel)
             {
-                Disarm(L"V");
+                Disarm(L"rally key");
                 return;
             }
             if (plan == Policy::SetKeyPlan::Arm)
@@ -1328,7 +1353,6 @@ namespace BZROpenShim::Hooks
         constexpr size_t kSpriteRecordStride = 0x24;
         // The stock key sprite flags (right-align x, centre y, colour mode 1).
         constexpr uint32_t kKeySpriteFlags = 0x60001;
-        constexpr char kKeyLetter[] = "V";
         // The drawn cap: the stock key sheet's caps are opaque white with a
         // black glyph (BZ_ASSETS sprite_n). Colours are ARGB, as
         // HudColorWhite/HudColorBlue hold them.
@@ -1382,8 +1406,10 @@ namespace BZROpenShim::Hooks
         ULONGLONG g_KeySpriteLastTry = 0;
         bool g_KeySpriteMissLogged = false;
         int g_KeyVSprite = 0;   // a usable key_V sprite, else 0
-        int g_KeyBoxW = 0;      // the key's atlas size (key_V, else key_0)
-        int g_KeyBoxH = 0;
+        int g_KeyVW = 0;        // its atlas size
+        int g_KeyVH = 0;
+        int g_KeyZeroW = 0;     // key_0's atlas size, the single-character cap
+        int g_KeyZeroH = 0;
         bool g_PanelRowFaultLogged = false;
         Policy::PanelRowPlacement g_LastPlacement = Policy::PanelRowPlacement::Hidden;
 
@@ -1467,9 +1493,10 @@ namespace BZROpenShim::Hooks
             }
         }
 
-        // A mod's key_V sprite wins when its row and material resolved;
-        // otherwise the cap is drawn at key_0's size. Cached once either is
-        // found; a miss retries at most once a second.
+        // A mod's key_V sprite is used when the bound key is V and its row and
+        // material resolved; every other key (and V without that sprite) is
+        // drawn as a cap at key_0's size. Both are looked up together and
+        // cached once either is found; a miss retries at most once a second.
         void ResolveKeySprites()
         {
             if (g_KeySpritesResolved)
@@ -1480,27 +1507,32 @@ namespace BZROpenShim::Hooks
             g_KeySpriteLastTry = now;
             const int id = SafeSpriteLookup(kKeyVSpriteName);
             HudSpriteRectRecord rec = {};
+            g_KeyVSprite = 0;
             if (id > 0 && SpriteMaterialResolved(id) && TryGetHudSpriteCurrentRecord(id, rec) && rec.w > 0 &&
                 rec.h > 0)
             {
-                g_KeySpritesResolved = true;
                 g_KeyVSprite = id;
-                g_KeyBoxW = rec.w;
-                g_KeyBoxH = rec.h;
-                Log(L"[RALLY] command panel row uses the key_V sprite (id %d, %dx%d)\n", id, g_KeyBoxW, g_KeyBoxH);
-                return;
+                g_KeyVW = rec.w;
+                g_KeyVH = rec.h;
+                Log(L"[RALLY] key_V sprite found (id %d, %dx%d); used while the rally key is V\n", id, g_KeyVW,
+                    g_KeyVH);
             }
-            if (id > 0 && !g_KeySpriteMissLogged)
+            else if (id > 0 && !g_KeySpriteMissLogged)
+            {
                 Log(L"[RALLY] key_V sprite (id %d) has no material or size; not drawn\n", id);
-            g_KeyVSprite = 0;
+            }
             HudSpriteRectRecord cap = {};
             const int capId = SafeSpriteLookup(kKeyCapSizeSprite);
             if (capId > 0 && TryGetHudSpriteCurrentRecord(capId, cap) && cap.w > 0 && cap.h > 0)
             {
+                g_KeyZeroW = cap.w;
+                g_KeyZeroH = cap.h;
+                Log(L"[RALLY] command panel row can draw its own key cap (key_0 size %dx%d)\n", g_KeyZeroW,
+                    g_KeyZeroH);
+            }
+            if (g_KeyVSprite > 0 || g_KeyZeroW > 0)
+            {
                 g_KeySpritesResolved = true;
-                g_KeyBoxW = cap.w;
-                g_KeyBoxH = cap.h;
-                Log(L"[RALLY] command panel row draws its own key cap (key_0 size %dx%d)\n", g_KeyBoxW, g_KeyBoxH);
                 return;
             }
             if (!g_KeySpriteMissLogged)
@@ -1509,6 +1541,39 @@ namespace BZROpenShim::Hooks
                 Log(L"[RALLY] no key_V sprite and key_0 size unreadable (id %d); panel row hidden, retrying\n",
                     capId);
             }
+        }
+
+        // What the row draws for the bound key: the mod's key_V sprite only
+        // when the key is V, else a drawn cap carrying the key's name (at
+        // key_0's size, or key_V's when key_0 is unreadable).
+        struct KeyCapSpec
+        {
+            bool valid = false;
+            bool sprite = false;
+            int atlasW = 0;
+            int atlasH = 0;
+            char name[12] = {};
+            size_t nameLen = 0;
+        };
+
+        KeyCapSpec ChooseKeyCap(const Policy::RallyKey& key)
+        {
+            KeyCapSpec spec;
+            if (key == Policy::RallyKey{} && g_KeyVSprite > 0)
+            {
+                spec.valid = true;
+                spec.sprite = true;
+                spec.atlasW = g_KeyVW;
+                spec.atlasH = g_KeyVH;
+                return spec;
+            }
+            spec.nameLen = Policy::RallyKeyCapName(key, spec.name, sizeof(spec.name));
+            if (spec.nameLen == 0)
+                return spec;
+            spec.atlasW = g_KeyZeroW > 0 ? g_KeyZeroW : g_KeyVW;
+            spec.atlasH = g_KeyZeroW > 0 ? g_KeyZeroH : g_KeyVH;
+            spec.valid = spec.atlasW > 0 && spec.atlasH > 0;
+            return spec;
         }
 
         bool ReadUiScale(float& sx, float& sy)
@@ -1534,12 +1599,19 @@ namespace BZROpenShim::Hooks
         // measured as the engine localizes it (UiLocalize); without that row
         // the width is unknown and the layout takes the safe place under the
         // underlay.
-        bool MeasurePanelRowSeh(const PanelRowInputs& in, Policy::PanelRowLayoutInput& layout)
+        bool MeasurePanelRowSeh(const PanelRowInputs& in, const KeyCapSpec& cap, float& capTextW,
+                                Policy::PanelRowLayoutInput& layout)
         {
             const auto measure = reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr);
             __try
             {
                 float w = 0.0f, h = 0.0f;
+                capTextW = 0.0f;
+                if (!cap.sprite && cap.nameLen > 1)
+                {
+                    measure(in.font, cap.name, &capTextW, &h);
+                    h = 0.0f;
+                }
                 measure(in.font, Policy::PanelRowLabel(false), &w, &h);
                 float armedW = 0.0f;
                 h = 0.0f;
@@ -1573,7 +1645,8 @@ namespace BZROpenShim::Hooks
         // anchor x - CommandMenuKeyInset, centred on the row y (the stock
         // call passes flags 0x60001, FUN_004a08e0.c lines 698-701), and the
         // label at anchor x, y - height / 2 (lines 707-712).
-        bool DrawPanelRowSeh(const PanelRowInputs& in, int x, int y, float sx, float sy, const char* label)
+        bool DrawPanelRowSeh(const PanelRowInputs& in, const KeyCapSpec& capSpec, int capWidthPx, int x, int y, float sx,
+                             float sy, const char* label)
         {
             const auto fontDraw = reinterpret_cast<FnFontDraw>(g_PanelFontDrawAddr);
             const auto textHeight = reinterpret_cast<FnTextHeight>(g_PanelTextHeightAddr);
@@ -1589,7 +1662,7 @@ namespace BZROpenShim::Hooks
                 // here and restored on both paths.
                 savedColour = *fontColour;
                 colourSaved = true;
-                if (g_KeyVSprite > 0)
+                if (capSpec.sprite)
                 {
                     reinterpret_cast<FnSpriteDraw>(g_PanelSpriteAddr)(in.pane, g_KeyVSprite, x - in.inset, y,
                                                                       kKeySpriteFlags, 0.0f);
@@ -1598,7 +1671,8 @@ namespace BZROpenShim::Hooks
                 {
                     Policy::PixelRect box;
                     Policy::FillRect cap[2];
-                    const int bands = Policy::KeyBoxRect(x, y, in.inset, g_KeyBoxW, g_KeyBoxH, sx, sy, box)
+                    const int bands = Policy::KeyBoxRect(x, y, in.inset, capSpec.atlasW, capSpec.atlasH, sx, sy, box,
+                                                         capWidthPx)
                                           ? Policy::KeyCapFillRects(box, sx, cap)
                                           : 0;
                     if (bands > 0)
@@ -1613,11 +1687,11 @@ namespace BZROpenShim::Hooks
                         *spriteZ = savedZ;
                         zRaised = false;
                         float w = 0.0f, h = 0.0f;
-                        reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr)(in.font, kKeyLetter, &w, &h);
+                        reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr)(in.font, capSpec.name, &w, &h);
                         *fontColour = kKeyGlyphArgb;
                         const int cx = (box.left + box.right) / 2 - static_cast<int>(w / 2.0f);
                         const int cy = (box.top + box.bottom) / 2;
-                        fontDraw(in.font, in.pane, cx, Policy::CenteredTextY(cy, textHeight(in.font)), kKeyLetter);
+                        fontDraw(in.font, in.pane, cx, Policy::CenteredTextY(cy, textHeight(in.font)), capSpec.name);
                     }
                 }
                 *fontColour = in.colour;
@@ -1695,7 +1769,8 @@ namespace BZROpenShim::Hooks
             if (!Policy::PanelRowVisible(gate))
                 return;
             ResolveKeySprites();
-            if (g_KeyBoxW <= 0 || g_KeyBoxH <= 0)
+            const KeyCapSpec capSpec = ChooseKeyCap(CurrentRallyKey());
+            if (!capSpec.valid)
                 return;
             float sx = 0.0f, sy = 0.0f;
             if (!ReadUiScale(sx, sy))
@@ -1709,8 +1784,8 @@ namespace BZROpenShim::Hooks
             layout.scaleX = sx;
             layout.scaleY = sy;
             layout.inset = in.inset;
-            layout.keyW = g_KeyBoxW;
-            layout.keyH = g_KeyBoxH;
+            layout.keyW = capSpec.atlasW;
+            layout.keyH = capSpec.atlasH;
             layout.viewportW = in.viewportW;
             layout.viewportH = in.viewportH;
             // The underlay sprite FUN_004a08e0.c lines 360-365 picked this
@@ -1719,11 +1794,17 @@ namespace BZROpenShim::Hooks
             layout.underlayKnown = in.underlaySprite > 0 && TryGetHudSpriteCurrentRecord(in.underlaySprite, underlay);
             layout.underlayTop = in.boundsTop;
             layout.underlaySpriteH = underlay.h;
-            if (!MeasurePanelRowSeh(in, layout))
+            float capTextW = 0.0f;
+            if (!MeasurePanelRowSeh(in, capSpec, capTextW, layout))
             {
                 PanelRowFault();
                 return;
             }
+            // A drawn cap widens for a multi-character name; the sprite keeps
+            // its atlas size.
+            const int capWidthPx =
+                capSpec.sprite ? 0 : Policy::KeyCapWidthPx(capSpec.atlasW, sx, capSpec.nameLen, capTextW);
+            layout.keyWidthPx = capWidthPx;
             const Policy::PanelRowLayout placed = Policy::ChoosePanelRowLayout(layout);
             if (placed.placement != g_LastPlacement)
             {
@@ -1732,7 +1813,7 @@ namespace BZROpenShim::Hooks
             }
             if (placed.placement == Policy::PanelRowPlacement::Hidden)
                 return;
-            if (!DrawPanelRowSeh(in, placed.labelX, placed.rowY, sx, sy,
+            if (!DrawPanelRowSeh(in, capSpec, capWidthPx, placed.labelX, placed.rowY, sx, sy,
                                  Policy::PanelRowLabel(ArmedAndMatching())))
                 PanelRowFault();
         }
@@ -2012,8 +2093,71 @@ namespace BZROpenShim::Hooks
         return all;
     }
 
+    namespace
+    {
+        // The QuickSave and QuickLoad chords in force (defaults if either text
+        // does not parse), for the rally key's collision check.
+        const char* CheckRallyKey(const char* text, Policy::RallyKey& out)
+        {
+            namespace QK = QuickSaveKeyPolicy;
+            QK::Chords quick; // defaults
+            QK::Chord parsed;
+            if (QK::ParseChord(QuickSave::ChordText(true), parsed))
+                quick.save = parsed;
+            if (QK::ParseChord(QuickSave::ChordText(false), parsed))
+                quick.load = parsed;
+            return Policy::CheckRallyKeyText(text, quick.save, quick.load, out);
+        }
+    }
+
+    const char* RallyKeyText()
+    {
+        return g_RallyKeyText.c_str();
+    }
+
+    const char* SetRallyKeyText(const char* text)
+    {
+        Policy::RallyKey key;
+        if (const char* reason = CheckRallyKey(text, key))
+            return reason;
+        StoreRallyKey(key);
+        g_RallyKeyText = text;
+        // A mark left by the old key could never be cleared by its key-up.
+        g_KeyLatch = Policy::KeyLatch{};
+        Log(L"[RALLY] rally key rebound to %hs\n", text);
+        return nullptr;
+    }
+
+    bool RallyKeyClashesWithChord(const QuickSaveKeyPolicy::Chord& chord)
+    {
+        // Same rule as CheckRallyKeyText: the rally filter ignores Ctrl and
+        // Alt chords, so only a Shift-only chord on the rally key clashes.
+        const Policy::RallyKey key = CurrentRallyKey();
+        return chord.vk == key.vk && chord.extended == key.extended && !chord.ctrl && !chord.alt;
+    }
+
+    void ResolveRallyKeyFromConfig()
+    {
+        std::string keyText;
+        Policy::RallyKey key;
+        if (!TryGetUserConfigString("Gameplay", "RallyKey", keyText) || keyText.empty())
+            keyText = Policy::kDefaultRallyKeyText;
+        if (const char* reason = CheckRallyKey(keyText.c_str(), key))
+        {
+            Log(L"[RALLY] [Gameplay] RallyKey=\"%hs\" ignored (%hs); using %hs\n", keyText.c_str(), reason,
+                Policy::kDefaultRallyKeyText);
+            keyText = Policy::kDefaultRallyKeyText;
+            key = Policy::RallyKey{};
+        }
+        StoreRallyKey(key);
+        g_RallyKeyText = keyText;
+        g_KeyLatch = Policy::KeyLatch{};
+    }
+
     void ReloadProducerRallyPointsConfig()
     {
+        ResolveRallyKeyFromConfig();
+
         bool value = true;
         g_Enabled = TryGetUserConfigBool("Gameplay", "ProducerRallyPoints", value) ? value : true;
         if (!g_ConfigRead)

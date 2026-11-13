@@ -524,6 +524,160 @@ namespace
         out = ChoosePanelRowLayout(small);
         Check(out.placement == PanelRowPlacement::TabLine && out.labelX == 128 && out.rowY == 150,
               "640x480: on the TAB line");
+
+        // A wide cap ("PgUp", 36 px) starts the group at 256 - 8 - 36 = 212,
+        // so the TAB label that just fit beside the 18 px cap no longer does.
+        in = LayoutAt2x();
+        in.cancelW = 183.0f;
+        in.keyWidthPx = 36;
+        out = ChoosePanelRowLayout(in);
+        Check(out.placement == PanelRowPlacement::BelowUnderlay && out.labelX == 256,
+              "a wide cap pushes a tight TAB label under the underlay");
+        in.cancelW = 165.0f; // 31 + 165 + 16 = 212
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::TabLine, "a wide cap that just fits stays");
+        in.keyWidthPx = 18; // the same width as keyW * scale
+        in.cancelW = 183.0f;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::TabLine,
+              "keyWidthPx equal to the atlas width behaves like the default");
+        in = LayoutAt2x();
+        in.keyWidthPx = 400; // group would start left of the row's key slot
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "a cap wider than the row: hidden");
+    }
+
+    void TestKeyCapWidth()
+    {
+        // key_0 is 9 atlas units: 18 px at scale 2.
+        Check(KeyCapWidthPx(9, 2.0f, 1, 10.0f) == 18, "one character keeps the key_0 cap");
+        Check(KeyCapWidthPx(9, 2.0f, 0, 10.0f) == 18, "no name keeps the key_0 cap");
+        Check(KeyCapWidthPx(9, 2.0f, 3, 24.0f) == 24 + 2 * 4, "a longer name: text plus 2 units padding a side");
+        Check(KeyCapWidthPx(9, 2.0f, 3, 4.0f) == 18, "a short wide-name never undercuts the key_0 cap");
+        Check(KeyCapWidthPx(9, 0.4f, 3, 10.0f) == 10 + 2, "padding is at least 1 px a side");
+        Check(KeyCapWidthPx(9, 2.0f, 3, std::numeric_limits<float>::quiet_NaN()) == 18, "NaN text: key_0 cap");
+        Check(KeyCapWidthPx(9, 2.0f, 3, -5.0f) == 18, "negative text: key_0 cap");
+
+        PixelRect box;
+        Check(KeyBoxRect(256, 300, 8, 9, 9, 2.0f, 2.0f, box) && box.right == 248 && box.left == 230,
+              "default cap box width is the atlas width times the scale");
+        Check(KeyBoxRect(256, 300, 8, 9, 9, 2.0f, 2.0f, box, 36) && box.right == 248 && box.left == 212 &&
+                  box.bottom - box.top == 18,
+              "a widened cap keeps its right edge and height");
+    }
+
+    void TestRallyKeyText()
+    {
+        const BZROpenShim::QuickSaveKeyPolicy::Chords quick; // Ctrl+Home / Ctrl+End
+        RallyKey key;
+        Check(CheckRallyKeyText("V", quick.save, quick.load, key) == nullptr && key == RallyKey{},
+              "V is the default key");
+        Check(CheckRallyKeyText("b", quick.save, quick.load, key) == nullptr && key.vk == 0x42 && !key.extended,
+              "a lower-case letter parses");
+        Check(CheckRallyKeyText("Insert", quick.save, quick.load, key) == nullptr && key.vk == 0x2D && key.extended,
+              "Insert is an extended key");
+        Check(CheckRallyKeyText("GreyPageUp", quick.save, quick.load, key) == nullptr && key.vk == 0x21 &&
+                  key.extended,
+              "the gamekey.map spelling parses");
+        Check(CheckRallyKeyText("F11", quick.save, quick.load, key) == nullptr && key.vk == 0x7A,
+              "F11 is free (only F1-F10 are group keys)");
+        // Home is only used as Ctrl+Home, which the rally filter never sees.
+        Check(CheckRallyKeyText("Home", quick.save, quick.load, key) == nullptr && key.vk == 0x24,
+              "Home is allowed beside Ctrl+Home");
+
+        key = RallyKey{};
+        const RallyKey before = key;
+        const char* const bad[] = {
+            "Shift+V", "Ctrl+V", "Alt+V", "Ctrl+Insert", "5",      "0",   "F1",   "F10",
+            "Space",   "Tab",    "Enter",  "Esc",         "Escape", "Alt", "",     "V+B",
+            "Banana",  "+",
+        };
+        for (const char* text : bad)
+            Check(CheckRallyKeyText(text, quick.save, quick.load, key) != nullptr, text);
+        Check(key == before, "a refused key leaves the output alone");
+        Check(CheckRallyKeyText(nullptr, quick.save, quick.load, key) != nullptr, "null text refused");
+
+        using BZROpenShim::QuickSaveKeyPolicy::Chord;
+        const Chord shiftIns{ false, true, false, 0x2D, true };
+        const Chord ctrlIns{ true, false, false, 0x2D, true };
+        Check(CheckRallyKeyText("Insert", shiftIns, quick.load, key) != nullptr,
+              "Shift+Insert as QuickSave collides with Shift+key clearing");
+        Check(CheckRallyKeyText("Insert", quick.save, shiftIns, key) != nullptr, "the QuickLoad chord counts too");
+        Check(CheckRallyKeyText("Insert", ctrlIns, quick.load, key) == nullptr,
+              "Ctrl+Insert never reaches the rally filter");
+        const Chord shiftNumpadIns{ false, true, false, 0x2D, false };
+        Check(CheckRallyKeyText("Insert", shiftNumpadIns, quick.load, key) == nullptr,
+              "a non-extended chord is another key");
+    }
+
+    void TestRallyKeyCapName()
+    {
+        char name[12];
+        Check(RallyKeyCapName(RallyKey{}, name, sizeof(name)) == 1 && std::string(name) == "V", "V");
+        Check(RallyKeyCapName(RallyKey{ 0x7A, false }, name, sizeof(name)) == 3 && std::string(name) == "F11",
+              "F11");
+        Check(RallyKeyCapName(RallyKey{ 0x2D, true }, name, sizeof(name)) == 3 && std::string(name) == "Ins", "Ins");
+        Check(RallyKeyCapName(RallyKey{ 0x21, true }, name, sizeof(name)) == 4 && std::string(name) == "PgUp",
+              "PgUp");
+        Check(RallyKeyCapName(RallyKey{ 0x27, true }, name, sizeof(name)) == 5 && std::string(name) == "Right",
+              "Right");
+        Check(RallyKeyCapName(RallyKey{ 0xFF, false }, name, sizeof(name)) == 0 && name[0] == '\0',
+              "an unnamed key has no cap name");
+        char tiny[3];
+        Check(RallyKeyCapName(RallyKey{ 0x21, true }, tiny, sizeof(tiny)) == 2 && std::string(tiny) == "Pg",
+              "a small buffer truncates and terminates");
+        Check(RallyKeyCapName(RallyKey{}, nullptr, 4) == 0 && RallyKeyCapName(RallyKey{}, name, 0) == 0,
+              "no buffer: nothing written");
+    }
+
+    void TestReboundKey()
+    {
+        const RallyKey ins{ 0x2D, true };
+        KeyEvent down = Down();
+        down.vk = 0x2D;
+        down.extended = true;
+        KeyLatch latch;
+        KeyDecision d = ClassifyRallyKey(down, OpenGate(), latch, ins);
+        Check(d.swallow && d.action == KeyAction::SetRally, "the bound key sets the rally");
+
+        latch = {};
+        down.shift = true;
+        d = ClassifyRallyKey(down, OpenGate(), latch, ins);
+        Check(d.swallow && d.action == KeyAction::ClearRally, "Shift+bound key clears the rally");
+
+        latch = {};
+        down.shift = false;
+        down.ctrl = true;
+        d = ClassifyRallyKey(down, OpenGate(), latch, ins);
+        Check(!d.swallow && d.action == KeyAction::None, "Ctrl+bound key passes through");
+
+        latch = {};
+        KeyEvent numpad = Down();
+        numpad.vk = 0x2D;
+        numpad.extended = false; // numpad 0 with NumLock off
+        d = ClassifyRallyKey(numpad, OpenGate(), latch, ins);
+        Check(!d.swallow && d.action == KeyAction::None, "the numpad twin of an extended key passes through");
+
+        latch = {};
+        d = ClassifyRallyKey(Down(), OpenGate(), latch, ins);
+        Check(!d.swallow && d.action == KeyAction::None, "V is a normal key once rebound");
+
+        latch = {};
+        KeyEvent plainDown = Down();
+        plainDown.vk = 0x2D;
+        plainDown.extended = true;
+        d = ClassifyRallyKey(plainDown, OpenGate(), latch, ins);
+        KeyEvent up;
+        up.msg = kWmKeyUp;
+        up.vk = 0x2D;
+        up.extended = true;
+        up.lParam = 0xC0000001ull;
+        d = ClassifyRallyKey(up, OpenGate(), latch, ins);
+        Check(d.swallow && !latch.downSwallowed, "the bound key's keyup is swallowed with its keydown");
+
+        // An extended default-vk key is not V.
+        KeyEvent extV = Down();
+        extV.extended = true;
+        latch = {};
+        d = ClassifyRallyKey(extV, OpenGate(), latch);
+        Check(!d.swallow, "an extended V does not match the default V");
     }
 }
 
@@ -572,6 +726,10 @@ int main()
     TestKeyCapFill();
     TestSpaceRowLabel();
     TestPanelRowLayout();
+    TestKeyCapWidth();
+    TestRallyKeyText();
+    TestRallyKeyCapName();
+    TestReboundKey();
     TestProducerLabelAndLamp();
     if (OpenShimTest::FailureCount() != 0)
     {
