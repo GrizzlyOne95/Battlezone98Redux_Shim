@@ -887,8 +887,11 @@ namespace BZROpenShim
                 {
                     Log(L"[FLAG] Config sourceDir does not exist path=%hs\n",
                         g_ConfigRequestedFlagsDirectory.string().c_str());
+                    // Kept, not cleared: the catalogue load rewrites flags.cfg,
+                    // and clearing dropped the player's sourceDir for good the
+                    // first time the folder (a removable or network drive) was
+                    // away. ResolveFlagSourceDirectoryPath skips a missing one.
                     g_SelectedFlagStatus = "Configured dir missing; using fallback.";
-                    g_ConfigRequestedFlagsDirectory.clear();
                 }
                 else
                 {

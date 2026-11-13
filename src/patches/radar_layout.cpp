@@ -315,9 +315,27 @@ namespace BZROpenShim
             }
         }
 
+        // The engine's value from before a mission script first scaled the radar.
+        // With no ini scale RefreshRadarSizeScaleState writes nothing, and the
+        // engine only rewrites this global on a game-mode change, so without
+        // putting it back a scripted scale carried into every later mission.
+        bool g_RadarScriptScaleActive = false;
+        float g_RadarScaleBeforeScript = 1.0f;
+
         void RevertRadarSizeScaleToBaseline()
         {
             g_RadarSizeScale = g_RadarSizeScaleBaseline;
+            if (g_RadarScriptScaleActive)
+            {
+                g_RadarScriptScaleActive = false;
+                __try
+                {
+                    *reinterpret_cast<float*>(g_RadarSizeScaleAddr) = g_RadarScaleBeforeScript;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
             RefreshRadarSizeScaleState();
         }
     }
@@ -362,6 +380,12 @@ namespace BZROpenShim
         g_RadarSizeScale = clamped;
         __try
         {
+            if (!g_RadarScriptScaleActive)
+            {
+                const float before = *reinterpret_cast<const float*>(g_RadarSizeScaleAddr);
+                g_RadarScaleBeforeScript = (std::isfinite(before) && before > 0.0f) ? before : 1.0f;
+                g_RadarScriptScaleActive = true;
+            }
             *reinterpret_cast<float*>(g_RadarSizeScaleAddr) = clamped;
         }
         __except (EXCEPTION_EXECUTE_HANDLER)

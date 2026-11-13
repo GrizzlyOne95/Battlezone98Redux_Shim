@@ -2726,6 +2726,11 @@ namespace BZROpenShim
             InputBindingDocument document;
             document.loaded = true;
             document.lines = ReadTextFileLines(path);
+            if (TextFileReadLooksFailed(path, document.lines))
+            {
+                outError = "openshim.ini could not be read";
+                return false;
+            }
             UpdateIniDocumentValueLossless(document.lines, section, key,
                                            altKeys, altKeyCount, value);
 
@@ -3694,6 +3699,11 @@ namespace BZROpenShim
             InputBindingDocument document;
             document.loaded = true;
             document.lines = ReadTextFileLines(path);
+            if (TextFileReadLooksFailed(path, document.lines))
+            {
+                status = ShimFormat("openshim_ui:save_failed", "Save failed: %s", "openshim.ini could not be read");
+                return;
+            }
             std::vector<ShimSettingApplyGroup> groups;
             bool restartNeeded = false;
             size_t written = 0;
@@ -6212,6 +6222,7 @@ namespace BZROpenShim
         if(!values||!count||count>32)return false;
         const auto path=GetUserConfigPath();if(path.empty())return false;
         InputBindingDocument document;document.loaded=true;document.lines=ReadTextFileLines(path);
+        if(TextFileReadLooksFailed(path,document.lines)){Log(L"[SETTINGSUI] Could not save settings group: openshim.ini could not be read\n");return false;}
         for(size_t i=0;i<count;++i)
         {
             if(!values[i].section||!values[i].key||!values[i].value)return false;

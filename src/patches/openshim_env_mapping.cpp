@@ -489,7 +489,7 @@ namespace
         if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_FRAME_CAPTURE_STRIDE"))
             return ini(IniFile::Main, "Terrain", "TerrainSemanticFrameCaptureStride", out);
         if (Equals(name, "OPENSHIM_TERRAIN_HD"))
-            return ini(IniFile::Main, "Terrain", "TerrainHdEnabled", out);
+            return TryReadMappedBool(ini, "Terrain", "TerrainHdEnabled", false, out);
         if (Equals(name, "OPENSHIM_TERRAIN_HD_MANIFEST"))
             return ini(IniFile::Main, "Terrain", "TerrainHdManifest", out);
 
