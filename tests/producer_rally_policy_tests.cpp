@@ -370,6 +370,37 @@ namespace
     }
 }
 
+void TestProducerLabelAndLamp()
+{
+    Check(UseAmberLamp(ProducerKind::Factory), "Factory lamp is amber");
+    Check(!UseAmberLamp(ProducerKind::Recycler), "Recycler lamp stays green");
+    Check(!UseAmberLamp(ProducerKind::Unknown), "unclassified producer keeps the current green lamp");
+
+    char out[kLabelMax];
+    size_t n = FormatRallyLabel("Recycler", out, sizeof(out));
+    Check(std::string(out) == "Recycler rally" && n == 14, "unitName plus ' rally'");
+    n = FormatRallyLabel("Factory", out, sizeof(out));
+    Check(std::string(out) == "Factory rally" && n == 13, "Factory label");
+    n = FormatRallyLabel("", out, sizeof(out));
+    Check(std::string(out) == "Rally" && n == 5, "empty unitName falls back to the generic label");
+    n = FormatRallyLabel(nullptr, out, sizeof(out));
+    Check(std::string(out) == "Rally" && n == 5, "null unitName falls back to the generic label");
+    n = FormatRallyLabel("   ", out, sizeof(out));
+    Check(std::string(out) == "Rally", "blank unitName falls back to the generic label");
+    n = FormatRallyLabel("  Heavy\tRecycler \x01 ", out, sizeof(out));
+    Check(std::string(out) == "HeavyRecycler rally", "control characters dropped, spaces trimmed");
+    n = FormatRallyLabel("\xC3\xA9\xC3\xA9", out, sizeof(out));
+    Check(std::string(out) == "Rally", "non-ASCII only falls back to the generic label");
+    n = FormatRallyLabel("ABCDEFGHIJKLMNOPQRSTUVWXYZ", out, sizeof(out));
+    Check(std::string(out) == "ABCDEFGHIJKLMNOPQRST rally" && n == 26 && n < kLabelMax, "long unitName is capped");
+    char tiny[8];
+    n = FormatRallyLabel("Recycler", tiny, sizeof(tiny));
+    Check(n == 7 && tiny[7] == '\0' && std::string(tiny) == "Recycle", "a small buffer truncates and terminates");
+    Check(FormatRallyLabel("x", nullptr, 8) == 0 && FormatRallyLabel("x", out, 0) == 0, "no buffer: nothing written");
+    Check(LabelHalfWidth(5) == 22, "generic label keeps the original 22 px half width");
+    Check(LabelHalfWidth(14) > LabelHalfWidth(5), "longer labels get a wider panel");
+}
+
 int main()
 {
     TestModifiers();
@@ -382,6 +413,7 @@ int main()
     TestTickPlan();
     TestSetMode();
     TestPanelRow();
+    TestProducerLabelAndLamp();
     if (OpenShimTest::FailureCount() != 0)
     {
         std::fprintf(stderr, "producer_rally_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());

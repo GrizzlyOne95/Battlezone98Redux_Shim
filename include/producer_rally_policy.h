@@ -520,5 +520,65 @@ namespace BZROpenShim
         {
             return static_cast<int>(static_cast<double>(rowY) - static_cast<double>(textHeight) / 2.0);
         }
+
+        // ---- producer type: beacon lamp colour and HUD label ---------------
+
+        enum class ProducerKind
+        {
+            Unknown,
+            Recycler,
+            Factory,
+        };
+
+        // Recycler keeps the original green lamp; only a Factory is amber.
+        // Unknown (anything unclassified) stays green.
+        inline bool UseAmberLamp(ProducerKind kind)
+        {
+            return kind == ProducerKind::Factory;
+        }
+
+        constexpr size_t kLabelMax = 32;         // buffer size, NUL included
+        constexpr size_t kUnitNameLabelMax = 20; // unitName characters kept
+        constexpr char kGenericLabel[] = "Rally";
+        constexpr char kLabelSuffix[] = " rally";
+
+        // "<unitName> rally" into out (cap bytes, NUL-terminated); the generic
+        // "Rally" when unitName is null, empty or has no printable text.
+        // Only printable ASCII is kept (spaces trimmed at both ends), at most
+        // kUnitNameLabelMax characters. Returns the length written.
+        inline size_t FormatRallyLabel(const char* unitName, char* out, size_t cap)
+        {
+            if (!out || cap == 0)
+                return 0;
+            out[0] = '\0';
+            char name[kUnitNameLabelMax + 1] = {};
+            size_t n = 0;
+            for (size_t i = 0; unitName && unitName[i] && n < kUnitNameLabelMax; ++i)
+            {
+                const unsigned char c = static_cast<unsigned char>(unitName[i]);
+                if (c < 0x20 || c > 0x7E)
+                    continue;
+                if (c == ' ' && n == 0)
+                    continue;
+                name[n++] = static_cast<char>(c);
+            }
+            while (n > 0 && name[n - 1] == ' ')
+                --n;
+            name[n] = '\0';
+            const char* const parts[2] = { n ? name : kGenericLabel, n ? kLabelSuffix : "" };
+            size_t len = 0;
+            for (const char* part : parts)
+                for (size_t i = 0; part[i] && len + 1 < cap; ++i)
+                    out[len++] = part[i];
+            out[len] = '\0';
+            return len;
+        }
+
+        // Half the backing panel's width for a label of `length` characters;
+        // 22 for the generic "Rally", which is the original fixed panel.
+        inline int LabelHalfWidth(size_t length)
+        {
+            return static_cast<int>(length) * 4 + 2;
+        }
     }
 }

@@ -40,6 +40,7 @@
 #include "hook_engine.h"
 #include "hud_gauge_overlay.h"
 #include "iat_patch.h"
+#include "kill_ticker.h"
 #include "native_chunk_mesh.h"
 #include "native_chunk_prune.h"
 #include "patcher.h"
@@ -56,6 +57,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <string>
+#include <utility>
 
 namespace BZROpenShim::Hooks
 {
@@ -113,7 +116,6 @@ namespace BZROpenShim::Hooks
         constexpr int kDotHalf = 1;
         constexpr float kDotSpacing = 18.0f;
         constexpr size_t kMaxDots = 48;
-        constexpr char kMarkerText[] = "Rally";
 
         uint32_t g_RecyclerVtableAddr = 0;
         uint32_t g_FactoryVtableAddr = 0;
@@ -365,6 +367,20 @@ namespace BZROpenShim::Hooks
         {
             const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(obj)));
             return vtable != 0 && (vtable == g_RecyclerVtableAddr || vtable == g_FactoryVtableAddr);
+        }
+
+        // The same vtable test as IsHookedProducer, kept as a kind: the
+        // Recycler and Factory vtables are the only two producers hooked.
+        Policy::ProducerKind ProducerKindOf(void* obj)
+        {
+            const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(obj)));
+            if (vtable == 0)
+                return Policy::ProducerKind::Unknown;
+            if (vtable == g_RecyclerVtableAddr)
+                return Policy::ProducerKind::Recycler;
+            if (vtable == g_FactoryVtableAddr)
+                return Policy::ProducerKind::Factory;
+            return Policy::ProducerKind::Unknown;
         }
 
         void* UserObject()
@@ -793,6 +809,8 @@ namespace BZROpenShim::Hooks
         // keeps the HUD square.
 
         constexpr char kRallyBeaconResource[] = OPENSHIM_CHUNK_CACHE_RALLY_DIR "openshim_rally_beacon.mesh";
+        // Factory variant: same geometry, amber lamp material.
+        constexpr char kRallyBeaconFactoryResource[] = OPENSHIM_CHUNK_CACHE_RALLY_DIR "openshim_rally_beacon_fac.mesh";
         constexpr char kRallyMeshName[] = "apcamr.mesh"; // stock fallback
         bool g_BeaconFallback = false;                  // generated mesh failed: stock mesh from then on
         bool g_BeaconInUseLogged = false;
@@ -808,7 +826,29 @@ namespace BZROpenShim::Hooks
             void* node = nullptr;
             void* entity = nullptr;
             bool visible = false;
+            bool amber = false;     // the lamp variant this entity was made with
+            bool generated = false; // made from the generated mesh, not the stock fallback
         };
+
+        // HUD label cache: filled by MeshTick (EnsureLabel), read by the HUD
+        // painter (LabelFor, no lookup, no allocation); both under g_TableLock.
+        // Cleared with the beacon slots.
+        struct LabelEntry
+        {
+            char odf[kGameObjectClassOdfNameMax + 1];
+            char text[Policy::kLabelMax];
+            size_t length;
+        };
+        constexpr size_t kLabelCacheSize = 8;
+        LabelEntry g_Labels[kLabelCacheSize];
+        size_t g_LabelCount = 0; // under g_TableLock
+
+        LabelEntry GenericLabel()
+        {
+            LabelEntry entry = {};
+            entry.length = Policy::FormatRallyLabel(nullptr, entry.text, sizeof(entry.text));
+            return entry;
+        }
 
         RallyMeshSlot g_MeshSlots[kMeshPoolSize];
         bool g_MeshUnavailable = false; // creation failed once: HUD square from then on
@@ -880,6 +920,10 @@ namespace BZROpenShim::Hooks
             }
             g_AnyMeshVisible = false;
             SetMeshShown(nullptr, 0);
+            {
+                TableExclusive lock; // the next mission may carry other ODFs
+                g_LabelCount = 0;
+            }
             if (held)
                 Log(L"[RALLY] forgot %zu rally beacon(s) (%ls)\n", held, reason ? reason : L"unspecified");
         }
@@ -896,11 +940,46 @@ namespace BZROpenShim::Hooks
             ForgetMeshSlots(reason);
         }
 
+        // Resolves the "<unitName> rally" label of a producer's ODF into the
+        // cache, once per ODF per mission (MeshTick, game thread: the engine
+        // file read and the allocations happen here, never in the painter). A
+        // failed read is cached as the generic label so it is not retried
+        // every tick.
+        void EnsureLabel(void* producer)
+        {
+            char odf[kGameObjectClassOdfNameMax + 1] = {};
+            if (!TryGetCraftOdfName(producer, odf, sizeof(odf)) || !odf[0])
+                return;
+            {
+                TableShared lock;
+                if (g_LabelCount >= kLabelCacheSize)
+                    return;
+                for (size_t i = 0; i < g_LabelCount; ++i)
+                    if (_stricmp(g_Labels[i].odf, odf) == 0)
+                        return;
+            }
+            LabelEntry entry = {};
+            std::memcpy(entry.odf, odf, sizeof(entry.odf));
+            try
+            {
+                const std::string unitName = KillTicker::LookupUnitName(odf);
+                entry.length = Policy::FormatRallyLabel(unitName.c_str(), entry.text, sizeof(entry.text));
+            }
+            catch (...)
+            {
+                entry.length = Policy::FormatRallyLabel(nullptr, entry.text, sizeof(entry.text));
+            }
+            TableExclusive lock;
+            if (g_LabelCount < kLabelCacheSize)
+                g_Labels[g_LabelCount++] = entry;
+        }
+
         void MeshTick()
         {
             if (g_MeshUnavailable)
                 return;
             uintptr_t producers[kMeshPoolSize] = {};
+            bool amber[kMeshPoolSize] = {};
             float positions[kMeshPoolSize][3] = {};
             size_t wanted = 0;
             if (g_Active.load(std::memory_order_acquire) && TableSize() != 0)
@@ -913,6 +992,7 @@ namespace BZROpenShim::Hooks
                     if (!entry)
                         return;
                     producers[wanted] = reinterpret_cast<uintptr_t>(producer);
+                    amber[wanted] = Policy::UseAmberLamp(ProducerKindOf(producer));
                     positions[wanted][0] = entry->pos[0];
                     positions[wanted][1] = entry->pos[1];
                     positions[wanted][2] = entry->pos[2];
@@ -950,6 +1030,34 @@ namespace BZROpenShim::Hooks
                                            6.283185307179586);
             const float quat[4] = { static_cast<float>(std::cos(angle * 0.5)), 0.0f,
                                     static_cast<float>(std::sin(angle * 0.5)), 0.0f };
+            // The labels are resolved here, on the game thread; the painter
+            // only reads the cache.
+            for (size_t i = 0; i < wanted; ++i)
+                EnsureLabel(reinterpret_cast<void*>(producers[i]));
+
+            // A slot follows the selection order, so it can be handed a
+            // producer of the other colour. Before destroying anything, swap
+            // it with another made slot that already has the wanted colour and
+            // is not needed in its own colour (the stock fallback mesh has
+            // one look and is skipped).
+            if (!g_BeaconFallback)
+            {
+                for (size_t i = 0; i < wanted; ++i)
+                {
+                    if (!g_MeshSlots[i].entity || g_MeshSlots[i].amber == amber[i])
+                        continue;
+                    for (size_t j = 0; j < kMeshPoolSize; ++j)
+                    {
+                        if (j == i || !g_MeshSlots[j].entity || g_MeshSlots[j].amber != amber[i])
+                            continue;
+                        if (j < wanted && g_MeshSlots[j].amber == amber[j])
+                            continue; // already right for its own producer
+                        std::swap(g_MeshSlots[i], g_MeshSlots[j]);
+                        break;
+                    }
+                }
+            }
+
             uintptr_t shown[kMeshPoolSize] = {};
             size_t shownCount = 0;
             for (size_t i = 0; i < kMeshPoolSize; ++i)
@@ -962,15 +1070,27 @@ namespace BZROpenShim::Hooks
                     slot.visible = false;
                     continue;
                 }
+                // A slot holding the wrong mesh is destroyed and re-made: the
+                // other lamp colour, or (once the generated mesh has failed)
+                // any generated mesh, so the stock one replaces it.
+                const char* const resource = amber[i] ? kRallyBeaconFactoryResource : kRallyBeaconResource;
+                if (slot.entity && (g_BeaconFallback ? slot.generated : slot.amber != amber[i]))
+                {
+                    DestroyShimOwnedMeshObject(slot.sceneManager, slot.node, slot.entity);
+                    slot = RallyMeshSlot{};
+                }
                 if (!slot.entity)
                 {
                     slot = RallyMeshSlot{};
                     bool created = false;
                     if (!g_BeaconFallback)
                     {
-                        created = CreateShimOwnedMeshObject(kRallyBeaconResource, slot.sceneManager, slot.node, slot.entity);
+                        created = CreateShimOwnedMeshObject(resource, slot.sceneManager, slot.node, slot.entity);
                         if (created)
+                        {
                             g_BeaconCreateFailures = 0;
+                            slot.generated = true;
+                        }
                         else
                         {
                             // A not-yet-ready scene also lands here: retry on
@@ -978,19 +1098,25 @@ namespace BZROpenShim::Hooks
                             // failure repeats.
                             slot = RallyMeshSlot{};
                             if (++g_BeaconCreateFailures < kMaxBeaconCreateFailures)
+                            {
+                                // Nothing may claim a beacon that is gone.
+                                HideAllMeshes();
                                 return;
+                            }
                             g_BeaconFallback = true;
                             Log(L"[RALLY] generated beacon mesh %hs could not be created %d times; using stock %hs\n",
-                                kRallyBeaconResource, g_BeaconCreateFailures, kRallyMeshName);
+                                resource, g_BeaconCreateFailures, kRallyMeshName);
                         }
                     }
                     if (!created)
                         created = CreateShimOwnedStockMeshObject(kRallyMeshName, slot.sceneManager, slot.node, slot.entity);
+                    if (created)
+                        slot.amber = amber[i];
                     if (created && !g_BeaconInUseLogged)
                     {
                         g_BeaconInUseLogged = true;
                         Log(L"[RALLY] rally beacon mesh in use: %hs\n",
-                            g_BeaconFallback ? kRallyMeshName : kRallyBeaconResource);
+                            g_BeaconFallback ? kRallyMeshName : resource);
                     }
                     if (!created)
                     {
@@ -1034,6 +1160,43 @@ namespace BZROpenShim::Hooks
         }
 
         // ---- the HUD marker ------------------------------------------------
+
+        // Copy of the cached label for this producer's ODF; "Rally" on a miss.
+        // No lookup and no allocation: the painter must not block or throw.
+        // EnsureLabel (MeshTick) fills the cache.
+        LabelEntry LabelFor(void* producer)
+        {
+            char odf[kGameObjectClassOdfNameMax + 1] = {};
+            if (TryGetCraftOdfName(producer, odf, sizeof(odf)) && odf[0])
+            {
+                TableShared lock;
+                for (size_t i = 0; i < g_LabelCount; ++i)
+                    if (_stricmp(g_Labels[i].odf, odf) == 0)
+                        return g_Labels[i];
+            }
+            return GenericLabel();
+        }
+
+        // Backing-panel half width: the measured text when the frame offers a
+        // sane measure, else the per-glyph estimate.
+        int LabelPanelHalfWidth(const HudGaugeOverlay::Frame& frame, const LabelEntry& label) noexcept
+        {
+            float w = 0.0f, h = 0.0f;
+            if (frame.measure && frame.style)
+            {
+                __try
+                {
+                    frame.measure(frame.style, label.text, &w, &h);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    w = 0.0f;
+                }
+            }
+            if (std::isfinite(w) && w > 0.0f && w < 400.0f)
+                return static_cast<int>(w * 0.5f) + 6;
+            return Policy::LabelHalfWidth(label.length);
+        }
 
         // Shown only while a rallied producer is selected (BZCC behaviour).
         // With a 3D beacon on the rally the square is left out; the dotted
@@ -1094,8 +1257,10 @@ namespace BZROpenShim::Hooks
                 if (!ok)
                     return;
                 const int textY = y + kMarkerHalf + 2;
-                ok = HudGaugeOverlay::DrawPanelText(frame, x - 22, textY - 1, x + 22, textY + 13,
-                                                    kMarkerPanelArgb, x, textY, kMarkerText, kMarkerArgb, 1);
+                const LabelEntry label = LabelFor(producer);
+                const int half = LabelPanelHalfWidth(frame, label);
+                ok = HudGaugeOverlay::DrawPanelText(frame, x - half, textY - 1, x + half, textY + 13,
+                                                    kMarkerPanelArgb, x, textY, label.text, kMarkerArgb, 1);
             });
             return ok;
         }
@@ -1573,27 +1738,32 @@ namespace BZROpenShim::Hooks
         {
             namespace RB = BZROpenShim::RallyBeacon;
             std::error_code ec;
-            const NativeChunks::Piece piece = NativeChunks::RallyBeaconMesh();
-            const auto meshPath = cacheRoot / std::filesystem::path(kRallyBeaconResource);
-            bool current = false;
-            if (std::filesystem::file_size(meshPath, ec) == piece.mesh.size() && !ec)
+            // Recycler (green lamp) and Factory (amber lamp) variants.
+            for (const bool amberLamp : { false, true })
             {
-                std::ifstream existing(meshPath, std::ios::binary);
-                std::vector<uint8_t> bytes(piece.mesh.size());
-                current = existing.read(reinterpret_cast<char*>(bytes.data()),
-                                        static_cast<std::streamsize>(bytes.size())) &&
-                          bytes == piece.mesh;
-            }
-            ec.clear();
-            if (!current && !piece.mesh.empty())
-            {
-                std::filesystem::create_directories(meshPath.parent_path(), ec);
-                std::ofstream output(meshPath, std::ios::binary | std::ios::trunc);
-                output.write(reinterpret_cast<const char*>(piece.mesh.data()),
-                             static_cast<std::streamsize>(piece.mesh.size()));
-                output.close();
-                Log(L"[RALLY] wrote beacon mesh %hs triangles=%u ok=%u\n", meshPath.string().c_str(),
-                    piece.triangles, output ? 1u : 0u);
+                const NativeChunks::Piece piece = NativeChunks::RallyBeaconMesh(amberLamp);
+                const auto meshPath = cacheRoot / std::filesystem::path(
+                    amberLamp ? kRallyBeaconFactoryResource : kRallyBeaconResource);
+                bool current = false;
+                if (std::filesystem::file_size(meshPath, ec) == piece.mesh.size() && !ec)
+                {
+                    std::ifstream existing(meshPath, std::ios::binary);
+                    std::vector<uint8_t> bytes(piece.mesh.size());
+                    current = existing.read(reinterpret_cast<char*>(bytes.data()),
+                                            static_cast<std::streamsize>(bytes.size())) &&
+                              bytes == piece.mesh;
+                }
+                ec.clear();
+                if (!current && !piece.mesh.empty())
+                {
+                    std::filesystem::create_directories(meshPath.parent_path(), ec);
+                    std::ofstream output(meshPath, std::ios::binary | std::ios::trunc);
+                    output.write(reinterpret_cast<const char*>(piece.mesh.data()),
+                                 static_cast<std::streamsize>(piece.mesh.size()));
+                    output.close();
+                    Log(L"[RALLY] wrote beacon mesh %hs triangles=%u ok=%u\n", meshPath.string().c_str(),
+                        piece.triangles, output ? 1u : 0u);
+                }
             }
 
             const auto ours = cacheRoot / RB::kMaterialFile;

@@ -52,8 +52,27 @@ checked by `scripts/audit_vtable_hooks.py`.
   world, spinning slowly (1 rad/s, the beacon's own `omegaSpin`). It is an
   Ogre scene node and entity only: no game object, no collision, nothing
   saved, no nav slot used, no effect on the simulation.
+- **Recycler vs Factory:** the beacon's lamp is green for a Recycler and amber
+  for a Factory. Same geometry; the Factory uses its own generated mesh
+  `rally/v1/openshim_rally_beacon_fac.mesh` whose lamp submesh is the material
+  `openshim_rally_beacon_lamp_fac` (textures `openshim_rally_beacon_lamp_fac_d.tga`
+  and `_e.tga`, written with the other beacon materials; the frame and the
+  specular map are shared). The type is the producer's vtable
+  (`ProducerKindOf`, the same Recycler/Factory vtable test as
+  `IsHookedProducer`); anything else keeps green. A beacon slot handed a
+  producer of the other type is destroyed and re-made with the right mesh.
+  The stock-mesh fallback has one look (once it is in use, generated meshes
+  are re-made as stock). A payload directory that overrides
+  `openshim_rally_beacon.material` must also define
+  `openshim_rally_beacon_lamp_fac`, or the Factory lamp renders white. The HUD label reads the producer's ODF
+  `[GameObjectClass] unitName` (`KillTicker::LookupUnitName`, resolved in the beacon tick and cached per
+  ODF; the HUD painter only reads the cache and measures the text for the
+  backing panel)
+  plus " rally", e.g. "Recycler rally" / "Factory rally": printable ASCII only,
+  at most 20 name characters, with the generic "Rally" when the unitName is
+  empty or unreadable. The pure rules are in `producer_rally_policy.h`.
 - **HUD marker:** a dotted line from the producer to the rally point and the
-  label "Rally" under it, so the beacon reads as a rally and not as a stock
+  label ("<unitName> rally", see above) under it, so the beacon reads as a rally and not as a stock
   nav. When there is no beacon for that rally (the mesh could not be created,
   or more than 8 rallied producers are selected), a small square is drawn at
   the point too. The HUD parts are hidden when the point is behind the camera
@@ -223,6 +242,10 @@ on live. Install runs once per process.
   while that Factory is selected, with no square under the label. Deselecting
   hides it; selecting again shows it. The log has no "could not be created"
   line.
+- A Recycler's beacon lamp is green and a Factory's amber; the labels read
+  "Recycler rally" / "Factory rally" (each ODF's unitName), falling back to
+  "Rally" only if the unitName cannot be read. Select both at once: two
+  beacons with the two colours. Mod ODFs with another unitName show it.
 - The beacon has no collision (a tank drives through it) and is not
   targetable or on radar.
 - After a mission restart, a save load and a return to the shell and back,

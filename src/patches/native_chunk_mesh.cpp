@@ -962,7 +962,7 @@ Piece CasingMesh(unsigned sides)
     chunk(out, 0x3000, body);
     return {"openshim_casing", std::move(out), triangles};
 }
-Piece RallyBeaconMesh()
+Piece RallyBeaconMesh(bool amberLamp)
 {
     // Producer rally "drop-off beacon" (after BZ2's ipdrop), Ogre axes, Y up,
     // origin at the base centre, min y = 0, about 5.9 m tall. Convex solids
@@ -1087,7 +1087,7 @@ Piece RallyBeaconMesh()
     uint32_t triangles = 0;
     for (const auto &[material, vertices] :
          {std::pair<const char *, const std::vector<Vertex> *>{"openshim_rally_beacon_frame", &frame},
-          std::pair<const char *, const std::vector<Vertex> *>{"openshim_rally_beacon_lamp", &lamp}})
+          std::pair<const char *, const std::vector<Vertex> *>{amberLamp ? "openshim_rally_beacon_lamp_fac" : "openshim_rally_beacon_lamp", &lamp}})
     {
         Geometry g;
         g.count = static_cast<uint32_t>(vertices->size());
@@ -1124,7 +1124,7 @@ Piece RallyBeaconMesh()
     put(out, uint16_t{0x1000});
     line(out, "[MeshSerializer_v1.8]");
     chunk(out, 0x3000, body);
-    return {"openshim_rally_beacon", std::move(out), triangles};
+    return {amberLamp ? "openshim_rally_beacon_fac" : "openshim_rally_beacon", std::move(out), triangles};
 }
 std::string SkeletonName(const Bytes &b)
 {
