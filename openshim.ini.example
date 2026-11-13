@@ -1653,9 +1653,9 @@ RespectExternalAutoSave = 1
 
 [QuickSave]
 
-; Ctrl+F5 saves the running single-player mission to Save\quick.sav (label in
-; Save\quick.label.txt); Ctrl+F9 loads it. Only the Ctrl chord is taken: plain
-; F5/F9 and Shift+F5/F9 keep their stock bindings. Uses the AutoSave save gate
+; Ctrl+Home saves the running single-player mission to Save\quick.sav (label in
+; Save\quick.label.txt); Ctrl+End loads it. Only the Ctrl chord is taken: plain
+; and Shift Home/End are left alone. Uses the AutoSave save gate
 ; but works with [AutoSave] Enabled = 0. The load screen shows a QuickSave
 ; button below the AutoSave one while quick.sav exists.
 ; Accepted: 0 = OFF, non-zero = ON. Default: 1.

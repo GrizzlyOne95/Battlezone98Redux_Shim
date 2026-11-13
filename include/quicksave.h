@@ -1,5 +1,5 @@
 // quicksave.h
-// BZR Open Shim - Ctrl+F5 QuickSave / Ctrl+F9 QuickLoad (single player)
+// BZR Open Shim - Ctrl+Home QuickSave / Ctrl+End QuickLoad (single player)
 //
 // Copyright (C) 2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT

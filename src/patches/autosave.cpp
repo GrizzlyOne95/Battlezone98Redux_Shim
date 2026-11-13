@@ -966,7 +966,7 @@ namespace BZROpenShim
         {
             // Only on an actual on->off change: QuickSave shares this settings
             // group, and resetting here would clear the per-mission SaveGame
-            // fault latch that still guards Ctrl+F5.
+            // fault latch that still guards Ctrl+Home.
             if (wasEnabled)
             {
                 ResetMissionState();

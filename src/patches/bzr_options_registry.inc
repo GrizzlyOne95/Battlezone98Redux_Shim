@@ -519,7 +519,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "QuickSave Keys", "QuickSave", "QuickSaveEnabled", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::AutoSave,
-      "Ctrl+F5 saves to a QuickSave slot and Ctrl+F9 loads it, in single-player missions. Plain F5/F9 keep their stock actions." },
+      "Ctrl+Home saves to a QuickSave slot and Ctrl+End loads it, in single-player missions." },
     { "Aim Convergence", "SinglePlayer", "WeaponConvergence", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,

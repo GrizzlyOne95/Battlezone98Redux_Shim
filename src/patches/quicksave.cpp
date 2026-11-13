@@ -1,5 +1,5 @@
 // quicksave.cpp
-// BZR Open Shim - Ctrl+F5 QuickSave / Ctrl+F9 QuickLoad (single player)
+// BZR Open Shim - Ctrl+Home QuickSave / Ctrl+End QuickLoad (single player)
 //
 // Copyright (C) 2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
@@ -52,7 +52,7 @@ namespace BZROpenShim::QuickSave
         // mission ended under it) and is dropped rather than run later.
         constexpr ULONGLONG kRequestMaxAgeMs = 1000;
         // Keys are only taken while the world is updating; in the shell and on
-        // the loading screen Ctrl+F5/F9 reach the game as stock.
+        // the loading screen Ctrl+Home/End reach the game as stock.
         constexpr ULONGLONG kTickFreshMs = 500;
 
         enum Request : LONG
@@ -90,13 +90,14 @@ namespace BZROpenShim::QuickSave
             using namespace QuickSaveKeyPolicy;
             if (msg != kWmKeyDown && msg != kWmKeyUp && msg != kWmSysKeyDown && msg != kWmSysKeyUp)
                 return false;
-            if (wParam != kVkF5 && wParam != kVkF9)
+            if (wParam != kVkHome && wParam != kVkEnd)
                 return false;
 
             KeyMessage key;
             key.msg = msg;
             key.vk = static_cast<unsigned>(wParam);
             key.autorepeat = (static_cast<unsigned long>(lParam) & (1UL << 30)) != 0;
+            key.extended = (static_cast<unsigned long>(lParam) & (1UL << 24)) != 0;
             key.ctrl = GetKeyState(VK_CONTROL) < 0;
             key.shift = GetKeyState(VK_SHIFT) < 0;
             key.alt = GetKeyState(VK_MENU) < 0;
@@ -187,7 +188,7 @@ namespace BZROpenShim::QuickSave
             g_prevWndProc = prev;
             g_window = ctx.found;
             LogShimA(LogLevel::Info, "quicksave",
-                     "Ctrl+F5 QuickSave / Ctrl+F9 QuickLoad active (hwnd=%p previous=%p)", ctx.found, prev);
+                     "Ctrl+Home QuickSave / Ctrl+End QuickLoad active (hwnd=%p previous=%p)", ctx.found, prev);
         }
 
         void RunQuickSave()
