@@ -1,5 +1,5 @@
 // autosave_notice.h
-// BZR Open Shim - "Game autosaved." HUD notice
+// BZR Open Shim - "Game autosaved." / "Game quicksaved." HUD notice
 //
 // Copyright (C) 2025-2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
@@ -13,6 +13,10 @@ namespace BZROpenShim::AutoSaveNotice
     // (hud_gauge_overlay.h); if any row is missing or mismatched it logs once
     // and every later call does nothing. It never affects the save.
     void Show() noexcept;
+
+    // Same notice with other text ("Game quicksaved."). `text` must outlive
+    // the notice: pass a string literal.
+    void Show(const char* text) noexcept;
 
     // Ends a notice early (mission change). Safe from any thread.
     void Hide() noexcept;

@@ -81,6 +81,10 @@ namespace BZROpenShim
         bool g_LoggedEngineFlameVtableHook = false;
         bool g_EngineFlameVariantsInitialized = false;
         bool g_EngineFlameVariantsInitAttempted = false;
+        // The secondary manager is only seen once a craft emits through the
+        // second HoverCraft::Simulate AddFlame site, which needs a ray hit, so
+        // some maps never reach it. Its clones are made when it shows up.
+        bool g_EngineFlameSecondaryVariantsCloned = false;
         bool g_EngineFlameVtableHooksInstalled = false;
         int g_EngineFlamePrimaryRedTexture = 0;
         int g_EngineFlamePrimaryBlueTexture = 0;
@@ -156,6 +160,8 @@ namespace BZROpenShim
         {
             return g_EngineFlameSecondaryManager;
         }
+
+        static void CloneSecondaryEngineFlameVariants();
 
 
         static void LogEngineFlameTargetFailure(const wchar_t* name)
@@ -246,6 +252,8 @@ namespace BZROpenShim
             {
                 g_EngineFlameSecondaryManager = manager;
                 Log(L"[FLAME] Observed secondary engine flame manager=0x%p\n", manager);
+                if (g_EngineFlameVariantsInitialized)
+                    CloneSecondaryEngineFlameVariants();
             }
         }
 
@@ -463,7 +471,9 @@ namespace BZROpenShim
             if (g_IsSteamExe)
                 ResolveEngineFlameRuntimeTargets();
 
-            if (!GetEngineFlamePrimary() || !GetEngineFlameSecondary() || !g_BzrFn_EngineFlameResolveTexture)
+            // Only the primary is required: the secondary may never be seen on
+            // a map (see g_EngineFlameSecondaryVariantsCloned).
+            if (!GetEngineFlamePrimary() || !g_BzrFn_EngineFlameResolveTexture)
                 return;
 
             if (g_EngineFlameVariantsInitAttempted)
@@ -530,38 +540,34 @@ namespace BZROpenShim
                 ResolveEngineFlameTextureHandle(kBlackDogTextureCandidates, _countof(kBlackDogTextureCandidates), L"Black Dog blood-red");
 
             void* primary = GetEngineFlamePrimary();
-            void* secondary = GetEngineFlameSecondary();
             if (g_EngineFlamePrimaryRedTexture != 0)
             {
                 CloneEngineFlameManager(g_EngineFlamePrimaryRed, primary, g_EngineFlamePrimaryRedTexture);
-                CloneEngineFlameManager(g_EngineFlameSecondaryRed, secondary, g_EngineFlamePrimaryRedTexture);
             }
 
             if (g_EngineFlamePrimaryBlueTexture != 0)
             {
                 CloneEngineFlameManager(g_EngineFlamePrimaryBlue, primary, g_EngineFlamePrimaryBlueTexture);
-                CloneEngineFlameManager(g_EngineFlameSecondaryBlue, secondary, g_EngineFlamePrimaryBlueTexture);
             }
 
             if (g_EngineFlamePrimaryGreenTexture != 0)
             {
                 CloneEngineFlameManager(g_EngineFlamePrimaryGreen, primary, g_EngineFlamePrimaryGreenTexture);
-                CloneEngineFlameManager(g_EngineFlameSecondaryGreen, secondary, g_EngineFlamePrimaryGreenTexture);
             }
 
             if (g_EngineFlamePrimaryOrangeTexture != 0)
             {
                 CloneEngineFlameManager(g_EngineFlamePrimaryOrange, primary, g_EngineFlamePrimaryOrangeTexture);
-                CloneEngineFlameManager(g_EngineFlameSecondaryOrange, secondary, g_EngineFlamePrimaryOrangeTexture);
             }
 
             if (g_EngineFlamePrimaryBlackDogTexture != 0)
             {
                 CloneEngineFlameManager(g_EngineFlamePrimaryBlackDog, primary, g_EngineFlamePrimaryBlackDogTexture);
-                CloneEngineFlameManager(g_EngineFlameSecondaryBlackDog, secondary, g_EngineFlamePrimaryBlackDogTexture);
             }
 
             g_EngineFlameVariantsInitialized = true;
+            if (GetEngineFlameSecondary())
+                CloneSecondaryEngineFlameVariants();
             Log(L"[FLAME] Engine flame variants initialized blue=%hs red=%hs green=%hs orange=%hs blackdog=%hs\n",
                 g_EngineFlamePrimaryBlueTexture != 0 ? "yes" : "no",
                 g_EngineFlamePrimaryRedTexture != 0 ? "yes" : "no",
@@ -672,6 +678,35 @@ namespace BZROpenShim
         // their isolated channels additively supplies arbitrary RGB without a
         // new asset or tinting another craft's queued flames.
         static std::unordered_map<int, std::unique_ptr<RgbFlameVariants>> g_RgbFlameVariants;
+
+        // Fills the secondary clones once both the variant textures and the
+        // secondary manager are known, whichever arrives last. The Control and
+        // Submit hooks only touch secondary clones after this has run, because
+        // they key on thisPtr == the (by then observed) secondary manager.
+        static void CloneSecondaryEngineFlameVariants()
+        {
+            void* secondary = GetEngineFlameSecondary();
+            if (g_EngineFlameSecondaryVariantsCloned || !secondary || !g_EngineFlameVariantsInitialized)
+                return;
+            g_EngineFlameSecondaryVariantsCloned = true;
+            if (g_EngineFlamePrimaryRedTexture != 0)
+                CloneEngineFlameManager(g_EngineFlameSecondaryRed, secondary, g_EngineFlamePrimaryRedTexture);
+            if (g_EngineFlamePrimaryBlueTexture != 0)
+                CloneEngineFlameManager(g_EngineFlameSecondaryBlue, secondary, g_EngineFlamePrimaryBlueTexture);
+            if (g_EngineFlamePrimaryGreenTexture != 0)
+                CloneEngineFlameManager(g_EngineFlameSecondaryGreen, secondary, g_EngineFlamePrimaryGreenTexture);
+            if (g_EngineFlamePrimaryOrangeTexture != 0)
+                CloneEngineFlameManager(g_EngineFlameSecondaryOrange, secondary, g_EngineFlamePrimaryOrangeTexture);
+            if (g_EngineFlamePrimaryBlackDogTexture != 0)
+                CloneEngineFlameManager(g_EngineFlameSecondaryBlackDog, secondary, g_EngineFlamePrimaryBlackDogTexture);
+            const int rgbTextures[] = {g_EngineFlamePrimaryRedTexture,
+                g_EngineFlamePrimaryGreenTexture, g_EngineFlamePrimaryBlueTexture};
+            for (const auto& entry : g_RgbFlameVariants)
+                for (int i = 0; i < 3; ++i)
+                    CloneEngineFlameManager(entry.second->secondary[i].bytes, secondary, rgbTextures[i]);
+            Log(L"[FLAME] Secondary engine flame variants cloned (rgbQueues=%u)\n",
+                static_cast<unsigned>(g_RgbFlameVariants.size()));
+        }
         static thread_local uint32_t g_FlameSubmitRgb = 0xFFFFFFFFu;
         static InlineDetour32 g_FlameSpriteColourDetour;
         using FnSpriteColour = uint32_t(__cdecl*)(uint32_t, uint32_t);
@@ -1055,7 +1090,7 @@ namespace BZROpenShim
             return;
         }
 
-        if (thisPtr == GetEngineFlameSecondary())
+        if (thisPtr == GetEngineFlameSecondary() && g_EngineFlameSecondaryVariantsCloned)
         {
             ControlRgbFlames(false);
             if (g_EngineFlamePrimaryBlueTexture != 0)
@@ -1097,7 +1132,7 @@ namespace BZROpenShim
             return;
         }
 
-        if (thisPtr == GetEngineFlameSecondary())
+        if (thisPtr == GetEngineFlameSecondary() && g_EngineFlameSecondaryVariantsCloned)
         {
             SubmitRgbFlames(false, camera);
             if (g_EngineFlamePrimaryBlueTexture != 0)

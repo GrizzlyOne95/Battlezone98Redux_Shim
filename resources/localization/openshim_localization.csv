@@ -212,6 +212,8 @@ openshim_opt:IntervalSeconds:label~AutoSave Interval~~~~~~
 openshim_opt:IntervalSeconds:desc~How often OpenShim refreshes the rolling AutoSave recovery slot.~~~~~~
 openshim_opt:BackupExisting:label~AutoSave Backups~~~~~~
 openshim_opt:BackupExisting:desc~Before OpenShim first replaces Save\auto.sav, keep one copy of the file that was already there.~~~~~~
+openshim_opt:QuickSaveEnabled:label~QuickSave Keys~~~~~~
+openshim_opt:QuickSaveEnabled:desc~Saves and loads a QuickSave slot in single-player missions (Ctrl+Home / Ctrl+End by default; rebind in Input > RTS Actions).~~~~~~
 openshim_opt:WeaponConvergence:label~Aim Convergence~~~~~~
 openshim_opt:WeaponConvergence:desc~Walker-style convergence on an explicitly targeted craft. Single player only.~~~~~~
 openshim_opt:MuzzleFlash:label~Muzzle Flashes~~~~~~
