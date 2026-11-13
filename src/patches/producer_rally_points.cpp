@@ -136,6 +136,20 @@ namespace BZROpenShim::Hooks
         bool g_Enabled = true;
         bool g_HooksInstalled = false;
         std::atomic<bool> g_Active{ false };
+        // Mission-scoped network opt-in (EXU AllowRallyPoints); cleared by
+        // ResetProducerRallyPoints, i.e. on leaving the simulation and on
+        // the mission-reset bridge.
+        std::atomic<bool> g_MissionAllowsNetwork{ false };
+        // DistributedObject::IsRemote 0x004B9830 tests the byte at
+        // DistributedObject+0x68 == 2 (row DistributedObjectIsRemote, whose
+        // expected bytes include `0F B6 48 68 83 F9 02`); DistributedObject
+        // sits at GameObject+0x18, guarded by row GameObjectSimulateRemoteCopy
+        // (`83 C1 18`, as in remote_object_smoothing.cpp). Bound on the first
+        // opt-in; without both rows the opt-in is refused, and a failed bind is
+        // not retried (on Steam each bind attempt can wait up to a second).
+        enum class RemoteCheck : int { Untried, Bound, Failed };
+        std::atomic<RemoteCheck> g_RemoteCheck{ RemoteCheck::Untried };
+        constexpr uint32_t kGoObjectTypeOffset = 0x18 + 0x68;
         // Set by the install (patch thread) once the camera rows bind; the
         // overlay is attached later from the game thread, the only thread
         // HudGaugeOverlay::Ensure() may run on.
@@ -303,6 +317,27 @@ namespace BZROpenShim::Hooks
             {
                 return 0;
             }
+        }
+
+        // Network games only (single-player objects are all ours). Fails
+        // closed: a null or unreadable object, or no bound ownership check,
+        // is foreign. See Policy::IsForeignObject for mustBeLocal.
+        bool IsForeignObject(void* obj, bool mustBeLocal)
+        {
+            if (!obj || g_RemoteCheck.load(std::memory_order_acquire) != RemoteCheck::Bound)
+                return true;
+            uint8_t type = 0;
+            bool readable = true;
+            __try
+            {
+                type = *reinterpret_cast<const volatile uint8_t*>(
+                    reinterpret_cast<uintptr_t>(obj) + kGoObjectTypeOffset);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                readable = false;
+            }
+            return Policy::IsForeignObject(readable, type, mustBeLocal);
         }
 
         bool SafeCanCommand(void* obj)
@@ -2033,6 +2068,8 @@ namespace BZROpenShim::Hooks
 
             Policy::BuiltUnit unit;
             unit.present = built != nullptr;
+            if (unit.present && !IsSinglePlayerSession())
+                unit.remote = IsForeignObject(producer, true) || IsForeignObject(built, false);
             if (unit.present)
             {
                 const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(built)));
@@ -2162,6 +2199,9 @@ namespace BZROpenShim::Hooks
     bool SetProducerRally(void* producer, const float pos[3])
     {
         if (!g_Active.load(std::memory_order_acquire) || !producer || !pos || !IsHookedProducer(producer))
+            return false;
+        // Network game: only this machine's own producers.
+        if (!IsSinglePlayerSession() && IsForeignObject(producer, true))
             return false;
         // Kept beside the pointer so a dead producer whose memory is reused
         // is recognised (GetObj(handle) no longer returns this pointer).
@@ -2294,7 +2334,7 @@ namespace BZROpenShim::Hooks
         bool value = true;
         g_Enabled = TryGetUserConfigBool("Gameplay", "ProducerRallyPoints", value) ? value : true;
         if (!g_ConfigRead)
-            Log(L"[RALLY] Baseline enabled=%hs (SP-only)\n", g_Enabled ? "yes" : "no");
+            Log(L"[RALLY] Baseline enabled=%hs (single-player; co-op missions can opt in)\n", g_Enabled ? "yes" : "no");
         g_ConfigRead = true;
         RefreshProducerRallyPointsState();
     }
@@ -2515,11 +2555,15 @@ namespace BZROpenShim::Hooks
 
     void RefreshProducerRallyPointsState()
     {
-        const bool want = g_Enabled && g_HooksInstalled && IsSinglePlayerSession();
+        const bool singlePlayer = IsSinglePlayerSession();
+        const bool want = Policy::ShouldBeActive(g_Enabled, g_HooksInstalled, singlePlayer,
+                                                 g_MissionAllowsNetwork.load(std::memory_order_acquire));
         if (want != g_Active.load(std::memory_order_acquire))
         {
             g_Active.store(want, std::memory_order_release);
-            Log(L"[RALLY] %hs\n", want ? "Active (SP-only)" : "Stood down");
+            Log(L"[RALLY] %hs\n", !want ? "Stood down"
+                                 : singlePlayer ? "Active (single-player)"
+                                                : "Active (network game, mission opt-in)");
             if (!want)
                 Disarm(L"stood down");
             // A stood-down feature's rallies are dropped by the next
@@ -2541,7 +2585,44 @@ namespace BZROpenShim::Hooks
         g_PendingAction.store(0, std::memory_order_release);
         g_LastLivenessCheck = 0;
         g_LogBudget = 48;
+        if (g_MissionAllowsNetwork.exchange(false, std::memory_order_acq_rel))
+            Log(L"[RALLY] network-game opt-in cleared (mission reset)\n");
         RefreshProducerRallyPointsState();
+    }
+
+    // EXU AllowRallyPoints: lets the running mission use rally points in a
+    // network game (co-op). Mission-scoped: cleared on mission reset. The
+    // user's [Gameplay] ProducerRallyPoints still decides. Returns true when
+    // the opt-in is recorded, not that the feature is active (the log line
+    // says that). Refused (false) when the ownership check is unavailable,
+    // since without it a machine could order another machine's units.
+    bool SetProducerRallyPointsNetworkAllowed(bool allowed)
+    {
+        if (allowed && g_RemoteCheck.load(std::memory_order_acquire) == RemoteCheck::Untried)
+        {
+            // Both rows are layout guards: IsRemote pins DistributedObject+0x68,
+            // SimulateRemoteCopy pins DistributedObject at GameObject+0x18.
+            uint32_t isRemote = 0;
+            uint32_t remoteCopy = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "DistributedObjectIsRemote", &isRemote },
+                { "GameObjectSimulateRemoteCopy", &remoteCopy },
+            };
+            const bool bound = HookEngine::BindEngineRows("Producer rally network check", rows) &&
+                               isRemote != 0 && remoteCopy != 0;
+            g_RemoteCheck.store(bound ? RemoteCheck::Bound : RemoteCheck::Failed, std::memory_order_release);
+        }
+        if (allowed && g_RemoteCheck.load(std::memory_order_acquire) != RemoteCheck::Bound)
+        {
+            Log(L"[RALLY] network-game opt-in refused: ownership check rows not bound\n");
+            return false;
+        }
+        g_MissionAllowsNetwork.store(allowed, std::memory_order_release);
+        RefreshProducerRallyPointsState();
+        Log(L"[RALLY] network-game opt-in %hs by the mission (enabled=%hs installed=%hs active=%hs)\n",
+            allowed ? "set" : "cleared", g_Enabled ? "yes" : "no", g_HooksInstalled ? "yes" : "no",
+            g_Active.load(std::memory_order_acquire) ? "yes" : "no");
+        return true;
     }
 
     int ProducerRallyCommandHookIndex(const char* patchName)

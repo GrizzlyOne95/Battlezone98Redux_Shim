@@ -124,6 +124,11 @@ namespace BZROpenShim
         return SetAiHold(handle, hold);
     }
 
+    bool SetRallyPointsAllowedInNetworkFromBridge(bool allowed)
+    {
+        return SetProducerRallyPointsNetworkAllowed(allowed);
+    }
+
     bool SetBomberAiRangeEnabledFromBridge(bool enabled)
     {
         // Bomber range is now part of AI ODF gameplay tuning; the export

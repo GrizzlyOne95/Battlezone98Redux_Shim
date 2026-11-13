@@ -160,6 +160,11 @@ extern "C" BOOL WINAPI OpenShimImpl_SetAiHold(int handle, BOOL hold)
     return BZROpenShim::SetAiHoldFromBridge(handle, hold != FALSE) ? TRUE : FALSE;
 }
 
+extern "C" BOOL WINAPI OpenShimImpl_SetRallyPointsAllowedInNetwork(BOOL allowed)
+{
+    return BZROpenShim::SetRallyPointsAllowedInNetworkFromBridge(allowed != FALSE) ? TRUE : FALSE;
+}
+
 extern "C" BOOL WINAPI OpenShimImpl_SetHowitzerVolleyEnabled(BOOL enabled)
 {
     return BZROpenShim::SetHowitzerVolleyEnabledFromBridge(enabled != FALSE) ? TRUE : FALSE;
@@ -850,6 +855,7 @@ namespace
         .OpenShimImpl_SetAiFollowEngageEnabled = OpenShimImpl_SetAiFollowEngageEnabled,
         .OpenShimImpl_SetAiDefendRefreshEnabled = OpenShimImpl_SetAiDefendRefreshEnabled,
         .OpenShimImpl_SetAiHold = OpenShimImpl_SetAiHold,
+        .OpenShimImpl_SetRallyPointsAllowedInNetwork = OpenShimImpl_SetRallyPointsAllowedInNetwork,
     };
 
     // Designated initializers enforce order but not completeness: a slot left
