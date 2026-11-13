@@ -544,6 +544,99 @@ namespace
         Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "a cap wider than the row: hidden");
     }
 
+    void TestClearRowLayout()
+    {
+        // Rally row: label 40 wide, column right 296 (label at 256) on the TAB line.
+        ClearRowLayoutInput in;
+        in.rally.placement = PanelRowPlacement::TabLine;
+        in.rally.labelX = 256;
+        in.rally.rowY = 300;
+        in.rallyLabelW = 40.0f;
+        in.tabX = 31;
+        in.tabY = 300;
+        in.altY = 278;
+        in.inset = 8;
+        in.shiftWidthPx = KeyCapWidthPx(9, 2.0f, 5, 50.0f); // 50 + 2 * 4
+        in.keyWidthPx = 18;
+        in.keyHeightPx = 18;
+        in.clearW = 36.0f;
+        in.labelH = 18.0f;
+        in.altKnown = true;
+        in.altW = 100.0f;
+        in.viewportW = 1920;
+        in.viewportH = 1080;
+        Check(in.shiftWidthPx == 58, "a wide Shift cap: text plus padding");
+
+        // Label at 296 - 36 = 260; group starts at 260 - 8 - 18 - 8 - 58 = 168.
+        ClearRowLayout out = ChooseClearRowLayout(in);
+        Check(out.placement == ClearRowPlacement::AltLine && out.rowY == 278 && out.labelX == 260,
+              "ALT label clear of the group: the Clear row is on the ALT line, same right edge");
+
+        in.altW = 121.0f; // 31 + 121 + 16 = 168: just fits
+        Check(ChooseClearRowLayout(in).placement == ClearRowPlacement::AltLine, "an ALT label that just fits stays");
+        in.altW = 122.0f;
+        out = ChooseClearRowLayout(in);
+        Check(out.placement == ClearRowPlacement::BelowRally && out.rowY == 322,
+              "an ALT label that reaches the caps: one pitch below the Rally row");
+        // With a cost width the group slides right past the ALT label, up to two cost widths.
+        in.costW = 25.0f;
+        out = ChooseClearRowLayout(in);
+        Check(out.placement == ClearRowPlacement::AltLine && out.rowY == 278 && out.labelX == 261,
+              "an ALT label 1 px into the caps: the group slides right 1 px on the ALT line");
+        in.altW = 171.0f; // 31 + 171 + 16 = 218: 50 px slide, exactly two cost widths
+        out = ChooseClearRowLayout(in);
+        Check(out.placement == ClearRowPlacement::AltLine && out.labelX == 310, "a 50 px slide still fits");
+        in.altW = 172.0f;
+        Check(ChooseClearRowLayout(in).placement == ClearRowPlacement::BelowRally, "a 51 px slide: below");
+        in.costW = 0.0f;
+        in.altW = 100.0f;
+        in.altKnown = false;
+        Check(ChooseClearRowLayout(in).placement == ClearRowPlacement::BelowRally, "unknown ALT width: below");
+
+        // Below a TAB-line Rally row the underlay's bottom border pushes it down.
+        in.underlayKnown = true;
+        in.underlayTop = 200;
+        in.underlaySpriteH = 150;
+        in.scaleY = 2.0f;
+        const int clearOfBorder = UnderlayBottom(200, 150, 2.0f) + 8 + 9;
+        out = ChooseClearRowLayout(in);
+        Check(clearOfBorder > 322 && out.placement == ClearRowPlacement::BelowRally && out.rowY == clearOfBorder,
+              "below a TAB-line Rally row: clear of the underlay's bottom border");
+        in.underlaySpriteH = 50; // border above one pitch down: pitch wins
+        Check(ChooseClearRowLayout(in).rowY == 322, "an underlay ending higher never pulls the row up");
+        in.underlaySpriteH = 150;
+        in.rally.placement = PanelRowPlacement::BelowUnderlay;
+        in.rally.rowY = 400;
+        Check(ChooseClearRowLayout(in).rowY == 422, "a fallback Rally row is already below the border");
+        in.rally.placement = PanelRowPlacement::TabLine;
+        in.rally.rowY = 300;
+        in.underlayKnown = false;
+
+        in.altKnown = true;
+        in.rally.placement = PanelRowPlacement::BelowUnderlay;
+        in.rally.rowY = 400;
+        out = ChooseClearRowLayout(in);
+        Check(out.placement == ClearRowPlacement::BelowRally && out.rowY == 422,
+              "a fallback Rally position: the Clear row is one pitch below it");
+
+        in.rally.placement = PanelRowPlacement::Hidden;
+        Check(ChooseClearRowLayout(in).placement == ClearRowPlacement::Hidden, "no Rally row: no Clear row");
+
+        in.rally.placement = PanelRowPlacement::TabLine;
+        in.rally.rowY = 300;
+        in.shiftWidthPx = 0;
+        Check(ChooseClearRowLayout(in).placement == ClearRowPlacement::Hidden, "no Shift cap width: hidden");
+        in.shiftWidthPx = 58;
+        in.clearW = 0.0f;
+        Check(ChooseClearRowLayout(in).placement == ClearRowPlacement::Hidden, "no label width: hidden");
+        in.clearW = 36.0f;
+        in.viewportH = 285; // ALT row 278 + half 9 > 285
+        Check(ChooseClearRowLayout(in).placement == ClearRowPlacement::Hidden, "off the bottom: hidden");
+        in.viewportH = 1080;
+        in.shiftWidthPx = 400; // group reaches past the row's key slot
+        Check(ChooseClearRowLayout(in).placement == ClearRowPlacement::Hidden, "caps wider than the row: hidden");
+    }
+
     void TestKeyCapWidth()
     {
         // key_0 is 9 atlas units: 18 px at scale 2.
@@ -726,6 +819,7 @@ int main()
     TestKeyCapFill();
     TestSpaceRowLabel();
     TestPanelRowLayout();
+    TestClearRowLayout();
     TestKeyCapWidth();
     TestRallyKeyText();
     TestRallyKeyCapName();

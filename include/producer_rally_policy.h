@@ -825,6 +825,120 @@ namespace BZROpenShim
             return out;
         }
 
+        // ---- the "[Shift] [key] Clear" row ----------------------------------
+        // A second row that teaches Shift+<rally key>. Same right edge as the
+        // Rally row. Preferred on the ALT line (one pitch above TAB) when the
+        // Rally row is on the TAB line and the group clears the ALT label by
+        // two insets (the TAB-line test, against the ALT label); otherwise one
+        // pitch below the Rally row.
+        constexpr char kClearRowLabel[] = "Clear";
+        constexpr char kClearRowShiftCap[] = "Shift";
+
+        enum class ClearRowPlacement
+        {
+            Hidden,
+            AltLine,
+            BelowRally,
+        };
+
+        struct ClearRowLayoutInput
+        {
+            PanelRowLayout rally; // the placed Rally row
+            float rallyLabelW = 0.0f; // the width ChoosePanelRowLayout used for the Rally label
+            int tabX = 0;
+            int tabY = 0;
+            int altY = 0;
+            int inset = 0;
+            int shiftWidthPx = 0; // the Shift cap
+            int keyWidthPx = 0;   // the bound key's cap
+            int keyHeightPx = 0;
+            float clearW = 0.0f;  // measured "Clear"
+            float labelH = 0.0f;
+            bool altKnown = false;
+            float altW = 0.0f; // measured ALT label
+            // Measured "00": on the ALT line the group may slide right past the
+            // Rally column by up to two of these to clear the ALT label.
+            float costW = 0.0f;
+            int viewportW = 0;
+            int viewportH = 0; // 0: unknown
+            // The panel underlay, as ChoosePanelRowLayout saw it: a Clear row
+            // below a TAB-line Rally row must clear its bottom edge.
+            bool underlayKnown = false;
+            int underlayTop = 0;
+            int underlaySpriteH = 0;
+            float scaleY = 0.0f;
+        };
+
+        struct ClearRowLayout
+        {
+            ClearRowPlacement placement = ClearRowPlacement::Hidden;
+            int labelX = 0; // left of the "Clear" text; the caps sit left of it
+            int rowY = 0;
+        };
+
+        inline ClearRowLayout ChooseClearRowLayout(const ClearRowLayoutInput& in)
+        {
+            ClearRowLayout out;
+            if (in.rally.placement == PanelRowPlacement::Hidden)
+                return out;
+            if (!PanelRowFinite(in.rallyLabelW) || !PanelRowFinite(in.clearW) || !PanelRowFinite(in.labelH) ||
+                in.rallyLabelW <= 0.0f || in.clearW <= 0.0f || in.labelH < 0.0f)
+                return out;
+            const int pitch = in.tabY - in.altY;
+            if (pitch <= 0 || pitch > kMaxPanelRowPitch || in.inset < 0 || in.shiftWidthPx <= 0 ||
+                in.keyWidthPx <= 0 || in.keyHeightPx <= 0)
+                return out;
+            const int columnRight = in.rally.labelX + static_cast<int>(in.rallyLabelW);
+            int labelX = columnRight - static_cast<int>(in.clearW);
+            const int groupLeft = labelX - in.inset - in.keyWidthPx - in.inset - in.shiftWidthPx;
+            if (groupLeft <= in.tabX - in.inset || (in.viewportW > 0 && columnRight > in.viewportW))
+                return out;
+            // On the ALT line the group starts at the Rally column's left, or
+            // just past the ALT label when that reaches further, as long as it
+            // then ends within two cost widths right of the Rally column.
+            int altShift = -1;
+            if (in.rally.placement == PanelRowPlacement::TabLine && in.altKnown && PanelRowFinite(in.altW) &&
+                in.altW >= 0.0f)
+            {
+                const int altEnd = in.tabX + static_cast<int>(in.altW) + 2 * in.inset;
+                const int shift = altEnd > groupLeft ? altEnd - groupLeft : 0;
+                const int slack = PanelRowFinite(in.costW) && in.costW > 0.0f ? static_cast<int>(2.0f * in.costW) : 0;
+                if (shift <= slack && (in.viewportW <= 0 || columnRight + shift <= in.viewportW))
+                    altShift = shift;
+            }
+            const bool altFits = altShift >= 0;
+            const int textH = static_cast<int>(in.labelH);
+            const int half = ((in.keyHeightPx > textH ? in.keyHeightPx : textH) + 1) / 2;
+            ClearRowPlacement placement;
+            int rowY;
+            if (altFits)
+            {
+                placement = ClearRowPlacement::AltLine;
+                rowY = in.altY;
+                labelX += altShift;
+            }
+            else
+            {
+                placement = ClearRowPlacement::BelowRally;
+                rowY = in.rally.rowY + pitch;
+                // Under a TAB-line Rally row, one pitch down lands on the
+                // underlay's bottom border: clear it like the Rally fallback.
+                if (in.rally.placement == PanelRowPlacement::TabLine && in.underlayKnown &&
+                    in.underlaySpriteH > 0 && PanelRowFinite(in.scaleY) && in.scaleY > 0.0f)
+                {
+                    const int below = UnderlayBottom(in.underlayTop, in.underlaySpriteH, in.scaleY) + in.inset + half;
+                    if (below > rowY)
+                        rowY = below;
+                }
+            }
+            if (in.viewportH > 0 && rowY + half > in.viewportH)
+                return out;
+            out.placement = placement;
+            out.labelX = labelX;
+            out.rowY = rowY;
+            return out;
+        }
+
         // ---- producer type: beacon lamp colour and HUD label ---------------
 
         enum class ProducerKind
