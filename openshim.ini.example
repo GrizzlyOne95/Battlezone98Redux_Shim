@@ -2979,7 +2979,8 @@ SatelliteVisibilityFix = 1
 ; Verifies GOG 2.2.301 code bytes at load and stays off on any mismatch
 ; ([BGRUN] lines in the shim log). Restart required.
 ; Accepted: boolean. Default: OFF.
-; Env override: OPENSHIM_RUN_IN_BACKGROUND=1
+; Env override: OPENSHIM_RUN_IN_BACKGROUND=1. OPENSHIM_NEVER_ACTIVATE=1 (test
+; launches) also turns it on, whatever this line says.
 RunInBackground = 0
 
 [Experimental]

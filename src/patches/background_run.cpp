@@ -285,9 +285,13 @@ namespace BZROpenShim
         }
 
         // [Testing] RunInBackground / OPENSHIM_RUN_IN_BACKGROUND. Default OFF.
+        // OPENSHIM_NEVER_ACTIVATE turns it on too: a never-activated window gets
+        // no WM_ACTIVATEAPP(TRUE) to raise the app-active flag, and the
+        // GetActiveWindow seed in FUN_00435bc0 alone left a test run idling on
+        // "Playing" (2026-11-12). Holding the flag here does not depend on it.
         void InstallBackgroundRunIfRequested()
         {
-            if (!EnvFlagEnabled("OPENSHIM_RUN_IN_BACKGROUND"))
+            if (!EnvFlagEnabled("OPENSHIM_RUN_IN_BACKGROUND") && !EnvFlagEnabled("OPENSHIM_NEVER_ACTIVATE"))
                 return;
             static bool attempted = false;
             if (attempted)
