@@ -4735,6 +4735,78 @@
       "identity": "SprayBomb::Simulate entry; MP auth trace detour"
     },
     {
+      "name": "LaserArcWeaponClassField",
+      "address": "0x00611321",
+      "expected": "C7 00 94 A1 88 00 8B 8D 6C FF FF FF 8B 55 0C 89 51 08",
+      "identity": "Weapon::Weapon 0x00611300 (FUN_00611300.c:21-22): stores Weapon::vftable 0x0088A194, then weapon+0x08 = the WeaponClass argument. LaserSight reads the selected weapon's class there for the ballistic arc (Docs/LASER_SIGHT.md)."
+    },
+    {
+      "name": "LaserArcWeaponOrdnanceField",
+      "address": "0x00611362",
+      "expected": "8B 55 0C 8B 42 30 89 41 0C",
+      "identity": "Weapon::Weapon 0x00611300 (FUN_00611300.c:27): weapon+0x0C = WeaponClass+0x30, the OrdnanceClass. LaserSight ballistic arc reads it."
+    },
+    {
+      "name": "LaserArcOrdnanceLifeSpan",
+      "address": "0x00586968",
+      "expected": "F3 0F 10 42 50 F3 0F 11 04 24 8B 45 C4 83 C0 50 50 68 4B 54 7C 7C",
+      "identity": "OrdnanceClass ODF load 0x00586440 (FUN_00586440.c:165): lifeSpan (hash 0x7C7C544B) read into class+0x50, default from the proto's +0x50. LaserSight ballistic arc time limit."
+    },
+    {
+      "name": "LaserArcOrdnanceShotSpeed",
+      "address": "0x0058698F",
+      "expected": "F3 0F 10 41 54 F3 0F 11 04 24 8B 55 C4 83 C2 54 52 68 D0 92 FE CA",
+      "identity": "OrdnanceClass ODF load 0x00586440 (FUN_00586440.c:166): shotSpeed (hash 0xCAFE92D0) read into class+0x54. Bullet::Init 0x00480340 sets velocity = shotSpeed * front (FUN_00480340.c:19-33). LaserSight ballistic arc launch speed."
+    },
+    {
+      "name": "LaserArcCannonShotPitch",
+      "address": "0x0048F4B7",
+      "expected": "8B 85 B0 FD FF FF 8B 48 08 F3 0F 5C 81 90 00 00 00",
+      "identity": "Cannon::Simulate 0x0048EFE0 (FUN_0048efe0.c:133-136): pitch argument of the spread rotation 0x0081ED60 is r * shotVariance - [weapon+0x08 -> WeaponClass +0x90] (shotPitch). LaserSight ballistic arc pitches the mean shot up by it for 'MORT'/'CANN' classes."
+    },
+    {
+      "name": "LaserArcGrenadeGravity",
+      "address": "0x004E7D39",
+      "expected": "F3 0F 10 05 58 28 8A 00 F3 0F 59 45 08 8B 45 FC F3 0F 10 48 34 F3 0F 5C C8",
+      "identity": "Grenade::Simulate 0x004E7D30 (FUN_004e7d30.c:8): velocity.y (ordnance+0x34) -= dt * [0x008A2858] (float 4.9, bytes CD CC 9C 40), repeated after the move (line 10): an exact parabola with g = 9.8. LaserSight ballistic arc uses 4.9 as LaserSight::kHalfGravity. Same function as the SprayBombSimulate row; this guard starts past its entry detour."
+    },
+    {
+      "name": "LaserArcGrenadeSig",
+      "address": "0x004E7F7B",
+      "expected": "C7 41 0C 4E 45 52 47 8B 55 FC",
+      "identity": "GrenadeClass::GrenadeClass 0x004E7F60 (FUN_004e7f60.c:7-8): class+0x0C = 'GREN' 0x4752454E, label \"grenade\". LaserSight ballistic ordnance signature."
+    },
+    {
+      "name": "LaserArcSprayBombSig",
+      "address": "0x005DAD0B",
+      "expected": "C7 41 0C 42 4D 42 53 8B 55 FC",
+      "identity": "SprayBombClass::SprayBombClass 0x005DACF0 (FUN_005dacf0.c:7-8): class+0x0C = 0x53424D42, label \"spraybomb\". LaserSight ballistic ordnance signature."
+    },
+    {
+      "name": "LaserArcBounceBombSig",
+      "address": "0x0047DBAB",
+      "expected": "C7 41 0C 42 4D 42 42 8B 55 FC",
+      "identity": "BounceBombClass::BounceBombClass 0x0047DB90 (FUN_0047db90.c:7-8): class+0x0C = 0x42424D42, label \"bouncebomb\". LaserSight ballistic ordnance signature."
+    },
+    {
+      "name": "LaserArcPopperSig",
+      "address": "0x005A6B1B",
+      "expected": "C7 41 0C 52 50 4F 50 8B 55 FC",
+      "identity": "PopperClass::PopperClass 0x005A6B00 (FUN_005a6b00.c:7-8): class+0x0C = 0x504F5052, label \"popper\". LaserSight ballistic ordnance signature."
+    },
+    {
+      "name": "LaserArcMortarSig",
+      "address": "0x0056B33B",
+      "expected": "C7 41 0C 54 52 4F 4D 8B 55 FC",
+      "identity": "MortarClass::MortarClass 0x0056B320 (FUN_0056b320.c:7-8): weapon class+0x0C = 'MORT' 0x4D4F5254, label \"mortar\"; fires through Cannon::Simulate. LaserSight applies shotPitch for it."
+    },
+    {
+      "name": "LaserArcCannonSig",
+      "address": "0x0048F87B",
+      "expected": "C7 41 0C 4E 4E 41 43 8B 55 FC",
+      "identity": "CannonClass::CannonClass 0x0048F860 (FUN_0048f860.c:6-13): weapon class+0x0C = 'CANN' 0x43414E4E, label \"cannon\"; shotVariance +0x8C and shotPitch +0x90 default 0. LaserSight applies shotPitch for it."
+    },
+    {
       "name": "MultiplayerCreateVtable",
       "address": "0x0089EBE0",
       "kind": "data",

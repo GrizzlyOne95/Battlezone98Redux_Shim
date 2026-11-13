@@ -143,6 +143,249 @@ namespace
               "never a zero scale");
     }
 
+    void BallisticSigTests()
+    {
+        // The engine stores the signature as a little-endian int: 'GREN'.
+        Check(kOrdnanceSigGrenade == ((uint32_t('G') << 24) | (uint32_t('R') << 16) | (uint32_t('E') << 8) | 'N'),
+              "grenade signature spells GREN");
+        Check(IsBallisticOrdnance(kOrdnanceSigGrenade) && IsBallisticOrdnance(kOrdnanceSigSprayBomb) &&
+                  IsBallisticOrdnance(kOrdnanceSigBounceBomb) && IsBallisticOrdnance(kOrdnanceSigPopper),
+              "the four gravity ordnance classes take the arc");
+        Check(!IsBallisticOrdnance(0) && !IsBallisticOrdnance(0x42554C4Cu /* 'BULL' */) &&
+                  !IsBallisticOrdnance(kWeaponSigMortar),
+              "anything else keeps the straight beam");
+        Check(AppliesShotPitch(kWeaponSigMortar) && AppliesShotPitch(kWeaponSigCannon), "mortar and cannon pitch");
+        Check(!AppliesShotPitch(0) && !AppliesShotPitch(kOrdnanceSigGrenade), "other weapon classes fire level");
+    }
+
+    // The engine's mean shot: Cannon::Simulate composes R(yaw 0, pitch
+    // -shotPitch) from 0x0081ED60 onto the muzzle (row vectors, child left).
+    // That matrix's front row is (sinA cosB, -sinB, cosA cosB).
+    Vec3 EngineMeanShot(Vec3 right, Vec3 up, Vec3 front, float shotPitch)
+    {
+        const float a = 0.0f, b = -shotPitch;
+        const Vec3 local = {std::sin(a) * std::cos(b), -std::sin(b), std::cos(a) * std::cos(b)};
+        return {local.x * right.x + local.y * up.x + local.z * front.x,
+                local.x * right.y + local.y * up.y + local.z * front.y,
+                local.x * right.z + local.y * up.z + local.z * front.z};
+    }
+
+    void PitchTests()
+    {
+        const Vec3 f = {0, 0, 1}, u = {0, 1, 0};
+        Vec3 d = PitchedFireDirection(f, u, 0.0f);
+        Check(Near(d.x, 0) && Near(d.y, 0) && Near(d.z, 1), "no pitch: the muzzle front");
+        d = PitchedFireDirection(f, u, 0.3f);
+        Check(d.y > 0.0f && Near(d.y, std::sin(0.3f)) && Near(d.z, std::cos(0.3f)), "positive shotPitch aims up");
+        d = PitchedFireDirection(f, u, -0.2f);
+        Check(d.y < 0.0f, "negative shotPitch aims down");
+        Check(Near(BZROpenShim::ShellCasings::Length(PitchedFireDirection(f, u, 1.1f)), 1.0f), "unit direction");
+
+        // A rolled and yawed muzzle: same answer as the engine composition.
+        const float c = std::cos(0.7f), s = std::sin(0.7f);
+        const Vec3 right = {c, s, 0}, up = {-s, c, 0}, front = {0, 0, 1};
+        const Vec3 yawRight = {right.x * c - front.x * s, right.y * c - front.y * s, right.z * c - front.z * s};
+        const Vec3 yawFront = {right.x * s + front.x * c, right.y * s + front.y * c, right.z * s + front.z * c};
+        const Vec3 engine = EngineMeanShot(yawRight, up, yawFront, 0.25f);
+        d = PitchedFireDirection(yawFront, up, 0.25f);
+        Check(Near(d.x, engine.x) && Near(d.y, engine.y) && Near(d.z, engine.z),
+              "matches the engine's R(0, -shotPitch) composed onto the muzzle");
+    }
+
+    void ArcPointTests()
+    {
+        // Grenade::Simulate: vy -= 4.9 dt; move; vy -= 4.9 dt. Integrate it
+        // and compare with the closed form.
+        Arc arc;
+        arc.origin = {10, 5, -3};
+        arc.velocity = {20, 15, 4};
+        arc.lifeSpan = 10.0f;
+        Vec3 p = arc.origin, v = arc.velocity;
+        const float dt = 1.0f / 30.0f;
+        for (int i = 0; i < 90; ++i)
+        {
+            v.y -= 4.9f * dt;
+            p = {p.x + v.x * dt, p.y + v.y * dt, p.z + v.z * dt};
+            v.y -= 4.9f * dt;
+        }
+        const Vec3 q = ArcPoint(arc, 90 * dt);
+        Check(Near(p.x, q.x, 1e-2f) && Near(p.y, q.y, 1e-2f) && Near(p.z, q.z, 1e-2f),
+              "closed form equals the engine's integrator");
+        const Vec3 w = ArcVelocity(arc, 90 * dt);
+        Check(Near(w.y, v.y, 1e-3f) && w.x == arc.velocity.x, "velocity: only y changes");
+    }
+
+    // Flat ground at y = 0.
+    bool Flat(float, float, float& out)
+    {
+        out = 0.0f;
+        return true;
+    }
+
+    float LandingTime(float y0, float vy)
+    {
+        return (vy + std::sqrt(vy * vy + 4.0f * kHalfGravity * y0)) / (2.0f * kHalfGravity);
+    }
+
+    void MarchArcTests()
+    {
+        const ArcMarch march;
+        const auto noObjects = [](const ArcSample*, int, float&) { return false; };
+        const float k = std::sqrt(0.5f);
+
+        Arc arc;
+        arc.origin = {0, 2, 0};
+        arc.velocity = {30 * k, 30 * k, 0};
+        arc.lifeSpan = 1e30f; // stock grenade.odf
+        int samples = 0;
+        auto flat = [&](float x, float z, float& out) {
+            ++samples;
+            return Flat(x, z, out);
+        };
+        ArcResult r = MarchArc(arc, march, flat, noObjects);
+        const float landing = LandingTime(2.0f, 30 * k);
+        Check(r.end == ArcEnd::Terrain, "a mortar shot lands on flat ground");
+        Check(r.endT >= landing - 1e-4f && r.endT - landing < march.maxStepTime / 32.0f,
+              "landing refined within 1/64 of a step, never short of the ground");
+        Check(std::fabs(ArcPoint(arc, r.endT).y) < 0.1f, "the arc ends at ground level");
+        const float range = 30 * k * landing; // ~93 m; path a little longer
+        Check(samples == r.samples && r.samples <= 2 + static_cast<int>(1.5f * range / march.terrainStep) +
+                                                        march.refineIterations,
+              "about one ground sample per 8 m of path plus the refinement");
+        Check(r.spans >= 2 && r.spans <= 4, "one grid query per ~50 m of path");
+
+        // A level shot from 2 m flies about 0.64 s.
+        arc.velocity = {50, 0, 0};
+        r = MarchArc(arc, march, Flat, noObjects);
+        Check(r.end == ArcEnd::Terrain && Near(r.endT, LandingTime(2.0f, 0.0f), 0.01f), "level shot drops to the ground");
+
+        // Expires in flight.
+        arc.velocity = {30 * k, 30 * k, 0};
+        arc.lifeSpan = 1.0f;
+        r = MarchArc(arc, march, Flat, noObjects);
+        Check(r.end == ArcEnd::LifeSpan && r.endT == 1.0f, "lifeSpan ends the arc in the air");
+
+        // Straight up from a deep pit: the path limit, within the sample budget.
+        arc.lifeSpan = 1e30f;
+        arc.velocity = {0, 200, 0};
+        auto pit = [](float, float, float& out) {
+            out = -1.0e6f;
+            return true;
+        };
+        r = MarchArc(arc, march, pit, noObjects);
+        Check(r.end == ArcEnd::PathLimit && r.samples <= kMaxArcSamples, "path limit bounds the march");
+        float path = 0.0f;
+        for (int i = 0; i < 64; ++i)
+            path += BZROpenShim::ShellCasings::Length(BZROpenShim::ShellCasings::Sub(
+                ArcPoint(arc, r.endT * (i + 1) / 64.0f), ArcPoint(arc, r.endT * i / 64.0f)));
+        Check(path >= march.maxPathLength - 1e-2f && path < march.maxPathLength + 2.0f * march.terrainStep,
+              "the path limit is the straight beam's 500 m");
+
+        // Slow shots are still bounded by the sample budget.
+        arc.velocity = {0.5f, 0.0f, 0.0f};
+        r = MarchArc(arc, march, pit, noObjects);
+        Check(r.samples <= kMaxArcSamples && r.end == ArcEnd::PathLimit, "slow shot: sample budget");
+
+        // Buried muzzle.
+        arc.origin = {0, -1, 0};
+        arc.velocity = {30, 0, 0};
+        r = MarchArc(arc, march, Flat, noObjects);
+        Check(r.end == ArcEnd::Terrain && r.endT == 0.0f, "a buried muzzle hits at once");
+
+        // Off the map: the arc ends at the last sampled point.
+        arc.origin = {0, 50, 0};
+        auto edge = [](float x, float, float& out) {
+            out = 0.0f;
+            return x < 20.0f;
+        };
+        r = MarchArc(arc, march, edge, noObjects);
+        Check(r.end == ArcEnd::Unsampled && ArcPoint(arc, r.endT).x < 20.0f && ArcPoint(arc, r.endT).x > 10.0f,
+              "unsampled ground ends the arc at the last sampled point");
+
+        Arc bad;
+        Check(MarchArc(bad, march, Flat, noObjects).end == ArcEnd::Invalid, "no lifeSpan: nothing drawn");
+    }
+
+    void ArcObjectTests()
+    {
+        const ArcMarch march;
+        const float k = std::sqrt(0.5f);
+        Arc arc;
+        arc.origin = {0, 2, 0};
+        arc.velocity = {30 * k, 30 * k, 0};
+        arc.lifeSpan = 1e30f;
+        // A 30 m wall across the flight path at x = 60 (the shell passes
+        // there about 23 m up, on its way down).
+        Obb wall;
+        wall.center = {61, 15, 0};
+        wall.half = {1, 15, 10};
+        float lastSpanEnd = 0.0f;
+        bool contiguous = true;
+        const auto wallHit = [&](const ArcSample* points, int count, float& outT) {
+            contiguous = contiguous && points[0].t == lastSpanEnd && count >= 2 && count <= kMaxArcSpanPoints;
+            lastSpanEnd = points[count - 1].t;
+            return PolylineObbHit(points, count, wall, outT);
+        };
+        ArcResult r = MarchArc(arc, march, Flat, wallHit);
+        const float tWall = 60.0f / (30 * k);
+        Check(r.end == ArcEnd::Object && Near(r.endT, tWall, 0.02f), "the arc stops on the wall face");
+        Check(ArcPoint(arc, r.endT).y < 30.0f && ArcPoint(arc, r.endT).y > 15.0f, "on the wall face, high up");
+        Check(contiguous, "spans are contiguous and bounded");
+
+        // The same wall beyond the landing point is never reached.
+        wall.center = {200, 15, 0};
+        lastSpanEnd = 0.0f;
+        r = MarchArc(arc, march, Flat, wallHit);
+        Check(r.end == ArcEnd::Terrain, "an object past the ground hit is ignored");
+
+        // A low wall mid-flight is flown over.
+        wall.center = {45, 1, 0};
+        wall.half = {1, 1, 10};
+        lastSpanEnd = 0.0f;
+        r = MarchArc(arc, march, Flat, wallHit);
+        Check(r.end == ArcEnd::Terrain, "the arc clears a low wall mid-flight");
+
+        // PolylineObbHit on its own.
+        Obb box;
+        box.center = {15, 0, 0};
+        box.half = {1, 1, 1};
+        const ArcSample line[3] = {{0.0f, {0, 0, 0}}, {1.0f, {10, 0, 0}}, {2.0f, {20, 0, 0}}};
+        float t = 0.0f;
+        Check(PolylineObbHit(line, 3, box, t) && Near(t, 1.4f), "hit time interpolated inside the chord");
+        Check(!PolylineObbHit(line, 2, box, t), "box beyond the polyline is missed");
+        Check(!PolylineObbHit(line, 1, box, t), "a single point has no chord");
+    }
+
+    void ArcDrawTests()
+    {
+        Arc arc;
+        arc.origin = {1, 2, 3};
+        arc.velocity = {10, 20, -5};
+        arc.lifeSpan = 9.0f;
+        const float endT = 3.0f;
+        Vec3 previousEnd = arc.origin;
+        bool contiguous = true;
+        const Vec3 side = ArcSideVector(arc, {0, 1, 0});
+        bool perpendicular = true;
+        for (unsigned k = 0; k < kArcSegments; ++k)
+        {
+            Vec3 a, b;
+            ArcSegment(arc, endT, k, kArcSegments, a, b);
+            contiguous = contiguous && Near(a.x, previousEnd.x) && Near(a.y, previousEnd.y) && Near(a.z, previousEnd.z);
+            const Vec3 chord = BZROpenShim::ShellCasings::Sub(b, a);
+            perpendicular = perpendicular && std::fabs(BZROpenShim::ShellCasings::Dot(chord, side)) < 1e-3f;
+            previousEnd = b;
+        }
+        const Vec3 last = ArcPoint(arc, endT);
+        Check(contiguous && Near(previousEnd.x, last.x) && Near(previousEnd.y, last.y) && Near(previousEnd.z, last.z),
+              "pieces join end to end from the muzzle to the end point");
+        Check(perpendicular && Near(BZROpenShim::ShellCasings::Length(side), 1.0f),
+              "the roll reference is perpendicular to every piece");
+        arc.velocity = {0, 30, 0};
+        const Vec3 fallback = ArcSideVector(arc, {0, 0, 1});
+        Check(fallback.z == 1.0f, "a vertical shot uses the fallback roll reference");
+    }
+
     void AssetTests()
     {
         const auto rgb = BeamRgb();
@@ -223,6 +466,12 @@ int main(int argc, char** argv)
     RayObbTests();
     SegmentTests();
     TransformTests();
+    BallisticSigTests();
+    PitchTests();
+    ArcPointTests();
+    MarchArcTests();
+    ArcObjectTests();
+    ArcDrawTests();
     AssetTests();
     return OpenShimTest::ExitCode();
 }

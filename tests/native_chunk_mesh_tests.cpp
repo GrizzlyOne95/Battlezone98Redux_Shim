@@ -1373,6 +1373,23 @@ int main(int argc, char **argv)
         Require(std::fabs(bounds[2]) < 1e-5f && std::fabs(bounds[5] - 1.0f) < 1e-5f &&
                     std::fabs(bounds[3] - 1.0f) < 1e-4f && std::fabs(bounds[0] + 1.0f) < 1e-3f,
                 "beam bounds span z 0..1 (muzzle to far end) and radius 1 at the muzzle");
+
+        // Ballistic arc pieces: sections of the same taper and texture.
+        Require(LaserBeamSectionMesh(8, 0, 1).mesh == beam.mesh, "section 0 of 1 is the straight beam, byte for byte");
+        Require(LaserBeamSectionMesh(8, 16, 16).mesh.empty() && LaserBeamSectionMesh(8, 0, 0).mesh.empty() &&
+                    LaserBeamSectionMesh(2, 0, 16).mesh.empty() && LaserBeamSectionMesh(8, 0, 65).mesh.empty(),
+                "invalid sections fail closed");
+        const auto first = LaserBeamSectionMesh(8, 0, 16);
+        const auto fourth = LaserBeamSectionMesh(8, 3, 16);
+        Require(!first.mesh.empty() && first.mesh != fourth.mesh && fourth.triangles == beam.triangles,
+                "sections differ and keep the tube's faces");
+        Require(Extract(fourth.mesh, skeleton, pieces, error) && pieces.size() == 1 &&
+                    pieces[0].triangles == fourth.triangles,
+                "a section reloads through the Ogre mesh parser");
+        std::memcpy(bounds, fourth.mesh.data() + fourth.mesh.size() - sizeof(bounds), sizeof(bounds));
+        Require(std::fabs(bounds[2]) < 1e-5f && std::fabs(bounds[5] - 1.0f) < 1e-5f &&
+                    std::fabs(bounds[3] - (1.0f - 0.5f * 3.0f / 16.0f)) < 1e-4f,
+                "section 3 of 16 spans z 0..1 and starts at the taper's radius there");
     }
     Require(SkeletonName(mesh) == "test.skeleton", "shared geometry skeleton link");
     Require(Extract(mesh, skeleton, pieces, error), "extract rigid bone group");

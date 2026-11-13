@@ -153,4 +153,9 @@ Piece RallyBeaconMesh(bool amberLamp = false);
 // scales it to the beam. Deterministic; an out-of-range side count returns an
 // empty piece.
 Piece LaserBeamMesh(unsigned sides);
+// LaserSight ballistic arc: piece `section` of `sections` (1..64) of the
+// LaserBeamMesh taper and texture, still spanning z 0..1, so pieces laid end
+// to end along a curve read as one beam. Section 0 of 1 is byte-identical to
+// LaserBeamMesh(sides). Out-of-range arguments return an empty piece.
+Piece LaserBeamSectionMesh(unsigned sides, unsigned section, unsigned sections);
 } // namespace BZROpenShim::NativeChunks

@@ -28,6 +28,12 @@
 // Matrix_Multiply(weapon->obj->matrix, weapon->mountWorld), as
 // SniperInterface::Simulate builds it.
 //
+// Ballistic arc (VERIFIED facts, Docs/LASER_SIGHT.md "Ballistic arc"): when
+// the selected weapon fires gravity ordnance (Grenade, SprayBomb, BounceBomb,
+// Popper), the beam is drawn as kArcSegments pieces along the predicted mean
+// trajectory to its first ground or object hit. Same keying, gate and cost
+// bounds as the straight beam; any failure falls back to the straight beam.
+//
 // [General] LaserSight = 0 (default) leaves everything below inert.
 
 #include "bzr_hooks.h"
@@ -44,6 +50,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -77,6 +84,9 @@ namespace BZROpenShim
             constexpr size_t kMaxGridHandles = 32;   // per segment query
             constexpr size_t kMaxTestedObjects = 64; // per recompute
             constexpr LS::TerrainMarch kTerrainMarch = {};
+            // Ballistic arc pieces: <prefix>NN.mesh, NN = 00..kArcSegments-1.
+            constexpr const char* kArcMeshPrefix = OPENSHIM_CHUNK_CACHE_LASERSIGHT_DIR "openshim_lasersight_arc";
+            constexpr LS::ArcMarch kArcMarch = {};
 
             // Released-layout contracts (GOG Redux 2.2.301), cited in
             // Docs/LASER_SIGHT.md. Weapon +0x10 = the hardpoint object whose
@@ -91,6 +101,17 @@ namespace BZROpenShim
             constexpr size_t kRenderBridgeWorldEntityOffset = 0x094;
             constexpr size_t kObj76FlagsOffset = 0x14;
             constexpr uint32_t kObj76DeadFlag = 0x200;
+            // Ballistic arc (Docs/LASER_SIGHT.md, "Ballistic arc"); each is
+            // guarded at bind time by a LaserArc* row in scripts/patches.json.
+            // Weapon +0x08 = WeaponClass, +0x0C = OrdnanceClass; both classes
+            // keep their signature at +0x0C; WeaponClass(Cannon) +0x90 =
+            // shotPitch; OrdnanceClass +0x50 = lifeSpan, +0x54 = shotSpeed.
+            constexpr size_t kWeaponClassOffset = 0x08;
+            constexpr size_t kWeaponOrdnanceClassOffset = 0x0C;
+            constexpr size_t kClassSigOffset = 0x0C;
+            constexpr size_t kCannonShotPitchOffset = 0x90;
+            constexpr size_t kOrdnanceLifeSpanOffset = 0x50;
+            constexpr size_t kOrdnanceShotSpeedOffset = 0x54;
 
             // ---- Config ------------------------------------------------------
             enum class ConfigState : uint8_t
@@ -160,6 +181,38 @@ namespace BZROpenShim
                 g_Api.usable = true;
                 LogShimA(LogLevel::Info, kComponent, "[LASERSIGHT] engine rows bound");
                 return true;
+            }
+
+            // The arc's layout guards. Unbound, every weapon gets the
+            // straight beam, as before the arc existed.
+            bool BindArcRows()
+            {
+                static bool attempted = false;
+                static bool usable = false;
+                if (attempted)
+                    return usable;
+                attempted = true;
+                uint32_t weaponClass = 0, weaponOrdnance = 0, lifeSpan = 0, shotSpeed = 0, shotPitch = 0, gravity = 0;
+                uint32_t grenade = 0, sprayBomb = 0, bounceBomb = 0, popper = 0, mortar = 0, cannon = 0;
+                const HookEngine::EngineRow rows[] = {
+                    {"LaserArcWeaponClassField", &weaponClass},
+                    {"LaserArcWeaponOrdnanceField", &weaponOrdnance},
+                    {"LaserArcOrdnanceLifeSpan", &lifeSpan},
+                    {"LaserArcOrdnanceShotSpeed", &shotSpeed},
+                    {"LaserArcCannonShotPitch", &shotPitch},
+                    {"LaserArcGrenadeGravity", &gravity},
+                    {"LaserArcGrenadeSig", &grenade},
+                    {"LaserArcSprayBombSig", &sprayBomb},
+                    {"LaserArcBounceBombSig", &bounceBomb},
+                    {"LaserArcPopperSig", &popper},
+                    {"LaserArcMortarSig", &mortar},
+                    {"LaserArcCannonSig", &cannon},
+                };
+                usable = HookEngine::BindEngineRows("Laser sight arc", rows);
+                LogShimA(usable ? LogLevel::Info : LogLevel::Warn, kComponent,
+                         usable ? "[LASERSIGHT] arc rows bound"
+                                : "[LASERSIGHT] arc rows unbound; ballistic weapons get the straight beam");
+                return usable;
             }
 
             // ---- Ogre access -------------------------------------------------
@@ -472,6 +525,41 @@ namespace BZROpenShim
                 return true;
             }
 
+            // The selected weapon's ballistics, when it fires gravity
+            // ordnance. False for every other weapon (straight beam).
+            struct Ballistics
+            {
+                float shotSpeed = 0.0f;
+                float lifeSpan = 0.0f;
+                float shotPitch = 0.0f; // radians, 0 unless Cannon::Simulate fires it
+            };
+
+            bool ReadBallisticsSeh(void* weapon, Ballistics& out)
+            {
+                __try
+                {
+                    const uint8_t* bytes = static_cast<const uint8_t*>(weapon);
+                    const uint8_t* ordnanceClass =
+                        *reinterpret_cast<const uint8_t* const*>(bytes + kWeaponOrdnanceClassOffset);
+                    const uint8_t* weaponClass = *reinterpret_cast<const uint8_t* const*>(bytes + kWeaponClassOffset);
+                    if (!ordnanceClass || !weaponClass ||
+                        !LS::IsBallisticOrdnance(*reinterpret_cast<const uint32_t*>(ordnanceClass + kClassSigOffset)))
+                        return false;
+                    out.shotSpeed = *reinterpret_cast<const float*>(ordnanceClass + kOrdnanceShotSpeedOffset);
+                    out.lifeSpan = *reinterpret_cast<const float*>(ordnanceClass + kOrdnanceLifeSpanOffset);
+                    out.shotPitch =
+                        LS::AppliesShotPitch(*reinterpret_cast<const uint32_t*>(weaponClass + kClassSigOffset))
+                            ? *reinterpret_cast<const float*>(weaponClass + kCannonShotPitchOffset)
+                            : 0.0f;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+                return std::isfinite(out.shotSpeed) && out.shotSpeed > 0.0f && out.lifeSpan > 0.0f &&
+                       std::isfinite(out.shotPitch) && std::fabs(out.shotPitch) < 3.2f;
+            }
+
             // On foot the player object is a Person: no beam. RTTI is read only
             // when the player object or its vtable changes.
             struct PersonCache
@@ -501,8 +589,20 @@ namespace BZROpenShim
                 void* entity = nullptr;
                 bool visible = false;
                 bool failed = false; // creation failed in this scene; not retried until it changes
+                // Ballistic arc: kArcSegments pieces, created on first use
+                // in the same scene as the straight beam.
+                void* arcNodes[LS::kArcSegments] = {};
+                void* arcEntities[LS::kArcSegments] = {};
+                bool arcCreated = false;
+                bool arcVisible = false;
+                bool arcFailed = false; // as `failed`, for the arc pieces
             };
             Beam g_Beam;
+
+            bool BeamShown()
+            {
+                return g_Beam.visible || g_Beam.arcVisible;
+            }
 
             // Last recompute's inputs; equal inputs inside kRefreshMs skip it.
             struct ComputeKey
@@ -524,6 +624,8 @@ namespace BZROpenShim
                 uint32_t calls = 0;
                 uint32_t recomputes = 0;
                 uint32_t objectsTested = 0;
+                uint32_t arcSamples = 0; // last arc recompute: ground samples
+                uint32_t arcSpans = 0;   // last arc recompute: grid queries
                 int64_t callTicks = 0;
                 int64_t callMax = 0;
                 int64_t recomputeTicks = 0;
@@ -533,18 +635,33 @@ namespace BZROpenShim
 
             // keepKey: Recompute hid it for this pose (muzzle against a hull);
             // keep the cache so the same pose is not traced again every call.
-            void HideBeam(bool keepKey = false)
+            void HideStraight()
             {
                 if (g_Beam.visible && g_Beam.node && g_Beam.entity)
                     HideShimOwnedObject(g_Beam.node, g_Beam.entity);
                 g_Beam.visible = false;
+            }
+
+            void HideArc()
+            {
+                if (g_Beam.arcVisible)
+                    for (unsigned k = 0; k < LS::kArcSegments; ++k)
+                        if (g_Beam.arcNodes[k] && g_Beam.arcEntities[k])
+                            HideShimOwnedObject(g_Beam.arcNodes[k], g_Beam.arcEntities[k]);
+                g_Beam.arcVisible = false;
+            }
+
+            void HideBeam(bool keepKey = false)
+            {
+                HideStraight();
+                HideArc();
                 if (!keepKey)
                     g_Key.valid = false;
             }
 
             void ForgetBeam(const wchar_t* reason)
             {
-                const bool had = g_Beam.node || g_Beam.entity;
+                const bool had = g_Beam.node || g_Beam.entity || g_Beam.arcCreated;
                 g_Beam = Beam{};
                 g_Key.valid = false;
                 g_PersonCache = PersonCache{};
@@ -584,6 +701,68 @@ namespace BZROpenShim
                 return true;
             }
 
+            // Drops the arc handles without destroying anything: this runs
+            // inside a render traversal, so, as for the straight beam, Ogre
+            // keeps the hidden objects until the scene is torn down.
+            void ForgetArcObjects()
+            {
+                for (unsigned k = 0; k < LS::kArcSegments; ++k)
+                {
+                    g_Beam.arcNodes[k] = nullptr;
+                    g_Beam.arcEntities[k] = nullptr;
+                }
+                g_Beam.arcCreated = false;
+                g_Beam.arcVisible = false;
+            }
+
+            // The arc pieces, in the straight beam's scene (EnsureBeam ran).
+            bool EnsureArc()
+            {
+                if (g_Beam.arcCreated)
+                    return true;
+                if (g_Beam.arcFailed || !g_Beam.sceneManager)
+                    return false;
+                for (unsigned k = 0; k < LS::kArcSegments; ++k)
+                {
+                    char mesh[160] = {};
+                    std::snprintf(mesh, sizeof(mesh), "%s%02u.mesh", kArcMeshPrefix, k);
+                    void* created = nullptr;
+                    if (!CreateShimOwnedMeshObject(mesh, created, g_Beam.arcNodes[k], g_Beam.arcEntities[k]) ||
+                        created != g_Beam.sceneManager)
+                    {
+                        LogShimA(LogLevel::Warn, kComponent,
+                                 "[LASERSIGHT] arc piece creation failed mesh=%s (straight beam instead; not "
+                                 "retried in this scene)",
+                                 mesh);
+                        ForgetArcObjects();
+                        g_Beam.arcFailed = true;
+                        return false;
+                    }
+                    SetCastShadowsSeh(GetOgreApi(), g_Beam.arcEntities[k]);
+                }
+                g_Beam.arcCreated = true;
+                g_Beam.arcVisible = false;
+                LogShimA(LogLevel::Info, kComponent, "[LASERSIGHT] arc pieces created count=%u", LS::kArcSegments);
+                return true;
+            }
+
+            // One object's box for the hit tests, or false to skip it: the
+            // player, dead or entity-less objects, and boxes that contain the
+            // muzzle. Entity bounds are loose: a box the muzzle sits in (a
+            // hull we are pressed against, a building we hover over) would
+            // swallow the whole beam.
+            bool ReadObjectBox(const OgreApi& ogre, int handle, void* player, Vec3 muzzle, SC::Obb& box)
+            {
+                void* object = GameObjectFromHandleGog(handle);
+                if (!object || object == player)
+                    return false;
+                void* entity = nullptr;
+                if (!ReadObjectEntitySeh(object, entity) || !LooksLikeOgreObjectInPlace(entity) ||
+                    !ReadEntityObbSeh(ogre, entity, box))
+                    return false;
+                return !SC::PointInsideObb(muzzle, box);
+            }
+
             // Nearest object hit along the beam, up to `length`. Objects come
             // only from the grid cells of the segments walked so far; the walk
             // stops once a hit lies inside the segment just searched.
@@ -617,18 +796,8 @@ namespace BZROpenShim
                         if (testedCount == kMaxTestedObjects)
                             break;
                         tested[testedCount++] = handle;
-                        void* object = GameObjectFromHandleGog(handle);
-                        if (!object || object == player)
-                            continue;
-                        void* entity = nullptr;
                         SC::Obb box;
-                        if (!ReadObjectEntitySeh(object, entity) || !LooksLikeOgreObjectInPlace(entity) ||
-                            !ReadEntityObbSeh(ogre, entity, box))
-                            continue;
-                        // Entity bounds are loose: a box the muzzle sits in
-                        // (a hull we are pressed against, a building we hover
-                        // over) would swallow the whole beam. Skip it.
-                        if (SC::PointInsideObb(muzzle, box))
+                        if (!ReadObjectBox(ogre, handle, player, muzzle, box))
                             continue;
                         float t = 0.0f;
                         if (LS::RayObb(muzzle, dir, box, best, t) && t < best)
@@ -645,6 +814,129 @@ namespace BZROpenShim
                 if (hit)
                     outT = best;
                 return hit;
+            }
+
+            // Objects met by the arc. Each object's box is read once per
+            // recompute (at most kMaxTestedObjects, as the straight beam) and
+            // kept, because consecutive spans query overlapping grid cells.
+            struct ArcObjects
+            {
+                int handles[kMaxTestedObjects] = {};
+                SC::Obb boxes[kMaxTestedObjects];
+                bool usable[kMaxTestedObjects] = {};
+                size_t count = 0;
+            };
+
+            bool ArcSpanObjectHit(const LS::ArcSample* points, int count, void* player, Vec3 muzzle,
+                                  const Vec3& origin, ArcObjects& cache, float& outT)
+            {
+                const GridApi& grid = GetGridApi();
+                const OgreApi& ogre = GetOgreApi();
+                if (!grid.usable || !ogre.objects || count < 2)
+                    return false;
+                Vec3 lo = SC::RenderToSimPoint(points[0].p, origin), hi = lo;
+                for (int i = 1; i < count; ++i)
+                {
+                    const Vec3 p = SC::RenderToSimPoint(points[i].p, origin);
+                    lo = {std::min(lo.x, p.x), 0.0f, std::min(lo.z, p.z)};
+                    hi = {std::max(hi.x, p.x), 0.0f, std::max(hi.z, p.z)};
+                }
+                int handles[kMaxGridHandles] = {};
+                const size_t found = QueryGridSeh(grid, lo.x, lo.z, hi.x, hi.z, handles, kMaxGridHandles);
+                bool hit = false;
+                float best = 0.0f;
+                for (size_t i = 0; i < found; ++i)
+                {
+                    size_t slot = std::find(cache.handles, cache.handles + cache.count, handles[i]) - cache.handles;
+                    if (slot == cache.count)
+                    {
+                        if (cache.count == kMaxTestedObjects)
+                            continue;
+                        cache.handles[slot] = handles[i];
+                        cache.usable[slot] = ReadObjectBox(ogre, handles[i], player, muzzle, cache.boxes[slot]);
+                        ++cache.count;
+                    }
+                    float t = 0.0f;
+                    if (cache.usable[slot] && LS::PolylineObbHit(points, count, cache.boxes[slot], t) &&
+                        (!hit || t < best))
+                    {
+                        best = t;
+                        hit = true;
+                    }
+                }
+                if (g_Trace)
+                    g_Stats.objectsTested = static_cast<uint32_t>(cache.count);
+                if (hit)
+                    outT = best;
+                return hit;
+            }
+
+            // The ballistic arc for gravity ordnance. False when the arc
+            // cannot be drawn (pieces unavailable or a transform failed): the
+            // caller then draws the straight beam.
+            bool RecomputeArc(const Snapshot& snap, const Vec3& origin, Vec3 muzzle, Vec3 front, Vec3 up,
+                              const Ballistics& ballistics)
+            {
+                if (!EnsureArc())
+                    return false;
+                LS::Arc arc;
+                arc.origin = muzzle;
+                arc.velocity = SC::Scale(LS::PitchedFireDirection(front, up, ballistics.shotPitch), ballistics.shotSpeed);
+                arc.lifeSpan = ballistics.lifeSpan;
+
+                const FnTerrainHeightAt terrain = ResolveTerrainHeight();
+                const auto heightAt = [&](float x, float z, float& out) {
+                    if (!terrain)
+                    {
+                        out = -1.0e9f; // no terrain row: the arc ignores the ground, as the straight beam does
+                        return true;
+                    }
+                    const Vec3 sim = SC::RenderToSimPoint({x, 0.0f, z}, origin);
+                    double height = 0.0;
+                    if (!TerrainHeightSimSeh(terrain, sim.x, sim.z, height))
+                        return false;
+                    out = static_cast<float>(height) - origin.y;
+                    return true;
+                };
+                ArcObjects objects;
+                const auto spanHit = [&](const LS::ArcSample* points, int count, float& outT) {
+                    return ArcSpanObjectHit(points, count, snap.player, muzzle, origin, objects, outT);
+                };
+                const LS::ArcResult result = LS::MarchArc(arc, kArcMarch, heightAt, spanHit);
+                if (g_Trace)
+                {
+                    g_Stats.arcSamples = static_cast<uint32_t>(result.samples);
+                    g_Stats.arcSpans = static_cast<uint32_t>(result.spans);
+                }
+                if (SC::Length(SC::Sub(LS::ArcPoint(arc, result.endT), muzzle)) < LS::kMinBeamLength)
+                {
+                    HideBeam(true);
+                    return true;
+                }
+                const Vec3 side = LS::ArcSideVector(arc, up);
+                for (unsigned k = 0; k < LS::kArcSegments; ++k)
+                {
+                    Vec3 a, b;
+                    LS::ArcSegment(arc, result.endT, k, LS::kArcSegments, a, b);
+                    const Vec3 chord = SC::Sub(b, a);
+                    const float length = SC::Length(chord);
+                    const Vec3 dir = SC::Normalize(chord, front);
+                    const LS::BeamTransform transform = LS::MakeBeamTransform(a, dir, side, length, kBeamRadius);
+                    if (!SetShimOwnedObjectTransform(g_Beam.arcNodes[k], g_Beam.arcEntities[k], transform.position,
+                                                     transform.orientation, transform.scale))
+                    {
+                        LogShimA(LogLevel::Warn, kComponent,
+                                 "[LASERSIGHT] arc transform failed; straight beam from now on in this scene");
+                        g_Beam.arcVisible = true; // some pieces may be shown: hide them all
+                        HideArc();
+                        ForgetArcObjects();
+                        g_Beam.arcFailed = true;
+                        return false;
+                    }
+                }
+                HideStraight();
+                g_Beam.arcVisible = true;
+                return true;
             }
 
             void Recompute(const Snapshot& snap, const Vec3& origin)
@@ -667,6 +959,12 @@ namespace BZROpenShim
                     HideBeam(true);
                     return;
                 }
+
+                // Gravity ordnance: the predicted arc instead of the line.
+                Ballistics ballistics;
+                if (BindArcRows() && ReadBallisticsSeh(snap.weapon, ballistics) &&
+                    RecomputeArc(snap, origin, muzzle, dir, SC::Normalize(up, {0, 1, 0}), ballistics))
+                    return;
 
                 float length = LS::kMaxBeamLength;
                 if (const FnTerrainHeightAt terrain = ResolveTerrainHeight())
@@ -703,6 +1001,7 @@ namespace BZROpenShim
                     g_Beam.failed = true;
                     return;
                 }
+                HideArc();
                 g_Beam.visible = true;
             }
 
@@ -712,7 +1011,7 @@ namespace BZROpenShim
                     return;
                 if (!LS::Enabled(true, *g_Api.isNetGame != 0, static_cast<int>(g_Mode)))
                 {
-                    if (g_Beam.visible)
+                    if (BeamShown())
                         HideBeam();
                     return;
                 }
@@ -722,7 +1021,7 @@ namespace BZROpenShim
                 if (!ReadPlayerSeh(snap.player, snap.playerVtable) || IsPerson(snap.player, snap.playerVtable) ||
                     !ReadWeaponPoseSeh(snap.player, snap.weapon, snap.local, snap.mount))
                 {
-                    if (g_Beam.visible)
+                    if (BeamShown())
                         HideBeam();
                     return;
                 }
@@ -770,13 +1069,14 @@ namespace BZROpenShim
                     const double us = 1.0e6 / static_cast<double>(g_Stats.frequency.QuadPart);
                     LogShimA(LogLevel::Info, kComponent,
                              "[LASERSIGHT] calls=%u avg=%.2fus max=%.2fus recomputes=%u avg=%.2fus max=%.2fus "
-                             "lastObjectsTested=%u visible=%d",
+                             "lastObjectsTested=%u visible=%d arc=%d lastArcSamples=%u lastArcSpans=%u",
                              g_Stats.calls, static_cast<double>(g_Stats.callTicks) * us / g_Stats.calls,
                              static_cast<double>(g_Stats.callMax) * us, g_Stats.recomputes,
                              g_Stats.recomputes ? static_cast<double>(g_Stats.recomputeTicks) * us / g_Stats.recomputes
                                                 : 0.0,
                              static_cast<double>(g_Stats.recomputeMax) * us, g_Stats.objectsTested,
-                             g_Beam.visible ? 1 : 0);
+                             g_Beam.visible ? 1 : 0, g_Beam.arcVisible ? 1 : 0, g_Stats.arcSamples,
+                             g_Stats.arcSpans);
                 }
                 const LARGE_INTEGER frequency = g_Stats.frequency;
                 g_Stats = TraceStats{};
@@ -791,7 +1091,7 @@ namespace BZROpenShim
             {
                 if (g_State == ConfigState::Unloaded)
                     LoadConfig();
-                else if (g_Beam.visible)
+                else if (BeamShown())
                     HideBeam();
                 return;
             }
@@ -832,18 +1132,22 @@ namespace BZROpenShim
                 return;
             if (g_Beam.node || g_Beam.entity)
                 DestroyShimOwnedMeshObject(g_Beam.sceneManager, g_Beam.node, g_Beam.entity);
+            for (unsigned k = 0; k < LS::kArcSegments; ++k)
+                if (g_Beam.arcNodes[k] || g_Beam.arcEntities[k])
+                    DestroyShimOwnedMeshObject(g_Beam.sceneManager, g_Beam.arcNodes[k], g_Beam.arcEntities[k]);
             ForgetBeam(reason);
         }
 
         void DeactivateLaserSight(const wchar_t* reason)
         {
-            if (g_Beam.visible)
+            if (BeamShown())
             {
                 HideBeam();
                 LogShimW(LogLevel::Info, kComponent, L"[LASERSIGHT] hid beam (%ls)", reason ? reason : L"unspecified");
             }
             g_Key.valid = false;
             g_Beam.failed = false;
+            g_Beam.arcFailed = false;
             // The network allow mode belongs to the mission that set it; a stock
             // network game joined later must not inherit it.
             const LONG previous = InterlockedExchange(&g_Mode, static_cast<LONG>(LS::Mode::Default));
@@ -898,6 +1202,13 @@ namespace BZROpenShim
 
                 const NativeChunks::Piece mesh = NativeChunks::LaserBeamMesh(kBeamSides);
                 writeIfChanged(cacheRoot / std::filesystem::path(kMeshResource), mesh.mesh);
+                for (unsigned k = 0; k < LS::kArcSegments; ++k)
+                {
+                    char name[160] = {};
+                    std::snprintf(name, sizeof(name), "%s%02u.mesh", kArcMeshPrefix, k);
+                    writeIfChanged(cacheRoot / std::filesystem::path(name),
+                                   NativeChunks::LaserBeamSectionMesh(kBeamSides, k, LS::kArcSegments).mesh);
+                }
 
                 // Text and texture assets: an asset pack overrides any of them
                 // by shipping the same file at the top of a chunk payload

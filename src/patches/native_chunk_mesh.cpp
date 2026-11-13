@@ -1128,13 +1128,24 @@ Piece RallyBeaconMesh(bool amberLamp)
 }
 Piece LaserBeamMesh(unsigned sides)
 {
-    if (sides < 3 || sides > 32)
+    return LaserBeamSectionMesh(sides, 0, 1);
+}
+Piece LaserBeamSectionMesh(unsigned sides, unsigned section, unsigned sections)
+{
+    if (sides < 3 || sides > 32 || sections < 1 || sections > 64 || section >= sections)
         return {};
     // Open tube along local +Z from the muzzle (z = 0, radius 1) to the far
     // end (z = 1, radius kFarRadius). The node scales x/y by the beam radius
-    // and z by its length. u runs around the tube, v along it.
+    // and z by its length. u runs around the tube, v along it. A section
+    // covers [section, section + 1) / sections of that taper and of v, so
+    // `sections` pieces laid end to end read as one beam; section 0 of 1 is
+    // the whole beam.
     constexpr float kFarRadius = 0.5f;
     constexpr float kPi = 3.14159265358979f;
+    const float v0 = static_cast<float>(section) / static_cast<float>(sections);
+    const float v1 = static_cast<float>(section + 1) / static_cast<float>(sections);
+    const float r0 = 1.0f - (1.0f - kFarRadius) * v0;
+    const float r1 = 1.0f - (1.0f - kFarRadius) * v1;
     struct Vertex
     {
         V p, n;
@@ -1142,19 +1153,20 @@ Piece LaserBeamMesh(unsigned sides)
     };
     std::vector<Vertex> vertices;
     vertices.reserve(sides * 6u);
-    auto at = [&](unsigned i, float z, float radius) {
+    auto at = [&](unsigned i, float z, float radius, float v) {
         const float a = 2.0f * kPi * static_cast<float>(i % sides) / static_cast<float>(sides);
-        // Normal of the cone surface: radial, tipped towards +Z by the taper.
+        // Normal of the cone surface: radial, tipped towards +Z by the taper
+        // of the whole beam (each section is stretched along z alike).
         const float slope = 1.0f - kFarRadius;
         const float l = std::sqrt(1.0f + slope * slope);
         return Vertex{V{std::cos(a) * radius, std::sin(a) * radius, z},
                       V{std::cos(a) / l, std::sin(a) / l, slope / l},
-                      static_cast<float>(i) / static_cast<float>(sides), z};
+                      static_cast<float>(i) / static_cast<float>(sides), v};
     };
     for (unsigned i = 0; i < sides; ++i)
     {
-        const Vertex a0 = at(i, 0.0f, 1.0f), a1 = at(i + 1, 0.0f, 1.0f);
-        const Vertex b0 = at(i, 1.0f, kFarRadius), b1 = at(i + 1, 1.0f, kFarRadius);
+        const Vertex a0 = at(i, 0.0f, r0, v0), a1 = at(i + 1, 0.0f, r0, v0);
+        const Vertex b0 = at(i, 1.0f, r1, v1), b1 = at(i + 1, 1.0f, r1, v1);
         for (const Vertex &v : {a0, a1, b1, a0, b1, b0})
             vertices.push_back(v);
     }
