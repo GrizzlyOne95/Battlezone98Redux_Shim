@@ -146,7 +146,17 @@ namespace BZROpenShim
             }
 
             if (name && name->size)
-                std::fprintf(file, "%s %.*s\n", id, static_cast<int>(name->size), BzrStringData(name));
+            {
+                // Same rule as StableIdList::Format: no line break from a
+                // remote display name may start a second entry.
+                std::string safeName = BzrStringToStdString(name);
+                for (char& c : safeName)
+                {
+                    if (static_cast<unsigned char>(c) < 0x20)
+                        c = ' ';
+                }
+                std::fprintf(file, "%s %s\n", id, safeName.c_str());
+            }
             else
                 std::fprintf(file, "%s\n", id);
             std::fclose(file);

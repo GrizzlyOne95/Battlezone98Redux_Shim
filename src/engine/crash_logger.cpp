@@ -21,7 +21,10 @@
 #endif
 #include <Windows.h>
 #include <DbgHelp.h>
+#include <algorithm>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -376,6 +379,32 @@ namespace BZROpenShim
             }
             return EXCEPTION_CONTINUE_SEARCH;
         }
+
+        // Keeps the newest kKeptCrashFiles files matching the pattern in the
+        // dump directory. The names carry YYYYMMDD_HHMMSS, so name order is
+        // age order.
+        void PruneOldCrashFiles(const char* pattern)
+        {
+            constexpr size_t kKeptCrashFiles = 5;
+            const std::string directory = g_DumpDirectory;
+            if (directory.empty()) return;
+
+            std::vector<std::string> names;
+            WIN32_FIND_DATAA found = {};
+            HANDLE search = FindFirstFileA((directory + pattern).c_str(), &found);
+            if (search == INVALID_HANDLE_VALUE) return;
+            do
+            {
+                if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                    names.emplace_back(found.cFileName);
+            } while (FindNextFileA(search, &found));
+            FindClose(search);
+
+            if (names.size() <= kKeptCrashFiles) return;
+            std::sort(names.begin(), names.end());
+            for (size_t index = 0; index + kKeptCrashFiles < names.size(); ++index)
+                DeleteFileA((directory + "\\" + names[index]).c_str());
+        }
     }
 
     void InstallCrashLogger()
@@ -400,6 +429,12 @@ namespace BZROpenShim
                 break;
             }
         }
+
+        // Each crash leaves a dump that can be hundreds of MB, and nothing
+        // else removes them: a crash that repeats on every launch would fill
+        // the disk. Install time is the safe place to allocate and delete.
+        PruneOldCrashFiles("\\openshim_crash_*.dmp");
+        PruneOldCrashFiles("\\openshim_crash_*.log");
 
         // Keep the report scoped to this process. The ordinary shim log and
         // support wrapper already preserve the previous launch; carrying this
