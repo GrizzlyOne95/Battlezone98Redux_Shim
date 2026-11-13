@@ -311,6 +311,104 @@ namespace BZROpenShim
             return dots;
         }
 
+        // ---- rally set mode ------------------------------------------------
+        // With the three command hooks installed, V arms "set mode" instead
+        // of setting the rally at once: the stock ground reticle and order
+        // line then preview the point, and the stock confirm key (menu_press)
+        // sets it. Without them V keeps the immediate custom-ray set.
+
+        enum class SetKeyPlan
+        {
+            SetImmediately, // fallback: a hook is missing
+            Arm,
+            Cancel,
+        };
+
+        // A V press (not Shift+V) that passed the key gate.
+        inline SetKeyPlan PlanSetKey(bool setModeAvailable, bool armed, bool selectionMatchesArmed)
+        {
+            if (!setModeAvailable)
+                return SetKeyPlan::SetImmediately;
+            if (armed && selectionMatchesArmed)
+                return SetKeyPlan::Cancel;
+            return SetKeyPlan::Arm;
+        }
+
+        // The selection (ControlPanel handle list) captured when set mode was
+        // armed. The mode holds only while the live selection is exactly this
+        // set of handles, so any selection change cancels it.
+        template <size_t Capacity>
+        class ArmedSelection
+        {
+        public:
+            size_t Size() const { return m_count; }
+
+            // False (and empty) for an empty or oversized selection.
+            bool Capture(const uint32_t* handles, size_t count)
+            {
+                m_count = 0;
+                if (!handles || count == 0 || count > Capacity)
+                    return false;
+                for (size_t i = 0; i < count; ++i)
+                    m_handles[i] = handles[i];
+                m_count = count;
+                return true;
+            }
+
+            void Reset() { m_count = 0; }
+
+            // Same handles, in any order.
+            bool Matches(const uint32_t* handles, size_t count) const
+            {
+                if (m_count == 0 || !handles || count != m_count)
+                    return false;
+                for (size_t i = 0; i < count; ++i)
+                {
+                    bool found = false;
+                    for (size_t j = 0; j < m_count && !found; ++j)
+                        found = m_handles[j] == handles[i];
+                    if (!found)
+                        return false;
+                }
+                return true;
+            }
+
+        private:
+            uint32_t m_handles[Capacity] = {};
+            size_t m_count = 0;
+        };
+
+        // While armed and the selection is unchanged, a ground aim yields a
+        // Go (so the stock reticle and order line draw) and an object aim
+        // yields no command (no object orders while placing a rally).
+        constexpr int kCmdNone = 0;
+        constexpr int kCmdGoCommand = 3;
+
+        inline bool OverrideAimCommand(bool armed, bool selectionMatches)
+        {
+            return armed && selectionMatches;
+        }
+
+        // ControlPanel::BroadcastCommand: a Go to a ground point from the
+        // global ControlPanel, while armed with the selection unchanged, is
+        // the rally confirm; it is consumed (no order is issued).
+        inline bool BroadcastIsRallyConfirm(bool armed, bool selectionMatches, bool isGlobalControlPanel, int cmd,
+                                            bool hasWhere)
+        {
+            return armed && selectionMatches && isGlobalControlPanel && cmd == kCmdGoCommand && hasWhere;
+        }
+
+        // Per-tick check of an armed set mode. Outside an interactive world
+        // (pause menu, dialogs) the selection is not read and the mode holds.
+        inline bool KeepArmed(bool active, bool worldInteractive, bool selectionMatches)
+        {
+            if (!active)
+                return false;
+            if (!worldInteractive)
+                return true;
+            return selectionMatches;
+        }
+
         // What the per-frame main-loop tick may do. Everything that reads or
         // writes game objects waits for an interactive world: the tick also
         // runs inside nested modal loops (pause menu, dialogs).

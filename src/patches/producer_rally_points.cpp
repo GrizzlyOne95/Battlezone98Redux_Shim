@@ -1,7 +1,11 @@
 // producer_rally_points.cpp
 // BZR Open Shim - producer rally points. [Gameplay] ProducerRallyPoints,
-// default ON, single player only. With a Recycler or Factory selected, V sets
-// its rally point to the ground under the reticle; Shift+V clears it. Each
+// default ON, single player only. With a Recycler or Factory selected, V
+// toggles rally set mode: while it is armed the stock ground reticle and order
+// line preview the point exactly like a Go order, the stock confirm key
+// (menu_press, "Reticle Command") sets the rally there, and V again cancels.
+// Shift+V clears the rally. Without the three command hooks below, V sets the
+// rally at once to the ground under the reticle (the original behaviour). Each
 // unit that producer finishes afterwards (not scavengers or constructors) gets
 // a Go order to the rally point. While a rallied producer is selected, a HUD
 // marker labelled "Rally" (and a dotted line from the producer) shows the
@@ -15,6 +19,12 @@
 //   * Recycler/Factory vtable slot 42 (Producer::FinishBuild, which returns the
 //     new GameObject*): after the stock call, a Go order for the new unit.
 //   * The game window procedure, subclassed: V/Shift+V become a request.
+//   * Entry detours (scripts/patches.json "Producer Rally * Command Hook",
+//     installed by the patcher) of the ground-aim GetCommand 0x0045BD80, the
+//     object-aim GetCommand 0x0045BBE0 and ControlPanel::BroadcastCommand
+//     0x004A70C0: pass-throughs unless set mode is armed and the selection is
+//     unchanged; then ground aim yields Go, object aim yields nothing, and the
+//     confirmed Go sets the rally instead of issuing an order.
 //   * PeekMessageA (main-module IAT): the per-frame main-loop tick. It also
 //     runs inside nested modal loops (pause menu, dialogs), so it touches game
 //     state only while the world is interactive.
@@ -57,6 +67,10 @@ namespace BZROpenShim::Hooks
         using FnGetHandle = uint32_t(__thiscall*)(void* obj);
         using FnCameraRecord = const uint8_t*(__cdecl*)();
         using PFN_PeekMessageA = BOOL(WINAPI*)(LPMSG, HWND, UINT, UINT, UINT);
+        // The three set-mode detour targets (thiscall; see scripts/patches.json).
+        using FnAimGroundCommand = int(__thiscall*)(void* self, const float* where);
+        using FnAimObjectCommand = int(__thiscall*)(void* self, void* target);
+        using FnBroadcastCommand = void(__thiscall*)(void* panel, int what, const float* where);
 
         constexpr size_t kFinishBuildSlot = 42;
         constexpr size_t kCanCommandSlot = 14;
@@ -134,6 +148,37 @@ namespace BZROpenShim::Hooks
         std::atomic<WNDPROC> g_PrevWndProc{ nullptr };
         ULONGLONG g_LastLivenessCheck = 0;
         volatile long g_LogBudget = 48;
+
+        // Rally set mode. The detours, the window procedure and the tick all
+        // run on the game thread; g_Armed is atomic only so a stray caller
+        // reads a whole value. g_ArmedSelection is written with g_Armed false.
+        enum CommandHook
+        {
+            kHookAimGround = 0,
+            kHookAimObject = 1,
+            kHookBroadcast = 2,
+            kCommandHookCount = 3,
+        };
+        constexpr unsigned kAllCommandHooks = (1u << kCommandHookCount) - 1u;
+        constexpr char const* kCommandHookNames[kCommandHookCount] = {
+            "Producer Rally Ground Command Hook",
+            "Producer Rally Object Command Hook",
+            "Producer Rally Broadcast Command Hook",
+        };
+        // push ebp; mov ebp,esp; sub esp,imm8 (no relative operands).
+        constexpr size_t kPrologueLength = 6;
+        constexpr uint8_t kCommandHookPrologues[kCommandHookCount][kPrologueLength] = {
+            { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C },
+            { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x10 },
+            { 0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x0C },
+        };
+        FnAimGroundCommand g_OrigAimGround = nullptr;
+        FnAimObjectCommand g_OrigAimObject = nullptr;
+        FnBroadcastCommand g_OrigBroadcast = nullptr;
+        std::atomic<unsigned> g_CommandHooksInstalled{ 0 };
+        bool g_SetModeFallbackLogged = false;
+        std::atomic<bool> g_Armed{ false };
+        Policy::ArmedSelection<static_cast<size_t>(kSelectMax)> g_ArmedSelection;
 
         struct TableShared
         {
@@ -391,6 +436,124 @@ namespace BZROpenShim::Hooks
             return ForEachSelectedProducer([](void*, uint32_t) {}) > 0;
         }
 
+        // ---- rally set mode ------------------------------------------------
+
+        // Copies the live selection's handles; false when unreadable.
+        bool ReadSelectionHandles(uint32_t (&out)[kSelectMax], size_t& count)
+        {
+            count = 0;
+            int n = 0;
+            if (g_ControlPanelAddr == 0 || !ReadInt(g_ControlPanelAddr + kSelectCountOffset, n) || n < 0 ||
+                n > kSelectMax)
+                return false;
+            for (int i = 0; i < n; ++i)
+            {
+                int handle = 0;
+                if (!ReadInt(g_ControlPanelAddr + kSelectHandlesOffset + 4 * static_cast<size_t>(i), handle))
+                    return false;
+                out[i] = static_cast<uint32_t>(handle);
+            }
+            count = static_cast<size_t>(n);
+            return true;
+        }
+
+        bool SelectionMatchesArmed()
+        {
+            uint32_t handles[kSelectMax];
+            size_t count = 0;
+            return ReadSelectionHandles(handles, count) && g_ArmedSelection.Matches(handles, count);
+        }
+
+        bool SetModeAvailable()
+        {
+            return g_CommandHooksInstalled.load(std::memory_order_acquire) == kAllCommandHooks &&
+                   g_OrigAimGround && g_OrigAimObject && g_OrigBroadcast;
+        }
+
+        // Armed, the feature active and the selection still the armed one.
+        bool ArmedAndMatching()
+        {
+            return g_Armed.load(std::memory_order_acquire) && g_Active.load(std::memory_order_acquire) &&
+                   SelectionMatchesArmed();
+        }
+
+        void Disarm(const wchar_t* reason)
+        {
+            if (!g_Armed.exchange(false, std::memory_order_acq_rel))
+                return;
+            g_ArmedSelection.Reset();
+            if (reason)
+                LogBudgeted(L"[RALLY] set mode cancelled (%ls)\n", reason);
+        }
+
+        // Caller has checked WorldInteractive() and that an eligible producer
+        // is selected (the V key gate).
+        void Arm()
+        {
+            uint32_t handles[kSelectMax];
+            size_t count = 0;
+            g_Armed.store(false, std::memory_order_release);
+            if (!ReadSelectionHandles(handles, count) || !g_ArmedSelection.Capture(handles, count))
+            {
+                g_ArmedSelection.Reset();
+                LogBudgeted(L"[RALLY] V: selection unreadable; set mode not armed\n");
+                return;
+            }
+            const int producers = ForEachSelectedProducer([](void*, uint32_t) {});
+            if (producers == 0)
+            {
+                // The selection changed between the V press and this tick.
+                g_ArmedSelection.Reset();
+                LogBudgeted(L"[RALLY] V: no producer selected; set mode not armed\n");
+                return;
+            }
+            g_Armed.store(true, std::memory_order_release);
+            LogBudgeted(L"[RALLY] set mode armed (%d producers)\n", producers);
+        }
+
+        int SetRallyForSelection(const float pos[3]);
+
+        // Ground-aim GetCommand (0x0045BD80): thiscall, one stack argument.
+        int __fastcall AimGroundCommandDetour(void* self, void* /*edx*/, const float* where)
+        {
+            if (Policy::OverrideAimCommand(g_Armed.load(std::memory_order_acquire), ArmedAndMatching()))
+                return Policy::kCmdGoCommand;
+            return g_OrigAimGround(self, where);
+        }
+
+        // Object-aim GetCommand (0x0045BBE0): thiscall, one stack argument.
+        int __fastcall AimObjectCommandDetour(void* self, void* /*edx*/, void* target)
+        {
+            if (Policy::OverrideAimCommand(g_Armed.load(std::memory_order_acquire), ArmedAndMatching()))
+                return Policy::kCmdNone;
+            return g_OrigAimObject(self, target);
+        }
+
+        // ControlPanel::BroadcastCommand (0x004A70C0): thiscall, two stack
+        // arguments. The armed confirm sets the rally and issues no order.
+        void __fastcall BroadcastCommandDetour(void* panel, void* /*edx*/, int what, const float* where)
+        {
+            const bool armed = g_Armed.load(std::memory_order_acquire);
+            if (armed &&
+                Policy::BroadcastIsRallyConfirm(armed, ArmedAndMatching(),
+                                                reinterpret_cast<uintptr_t>(panel) == g_ControlPanelAddr, what,
+                                                where != nullptr))
+            {
+                float pos[3] = {};
+                if (!ReadVector(reinterpret_cast<uintptr_t>(where), pos))
+                {
+                    LogBudgeted(L"[RALLY] confirm: no readable ground point; set mode stays armed\n");
+                    return;
+                }
+                const int applied = SetRallyForSelection(pos);
+                Disarm(nullptr);
+                LogBudgeted(L"[RALLY] rally set via reticle at %.1f,%.1f for %d producer(s)\n", pos[0], pos[2],
+                            applied);
+                return;
+            }
+            g_OrigBroadcast(panel, what, where);
+        }
+
         LRESULT CALLBACK RallyWndProc(HWND h, UINT msg, WPARAM w, LPARAM l)
         {
             if ((msg == Policy::kWmKeyDown || msg == Policy::kWmKeyUp) && w == Policy::kVkV)
@@ -472,35 +635,64 @@ namespace BZROpenShim::Hooks
 
         // ---- the per-frame main-loop tick ------------------------------------
 
+        int SetRallyForSelection(const float pos[3])
+        {
+            int applied = 0;
+            ForEachSelectedProducer([&](void* producer, uint32_t) {
+                if (SetProducerRally(producer, pos))
+                    ++applied;
+            });
+            return applied;
+        }
+
         // Caller has checked WorldInteractive().
         void ApplyToSelection(Policy::KeyAction action)
         {
             if (EditorActive())
                 return;
-            float pos[3] = {};
-            if (action == Policy::KeyAction::SetRally)
+            if (action == Policy::KeyAction::ClearRally)
             {
-                const uintptr_t groundPos = reinterpret_cast<uintptr_t>(
-                    ReadPtr(g_ReticleAddr + kReticleGroundPosOffset));
-                if (!groundPos || !ReadVector(groundPos, pos))
-                {
-                    LogBudgeted(L"[RALLY] V: no ground under the reticle; nothing set\n");
-                    return;
-                }
-            }
-            int applied = 0;
-            ForEachSelectedProducer([&](void* producer, uint32_t) {
-                const bool ok = action == Policy::KeyAction::SetRally
-                    ? SetProducerRally(producer, pos)
-                    : ClearProducerRally(producer);
-                if (ok)
-                    ++applied;
-            });
-            if (action == Policy::KeyAction::SetRally)
-                LogBudgeted(L"[RALLY] V: rally set for %d producer(s) at (%.1f, %.1f, %.1f)\n",
-                            applied, pos[0], pos[1], pos[2]);
-            else
+                Disarm(L"Shift+V");
+                int applied = 0;
+                ForEachSelectedProducer([&](void* producer, uint32_t) {
+                    if (ClearProducerRally(producer))
+                        ++applied;
+                });
                 LogBudgeted(L"[RALLY] Shift+V: rally cleared for %d producer(s)\n", applied);
+                return;
+            }
+
+            const bool armed = g_Armed.load(std::memory_order_acquire);
+            const Policy::SetKeyPlan plan =
+                Policy::PlanSetKey(SetModeAvailable(), armed, armed && SelectionMatchesArmed());
+            if (plan == Policy::SetKeyPlan::Cancel)
+            {
+                Disarm(L"V");
+                return;
+            }
+            if (plan == Policy::SetKeyPlan::Arm)
+            {
+                Arm();
+                return;
+            }
+            if (!g_SetModeFallbackLogged)
+            {
+                g_SetModeFallbackLogged = true;
+                Log(L"[RALLY] set mode unavailable (command hooks installed mask=0x%X of 0x%X); "
+                    L"V sets the rally at once\n",
+                    g_CommandHooksInstalled.load(std::memory_order_acquire), kAllCommandHooks);
+            }
+            float pos[3] = {};
+            const uintptr_t groundPos = reinterpret_cast<uintptr_t>(
+                ReadPtr(g_ReticleAddr + kReticleGroundPosOffset));
+            if (!groundPos || !ReadVector(groundPos, pos))
+            {
+                LogBudgeted(L"[RALLY] V: no ground under the reticle; nothing set\n");
+                return;
+            }
+            const int applied = SetRallyForSelection(pos);
+            LogBudgeted(L"[RALLY] V: rally set for %d producer(s) at (%.1f, %.1f, %.1f)\n",
+                        applied, pos[0], pos[1], pos[2]);
         }
 
         // A producer that died (or whose slot was reused) loses its rally.
@@ -534,12 +726,20 @@ namespace BZROpenShim::Hooks
             const int pending = g_PendingAction.load(std::memory_order_acquire);
             const size_t tableSize = TableSize();
             const bool active = g_Active.load(std::memory_order_acquire);
-            // Nothing queued and nothing stored: skip the shell-state reads.
-            if (pending == 0 && tableSize == 0)
+            const bool armed = g_Armed.load(std::memory_order_acquire);
+            // Nothing queued, stored or armed: skip the shell-state reads.
+            if (pending == 0 && tableSize == 0 && !armed)
                 return;
 
             const ULONGLONG now = GetTickCount64();
-            const Policy::TickPlan plan = Policy::PlanTick(WorldInteractive(), active, pending != 0,
+            const bool interactive = WorldInteractive();
+            // Before the queued press, so a V after a selection change arms
+            // the new selection instead of cancelling the old one.
+            if (armed && EditorActive())
+                Disarm(L"editor opened");
+            else if (armed && !Policy::KeepArmed(active, interactive, interactive && SelectionMatchesArmed()))
+                Disarm(active ? L"selection changed" : L"stood down");
+            const Policy::TickPlan plan = Policy::PlanTick(interactive, active, pending != 0,
                                                            tableSize != 0,
                                                            now - g_LastLivenessCheck >= kLivenessCheckMs);
             if (plan.dropPending || plan.applyPending)
@@ -1270,7 +1470,7 @@ namespace BZROpenShim::Hooks
             all = InstallSlot(p) && all;
         g_HooksInstalled = all;
         Log(L"[RALLY] Producer rally points %hs\n",
-            all ? "installed (V sets, Shift+V clears)" : "partially installed; feature stays off");
+            all ? "installed (V sets or toggles set mode, Shift+V clears)" : "partially installed; feature stays off");
         if (!all)
             MarkFailed();
         else
@@ -1285,6 +1485,8 @@ namespace BZROpenShim::Hooks
         {
             g_Active.store(want, std::memory_order_release);
             Log(L"[RALLY] %hs\n", want ? "Active (SP-only)" : "Stood down");
+            if (!want)
+                Disarm(L"stood down");
             // A stood-down feature's rallies are dropped by the next
             // interactive main-loop tick (MainLoopTick).
         }
@@ -1296,6 +1498,7 @@ namespace BZROpenShim::Hooks
     void ResetProducerRallyPoints()
     {
         DestroyMeshSlots(GetOgreSceneManagerRuntime(), L"rally reset");
+        Disarm(L"rally reset");
         {
             TableExclusive lock;
             g_Table.ClearAll();
@@ -1304,6 +1507,75 @@ namespace BZROpenShim::Hooks
         g_LastLivenessCheck = 0;
         g_LogBudget = 48;
         RefreshProducerRallyPointsState();
+    }
+
+    int ProducerRallyCommandHookIndex(const char* patchName)
+    {
+        if (!patchName)
+            return -1;
+        for (int i = 0; i < kCommandHookCount; ++i)
+        {
+            if (std::strcmp(patchName, kCommandHookNames[i]) == 0)
+                return i;
+        }
+        return -1;
+    }
+
+    // Patcher thread, before the JMP5 is written. Relocates the 6-byte
+    // prologue (no relative operands) into a trampoline that jumps back to
+    // site + 6 and returns the detour for the JMP5. Null leaves the site stock.
+    void* PrepareProducerRallyCommandHook(int index, uint32_t site)
+    {
+        if (index < 0 || index >= kCommandHookCount)
+            return nullptr;
+        void* const detours[kCommandHookCount] = {
+            reinterpret_cast<void*>(&AimGroundCommandDetour),
+            reinterpret_cast<void*>(&AimObjectCommandDetour),
+            reinterpret_cast<void*>(&BroadcastCommandDetour),
+        };
+        void** const originals[kCommandHookCount] = {
+            reinterpret_cast<void**>(&g_OrigAimGround),
+            reinterpret_cast<void**>(&g_OrigAimObject),
+            reinterpret_cast<void**>(&g_OrigBroadcast),
+        };
+        if (*originals[index])
+            return detours[index];
+
+        uint8_t prologue[kPrologueLength] = {};
+        if (!site || !HookEngine::ReadMemory(site, prologue, kPrologueLength) ||
+            std::memcmp(prologue, kCommandHookPrologues[index], kPrologueLength) != 0)
+        {
+            Log(L"[RALLY] %hs: prologue mismatch at 0x%08X (%02X %02X %02X %02X %02X %02X); "
+                L"set mode unavailable, V sets the rally at once\n",
+                kCommandHookNames[index], site, prologue[0], prologue[1], prologue[2], prologue[3], prologue[4],
+                prologue[5]);
+            return nullptr;
+        }
+        auto* tramp = static_cast<uint8_t*>(
+            VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
+        if (!tramp)
+        {
+            Log(L"[RALLY] %hs: trampoline allocation failed; set mode unavailable\n", kCommandHookNames[index]);
+            return nullptr;
+        }
+        std::memcpy(tramp, prologue, kPrologueLength);
+        tramp[kPrologueLength] = 0xE9;
+        const int32_t rel = static_cast<int32_t>(site + kPrologueLength) -
+                            static_cast<int32_t>(reinterpret_cast<uintptr_t>(tramp) + kPrologueLength + 5);
+        std::memcpy(tramp + kPrologueLength + 1, &rel, sizeof(rel));
+        FlushInstructionCache(GetCurrentProcess(), tramp, kPrologueLength + 5);
+        *originals[index] = tramp;
+        return detours[index];
+    }
+
+    void NoteProducerRallyCommandHookInstalled(int index)
+    {
+        if (index < 0 || index >= kCommandHookCount)
+            return;
+        const unsigned bit = 1u << index;
+        const unsigned mask = g_CommandHooksInstalled.fetch_or(bit, std::memory_order_acq_rel) | bit;
+        Log(L"[RALLY] %hs installed%hs\n", kCommandHookNames[index],
+            mask == kAllCommandHooks ? "; rally set mode available (V arms, menu_press confirms)" : "");
     }
 
     void TickProducerRallyMeshes()

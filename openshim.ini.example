@@ -2486,9 +2486,12 @@ RecurseModSubfolders = 0
 ; Exposed on the OpenShim Settings page as "Attack Neutrals".
 AllowNeutralAttackOrders = 0
 
-; Producer rally points. With a Recycler or Factory selected, V sets its rally
-; point to the ground under the reticle (the spot a stock Go order would use)
-; and Shift+V clears it. While that producer is selected the HUD shows a
+; Producer rally points. With a Recycler or Factory selected, V enters rally
+; mode: the stock ground reticle and order line preview the point exactly like
+; a Go order, the Reticle Command key (menu_press, normally Space) sets the
+; rally there, and V again cancels. Shift+V clears it. If the command hooks
+; are missing on a build, V sets the rally at once to the ground under the
+; reticle instead. While that producer is selected the HUD shows a
 ; "Rally" marker there (drawn only, no nav object). Each unit that producer
 ; finishes afterwards gets a Go order to the rally point.
 ; Scavengers and constructors are left alone. Off in the map editor (V and

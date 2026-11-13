@@ -203,6 +203,13 @@ namespace BZROpenShim
             // collision solids; every other object keeps the stock box.
             // Removed at startup when [General] PathBlockFaces = 0.
             { 0, HookEngine::PatchType::JMP5, {}, "Path Block Faces BlockCells Hook", false, {} },
+            // ProducerRallyPoints set mode: entry detours of the ground and
+            // object aim GetCommand and ControlPanel::BroadcastCommand.
+            // Pass-throughs unless V armed set mode; without all three, V
+            // keeps the immediate rally set.
+            { 0, HookEngine::PatchType::JMP5, {}, "Producer Rally Ground Command Hook", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Producer Rally Object Command Hook", false, {} },
+            { 0, HookEngine::PatchType::JMP5, {}, "Producer Rally Broadcast Command Hook", false, {} },
             // FastMenuTransitions: main menu, Instant Action, Multiplayer and
             // Custom Campaigns keep their mounts but skip the Modable
             // clear+initialise while the group holds the main set; the mission

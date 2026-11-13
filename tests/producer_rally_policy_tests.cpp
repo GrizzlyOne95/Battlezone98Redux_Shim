@@ -266,6 +266,51 @@ namespace
         plan = PlanTick(true, true, false, false, true);
         Check(!plan.livenessCheck, "no rallies, nothing to check");
     }
+
+    void TestSetMode()
+    {
+        // V without the command hooks keeps the immediate set.
+        Check(PlanSetKey(false, false, false) == SetKeyPlan::SetImmediately, "no hooks: V sets at once");
+        Check(PlanSetKey(false, true, true) == SetKeyPlan::SetImmediately, "no hooks: never a cancel");
+        Check(PlanSetKey(true, false, false) == SetKeyPlan::Arm, "hooks: V arms");
+        Check(PlanSetKey(true, true, true) == SetKeyPlan::Cancel, "armed, same selection: V cancels");
+        Check(PlanSetKey(true, true, false) == SetKeyPlan::Arm, "armed, other selection: V re-arms");
+
+        ArmedSelection<4> armed;
+        const uint32_t sel[] = { 0x101, 0x202 };
+        const uint32_t reordered[] = { 0x202, 0x101 };
+        const uint32_t grown[] = { 0x101, 0x202, 0x303 };
+        const uint32_t swapped[] = { 0x101, 0x303 };
+        const uint32_t tooMany[] = { 1, 2, 3, 4, 5 };
+        Check(!armed.Matches(sel, 2), "nothing armed matches nothing");
+        Check(!armed.Capture(sel, 0) && armed.Size() == 0, "an empty selection is not armed");
+        Check(!armed.Capture(tooMany, 5) && armed.Size() == 0, "an oversized selection is not armed");
+        Check(armed.Capture(sel, 2) && armed.Size() == 2, "a selection is captured");
+        Check(armed.Matches(sel, 2), "same selection matches");
+        Check(armed.Matches(reordered, 2), "order does not matter");
+        Check(!armed.Matches(grown, 3), "an added unit breaks the match");
+        Check(!armed.Matches(sel, 1), "a removed unit breaks the match");
+        Check(!armed.Matches(swapped, 2), "a different unit breaks the match");
+        Check(!armed.Matches(nullptr, 0), "no selection breaks the match");
+        armed.Reset();
+        Check(!armed.Matches(sel, 2), "reset forgets the selection");
+
+        Check(OverrideAimCommand(true, true), "armed with the same selection: aim is overridden");
+        Check(!OverrideAimCommand(true, false), "selection changed: stock aim command");
+        Check(!OverrideAimCommand(false, true), "not armed: stock aim command");
+
+        Check(BroadcastIsRallyConfirm(true, true, true, kCmdGoCommand, true), "armed Go to ground confirms");
+        Check(!BroadcastIsRallyConfirm(false, true, true, kCmdGoCommand, true), "not armed: stock order");
+        Check(!BroadcastIsRallyConfirm(true, false, true, kCmdGoCommand, true), "selection changed: stock order");
+        Check(!BroadcastIsRallyConfirm(true, true, false, kCmdGoCommand, true), "another panel: stock order");
+        Check(!BroadcastIsRallyConfirm(true, true, true, 4, true), "another command: stock order");
+        Check(!BroadcastIsRallyConfirm(true, true, true, kCmdGoCommand, false), "no ground point: stock order");
+
+        Check(!KeepArmed(false, true, true), "stood down: disarm");
+        Check(KeepArmed(true, false, false), "modal loop: the mode holds");
+        Check(!KeepArmed(true, true, false), "selection changed: disarm");
+        Check(KeepArmed(true, true, true), "unchanged: the mode holds");
+    }
 }
 
 int main()
@@ -278,6 +323,7 @@ int main()
     TestProjection();
     TestLineDots();
     TestTickPlan();
+    TestSetMode();
     if (OpenShimTest::FailureCount() != 0)
     {
         std::fprintf(stderr, "producer_rally_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());

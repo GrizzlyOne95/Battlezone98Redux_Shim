@@ -12,9 +12,26 @@ checked by `scripts/audit_vtable_hooks.py`.
 
 ## Behaviour
 
-- Select a Recycler or Factory (yours, or several) and press **V**: each
-  selected Recycler/Factory gets a rally point at the terrain point under the
-  reticle. Pressing V again moves it.
+- Select a Recycler or Factory (yours, or several) and press **V** to arm
+  **rally set mode**. While it is armed the engine's own ground reticle and
+  order line show the target exactly as for a Go order; the stock confirm key
+  (`menu_press`, "Reticle Command", normally Space) sets the rally of every
+  selected Recycler/Factory at that ground point and ends the mode. V again
+  cancels. Setting a new rally moves the old one.
+- While armed, aiming at an object gives no command (no attack/follow orders),
+  and the confirm issues no order and sends nothing over the network. Stock
+  then deselects (SelectNone after a ground command), as after any Go.
+  Ground under a unit or building cannot be picked: Reticle::Simulate drops
+  the ground point whenever the reticle is on an object.
+- The mode is cancelled when the selection changes in any way (it must stay
+  exactly the units selected at V), when the mission ends or the sim is left,
+  when the in-game editor opens, when the feature is switched off, and by
+  Shift+V.
+- **Fallback:** if any of the three command hooks below is missing on a build
+  (signature or prologue mismatch), V keeps the original behaviour: it sets
+  the rally at once to the terrain point under the reticle. The log says
+  `[RALLY] set mode unavailable (command hooks installed mask=...)` once, on
+  the first V.
 - **Shift+V** clears the rally of the selected producers.
 - Each unit the producer finishes afterwards is given a Go order (CMD_GO = 3)
   to the rally point. Scavengers, constructors (ConstructionRig), units that
@@ -46,7 +63,10 @@ checked by `scripts/audit_vtable_hooks.py`.
 |---|---|---|
 | Recycler/Factory FinishBuild | vtable slot 42 (RecyclerVtable 0x00886454 slot at 0x008864FC; FactoryVtable 0x00879388 slot at 0x00879430) | calls stock, then orders the returned unit. Producer base (0x0088616C) and ConstructionRig (0x00877A3C) copies stay stock. All or nothing, RTTI checked. |
 | Game window | `SetWindowLongPtrA(GWLP_WNDPROC)` subclass | reacts only to WM_KEYDOWN/WM_KEYUP with VK `V`; everything else goes to `CallWindowProcA(previous)`. |
-| PeekMessageA | IAT patch | the main-loop tick: applies the queued V request and drops dead producers (every 250 ms). |
+| PeekMessageA | IAT patch | the main-loop tick: applies the queued V request, cancels set mode when the selection changed, and drops dead producers (every 250 ms). |
+| Ground-aim GetCommand 0x0045BD80 | JMP5 entry detour, patches.json `Producer Rally Ground Command Hook` | thiscall `(const VECTOR_3D* where)`, ret 4; 6-byte prologue `55 8B EC 83 EC 0C` relocated to a trampoline. Returns CMD_GO (3) while armed with the armed selection, so `Reticle::Simulate` hands a Go to the ControlPanel and the stock reticle and order line draw. |
+| Object-aim GetCommand 0x0045BBE0 | JMP5 entry detour, `Producer Rally Object Command Hook` | thiscall `(GameObject* target)`, ret 4; prologue `55 8B EC 83 EC 10`. Returns 0 while armed. |
+| ControlPanel::BroadcastCommand 0x004A70C0 | JMP5 entry detour, `Producer Rally Broadcast Command Hook` | thiscall `(int what, const VECTOR_3D* where)`, ret 8; prologue `55 8B EC 83 EC 0C`. While armed, a CMD_GO with a ground point on the global ControlPanel sets the rally and returns without the stock body (no SetCommand). |
 | HUD gauge overlay | painter slot `RallyMarker` in `hud_gauge_overlay.h` | draws the marker after the stock scrap/pilot gauge, the same paint point the autosave notice and kill ticker use. |
 | ChunkEffect::Simulate (existing hook) | `TickProducerRallyMeshes()` after `TickShellCasings` in `ChunkEffectSimulateHook` | places, shows and hides the beacons. |
 | Ogre scene teardown (existing hooks, `lifecycle_seams.cpp`) | clearScene / destroyAllMovableObjects: `ForgetProducerRallyMeshes`; destroyAllEntities: `DestroyProducerRallySceneObjects` | the same seams the shell casings use. |
@@ -122,7 +142,9 @@ Decompile paths are relative to
 |---|---|---|
 | ProducerFinishBuild | 0x005AF160 | `FUN_005af160-005af160.c`: new object cleared at line 50 and set from Build at lines 53 and 153; AiMission add at lines 162-163; `+0x300` cleared at line 167. The decompile shows `void`, but the exe loads eax from `[ebp-0x160]` (the new object) at 0x005AF790 before the only `ret` at 0x005AF7A5. thiscall, no arguments. |
 | GameObjectSetCommandWhere | 0x004DBE70 | `FUN_004dbe70-004dbe70.c` lines 23-25 (`+0xC8`=0, `+0xCC`=what, `+0xD0`=0), 33-37 (AiPath at `+0xD4` built from the position), 38-39 (param at `+0xE0/+0xE4`). thiscall, `ret 0x10`. |
-| (stock caller) | 0x004A70C0 | `FUN_004a70c0-004a70c0.c` lines 9-13: selection count at `CP+0x188`, handles at `CP+0x1C+4i`, GetObj, CanCommand (vtable `+0x38`, slot 14), then SetCommand. The rally uses the same selection walk and gate. |
+| Producer Rally Broadcast Command Hook | 0x004A70C0 | `FUN_004a70c0-004a70c0.c` lines 9-13: selection count at `CP+0x188`, handles at `CP+0x1C+4i`, GetObj, CanCommand (vtable `+0x38`, slot 14), then SetCommand. The rally uses the same selection walk and gate. Called from ControlPanel::Render `FUN_004a08e0-004a08e0.c` lines 571 and 586 with `(cmdButton what CP+0x111C, where CP+0x1124)` on `menu_press` (`DAT_0091988e`, line 542), line 592 then calls SelectNone `FUN_004a6d50`; also line 664 and OverView `FUN_00587ef0-00587ef0.c` line 211. Disassembly: `ret 8` at 0x004A7134. |
+| Producer Rally Ground Command Hook | 0x0045BD80 | `FUN_0045bd80-0045bd80.c` lines 9-24: with a selection (`DAT_00978fa8`) the first selected object's vtable `+0x30(where)`, else ControlPanel mode 1 gives 3. Reticle::Simulate `FUN_005ba560-005ba560.c` lines 159-163 call it with the ground hit (`+0xA8`) and line 171 passes the result to `FUN_004a71e0` (cmdButton what/where, `FUN_004a71e0-004a71e0.c` lines 11-12). Disassembly: `mov ecx,0x91553F` before both calls (0x005BAA39, 0x005885E7), `ret 4` at 0x0045BDEA. |
+| Producer Rally Object Command Hook | 0x0045BBE0 | `FUN_0045bbe0-0045bbe0.c` lines 11-14: the first selected object's vtable `+0x34(target)`. Called by Reticle::Simulate `FUN_005ba560-005ba560.c` line 167 with the aimed object. Disassembly: `ret 4` at 0x0045BD70. |
 | InputEditModeFlag | 0x009181B8 | `FUN_005b0920-005b0920.c` lines 7-8 store `(param == 1)`; editor enter `FUN_004c82d0-004c82d0.c` line 6 passes 1, editor exit `FUN_004c8310-004c8310.c` line 13 passes 0; `FUN_005b08b0-005b08b0.c` lines 10-11 turn it into the EditMode input-program bit. |
 | ControlPanelGlobal | 0x00978E20 | data; the selection walk above reads it. |
 | ReticleGlobal (existing row) | 0x025CE6D0 | `+0xA8` is the ground-hit VECTOR pointer, null without a terrain hit. Reticle::Simulate passes it to the ControlPanel as the command "where" at 0x005BAA8A-0x005BAAA3 (disassembly; stored at `CP+0x1124`). This is the stock command-targeting ground hit, not a new raycast. |
@@ -154,6 +176,23 @@ on live. Install runs once per process.
 
 ## Live test checklist (UNVERIFIED)
 
+- The log shows the three `Producer Rally * Command Hook installed` lines and
+  "rally set mode available".
+- With a Factory selected, V logs `set mode armed (1 producers)`; aiming at
+  the ground then shows the stock ground reticle and the order line from the
+  Factory, exactly like a tank's Go. Space sets the rally (log `rally set via
+  reticle at x,z`), the beacon appears there, no order is given to the
+  Factory, and the selection is cleared.
+- V again while armed cancels (log `set mode cancelled (V)`); the reticle is
+  back to stock.
+- While armed, aiming at an enemy or a friendly unit shows no attack/follow
+  command, and Space on it does nothing.
+- Selecting another unit, deselecting, Shift+V, restarting the mission and
+  leaving to the shell each cancel the mode.
+- With a tank and the Factory selected together, V arms; Space sets the
+  Factory's rally and the tank gets no order.
+- The satellite/overview map: armed Space or click on the map sets the rally
+  the same way (OverView calls the same functions).
 - V with a Factory selected shows the "Rally" marker under the reticle,
   only while that Factory is selected, with a dotted line from it.
 - A spinning nav beacon stands on the ground at the rally point (not floating,
