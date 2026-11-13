@@ -652,8 +652,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "With a Recycler or Factory selected, V enters rally mode: aim like a Go order and "
       "press the Reticle Command key (Space) to set its rally point; V again cancels, "
-      "Shift+V clears it. New units from it drive there; scavengers and constructors do "
-      "not. Single player only." },
+      "Shift+V clears it. The key is rebindable in Input > RTS Actions (Rally Point). New "
+      "units from it drive there; scavengers and constructors do not. Single player only." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalTurbo,

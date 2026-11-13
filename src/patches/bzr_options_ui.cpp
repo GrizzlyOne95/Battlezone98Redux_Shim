@@ -1489,6 +1489,7 @@ namespace BZROpenShim
 
         constexpr const char* kQuickSaveRowCommand = "OpenShim:QuickSave";
         constexpr const char* kQuickLoadRowCommand = "OpenShim:QuickLoad";
+        constexpr const char* kRallyKeyRowCommand = "OpenShim:RallyKey";
 
         // The first gamekey.map action whose chord is exactly `chord`, or null.
         static const GameKeyBindingAction* FindGameKeyActionWithChord(const BZROpenShim::QuickSaveKeyPolicy::Chord& chord)
@@ -1557,6 +1558,16 @@ namespace BZROpenShim
                 row.command = save ? kQuickSaveRowCommand : kQuickLoadRowCommand;
                 row.displayText = save ? "Quick Save" : "Quick Load";
                 row.currentBindingText = BZROpenShim::QuickSave::ChordText(save);
+                row.foundInMap = true;
+                row.matchingBlockCount = 1;
+                gameKeyRows.push_back(std::move(row));
+            }
+            {
+                InputBindingUiRow row = {};
+                row.family = InputBindingMapFamily::GameKey;
+                row.command = kRallyKeyRowCommand;
+                row.displayText = "Rally Point";
+                row.currentBindingText = Hooks::RallyKeyText();
                 row.foundInMap = true;
                 row.matchingBlockCount = 1;
                 gameKeyRows.push_back(std::move(row));
@@ -4832,6 +4843,54 @@ namespace BZROpenShim
                     "Press a non-modifier key for " + g_InputBindingUiPendingDisplayText + ".";
                 Log(L"[INPUTUI] Capture rejected for gamekey command=%hs because chord build failed\n",
                     command.c_str());
+                RefreshInputBindingUiControls();
+                return true;
+            }
+
+            if (command == kRallyKeyRowCommand)
+            {
+                const std::string previousKey = Hooks::RallyKeyText();
+                const char* refusal = Hooks::SetRallyKeyText(chord.c_str());
+                if (refusal)
+                {
+                    g_InputBindingUiStatusText = "Cannot use " + chord + " for " + displayText + ": " + refusal + ".";
+                    Log(L"[INPUTUI] Capture rejected for %hs key=%hs: %hs\n",
+                        command.c_str(), chord.c_str(), refusal);
+                    RefreshInputBindingUiControls();
+                    return true;
+                }
+
+                std::string writeError;
+                if (!WriteUserConfigValueLossless("Gameplay", "RallyKey", nullptr, 0, chord.c_str(), writeError))
+                {
+                    // Roll back, as for the Quick rows: a live key the ini does
+                    // not hold would silently revert on the next settings reload.
+                    Hooks::SetRallyKeyText(previousKey.c_str());
+                    g_InputBindingUiStatusText = "Could not save " + displayText + " to openshim.ini; kept " +
+                                                 previousKey + ".";
+                    Log(L"[INPUTUI] openshim.ini write failed for %hs key=%hs error=%hs; kept %hs\n",
+                        command.c_str(), chord.c_str(), writeError.c_str(), previousKey.c_str());
+                    RefreshInputBindingUiControls();
+                    return true;
+                }
+
+                std::string status = "Bound " + displayText + " to " + chord + " (Shift+" + chord + " clears).";
+                BZROpenShim::QuickSaveKeyPolicy::Chord parsed;
+                if (BZROpenShim::QuickSaveKeyPolicy::ParseChord(chord.c_str(), parsed))
+                {
+                    if (const GameKeyBindingAction* clash = FindGameKeyActionWithChord(parsed))
+                    {
+                        status += " Also used by " + HumanizeInputBindingCommand(clash->action) +
+                                  "; with a Recycler or Factory selected " + displayText + " takes it.";
+                        Log(L"[INPUTUI] Conflict: %hs key=%hs is also gamekey action=%hs\n",
+                            command.c_str(), chord.c_str(), clash->action.c_str());
+                    }
+                }
+                ReloadInputBindingUiInventory(true);
+                g_InputBindingUiPendingCommand.clear();
+                g_InputBindingUiPendingDisplayText.clear();
+                g_InputBindingUiStatusText = status;
+                Log(L"[INPUTUI] Bound OpenShim action=%hs key=%hs\n", command.c_str(), chord.c_str());
                 RefreshInputBindingUiControls();
                 return true;
             }

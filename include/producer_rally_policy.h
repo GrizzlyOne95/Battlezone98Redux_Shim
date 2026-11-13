@@ -5,6 +5,8 @@
 // directly. The engine side is src/patches/producer_rally_points.cpp; the
 // behaviour is documented in Docs/PRODUCER_RALLY_POINTS.md.
 
+#include "quicksave_key_policy.h"
+
 #include <cstddef>
 #include <cstdint>
 
@@ -25,11 +27,123 @@ namespace BZROpenShim
             ClearRally,
         };
 
+        // The configured rally key ([Gameplay] RallyKey, default V): one key,
+        // no modifier. A plain press arms/cancels, Shift+key clears.
+        struct RallyKey
+        {
+            unsigned vk = kVkV;
+            bool extended = false; // grey-cluster key (Ins, Home, arrows, ...)
+
+            bool operator==(const RallyKey& other) const
+            {
+                return vk == other.vk && extended == other.extended;
+            }
+        };
+
+        constexpr const char* kDefaultRallyKeyText = "V";
+
+        // nullptr when `vk` may be the rally key, else why not. The game
+        // hard-wires digits (command menus), Space, Tab, Alt, Enter and Esc,
+        // and F1-F10 are the group keys.
+        inline const char* ReservedRallyKeyReason(unsigned vk)
+        {
+            if (vk >= 0x30 && vk <= 0x39)
+                return "digits are the game's command-menu keys";
+            if (vk >= 0x70 && vk <= 0x79)
+                return "F1-F10 are the game's group keys";
+            switch (vk)
+            {
+            case 0x20: return "Space is a game key";
+            case 0x09: return "Tab is a game key";
+            case 0x12: return "Alt is a modifier";
+            case 0x0D: return "Enter is a game key";
+            case 0x1B: return "Esc is a game key";
+            default: return nullptr;
+            }
+        }
+
+        // Parses and checks the [Gameplay] RallyKey text against the two
+        // QuickSave chords. nullptr and `out` filled on success, else the
+        // reason. A Ctrl or Alt chord on the same key never reaches the rally
+        // filter (it ignores Ctrl and Alt), so only a Shift-only chord clashes.
+        inline const char* CheckRallyKeyText(const char* text, const QuickSaveKeyPolicy::Chord& quickSave,
+                                             const QuickSaveKeyPolicy::Chord& quickLoad, RallyKey& out)
+        {
+            QuickSaveKeyPolicy::Chord chord;
+            if (!QuickSaveKeyPolicy::ParseChord(text, chord))
+                return "not a recognised key (use e.g. V, Insert, PageUp)";
+            if (chord.ctrl || chord.shift || chord.alt)
+                return "must be a single key without Ctrl, Shift or Alt";
+            if (const char* reason = ReservedRallyKeyReason(chord.vk))
+                return reason;
+            const QuickSaveKeyPolicy::Chord* const quickChords[2] = { &quickSave, &quickLoad };
+            for (const QuickSaveKeyPolicy::Chord* quick : quickChords)
+            {
+                if (quick->vk == chord.vk && quick->extended == chord.extended && !quick->ctrl && !quick->alt)
+                    return "Shift plus this key is a QuickSave chord";
+            }
+            out.vk = chord.vk;
+            out.extended = chord.extended;
+            return nullptr;
+        }
+
+        // The key's name as printed on the panel key cap: the letter itself,
+        // "F11", or a short name ("Ins", "PgUp"). Returns the length written
+        // (0 for a key with no name; the buffer then holds "").
+        inline size_t RallyKeyCapName(const RallyKey& key, char* out, size_t cap)
+        {
+            if (!out || cap == 0)
+                return 0;
+            out[0] = '\0';
+            char text[8] = {};
+            if ((key.vk >= 0x41 && key.vk <= 0x5A) || (key.vk >= 0x30 && key.vk <= 0x39))
+            {
+                text[0] = static_cast<char>(key.vk);
+            }
+            else if (key.vk >= 0x70 && key.vk <= 0x87)
+            {
+                const unsigned n = key.vk - 0x70 + 1;
+                size_t len = 0;
+                text[len++] = 'F';
+                if (n >= 10)
+                    text[len++] = static_cast<char>('0' + n / 10);
+                text[len++] = static_cast<char>('0' + n % 10);
+            }
+            else
+            {
+                const char* name = nullptr;
+                switch (key.vk)
+                {
+                case 0x2D: name = "Ins"; break;
+                case 0x2E: name = "Del"; break;
+                case 0x24: name = "Home"; break;
+                case 0x23: name = "End"; break;
+                case 0x21: name = "PgUp"; break;
+                case 0x22: name = "PgDn"; break;
+                case 0x25: name = "Left"; break;
+                case 0x26: name = "Up"; break;
+                case 0x27: name = "Right"; break;
+                case 0x28: name = "Down"; break;
+                default: break;
+                }
+                if (!name)
+                    return 0;
+                for (size_t i = 0; name[i] && i + 1 < sizeof(text); ++i)
+                    text[i] = name[i];
+            }
+            size_t len = 0;
+            for (; text[len] && len + 1 < cap; ++len)
+                out[len] = text[len];
+            out[len] = '\0';
+            return len;
+        }
+
         struct KeyEvent
         {
             unsigned msg = 0;
             unsigned vk = 0;
             unsigned long long lParam = 0;
+            bool extended = false; // lParam bit 24: grey-cluster key, not the numpad
             bool shift = false;
             bool ctrl = false;
             bool alt = false;
@@ -71,13 +185,16 @@ namespace BZROpenShim
                    gate.eligibleProducerSelected;
         }
 
-        // V sets the rally, Shift+V clears it. Ctrl+V and Alt+V are never ours
-        // (Alt+V arrives as WM_SYSKEYDOWN and never reaches this either).
-        // Autorepeat never triggers an action. Everything else passes through.
-        inline KeyDecision ClassifyRallyKey(const KeyEvent& key, const KeyGate& gate, KeyLatch& latch)
+        // The rally key sets the rally, Shift+key clears it. Ctrl+key and
+        // Alt+key are never ours (Alt+key arrives as WM_SYSKEYDOWN and never
+        // reaches this either). Autorepeat never triggers an action.
+        // Everything else passes through. `bound` defaults to V; an extended
+        // key (Ins, Home, ...) does not match its numpad twin.
+        inline KeyDecision ClassifyRallyKey(const KeyEvent& key, const KeyGate& gate, KeyLatch& latch,
+                                            const RallyKey& bound = RallyKey{})
         {
             KeyDecision decision;
-            if (key.vk != kVkV)
+            if (key.vk != bound.vk || key.extended != bound.extended)
                 return decision;
 
             if (key.msg == kWmKeyUp)
@@ -506,10 +623,11 @@ namespace BZROpenShim
             int bottom = 0;
         };
 
+        // widthPx > 0 replaces the atlas-width term (a widened drawn cap).
         inline bool KeyBoxRect(int anchorX, int anchorY, int inset, int spriteW, int spriteH, float scaleX,
-                               float scaleY, PixelRect& out)
+                               float scaleY, PixelRect& out, int widthPx = 0)
         {
-            const int w = static_cast<int>(static_cast<float>(spriteW) * scaleX);
+            const int w = widthPx > 0 ? widthPx : static_cast<int>(static_cast<float>(spriteW) * scaleX);
             const int h = static_cast<int>(static_cast<float>(spriteH) * scaleY);
             if (w <= 0 || h <= 0)
                 return false;
@@ -518,6 +636,23 @@ namespace BZROpenShim
             out.top = anchorY - (h >> 1);
             out.bottom = out.top + h;
             return true;
+        }
+
+        // Width in pixels of the drawn cap for a key name of `nameLen`
+        // characters whose measured text is `textW` wide. One character keeps
+        // the key_0-sized cap (atlas width times the UI scale); a longer name
+        // widens it to the text plus a padding of two reference units
+        // (scaled, at least 1 px) each side, never narrower than that cap.
+        // The padding is a choice, not read from key_TAB/key_SPACE (UNVERIFIED).
+        inline int KeyCapWidthPx(int atlasW, float scaleX, size_t nameLen, float textW)
+        {
+            const int base = static_cast<int>(static_cast<float>(atlasW) * scaleX);
+            if (nameLen <= 1 || !(textW == textW) || textW <= 0.0f || textW > 1.0e6f || !(scaleX > 0.0f))
+                return base;
+            const int scaled = static_cast<int>(2.0f * scaleX);
+            const int pad = scaled >= 1 ? scaled : 1;
+            const int wide = static_cast<int>(textW) + 2 * pad;
+            return wide > base ? wide : base;
         }
 
         // The drawn key cap: a filled rect with its four corners notched by
@@ -591,6 +726,7 @@ namespace BZROpenShim
             int inset = 0; // CommandMenuKeyInset
             int keyW = 0;  // key sprite size, atlas units
             int keyH = 0;
+            int keyWidthPx = 0;  // > 0: the key's pixel width (a wide drawn cap), else keyW * scaleX
             float labelW = 0.0f; // the wider measured row label
             float labelH = 0.0f; // the font's line height
             float costW = 0.0f;  // measured "00"
@@ -636,7 +772,8 @@ namespace BZROpenShim
             const int pitch = in.tabY - in.altY;
             if (pitch <= 0 || pitch > kMaxPanelRowPitch || in.inset < 0)
                 return out;
-            const int keyWpx = static_cast<int>(static_cast<float>(in.keyW) * in.scaleX);
+            const int keyWpx = in.keyWidthPx > 0 ? in.keyWidthPx
+                                                 : static_cast<int>(static_cast<float>(in.keyW) * in.scaleX);
             const int keyHpx = static_cast<int>(static_cast<float>(in.keyH) * in.scaleY);
             if (keyWpx <= 0 || keyHpx <= 0)
                 return out;

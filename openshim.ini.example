@@ -2525,6 +2525,15 @@ AllowNeutralAttackOrders = 0
 ; Exposed on the OpenShim Settings page as "Rally Points".
 ProducerRallyPoints = 1
 
+; The rally key. One key with no modifier: it arms and cancels rally mode,
+; Shift+key clears the rally. Rebind it in Options > Input > RTS Actions
+; ("Rally Point"), which writes this line. Accepted: a letter, F11/F12 or a
+; navigation key (Insert, Delete, Home, End, PageUp, PageDown, arrows).
+; Refused, with a log line and a fall back to V: any modifier, digits, F1-F10,
+; Space, Tab, Alt, Enter, Esc, and a key that is a Shift-only QuickSave chord.
+; Default: V.
+RallyKey = V
+
 
 [Updater]
 ; Stage a newer OpenShim from the Steam Workshop when the main menu first appears (Steam builds, never in multiplayer); it installs when you quit. 0 = manual "Check for Updates" only. Default: 1.

@@ -320,6 +320,9 @@ namespace BZROpenShim::QuickSave
             g_saveText = QuickSaveKeyPolicy::kDefaultSaveText;
             g_loadText = QuickSaveKeyPolicy::kDefaultLoadText;
         }
+        // The rally key was first checked against the default chords (its
+        // config is read earlier at startup); check it again against these.
+        Hooks::ResolveRallyKeyFromConfig();
     }
 
     const char* ChordText(bool save)
@@ -333,6 +336,8 @@ namespace BZROpenShim::QuickSave
         Chord chord;
         if (const char* reason = CheckChordText(text, save ? g_chords.load : g_chords.save, chord))
             return reason;
+        if (Hooks::RallyKeyClashesWithChord(chord))
+            return "Shift plus the rally key clears the rally point";
         (save ? g_chords.save : g_chords.load) = chord;
         (save ? g_saveText : g_loadText) = text;
         // Decide matches by the new keys only, so a mark left by the old chord

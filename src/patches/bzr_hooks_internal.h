@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "bzr_hooks.h"
+#include "quicksave_key_policy.h"
 #include "stable_id_list.h"
 #include "bzr_object_layout.h"
 #include "bzr_options_ui.h"
@@ -1404,6 +1405,16 @@ namespace BZROpenShim
         void ReloadProducerRallyPointsConfig();
         void RefreshProducerRallyPointsState();
         void ResetProducerRallyPoints();
+        // The rally key ([Gameplay] RallyKey) as the key-binding editor sees
+        // it. SetRallyKeyText rebinds live (main thread): nullptr on success,
+        // else why the key was refused; it does not touch the ini.
+        const char* RallyKeyText();
+        const char* SetRallyKeyText(const char* text);
+        // Re-reads [Gameplay] RallyKey against the QuickSave chords now in
+        // force (QuickSave::LoadConfig runs after the first rally read).
+        void ResolveRallyKeyFromConfig();
+        // True when chord (a QuickSave chord) would be eaten by the rally key.
+        bool RallyKeyClashesWithChord(const QuickSaveKeyPolicy::Chord& chord);
         // The input-method-independent entry points. Main thread; they only
         // edit the rally table (the marker is drawn, not a game object).
         bool SetProducerRally(void* producer, const float pos[3]);
