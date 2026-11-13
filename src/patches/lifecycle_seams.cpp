@@ -587,6 +587,9 @@ namespace BZROpenShim
                 NativeHud::Runtime::ResetMission();
                 HudFeedback::ResetMission();
                 UnitDamage::ResetMissionState();
+                // Rallies belong to the world being left; without this a load
+                // that restores the same producer handle would inherit them.
+                ResetProducerRallyPoints();
                 ResetUnderAttackAlertCooldown();
                 ResetHopOutAttackAlertTracking();
             }

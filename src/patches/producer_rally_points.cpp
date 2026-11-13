@@ -72,6 +72,10 @@ namespace BZROpenShim::Hooks
         // ViewRecord +8 is Current_View; the stock reticle draws only in views
         // 0, 1, 2 and 7 (FUN_005bc170 line 54), and so does the marker.
         constexpr size_t kViewRecordCurrentViewOffset = 8;
+        // DAT_008eaab0, 0x20 below the ViewRecord row (0x008EAAD0): the stock
+        // reticle projects only while it is non-zero (FUN_005bc170 line 60),
+        // so the camera record is not trusted while it is zero.
+        constexpr size_t kViewRecordCameraValidBackOffset = 0x20;
 
         // Marker look.
         constexpr uint32_t kMarkerArgb = 0xFF60FF60;
@@ -103,6 +107,10 @@ namespace BZROpenShim::Hooks
         bool g_Enabled = true;
         bool g_HooksInstalled = false;
         std::atomic<bool> g_Active{ false };
+        // Set by the install (patch thread) once the camera rows bind; the
+        // overlay is attached later from the game thread, the only thread
+        // HudGaugeOverlay::Ensure() may run on.
+        std::atomic<bool> g_MarkerPending{ false };
 
         // Written by the main-loop tick and FinishBuild, read by the HUD
         // painter; the lock keeps a painter from seeing a half-moved row.
@@ -260,6 +268,8 @@ namespace BZROpenShim::Hooks
             {
                 const int view = *reinterpret_cast<const int*>(g_ViewRecordAddr + kViewRecordCurrentViewOffset);
                 if (view != 0 && view != 1 && view != 2 && view != 7)
+                    return false;
+                if (*reinterpret_cast<const int*>(g_ViewRecordAddr - kViewRecordCameraValidBackOffset) == 0)
                     return false;
                 const uint8_t* record = reinterpret_cast<FnCameraRecord>(g_CameraRecordAddr)();
                 if (!record)
@@ -505,9 +515,12 @@ namespace BZROpenShim::Hooks
             return g_Table.Size();
         }
 
+        void AttachMarkerOnGameThread();
+
         void MainLoopTick()
         {
             EnsureSubclass();
+            AttachMarkerOnGameThread();
             const int pending = g_PendingAction.load(std::memory_order_acquire);
             const size_t tableSize = TableSize();
             const bool active = g_Active.load(std::memory_order_acquire);
@@ -722,6 +735,15 @@ namespace BZROpenShim::Hooks
                 Log(L"[RALLY] camera rows did not bind; rally marker hidden\n");
                 return;
             }
+            g_MarkerPending.store(true, std::memory_order_release);
+        }
+
+        // Game thread (main-loop tick). One attempt: Ensure() failing means
+        // the overlay rows do not match this build, which a retry repeats.
+        void AttachMarkerOnGameThread()
+        {
+            if (!g_MarkerPending.exchange(false, std::memory_order_acq_rel))
+                return;
             if (!HudGaugeOverlay::Ensure())
             {
                 Log(L"[RALLY] HUD overlay unavailable; rally marker hidden\n");
@@ -774,15 +796,20 @@ namespace BZROpenShim::Hooks
     }
 
     // Installed regardless of the ini value, so the Options row can turn the
-    // feature on live; while it is off every hook is a pass-through. One
-    // attempt per process: the rows are static, so a retry would only repeat
-    // the same failure.
+    // feature on live; while it is off every hook is a pass-through.
+    // The caller (InstallAiTuningHooksIfPossible) runs on every patcher pass.
+    // A row or vtable check can fail only because the code pages have not
+    // settled yet (Steam), so those failures are retried on later passes, up
+    // to kMaxInstallAttempts; every other failure ends the attempts.
     void InstallProducerRallyPointsIfPossible()
     {
-        static bool s_tried = false;
-        if (s_tried)
+        constexpr int kMaxInstallAttempts = 40;
+        static bool s_done = false;
+        static int s_attempts = 0;
+        if (s_done)
             return;
-        s_tried = true;
+        if (++s_attempts >= kMaxInstallAttempts)
+            s_done = true;
         if (!g_ConfigRead)
             ReloadProducerRallyPointsConfig();
 
@@ -790,6 +817,7 @@ namespace BZROpenShim::Hooks
         {
             Log(L"[RALLY] Executable relocated; feature unavailable\n");
             MarkFailed();
+            s_done = true;
             return;
         }
 
@@ -805,7 +833,7 @@ namespace BZROpenShim::Hooks
         };
         if (!HookEngine::BindEngineRows("Producer rally points", rows))
         {
-            Log(L"[RALLY] Engine rows did not bind; feature unavailable\n");
+            Log(L"[RALLY] Engine rows did not bind (attempt %d); feature unavailable\n", s_attempts);
             MarkFailed();
             return;
         }
@@ -827,6 +855,10 @@ namespace BZROpenShim::Hooks
                 return;
             }
         }
+        // From here every failure is permanent, or a retry would patch a
+        // half-patched process, so this is the last attempt.
+        s_done = true;
+        ClearOptionHookFailed("ProducerRallyPoints");
 
         // The key path first: without it nothing can set a rally, so a
         // FinishBuild hook alone would be dead weight.

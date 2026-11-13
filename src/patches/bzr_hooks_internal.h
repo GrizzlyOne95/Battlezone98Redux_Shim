@@ -1403,8 +1403,8 @@ namespace BZROpenShim
         void ReloadProducerRallyPointsConfig();
         void RefreshProducerRallyPointsState();
         void ResetProducerRallyPoints();
-        // The input-method-independent entry points. Main thread, outside the
-        // render traversal (they spawn and remove the nav marker).
+        // The input-method-independent entry points. Main thread; they only
+        // edit the rally table (the marker is drawn, not a game object).
         bool SetProducerRally(void* producer, const float pos[3]);
         bool ClearProducerRally(void* producer);
 
