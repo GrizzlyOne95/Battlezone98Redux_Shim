@@ -133,6 +133,7 @@ namespace
 int main()
 {
     TestStockChordsPass();
+    TestNumpadKeysPass();
     TestSaveAndLoadChords();
     TestAutorepeat();
     TestKeyUpAfterCtrlReleased();
