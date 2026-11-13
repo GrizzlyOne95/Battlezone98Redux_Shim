@@ -238,7 +238,8 @@ Accept in Steam and joined 6 s later with no password prompt: PC 1 logged
 `[TUNNELJOIN] join request ... (lobby)`, the host assigned DAGrizzler team 2,
 and the server listed userCount 2 for B1007.
 
-UNVERIFIED until the two-account live test:
+UNVERIFIED until the two-account live test
+([two-PC runbook](STEAM_TUNNEL_TWO_PC_RUNBOOK.md)):
 
 - whether `GetFriendRichPresence` returns the inviter's keys at callback time
   without a prior `RequestFriendRichPresence` (the log says
