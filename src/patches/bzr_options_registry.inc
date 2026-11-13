@@ -653,7 +653,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "With a Recycler or Factory selected, V enters rally mode: aim like a Go order and "
       "press the Reticle Command key (Space) to set its rally point; V again cancels, "
       "Shift+V clears it. The key is rebindable in Input > RTS Actions (Rally Point). New "
-      "units from it drive there; scavengers and constructors do not. Single player only." },
+      "units from it drive there; scavengers and constructors do not. Single player, and co-op missions that allow it." },
     // [Gameplay], Controls page next to Rally Points. Ships OFF: default "Off" (1).
     { "Auto Group", "Gameplay", "AutoGroupNewUnits", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,

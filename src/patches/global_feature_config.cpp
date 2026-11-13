@@ -699,6 +699,9 @@ namespace BZROpenShim
               &ResetTurretAttackOrders, &RefreshTurretAttackOrdersState },
             // [Gameplay] ProducerRallyPoints: V/Shift+V rally points for
             // Recycler/Factory. Revert drops the rally table at mission end.
+            // SinglePlayer tier, but a co-op mission can opt in (EXU
+            // AllowRallyPoints): the refresh callback, not the tier, decides
+            // network games.
             { "ProducerRallyPoints", FeatureTier::SinglePlayer,
               &ResetProducerRallyPoints, &RefreshProducerRallyPointsState },
             // [Gameplay] AutoGroupNewUnits: new Recycler/Factory units join a

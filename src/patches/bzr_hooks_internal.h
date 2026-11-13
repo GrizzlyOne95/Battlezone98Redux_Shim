@@ -1405,6 +1405,8 @@ namespace BZROpenShim
         void ReloadProducerRallyPointsConfig();
         void RefreshProducerRallyPointsState();
         void ResetProducerRallyPoints();
+        // Mission-scoped network-game opt-in (SDK OpenShimSetRallyPointsAllowedInNetwork).
+        bool SetProducerRallyPointsNetworkAllowed(bool allowed);
         // The rally key ([Gameplay] RallyKey) as the key-binding editor sees
         // it. SetRallyKeyText rebinds live (main thread): nullptr on success,
         // else why the key was refused; it does not touch the ini.

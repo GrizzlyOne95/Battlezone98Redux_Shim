@@ -301,3 +301,4 @@ EXPORTS
     OpenShimSetAiFollowEngageEnabled
     OpenShimSetAiDefendRefreshEnabled
     OpenShimSetAiHold
+    OpenShimSetRallyPointsAllowedInNetwork

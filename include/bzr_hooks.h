@@ -210,6 +210,7 @@ namespace BZROpenShim
     bool SetAiFollowEngageEnabledFromBridge(bool enabled);
     bool SetAiDefendRefreshEnabledFromBridge(bool enabled);
     bool SetAiHoldFromBridge(int handle, bool hold);
+    bool SetRallyPointsAllowedInNetworkFromBridge(bool allowed);
     bool SetHowitzerVolleyEnabledFromBridge(bool enabled);
     bool SetWeaponMaskCarrierBiasEnabledFromBridge(bool enabled);
     bool SetAiOdfGameplayTuningEnabledFromBridge(bool enabled);

@@ -160,6 +160,33 @@ namespace
               "a script's order is not overridden");
 
         Check(ClassifyBuiltUnit(true, BuiltUnit{}) == BuiltUnitVerdict::NoUnit, "failed build skipped");
+
+        BuiltUnit remote = unit;
+        remote.remote = true;
+        Check(ClassifyBuiltUnit(true, remote) == BuiltUnitVerdict::Remote, "another machine's unit is not ordered");
+        remote.isScavenger = true;
+        Check(ClassifyBuiltUnit(true, remote) == BuiltUnitVerdict::Remote, "remote wins over the type checks");
+        Check(std::string(DescribeVerdict(BuiltUnitVerdict::Remote)) == "owned by another machine",
+              "remote verdict text");
+    }
+
+    void TestNetworkGate()
+    {
+        Check(ShouldBeActive(true, true, true, false), "single-player: active");
+        Check(!ShouldBeActive(true, true, false, false), "network game without opt-in: off");
+        Check(ShouldBeActive(true, true, false, true), "network game with the mission opt-in: active");
+        Check(!ShouldBeActive(false, true, false, true), "opt-in does not override the user's setting");
+        Check(!ShouldBeActive(true, false, false, true), "opt-in does not override a failed install");
+        Check(!ShouldBeActive(false, false, true, true), "nothing without the setting and hooks");
+
+        // Ownership byte: 0 unowned, 1 local, 2 remote.
+        Check(!IsForeignObject(true, 1, true), "local producer is ours");
+        Check(IsForeignObject(true, 0, true), "unowned producer is foreign");
+        Check(IsForeignObject(true, 2, true), "remote producer is foreign");
+        Check(!IsForeignObject(true, 1, false), "local unit is ours");
+        Check(!IsForeignObject(true, 0, false), "fresh unowned unit is ours");
+        Check(IsForeignObject(true, 2, false), "remote unit is foreign");
+        Check(IsForeignObject(false, 1, false), "unreadable object is foreign");
     }
 
     void TestTable()
@@ -811,6 +838,7 @@ int main()
     TestGate();
     TestAutorepeatAndKeyUp();
     TestBuiltUnit();
+    TestNetworkGate();
     TestTable();
     TestProjection();
     TestTickPlan();

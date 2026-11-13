@@ -152,7 +152,8 @@ namespace BZROpenShim
         // Everything outside the key itself that decides whether V is ours.
         struct KeyGate
         {
-            // [Gameplay] ProducerRallyPoints on, hooks installed, single player.
+            // [Gameplay] ProducerRallyPoints on, hooks installed, and single
+            // player or a network game whose mission opted in.
             bool featureActive = false;
             // A mission world exists and no shell screen (pause, options,
             // save/load) is up.
@@ -234,13 +235,42 @@ namespace BZROpenShim
             bool isConstructor = false;
             bool canCommand = false;
             int pendingCommand = 0; // nextCmd.what; 0 = CMD_NONE
+            // In a network game: the producer or the unit is simulated by
+            // another machine (or its ownership could not be read). Only the
+            // owner's machine may order it.
+            bool remote = false;
         };
+
+        // Single-player always; a network game only while the running mission
+        // has opted in (EXU, mission-scoped).
+        inline bool ShouldBeActive(bool enabled, bool hooksInstalled, bool singlePlayer, bool missionAllowsNetwork)
+        {
+            return enabled && hooksInstalled && (singlePlayer || missionAllowsNetwork);
+        }
+
+        // DistributedObject object_type: 0 = unowned (built but never
+        // published), 1 = local, 2 = remote (Docs/MPAUTH_SPLINTER_STATIC_ANALYSIS.md).
+        constexpr uint8_t kObjectTypeLocal = 1;
+        constexpr uint8_t kObjectTypeRemote = 2;
+
+        // Network games only. An unreadable object is foreign. A remote one is
+        // foreign. With mustBeLocal (a producer, which is always published), an
+        // unowned one is foreign too; a unit fresh out of FinishBuild may still
+        // be unowned on the machine that built it, so it only has to be not
+        // remote.
+        inline bool IsForeignObject(bool readable, uint8_t objectType, bool mustBeLocal)
+        {
+            if (!readable || objectType == kObjectTypeRemote)
+                return true;
+            return mustBeLocal && objectType != kObjectTypeLocal;
+        }
 
         enum class BuiltUnitVerdict
         {
             Rally,
             NoRally,
             NoUnit,
+            Remote,
             Scavenger,
             Constructor,
             NotCommandable,
@@ -253,6 +283,8 @@ namespace BZROpenShim
                 return BuiltUnitVerdict::NoRally;
             if (!unit.present)
                 return BuiltUnitVerdict::NoUnit;
+            if (unit.remote)
+                return BuiltUnitVerdict::Remote;
             if (unit.isScavenger)
                 return BuiltUnitVerdict::Scavenger;
             if (unit.isConstructor)
@@ -271,6 +303,7 @@ namespace BZROpenShim
             case BuiltUnitVerdict::Rally: return "rally";
             case BuiltUnitVerdict::NoRally: return "no rally set";
             case BuiltUnitVerdict::NoUnit: return "no unit";
+            case BuiltUnitVerdict::Remote: return "owned by another machine";
             case BuiltUnitVerdict::Scavenger: return "scavenger";
             case BuiltUnitVerdict::Constructor: return "constructor";
             case BuiltUnitVerdict::NotCommandable: return "not commandable";

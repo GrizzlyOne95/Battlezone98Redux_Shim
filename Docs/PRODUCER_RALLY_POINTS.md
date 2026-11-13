@@ -141,11 +141,48 @@ checked by `scripts/audit_vtable_hooks.py`.
   reloaded, or when the feature is switched off. Rallies are not saved.
 - V passes through untouched when: no eligible producer is selected, the map
   editor is active, Ctrl or Alt is held, the feature is off, the session is
-  multiplayer, the pause menu or a shell screen is up, or there is no world.
+  multiplayer and the mission has not opted in (see Co-op), the pause menu or a shell screen is up, or there is no world.
   Autorepeat presses (lParam bit 30) do nothing; a WM_KEYUP is swallowed only
   when its WM_KEYDOWN was.
 - With no ground under the reticle, V is swallowed (an eligible producer was
   selected) but sets nothing; the log says so.
+
+## Co-op (network games)
+
+Rally points stay off in network games unless the running mission opts in.
+A co-op mission calls `exu.AllowRallyPoints(true)` (EXU), which calls the SDK
+export `OpenShimSetRallyPointsAllowedInNetwork(TRUE)`.
+
+- The opt-in lasts for that mission only. It is cleared when the simulation
+  ends (including a save load), when EXU initializes, and by
+  `exu.ResetMissionHookOverrides()`. Each machine's mission script sets it on
+  that machine, after those points: on the first update after start and after
+  a load, not only in `Start()`. CR's `CRCoop.Update` opts in once after each
+  `CRCoop.Initialize`; it does not re-apply after a load (UNVERIFIED that a
+  network game can load a save at all).
+- The call returns true when the opt-in is recorded, not that rally points
+  are active (they also need the setting on and the hooks installed); the
+  `[RALLY]` log line says which.
+- The player's `[Gameplay] ProducerRallyPoints` setting still decides; the
+  opt-in only lifts the network-game gate.
+- Each machine only acts on objects it simulates itself. A rally can be set
+  only on a local producer (ownership byte 1), and a new unit is ordered only
+  when the producer is local and the unit is not remote. A unit fresh out of
+  FinishBuild may still be unowned (0) on the machine that built it, so 0 is
+  accepted for the unit but not the producer. A remote or unreadable object is
+  left alone (log verdict "owned by another machine").
+  The order is the same local Go order a player's own command gives, so it
+  reaches peers the normal way, through the owner's position updates.
+- The ownership byte is the one `DistributedObject::IsRemote` (0x004B9830,
+  row `DistributedObjectIsRemote`) reads: DistributedObject+0x68, with
+  DistributedObject at GameObject+0x18 (row `GameObjectSimulateRemoteCopy`,
+  as in `remote_object_smoothing.cpp`). States 0/1/2 are from
+  `Docs/MPAUTH_SPLINTER_STATIC_ANALYSIS.md`. If either row does not bind, the
+  opt-in is refused, returns false, and is not retried that session.
+- UNVERIFIED: that a host's Recycler reads 1 (it is published, so it should).
+  If it reads 0, the host never sets a rally and the log shows refusals.
+- In CR co-op the Recycler belongs to the host (team 1). Guests usually have
+  no producer, so in practice the feature is the host's.
 
 ## Hooks
 
@@ -347,7 +384,11 @@ on live. Install runs once per process.
   names that action. A bad `RallyKey =` line in the ini logs `[RALLY]
   [Gameplay] RallyKey=... ignored` and V works.
 - Pressing V and opening the pause menu at once does nothing later.
-- Nothing happens in multiplayer.
+- Nothing happens in multiplayer unless the mission called
+  `exu.AllowRallyPoints(true)`; then the log has `network-game opt-in set`
+  and `Active (network game, mission opt-in)`, and on mission end
+  `network-game opt-in cleared (mission reset)`. A guest's machine never
+  orders the host's units.
 - The game window is found by its title ("Battlezone 98 Redux").
 - Command panel row: the log has `command panel row registered`,
   `draws its own key cap (key_0 size 9x9)`, and `command panel row on the TAB

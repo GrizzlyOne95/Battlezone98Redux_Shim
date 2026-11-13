@@ -124,6 +124,9 @@ OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetAiFollowEngageEnabled, OpenS
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetAiDefendRefreshEnabled, OpenShimImpl_SetAiDefendRefreshEnabled, (BOOL enabled), (enabled), FALSE)
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetAiHold, OpenShimImpl_SetAiHold, (int handle, BOOL hold), (handle, hold), FALSE)
 
+// Mission-scoped network-game (co-op) opt-in for producer rally points (Docs/PRODUCER_RALLY_POINTS.md).
+OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetRallyPointsAllowedInNetwork, OpenShimImpl_SetRallyPointsAllowedInNetwork, (BOOL allowed), (allowed), FALSE)
+
 #ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_APPEND
 #undef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
