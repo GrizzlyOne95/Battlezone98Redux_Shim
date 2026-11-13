@@ -43,7 +43,7 @@
       "expected_size": 6,
       "fallback": "0x00000000",
       "require_unique": true,
-      "identity": "GOG 2.2.301 P2P send 0x0075BEB0 queues and increments reliable sequence before this connected-state/retransmit-pending test at 0x0075C71B. Only the second JNE at 0x0075C730 skips immediate send to 0x0075C972 when peer+0x1A is set. The retry pump 0x0075AAF0 still owns acknowledgements and retransmission; receive 0x0075D800 rejects updates stamped beyond unreceived reliable messages. The exact whole test occurs once in the shipped GOG image and the recorded four-player replay reproduces native drop counts within three packets. Preserve the connected-state branch and remove only the backlog branch; no fallback on a signature miss. See reverse_engineering/notes/p2p_reliable_send_backlog_20261007.md."
+      "identity": "GOG 2.2.301 P2P send 0x0075BEB0 queues and increments reliable sequence before this connected-state/retransmit-pending test at 0x0075C71B. Only the second JNE at 0x0075C730 skips immediate send to 0x0075C972 when peer+0x1A is set. The retry pump 0x0075AAF0 still owns acknowledgements and retransmission; receive 0x0075D800 rejects updates stamped beyond unreceived reliable messages. The exact whole test occurs once in the shipped GOG image and the recorded four-player replay reproduces native drop counts within three packets. Preserve the connected-state branch and remove only the backlog branch; no fallback on a signature miss. See reverse_engineering/p2p_reliable_send_backlog_20261007.md."
     },
     {
       "name": "Sync Join Default On",
@@ -79,7 +79,7 @@
       "expected_size": 13,
       "fallback": "0x00000000",
       "require_unique": true,
-      "identity": "GOG 2.2.301 P2P receive 0x0075D800 drop path for a connected peer, after the cumulative-ack loop and the silent kind 6/7 return: cmp dword [0x008EDA28],0 / je 0x0075DB32 at 0x0075DA8D gates the 'Dropping Packet Type' log before the NAK send at 0x0075DB32. [Network] EarlyUnreliableAccept (default on) replaces these two whole instructions with a JMP to a thunk that skips only the log for a final-fragment unreliable data packet stamped 1-4096 ahead of peer+0x84 while the reassembly vector peer+0x98 is empty, and otherwise repeats the stock compare. Installed only together with P2P Early Unreliable Deliver. No fallback. See reverse_engineering/notes/p2p_early_unreliable_receive_20261010.md."
+      "identity": "GOG 2.2.301 P2P receive 0x0075D800 drop path for a connected peer, after the cumulative-ack loop and the silent kind 6/7 return: cmp dword [0x008EDA28],0 / je 0x0075DB32 at 0x0075DA8D gates the 'Dropping Packet Type' log before the NAK send at 0x0075DB32. [Network] EarlyUnreliableAccept (default on) replaces these two whole instructions with a JMP to a thunk that skips only the log for a final-fragment unreliable data packet stamped 1-4096 ahead of peer+0x84 while the reassembly vector peer+0x98 is empty, and otherwise repeats the stock compare. Installed only together with P2P Early Unreliable Deliver. No fallback. See reverse_engineering/p2p_early_unreliable_receive_20261010.md."
     },
     {
       "name": "P2P Early NAK Accept",
@@ -1165,7 +1165,7 @@
       "mode": "rel32_target",
       "prefer": "fallback",
       "fallback": "0x004C8800",
-      "identity": "First HoverCraft::Simulate (0x004EA300) exhaust emit site; the CALL at 0x004EAD77 targets EngineFlame::AddFlame 0x004C8800, cross-checked against the EngineFlame vtable at 0x0087918C in reverse_engineering/notes/engine_flame_color_notes.md. The anchor is the E8 opcode, not its rel32 operand."
+      "identity": "First HoverCraft::Simulate (0x004EA300) exhaust emit site; the CALL at 0x004EAD77 targets EngineFlame::AddFlame 0x004C8800, cross-checked against the EngineFlame vtable at 0x0087918C in reverse_engineering/engine_flame_color_notes.md. The anchor is the E8 opcode, not its rel32 operand."
     },
     {
       "name": "EngineFlame::SpriteColour",
@@ -1183,7 +1183,7 @@
       "mode": "address",
       "prefer": "fallback",
       "fallback": "0x005C8800",
-      "identity": "Live GetTeamNum helper 0x005C8800, named in reverse_engineering/notes/engine_flame_color_notes.md as the team source for exhaust routing. The pattern starts at the body (mov eax,[ebp+8]); the negative offset steps back over the 55 8B EC 51 prologue, which is too generic to carry inside the signature."
+      "identity": "Live GetTeamNum helper 0x005C8800, named in reverse_engineering/engine_flame_color_notes.md as the team source for exhaust routing. The pattern starts at the body (mov eax,[ebp+8]); the negative offset steps back over the 55 8B EC 51 prologue, which is too generic to carry inside the signature."
     },
     {
       "name": "EngineFlame::ResolveTexture",
@@ -1215,7 +1215,7 @@
       "mode": "address",
       "fallback": "0x00466BE0",
       "require_unique": true,
-      "identity": "CalcRange(Craft*, &close, &range, &time, &weapon) at 0x00466BE0 on the exact GOG 2.2.301 baseline. UnitTask::Execute 0x006002A0 supplies its craft and five output addresses; the decompile initializes close/range/time/weapon, scans the craft's selected weapon slots through CalcRange(Weapon) 0x00466890, selects the largest usable weapon range, and subtracts 1.0. Cross-checked in reverse_engineering/notes/backlog_address_audit_20260708.md; the signature is the function entry and matched once in SHA-256 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413."
+      "identity": "CalcRange(Craft*, &close, &range, &time, &weapon) at 0x00466BE0 on the exact GOG 2.2.301 baseline. UnitTask::Execute 0x006002A0 supplies its craft and five output addresses; the decompile initializes close/range/time/weapon, scans the craft's selected weapon slots through CalcRange(Weapon) 0x00466890, selects the largest usable weapon range, and subtracts 1.0. Cross-checked in reverse_engineering/backlog_address_audit_20260708.md; the signature is the function entry and matched once in SHA-256 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413."
     },
     {
       "name": "Workshop::GetManager",
@@ -1686,7 +1686,7 @@
       "fallback": "0x0047B6C0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "BuildingClass string16 ParameterDB wrapper on exact GOG Redux 2.2.301: forwards (section, key, out, default) to FUN_00589a10 with length 0x10 and its own ecx, ret 0x10 (__thiscall). BuildingClass::BuildingClass reads soundAmbient through it inside its live ParameterDB scope (Docs: reverse_engineering/notes/building_tuggable_odf_20260913.md). The soundAmbient call is at 0x0048004F with ecx = the local ParameterDB scope at [ebp-0x14]. pond_class_label.cpp detours it as a __fastcall thiscall shim with a 7-byte steal guarded on 55 8B EC 51 89 4D FC."
+      "identity": "BuildingClass string16 ParameterDB wrapper on exact GOG Redux 2.2.301: forwards (section, key, out, default) to FUN_00589a10 with length 0x10 and its own ecx, ret 0x10 (__thiscall). BuildingClass::BuildingClass reads soundAmbient through it inside its live ParameterDB scope (Docs: reverse_engineering/building_tuggable_odf_20260913.md). The soundAmbient call is at 0x0048004F with ecx = the local ParameterDB scope at [ebp-0x14]. pond_class_label.cpp detours it as a __fastcall thiscall shim with a 7-byte steal guarded on 55 8B EC 51 89 4D FC."
     },
     {
       "name": "Building::Building",
@@ -1696,7 +1696,7 @@
       "fallback": "0x0047E9C0",
       "prefer": "scan",
       "require_unique": true,
-      "identity": "Building::Building on exact GOG Redux 2.2.301: after the base constructor (FUN_004da0b0) it stores Building::vftable at this+0 and this+0x18 (the two C7 stores the pattern ends near), then compares the class ODF name against abstor to set the tuggable handle at +0x220 (reverse_engineering/notes/building_tuggable_odf_20260913.md). The hitch value stock stores is the virtual GetHandle (0x0046CFE0) on this+0x18, i.e. [this+0xF4]; pond_class_label.cpp detours it after stock construction and copies that same value for opted-in ODFs."
+      "identity": "Building::Building on exact GOG Redux 2.2.301: after the base constructor (FUN_004da0b0) it stores Building::vftable at this+0 and this+0x18 (the two C7 stores the pattern ends near), then compares the class ODF name against abstor to set the tuggable handle at +0x220 (reverse_engineering/building_tuggable_odf_20260913.md). The hitch value stock stores is the virtual GetHandle (0x0046CFE0) on this+0x18, i.e. [this+0xF4]; pond_class_label.cpp detours it after stock construction and copies that same value for opted-in ODFs."
     },
     {
       "name": "Music::SelectTrack",
@@ -5098,13 +5098,13 @@
       "name": "TextBlockPageProbeAppendPush",
       "address": "0x007CCF53",
       "expected": "68 B4 09 8A 00 8D 4D D8",
-      "identity": "`push 0x8A09B4` (the appended \"\nT\" literal) before the string append 0x0041F7B0 in the same probe 0x007CCE90. The only reference to that literal. Fix redirects the operand to a DLL-owned \"T\n\" so the probe text ends in a newline exactly like the page text rendered by cUI_ScrollingTextBlock 0x007CDD50 (see reverse_engineering/notes/briefing_page_stride_20261109.md)."
+      "identity": "`push 0x8A09B4` (the appended \"\nT\" literal) before the string append 0x0041F7B0 in the same probe 0x007CCE90. The only reference to that literal. Fix redirects the operand to a DLL-owned \"T\n\" so the probe text ends in a newline exactly like the page text rendered by cUI_ScrollingTextBlock 0x007CDD50 (see reverse_engineering/briefing_page_stride_20261109.md)."
     },
     {
       "name": "BriefingScreenCtor",
       "address": "0x0078F030",
       "expected": "55 8B EC 6A FF 68 53 ED 85 00 64 A1 00 00 00 00",
-      "identity": "cUI_Mission (pre-launch briefing) ctor, GOG Redux 2.2.301: thiscall(this, manager, std::string missionName by value), RET 0x1C; writes vtable 0x0089E2A8 at 0x0078F081 and stores this in 0x0094552C at 0x0078F131. Briefing pages detour the entry (10 bytes) to capture page 1 and add the page widgets after it returns (reverse_engineering/notes/briefing_pages_20261110.md)."
+      "identity": "cUI_Mission (pre-launch briefing) ctor, GOG Redux 2.2.301: thiscall(this, manager, std::string missionName by value), RET 0x1C; writes vtable 0x0089E2A8 at 0x0078F081 and stores this in 0x0094552C at 0x0078F131. Briefing pages detour the entry (10 bytes) to capture page 1 and add the page widgets after it returns (reverse_engineering/briefing_pages_20261110.md)."
     },
     {
       "name": "BriefingScreenOnKey",
@@ -5722,7 +5722,7 @@
       "name": "CraftWeaponSignature",
       "address": "0x005FED30",
       "expected": "55 8B EC 83 EC 14 C7 45 FC 00 00 00 00 8B 4D 08",
-      "identity": "cdecl uint(Craft*) weapon signature: XOR of the craft's masked weapon pointers, their ordnance class (+0x0C) and weapon class sig. UnitTask::Execute 0x006002A0 compares it with its cached copy and re-runs CalcRange(Craft) on change; see reverse_engineering/notes/turret_charge_range_cache_20261103.md"
+      "identity": "cdecl uint(Craft*) weapon signature: XOR of the craft's masked weapon pointers, their ordnance class (+0x0C) and weapon class sig. UnitTask::Execute 0x006002A0 compares it with its cached copy and re-runs CalcRange(Craft) on change; see reverse_engineering/turret_charge_range_cache_20261103.md"
     },
     {
       "name": "GetGameTime",
