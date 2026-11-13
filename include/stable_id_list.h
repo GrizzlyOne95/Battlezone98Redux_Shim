@@ -123,7 +123,11 @@ namespace StableIdList
             if (!record.name.empty())
             {
                 text += ' ';
-                text += record.name;
+                // One record per line: a display name comes from a remote
+                // player, and a CR/LF in it would start a second record,
+                // adding an id of that player's choosing to the list.
+                for (const char c : record.name)
+                    text += (static_cast<unsigned char>(c) < 0x20) ? ' ' : c;
             }
             text += '\n';
         }

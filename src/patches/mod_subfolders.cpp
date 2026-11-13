@@ -325,8 +325,11 @@ namespace BZROpenShim
             g_ConfigInitialized = true;
             bool cfg = false;
             const bool on = TryGetUserConfigBool("Mods", "RecurseModSubfolders", cfg) && cfg;
-            cfg = false;
-            g_AllowTga = TryGetUserConfigBool(kUserConfigNetworkSection, "AllowTgaInMultiplayerMods", cfg) && cfg;
+            // Default on, as in mp_whitelist_tga.cpp: with the key absent the
+            // root whitelist accepted .tga while subfolders rejected it.
+            cfg = true;
+            TryGetUserConfigBool(kUserConfigNetworkSection, "AllowTgaInMultiplayerMods", cfg);
+            g_AllowTga = cfg;
             g_Recurse = on;
             Log(L"[MODSUB] RecurseModSubfolders=%hs\n", on ? "on" : "off");
             if (on)
