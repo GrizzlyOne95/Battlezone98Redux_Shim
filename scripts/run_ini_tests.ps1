@@ -576,6 +576,7 @@ $shippingPolicyChecks = @{
     "SinglePlayer/PilotTeamRestore" = "1"
     "SinglePlayer/TurretAttackOrders" = "1"
     "Gameplay/ProducerRallyPoints" = "1"
+    "Gameplay/AutoGroupNewUnits" = "0"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }

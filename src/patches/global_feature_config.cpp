@@ -489,6 +489,8 @@ namespace BZROpenShim
             // [Gameplay] ProducerRallyPoints; re-read here so the Options row
             // applies live.
             ReloadProducerRallyPointsConfig();
+            // [Gameplay] AutoGroupNewUnits, likewise.
+            ReloadAutoGroupNewUnitsConfig();
 
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;
             if (TryGetUserConfigBool(
@@ -697,6 +699,10 @@ namespace BZROpenShim
             // Recycler/Factory. Revert drops the rally table at mission end.
             { "ProducerRallyPoints", FeatureTier::SinglePlayer,
               &ResetProducerRallyPoints, &RefreshProducerRallyPointsState },
+            // [Gameplay] AutoGroupNewUnits: new Recycler/Factory units join a
+            // F1-F7 group. No state of its own to revert.
+            { "AutoGroupNewUnits", FeatureTier::SinglePlayer,
+              &ResetAutoGroupNewUnits, &RefreshAutoGroupNewUnitsState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config

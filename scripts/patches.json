@@ -2960,7 +2960,13 @@
       "name": "ControlPanelGlobal",
       "address": "0x00978E20",
       "kind": "data",
-      "identity": "The global ControlPanel on exact GOG Redux 2.2.301: `mov ecx,0x978E20` before every ControlPanel command call from OverView (0x00588184, 0x00588605) and Reticle::Simulate (0x005BAA78, 0x005BAA9E). ControlPanel::BroadcastCommand(VECTOR) 0x004A70C0 loops i < [this+0x188] (selectNum, 0x004A70E1) over handles [this+0x1C+4*i] (0x004A70EF) resolved with GameObject::GetObj 0x004DA060. Read only, by ProducerRallyPoints."
+      "identity": "The global ControlPanel on exact GOG Redux 2.2.301: `mov ecx,0x978E20` before every ControlPanel command call from OverView (0x00588184, 0x00588605) and Reticle::Simulate (0x005BAA78, 0x005BAA9E). ControlPanel::BroadcastCommand(VECTOR) 0x004A70C0 loops i < [this+0x188] (selectNum, 0x004A70E1) over handles [this+0x1C+4*i] (0x004A70EF) resolved with GameObject::GetObj 0x004DA060. Read by ProducerRallyPoints. AutoGroupNewUnits appends to its groups: mission save FUN_005c7b90 line 118 (0x005C7E5D `mov ecx,0x978E20`, call 0x004A7440) writes groupNum (+0xFC4, 0x28 bytes) and groupList (+0x18C, 0xE38 bytes = 10 x 0x16C, 91 handles each) (FUN_004a7440 lines 8-10); mission load FUN_005c7510 line 204 (0x005C7A11) reads them back (FUN_004a73a0); BindGroup FUN_004a6f00 lines 7-10 and SelectGroup FUN_004a6dd0 lines 14-24 use the same layout, called with this = ControlPanel from FUN_004a08e0 (vtable slot 6) at 0x004A1D39 and 0x004A1D60."
+    },
+    {
+      "name": "ControlPanelVtable",
+      "address": "0x00877E50",
+      "kind": "data",
+      "identity": "ControlPanel primary vtable on exact GOG Redux 2.2.301 (RTTI COL 0x008A6AE4, type .?AVControlPanel@@ at 0x0090013C). The only ControlPanel constructor call is the static initializer 0x004054E0 (`mov ecx,0x978E20; call 0x0049F8E0`), which stores this vtable at 0x0049F918. Slot 6 (0x00877E68) is the input/group-key routine FUN_004A08E0. AutoGroupNewUnits requires [ControlPanelGlobal] == this and the RTTI name before it writes a group."
     },
     {
       "name": "InputEditModeFlag",

@@ -176,3 +176,79 @@ on live. Install runs once per process.
 - Pressing V and opening the pause menu at once does nothing later.
 - Nothing happens in multiplayer.
 - The game window is found by its title ("Battlezone 98 Redux").
+
+# Auto-group new units
+
+`[Gameplay] AutoGroupNewUnits` (default OFF; Options page Controls, row
+"Auto Group"). Source: `src/patches/auto_group_new_units.cpp`, pure logic in
+`include/auto_group_policy.h` (tests: `tests/auto_group_policy_tests.cpp`).
+Log tag `[AUTOGROUP]`. Ported from BZCC's `SetBestGroup`
+(`SetBestGroup-004da8b0.c` lines 19-26, `FirstMatchGroup-005a4e03.c` lines
+14-18, `FirstEmptyGroup-005a4dd6.c` lines 14-16). Single player only
+(FeatureTier::SinglePlayer). **UNVERIFIED at runtime.**
+
+## Behaviour
+
+When the player's Recycler or Factory finishes a unit, the unit is appended to
+a stock number-key group:
+
+1. the first keyed group (index 0-6) in which *every* live member has the
+   new unit's ODF name (exact compare) and that has fewer than 10 live
+   members;
+2. otherwise the first keyed group with no live members (an all-dead group
+   counts as empty);
+3. otherwise nothing.
+
+Only indices 0-6 are used: the stock `input.map` (GOG install, lines 159-194)
+binds `group_select_0`..`group_select_6` to F1-F7, each with a
+`- keyboard LeftShift` line; nothing selects 7-9. The every-member rule is
+stricter than BZCC (which compares only the first member), so a mixed group
+the player built by hand is never touched.
+
+Skipped: other teams, a null unit, scavengers, constructors, pilots
+(RTTI name contains `Person`), buildings (class id 2), units that cannot be
+commanded, units whose ODF name cannot be read, and units already in any of
+the ten groups. Dead handles are not counted and the
+stored list is never compacted: stock already removes a deleted object from
+every group, and stock SelectGroup skips dead handles. A group whose 91 stored
+slots are used is skipped.
+
+It consumes the rally's FinishBuild slot-42 hook (no hook of its own).
+`EnsureProducerFinishBuildHook` installs that hook with its own copy of the
+shared rows, so auto-group works with rally points off or unavailable; the
+rally's behaviour is unchanged. Install retries up to 40 times; if a row, the
+ControlPanel identity check or the hook fails, the Options row is marked
+failed and rally points are unaffected.
+
+Multiplayer: groups are local UI state and nothing is sent, so it is probably
+safe, but FinishBuild may run for remote replicas and it is untested. Off in
+MP for v1.
+
+## Addresses and evidence (GOG 2.2.301)
+
+| Fact | Evidence |
+|---|---|
+| ControlPanelGlobal 0x00978E20 is the ControlPanel | Only ctor call: static init 0x004054E0 (`mov ecx,0x978E20; call 0x0049F8E0`); the ctor stores vtable 0x00877E50 at 0x0049F918 (`FUN_0049f8e0` line 17); RTTI `.?AVControlPanel@@`. Checked at runtime (row `ControlPanelVtable`). |
+| groupNum `+0xFC4` (int[10]), groupList `+0x18C`, 0x16C bytes (91 handles) per group | BindGroup `FUN_004a6f00` lines 7-10; SelectGroup `FUN_004a6dd0` lines 14-24. Both are called from `FUN_004a08e0` lines 530-537 (ControlPanel vtable slot 6) with `this` = ControlPanel (0x004A1D33, 0x004A1D5A). |
+| Entries are handles | SelectGroup resolves each with GetObj (`FUN_004a6dd0` line 15) and copies it into selectList, which BroadcastCommand also resolves by handle. |
+| Groups are saved | Mission save `FUN_005c7b90` line 118 calls `FUN_004a7440` (0x005C7E5D `mov ecx,0x978E20`), which writes `groupNum` (0x28 bytes) and `groupList` (0xE38 bytes) (lines 8-10). Load `FUN_005c7510` line 204 calls `FUN_004a73a0`; post-load `FUN_004a0160` lines 63-67 remaps the handles. |
+| Dead objects leave groups | GameObject cleanup `FUN_004db780` line 14 calls `FUN_004a0710`, which removes the handle from every group (lines 27-37). |
+| GameObjectClass at object `+0xF8` | `FUN_005ae660` lines 51-53 read the producer build list through `[this+0xF8]+0x608`. |
+| Class id 2 = building | IsBuilding 0x006A0810 (`AI IsBuilding` row) opens with `cmp dword [class+0x1C], 2`. **UNVERIFIED** for craft: `odf_helpers.cpp` notes the `+0xF8` chain names a different class record for Craft. A misread only skips the unit (fails safe). |
+| ODF name | `TryGetCraftOdfName` (`engine_flames.cpp`), GetClass vtable path, class `+0x30` char[8]; same reader for the unit and each live member. |
+
+Decompile paths are relative to the corpus directory named above.
+
+## Live test checklist (UNVERIFIED)
+
+- With the setting on, a new tank from the Factory is selected by F(n+1),
+  where n is the group index in the log. Whether selection is F-key alone or
+  needs the LeftShift chord is not checked.
+- A second tank of the same ODF joins the same group; an 11th goes to the
+  next empty group; a different ODF starts its own group; a hand-made mixed
+  group is left alone; nothing ever lands in groups 8-10.
+- A scavenger, a constructor and a unit already bound to a group are not
+  added.
+- Save and load keep the group.
+- The HUD group display (if any) shows the new member without a reselect.
+- Nothing happens in multiplayer or with the setting off.

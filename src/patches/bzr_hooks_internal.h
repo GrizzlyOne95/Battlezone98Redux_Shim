@@ -1414,6 +1414,17 @@ namespace BZROpenShim
         void TickProducerRallyMeshes();
         void ForgetProducerRallyMeshes(const wchar_t* reason);
         void DestroyProducerRallySceneObjects(void* sceneManager, const wchar_t* reason);
+        // Installs only the shared Recycler/Factory FinishBuild slot hook,
+        // independent of the rally (used by AutoGroupNewUnits).
+        bool EnsureProducerFinishBuildHook();
+
+        // --- Auto-group new units (auto_group_new_units.cpp) -------------------
+        void InstallAutoGroupNewUnitsIfPossible();
+        void ReloadAutoGroupNewUnitsConfig();
+        void RefreshAutoGroupNewUnitsState();
+        void ResetAutoGroupNewUnits();
+        // Called by the shared FinishBuild hook after the stock call.
+        void AutoGroupOnUnitBuilt(void* producer, void* built);
 
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
         extern bool g_ApcAlliedTargetDeployFixEnabled;
