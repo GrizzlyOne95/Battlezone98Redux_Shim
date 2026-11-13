@@ -2638,6 +2638,7 @@ namespace BZROpenShim
 		void InstallAiTuningHooksIfPossible()
         {
             InstallAiNativeOrdersHooksIfPossible();
+            InstallTurretAttackOrdersHooksIfPossible();
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();

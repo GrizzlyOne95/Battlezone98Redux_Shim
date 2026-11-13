@@ -1393,6 +1393,11 @@ namespace BZROpenShim
         bool IsAiHeldProcess(void* process);
         void ResetAiNativeOrders();
 
+        // --- Turret tank attack orders (turret_attack_orders.cpp) --------------
+        void InstallTurretAttackOrdersHooksIfPossible();
+        void RefreshTurretAttackOrdersState();
+        void ResetTurretAttackOrders();
+
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
         extern bool g_ApcAlliedTargetDeployFixEnabled;
         extern bool g_ApcAlliedTargetDeployFixInstalled;

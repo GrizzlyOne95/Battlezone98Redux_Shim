@@ -6069,6 +6069,48 @@
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SitTask::DoState (vtable 0x00889F50 slot 12): calls UnitTask::DoSit 0x00602420 only. OpenShim wraps it so a held craft also runs the FollowTask fire block. See Docs/NATIVE_HOLD_DEFEND_FOLLOW.md."
     },
     {
+      "name": "TurretTankGetCommand",
+      "address": "0x005F5D10",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 83 7D 08 00 75 07 33",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) TurretTank::GetCommand(GameObject* target) (TurretTankVtable 0x00889498 slot 13), thiscall ret 4, returns the AiCommand for the reticle; it has no enemy -> CMD_ATTACK (4) branch. OpenShim wraps the slot for TurretAttackOrders. See Docs/TURRET_ATTACK_ORDERS.md."
+    },
+    {
+      "name": "TurretTankUpdateModeList",
+      "address": "0x005F5A50",
+      "expected": "55 8B EC 83 EC 1C 56 89 4D F4 6A 01 6A 01 6A 00",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) TurretTank::UpdateModeList (TurretTankVtable 0x00889498 slot 23), thiscall no args; fills the ModeList at this+0x1A4 and calls ModeList::SetMode(3, 0, false). OpenShim wraps the slot to put Targets/Attack (0xE) in slot 3 as HoverCraft::UpdateModeList 0x004EBD60 does. See Docs/TURRET_ATTACK_ORDERS.md."
+    },
+    {
+      "name": "CraftGetCommand",
+      "address": "0x004AE110",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 83 7D 08 00 75 07 33",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) Craft::GetCommand(GameObject* target) (HoverCraftVtable 0x0087ABE4 slot 13), thiscall ret 4: returns CMD_ATTACK (4) when EnemyP(this, target) and [this+0x1A0] (weapon) is non-zero. Called directly by the TurretAttackOrders GetCommand wrapper. See Docs/TURRET_ATTACK_ORDERS.md."
+    },
+    {
+      "name": "CraftDeploy",
+      "address": "0x004AE2B0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 28 02 00 00 00 74",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) Craft::Deploy (TurretTankVtable and HoverCraftVtable slot 24), thiscall no args: if deploy state [this+0x228] is 0 or 3 sets [[this+0x230]+0xE0] = 1, else 0. Called only after the craft's own slot 24 is checked to hold it. See Docs/TURRET_ATTACK_ORDERS.md."
+    },
+    {
+      "name": "CraftPackup",
+      "address": "0x004AE330",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 28 02 00 00 02 74",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) Craft::Packup (TurretTankVtable and HoverCraftVtable slot 25), thiscall no args: if deploy state [this+0x228] is 2 or 1 sets [[this+0x230]+0xE0] = 1, else 0 (so on an undeployed craft it cancels a pending Deploy). Called only after the craft's own slot 25 is checked to hold it. See Docs/TURRET_ATTACK_ORDERS.md."
+    },
+    {
+      "name": "TurretTankProcessInitAttack",
+      "address": "0x005F7710",
+      "expected": "55 8B EC 6A FF 68 2C 76 84 00 64 A1 00 00 00 00",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) TurretTankProcess::InitAttack (slot 24 of TurretTankProcess 0x00889710, TurretTankFriend 0x008895EC and TurretTankEnemy 0x008897F8; no other vtable holds it), thiscall no args: calls the craft's Deploy (vtable +0x60) and stores a new TurretAttack task at this+0x38. OpenShim wraps the three slots for TurretAttackOrders. See Docs/TURRET_ATTACK_ORDERS.md."
+    },
+    {
+      "name": "TurretTankProcessDoAttack",
+      "address": "0x005F77C0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 48 38 8B 55 FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) Shared AiProcess DoAttack (slot 26 of the TurretTankProcess/Friend/Enemy vtables and of every other unit process vtable), thiscall no args: runs the task at this+0x38; on a kill clears CMD_ATTACK and sets state [this+0x20] = 3. OpenShim wraps slot 26 of the three TurretTank process vtables only. See Docs/TURRET_ATTACK_ORDERS.md."
+    },
+    {
       "name": "AiFollowRangeConstantSite",
       "address": "0x005833CA",
       "expected": "F3 0F 10 05 20 2E 8A 00 F3 0F 11 41 6C",
