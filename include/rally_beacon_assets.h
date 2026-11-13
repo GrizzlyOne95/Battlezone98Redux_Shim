@@ -102,7 +102,11 @@ namespace BZROpenShim::RallyBeacon
 
     inline std::string MaterialScript()
     {
-        std::string script = std::string(kMarker) + " v2 (generated; do not edit).\n";
+        std::string script = std::string(kMarker) + " v3 (generated; do not edit).\n"
+            // Without this import the script only compiles when it is parsed
+            // after BZBase.material; resource-group init parses an existing
+            // file first and every material fails. Same as the gib scripts.
+            "import * from \"BZBase.material\"\n\n";
         const struct { const char* name; const char* diffuse; const char* specular; const char* emissive; } materials[] = {
             {kFrameMaterial, kFrameDiffuse, kFrameSpecular, "black.dds"},
             {kLampMaterial, kLampDiffuse, kLampSpecular, kLampEmissive},

@@ -15,6 +15,9 @@ int main(int argc, char** argv)
     const auto script = MaterialScript();
     Check(script.rfind(kMarker, 0) == 0, "material script starts with the generated marker");
     Check(script == MaterialScript(), "material script is deterministic");
+    const auto importAt = script.find("import * from \"BZBase.material\"");
+    Check(importAt != std::string::npos && importAt < script.find("material "),
+          "script imports BZBase before the first material (parse-order independent)");
     for (const auto* name : {kFrameMaterial, kLampMaterial, kLampAmberMaterial})
         Check(script.find(std::string("material ") + name + " : BZBase") != std::string::npos,
               "material names match the mesh submeshes");

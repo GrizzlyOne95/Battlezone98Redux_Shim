@@ -242,6 +242,12 @@ on live. Install runs once per process.
   while that Factory is selected, with no square under the label. Deselecting
   hides it; selecting again shows it. The log has no "could not be created"
   line.
+- Second launch (the generated material already on disk): the beacon is
+  textured, and BZOgreLogfile.log has no `base object named "BZBase" not
+  found` compiler error for `openshim_rally_beacon.material`. The generated
+  script starts with `import * from "BZBase.material"` so it compiles whatever
+  order the resource group parses it in; a payload override of the file should
+  do the same.
 - A Recycler's beacon lamp is green and a Factory's amber; the labels read
   "Recycler rally" / "Factory rally" (each ODF's unitName), falling back to
   "Rally" only if the unitName cannot be read. Select both at once: two
