@@ -73,6 +73,13 @@ HOOKS = [
     ("SitTaskDoState", "SitTaskDoState", [VT("SitTaskVtable", 12)]),
     ("TurretTankProcessDoSubTask", "TurretTankProcessDoSubTask",
      [VT(f"TurretTank{s}Vtable", 11) for s in ("Process", "Friend", "Enemy")]),
+    ("TurretTankGetCommand", "TurretTankGetCommand", [VT("TurretTankVtable", 13)]),
+    ("TurretTankUpdateModeList", "TurretTankUpdateModeList", [VT("TurretTankVtable", 23)]),
+    ("TurretTankProcessInitAttack", "TurretTankProcessInitAttack",
+     [VT(f"TurretTank{s}Vtable", 24) for s in ("Process", "Friend", "Enemy")]),
+    ("TurretTankProcessDoAttack", "TurretTankProcessDoAttack",
+     [VT(f"TurretTank{s}Vtable", 26) for s in ("Process", "Friend", "Enemy")],
+     "shared AiProcess DoAttack; TurretAttackOrders manages turret deploy only"),
 ]
 
 

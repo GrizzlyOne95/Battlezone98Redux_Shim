@@ -2934,6 +2934,22 @@ PilotTeamRestore = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_ATTACK_REVEAL
 AttackRevealPerceivedTeam = 1
 
+; Let the player order a turret tank (avturr, svturr and other TurretTank
+; classes) to attack.
+;
+; Stock turret tanks never offer "Attack": the reticle over an enemy gives no
+; command and the unit menu has no Targets/Attack slot. With this on, a
+; selected turret gets the same Attack command and menu slot a hovercraft
+; does. If the target is beyond its weapon range, the turret packs up, drives
+; into range, deploys and attacks; if the target later moves well out of range
+; (10% past it for 1.5 s), it packs up and closes in again.
+;
+; Applies to turrets on your own team only; AI turrets are untouched.
+; Hard-disabled in network games. Read once at startup; restart after changing.
+; See Docs/TURRET_ATTACK_ORDERS.md.
+; Accepted: boolean. Default: ON.
+TurretAttackOrders = 1
+
 ; Hide undetected objects on the satellite view again.
 ;
 ; BZ 1.5 rendered the overview through Submit_Overview_Entities, which tested

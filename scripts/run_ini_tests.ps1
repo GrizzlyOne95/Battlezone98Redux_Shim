@@ -394,6 +394,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "SinglePlayer/JumpSnipeCrouch",
     "SinglePlayer/SatelliteVisibilityFix",
 
+    # Turret tanks accept ATTACK and close in on out-of-range targets; player
+    # team only, hard-disabled in network games. Default on by design.
+    "SinglePlayer/TurretAttackOrders",
+
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
     "Fixes/AiMultiProducerMakers",
@@ -565,6 +569,7 @@ $shippingPolicyChecks = @{
     "SinglePlayer/AttackRevealPerceivedTeam" = "0"
     "SinglePlayer/SatelliteVisibilityFix" = "1"
     "SinglePlayer/PilotTeamRestore" = "1"
+    "SinglePlayer/TurretAttackOrders" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }

@@ -685,6 +685,10 @@ namespace BZROpenShim
             // refresh and Hold. Revert switches them off at mission end.
             { "AiNativeOrders", FeatureTier::SinglePlayer,
               &ResetAiNativeOrders, &RefreshAiNativeOrdersState },
+            // [SinglePlayer] TurretAttackOrders: ATTACK for turret tanks and
+            // deploy/pack-up around it. Revert drops per-process tracks.
+            { "TurretAttackOrders", FeatureTier::SinglePlayer,
+              &ResetTurretAttackOrders, &RefreshTurretAttackOrdersState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config
