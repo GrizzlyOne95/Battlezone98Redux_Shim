@@ -239,18 +239,6 @@ namespace
               !OnScreen(10.0f, -1.0f, 800, 600), "on-screen bounds");
     }
 
-    void TestLineDots()
-    {
-        float dots[8][2] = {};
-        Check(LineDots(0.0f, 0.0f, 10.0f, 0.0f, 20.0f, 8, dots) == 0, "a line shorter than the spacing has no dots");
-        size_t n = LineDots(0.0f, 0.0f, 100.0f, 0.0f, 20.0f, 8, dots);
-        Check(n == 4, "100 px at 20 px spacing gives 4 inner dots");
-        Check(n == 4 && dots[0][0] == 20.0f && dots[3][0] == 80.0f && dots[1][1] == 0.0f, "dots are evenly spaced");
-        n = LineDots(0.0f, 0.0f, 1000.0f, 0.0f, 20.0f, 8, dots);
-        Check(n == 8, "long lines are capped");
-        Check(LineDots(0.0f, 0.0f, 100.0f, 0.0f, 0.0f, 8, dots) == 0, "zero spacing draws nothing");
-    }
-
     void TestTickPlan()
     {
         TickPlan plan = PlanTick(false, true, true, true, true);
@@ -346,8 +334,9 @@ namespace
         g.eligibleProducer = false;
         Check(!PanelRowVisible(g), "no Recycler/Factory selected: no row");
 
-        Check(std::string(PanelRowLabel(false)) == "Rally Point", "idle label");
-        Check(std::string(PanelRowLabel(true)) == "Cancel Rally", "armed label");
+        Check(std::string(kPanelRowLabel) == "Rally", "the row reads Rally");
+        Check(std::string(PanelRowLabel(false)) == "Rally", "not armed: the row reads Rally");
+        Check(std::string(PanelRowLabel(true)) == "Cancel", "armed: the row reads Cancel (V cancels)");
 
         int x = 0, y = 0;
         Check(PanelRowAnchor(31, 300, 278, x, y) && x == 31 && y == 322, "row 13 is one pitch below TAB");
@@ -368,6 +357,205 @@ namespace
         Check(CenteredTextY(322, 18.0f) == 313, "text top is row centre minus half the height");
         Check(CenteredTextY(322, 13.5f) == 315, "fractional heights truncate like the stock call");
     }
+
+    void TestKeyCapFill()
+    {
+        FillRect r[2];
+        // key_0's 9x9 at UI scale 2: 18x18, notched by 2 px.
+        PixelRect box;
+        box.left = 10;
+        box.top = 20;
+        box.right = 28;
+        box.bottom = 38;
+        Check(KeyCapFillRects(box, 2.0f, r) == 2, "a scaled cap is two bands");
+        Check(r[0].x1 == 10 && r[0].x2 == 27 && r[0].y1 == 22 && r[0].y2 == 35,
+              "full-width band, inclusive corners, notched top and bottom");
+        Check(r[1].x1 == 12 && r[1].x2 == 25 && r[1].y1 == 20 && r[1].y2 == 37,
+              "full-height band, inclusive corners, notched left and right");
+        // Scale below 1 still notches by one pixel.
+        box.right = 19;
+        box.bottom = 29;
+        Check(KeyCapFillRects(box, 0.75f, r) == 2 && r[0].y1 == 21 && r[1].x1 == 11, "minimum notch is 1 px");
+        // Too small to notch: one plain rect.
+        box.right = 12;
+        box.bottom = 22;
+        Check(KeyCapFillRects(box, 1.0f, r) == 1 && r[0].x1 == 10 && r[0].x2 == 11 && r[0].y2 == 21,
+              "a 2x2 cap is one rect");
+        box.right = box.left;
+        Check(KeyCapFillRects(box, 1.0f, r) == 0, "empty box: nothing to fill");
+    }
+
+    void TestSpaceRowLabel()
+    {
+        Check(SpaceRowLabelOverride(true, "Go To"), "armed Go To reads Rally");
+        Check(std::string(kSpaceRowArmedLabel) == "Rally", "the armed SPACE label");
+        Check(!SpaceRowLabelOverride(false, "Go To"), "not armed: stock Go To");
+        Check(!SpaceRowLabelOverride(true, "Attack"), "another command: stock label");
+        Check(!SpaceRowLabelOverride(true, "Go"), "a prefix is not the key");
+        Check(!SpaceRowLabelOverride(true, "Go To "), "a longer key is not the key");
+        Check(!SpaceRowLabelOverride(true, "go to"), "the key compare is exact");
+        Check(!SpaceRowLabelOverride(true, nullptr), "no key: stock label");
+    }
+
+    PanelRowLayoutInput LayoutAt2x()
+    {
+        // UI scale 2: TAB anchor (31, 300), ALT y 278, row right 320.
+        PanelRowLayoutInput in;
+        in.tabX = 31;
+        in.tabY = 300;
+        in.altY = 278;
+        in.rowRight = 320;
+        in.scaleX = 2.0f;
+        in.scaleY = 2.0f;
+        in.inset = 8;
+        in.keyW = 9;
+        in.keyH = 9;
+        in.labelW = 40.0f;
+        in.labelH = 18.0f;
+        in.costW = 16.0f;
+        in.cancelKnown = true;
+        in.cancelW = 60.0f;
+        in.viewportW = 1920;
+        in.viewportH = 1080;
+        in.underlayKnown = true;
+        in.underlayTop = 100;
+        in.underlaySpriteH = 256;
+        return in;
+    }
+
+    void TestPanelRowLayout()
+    {
+        Check(UnderlayBottom(100, 256, 2.0f) == 356, "underlay bottom: top + h * scale / 2");
+        Check(UnderlayBottom(100, 255, 1.5f) == 291, "underlay bottom truncates like the stock call");
+
+        // Column right = 320 - 40 + 16 = 296; label at 256; key 18 px wide
+        // right-aligned at 256 - 8, so the group starts at 230.
+        PanelRowLayoutInput in = LayoutAt2x();
+        PanelRowLayout out = ChoosePanelRowLayout(in);
+        Check(out.placement == PanelRowPlacement::TabLine && out.rowY == 300 && out.labelX == 256,
+              "short TAB label: on the TAB line, right-aligned to the cost column");
+
+        in = LayoutAt2x();
+        in.cancelW = 191.0f; // 31 + 191 + 16 = 238 > 230
+        out = ChoosePanelRowLayout(in);
+        Check(out.placement == PanelRowPlacement::BelowUnderlay && out.rowY == 356 + 8 + 9 && out.labelX == 256,
+              "long TAB label: under the underlay, clear by one inset plus half the row");
+        in.cancelW = 183.0f; // 31 + 183 + 16 = 230: just fits
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::TabLine, "a label that just fits stays");
+
+        in = LayoutAt2x();
+        in.cancelKnown = false;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::BelowUnderlay,
+              "TAB label not measurable: the safe place under the underlay");
+
+        in = LayoutAt2x();
+        in.cancelW = 500.0f;
+        in.underlayTop = 0;
+        in.underlaySpriteH = 100; // bottom 100, above the TAB row
+        out = ChoosePanelRowLayout(in);
+        Check(out.placement == PanelRowPlacement::BelowUnderlay && out.rowY == 322,
+              "a short underlay never lifts the row onto TAB");
+
+        in = LayoutAt2x();
+        in.cancelW = 500.0f;
+        in.viewportW = 400;
+        out = ChoosePanelRowLayout(in);
+        Check(out.placement == PanelRowPlacement::BelowTab && out.rowY == 322,
+              "no underlay at 400 px: one pitch under TAB");
+
+        in = LayoutAt2x();
+        in.cancelW = 500.0f;
+        in.underlayKnown = false;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden,
+              "underlay drawn but unreadable: hidden, never over it");
+        in.underlayKnown = true;
+        in.underlaySpriteH = 0;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "empty underlay sprite: hidden");
+
+        in = LayoutAt2x();
+        in.cancelW = 500.0f;
+        in.viewportH = 380; // 373 + 9 > 380
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "off the bottom of the screen: hidden");
+
+        in = LayoutAt2x();
+        in.labelW = 300.0f;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden,
+              "a label wider than the row: hidden");
+        in = LayoutAt2x();
+        in.rowRight = 1900;
+        in.viewportW = 1600;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "column off the right edge: hidden");
+
+        in = LayoutAt2x();
+        in.scaleX = 0.0f;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "no UI scale: hidden");
+        in = LayoutAt2x();
+        in.scaleY = std::numeric_limits<float>::quiet_NaN();
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "NaN UI scale: hidden");
+        in = LayoutAt2x();
+        in.altY = 300;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "no row pitch: hidden");
+        in = LayoutAt2x();
+        in.keyW = 0;
+        Check(ChoosePanelRowLayout(in).placement == PanelRowPlacement::Hidden, "no key size: hidden");
+
+        // 640x480 at UI scale 1: column right 160 - 20 + 8 = 148, label at
+        // 128, key 9 px at 124, group from 115; "Cancel" ends at 16 + 30 + 8.
+        PanelRowLayoutInput small;
+        small.tabX = 16;
+        small.tabY = 150;
+        small.altY = 139;
+        small.rowRight = 160;
+        small.scaleX = 1.0f;
+        small.scaleY = 1.0f;
+        small.inset = 4;
+        small.keyW = 9;
+        small.keyH = 9;
+        small.labelW = 20.0f;
+        small.labelH = 9.0f;
+        small.costW = 8.0f;
+        small.cancelKnown = true;
+        small.cancelW = 30.0f;
+        small.viewportW = 640;
+        small.viewportH = 480;
+        small.underlayKnown = true;
+        small.underlayTop = 50;
+        small.underlaySpriteH = 256;
+        out = ChoosePanelRowLayout(small);
+        Check(out.placement == PanelRowPlacement::TabLine && out.labelX == 128 && out.rowY == 150,
+              "640x480: on the TAB line");
+    }
+}
+
+void TestProducerLabelAndLamp()
+{
+    Check(UseAmberLamp(ProducerKind::Factory), "Factory lamp is amber");
+    Check(!UseAmberLamp(ProducerKind::Recycler), "Recycler lamp stays green");
+    Check(!UseAmberLamp(ProducerKind::Unknown), "unclassified producer keeps the current green lamp");
+
+    char out[kLabelMax];
+    size_t n = FormatRallyLabel("Recycler", out, sizeof(out));
+    Check(std::string(out) == "Recycler rally" && n == 14, "unitName plus ' rally'");
+    n = FormatRallyLabel("Factory", out, sizeof(out));
+    Check(std::string(out) == "Factory rally" && n == 13, "Factory label");
+    n = FormatRallyLabel("", out, sizeof(out));
+    Check(std::string(out) == "Rally" && n == 5, "empty unitName falls back to the generic label");
+    n = FormatRallyLabel(nullptr, out, sizeof(out));
+    Check(std::string(out) == "Rally" && n == 5, "null unitName falls back to the generic label");
+    n = FormatRallyLabel("   ", out, sizeof(out));
+    Check(std::string(out) == "Rally", "blank unitName falls back to the generic label");
+    n = FormatRallyLabel("  Heavy\tRecycler \x01 ", out, sizeof(out));
+    Check(std::string(out) == "HeavyRecycler rally", "control characters dropped, spaces trimmed");
+    n = FormatRallyLabel("\xC3\xA9\xC3\xA9", out, sizeof(out));
+    Check(std::string(out) == "Rally", "non-ASCII only falls back to the generic label");
+    n = FormatRallyLabel("ABCDEFGHIJKLMNOPQRSTUVWXYZ", out, sizeof(out));
+    Check(std::string(out) == "ABCDEFGHIJKLMNOPQRST rally" && n == 26 && n < kLabelMax, "long unitName is capped");
+    char tiny[8];
+    n = FormatRallyLabel("Recycler", tiny, sizeof(tiny));
+    Check(n == 7 && tiny[7] == '\0' && std::string(tiny) == "Recycle", "a small buffer truncates and terminates");
+    Check(FormatRallyLabel("x", nullptr, 8) == 0 && FormatRallyLabel("x", out, 0) == 0, "no buffer: nothing written");
+    Check(LabelHalfWidth(5) == 22, "generic label keeps the original 22 px half width");
+    Check(LabelHalfWidth(14) > LabelHalfWidth(5), "longer labels get a wider panel");
 }
 
 int main()
@@ -378,10 +566,13 @@ int main()
     TestBuiltUnit();
     TestTable();
     TestProjection();
-    TestLineDots();
     TestTickPlan();
     TestSetMode();
     TestPanelRow();
+    TestKeyCapFill();
+    TestSpaceRowLabel();
+    TestPanelRowLayout();
+    TestProducerLabelAndLamp();
     if (OpenShimTest::FailureCount() != 0)
     {
         std::fprintf(stderr, "producer_rally_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());

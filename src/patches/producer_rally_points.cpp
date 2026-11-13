@@ -8,7 +8,7 @@
 // rally at once to the ground under the reticle (the original behaviour). Each
 // unit that producer finishes afterwards (not scavengers or constructors) gets
 // a Go order to the rally point. While a rallied producer is selected, a HUD
-// marker labelled "Rally" (and a dotted line from the producer) shows the
+// marker labelled "Rally" shows the
 // point; it is drawn only, never a game object, so nothing is saved and no nav
 // slot is used. Addresses, evidence and limits: Docs/PRODUCER_RALLY_POINTS.md.
 //
@@ -31,7 +31,7 @@
 //   * The shared HUD gauge overlay (hud_gauge_overlay.h) draws the marker.
 //   * The command panel's post-draw seam (ContextualHud::
 //     RegisterCommandPanelPostDraw; contextual_hud.cpp owns the render slot)
-//     adds a "V Rally Point" row under the stock TAB row.
+//     adds a V "Rally" row ("Cancel" while set mode is armed) on the TAB line.
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "contextual_hud.h"
@@ -40,6 +40,7 @@
 #include "hook_engine.h"
 #include "hud_gauge_overlay.h"
 #include "iat_patch.h"
+#include "kill_ticker.h"
 #include "native_chunk_mesh.h"
 #include "native_chunk_prune.h"
 #include "patcher.h"
@@ -56,6 +57,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <string>
+#include <utility>
 
 namespace BZROpenShim::Hooks
 {
@@ -108,12 +111,7 @@ namespace BZROpenShim::Hooks
         // Marker look.
         constexpr uint32_t kMarkerArgb = 0xFF60FF60;
         constexpr uint32_t kMarkerPanelArgb = 0x90000000;
-        constexpr uint32_t kDotArgb = 0xC060FF60;
         constexpr int kMarkerHalf = 4;
-        constexpr int kDotHalf = 1;
-        constexpr float kDotSpacing = 18.0f;
-        constexpr size_t kMaxDots = 48;
-        constexpr char kMarkerText[] = "Rally";
 
         uint32_t g_RecyclerVtableAddr = 0;
         uint32_t g_FactoryVtableAddr = 0;
@@ -365,6 +363,20 @@ namespace BZROpenShim::Hooks
         {
             const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(obj)));
             return vtable != 0 && (vtable == g_RecyclerVtableAddr || vtable == g_FactoryVtableAddr);
+        }
+
+        // The same vtable test as IsHookedProducer, kept as a kind: the
+        // Recycler and Factory vtables are the only two producers hooked.
+        Policy::ProducerKind ProducerKindOf(void* obj)
+        {
+            const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(obj)));
+            if (vtable == 0)
+                return Policy::ProducerKind::Unknown;
+            if (vtable == g_RecyclerVtableAddr)
+                return Policy::ProducerKind::Recycler;
+            if (vtable == g_FactoryVtableAddr)
+                return Policy::ProducerKind::Factory;
+            return Policy::ProducerKind::Unknown;
         }
 
         void* UserObject()
@@ -793,6 +805,8 @@ namespace BZROpenShim::Hooks
         // keeps the HUD square.
 
         constexpr char kRallyBeaconResource[] = OPENSHIM_CHUNK_CACHE_RALLY_DIR "openshim_rally_beacon.mesh";
+        // Factory variant: same geometry, amber lamp material.
+        constexpr char kRallyBeaconFactoryResource[] = OPENSHIM_CHUNK_CACHE_RALLY_DIR "openshim_rally_beacon_fac.mesh";
         constexpr char kRallyMeshName[] = "apcamr.mesh"; // stock fallback
         bool g_BeaconFallback = false;                  // generated mesh failed: stock mesh from then on
         bool g_BeaconInUseLogged = false;
@@ -808,7 +822,29 @@ namespace BZROpenShim::Hooks
             void* node = nullptr;
             void* entity = nullptr;
             bool visible = false;
+            bool amber = false;     // the lamp variant this entity was made with
+            bool generated = false; // made from the generated mesh, not the stock fallback
         };
+
+        // HUD label cache: filled by MeshTick (EnsureLabel), read by the HUD
+        // painter (LabelFor, no lookup, no allocation); both under g_TableLock.
+        // Cleared with the beacon slots.
+        struct LabelEntry
+        {
+            char odf[kGameObjectClassOdfNameMax + 1];
+            char text[Policy::kLabelMax];
+            size_t length;
+        };
+        constexpr size_t kLabelCacheSize = 8;
+        LabelEntry g_Labels[kLabelCacheSize];
+        size_t g_LabelCount = 0; // under g_TableLock
+
+        LabelEntry GenericLabel()
+        {
+            LabelEntry entry = {};
+            entry.length = Policy::FormatRallyLabel(nullptr, entry.text, sizeof(entry.text));
+            return entry;
+        }
 
         RallyMeshSlot g_MeshSlots[kMeshPoolSize];
         bool g_MeshUnavailable = false; // creation failed once: HUD square from then on
@@ -880,6 +916,10 @@ namespace BZROpenShim::Hooks
             }
             g_AnyMeshVisible = false;
             SetMeshShown(nullptr, 0);
+            {
+                TableExclusive lock; // the next mission may carry other ODFs
+                g_LabelCount = 0;
+            }
             if (held)
                 Log(L"[RALLY] forgot %zu rally beacon(s) (%ls)\n", held, reason ? reason : L"unspecified");
         }
@@ -896,11 +936,46 @@ namespace BZROpenShim::Hooks
             ForgetMeshSlots(reason);
         }
 
+        // Resolves the "<unitName> rally" label of a producer's ODF into the
+        // cache, once per ODF per mission (MeshTick, game thread: the engine
+        // file read and the allocations happen here, never in the painter). A
+        // failed read is cached as the generic label so it is not retried
+        // every tick.
+        void EnsureLabel(void* producer)
+        {
+            char odf[kGameObjectClassOdfNameMax + 1] = {};
+            if (!TryGetCraftOdfName(producer, odf, sizeof(odf)) || !odf[0])
+                return;
+            {
+                TableShared lock;
+                if (g_LabelCount >= kLabelCacheSize)
+                    return;
+                for (size_t i = 0; i < g_LabelCount; ++i)
+                    if (_stricmp(g_Labels[i].odf, odf) == 0)
+                        return;
+            }
+            LabelEntry entry = {};
+            std::memcpy(entry.odf, odf, sizeof(entry.odf));
+            try
+            {
+                const std::string unitName = KillTicker::LookupUnitName(odf);
+                entry.length = Policy::FormatRallyLabel(unitName.c_str(), entry.text, sizeof(entry.text));
+            }
+            catch (...)
+            {
+                entry.length = Policy::FormatRallyLabel(nullptr, entry.text, sizeof(entry.text));
+            }
+            TableExclusive lock;
+            if (g_LabelCount < kLabelCacheSize)
+                g_Labels[g_LabelCount++] = entry;
+        }
+
         void MeshTick()
         {
             if (g_MeshUnavailable)
                 return;
             uintptr_t producers[kMeshPoolSize] = {};
+            bool amber[kMeshPoolSize] = {};
             float positions[kMeshPoolSize][3] = {};
             size_t wanted = 0;
             if (g_Active.load(std::memory_order_acquire) && TableSize() != 0)
@@ -913,6 +988,7 @@ namespace BZROpenShim::Hooks
                     if (!entry)
                         return;
                     producers[wanted] = reinterpret_cast<uintptr_t>(producer);
+                    amber[wanted] = Policy::UseAmberLamp(ProducerKindOf(producer));
                     positions[wanted][0] = entry->pos[0];
                     positions[wanted][1] = entry->pos[1];
                     positions[wanted][2] = entry->pos[2];
@@ -950,6 +1026,34 @@ namespace BZROpenShim::Hooks
                                            6.283185307179586);
             const float quat[4] = { static_cast<float>(std::cos(angle * 0.5)), 0.0f,
                                     static_cast<float>(std::sin(angle * 0.5)), 0.0f };
+            // The labels are resolved here, on the game thread; the painter
+            // only reads the cache.
+            for (size_t i = 0; i < wanted; ++i)
+                EnsureLabel(reinterpret_cast<void*>(producers[i]));
+
+            // A slot follows the selection order, so it can be handed a
+            // producer of the other colour. Before destroying anything, swap
+            // it with another made slot that already has the wanted colour and
+            // is not needed in its own colour (the stock fallback mesh has
+            // one look and is skipped).
+            if (!g_BeaconFallback)
+            {
+                for (size_t i = 0; i < wanted; ++i)
+                {
+                    if (!g_MeshSlots[i].entity || g_MeshSlots[i].amber == amber[i])
+                        continue;
+                    for (size_t j = 0; j < kMeshPoolSize; ++j)
+                    {
+                        if (j == i || !g_MeshSlots[j].entity || g_MeshSlots[j].amber != amber[i])
+                            continue;
+                        if (j < wanted && g_MeshSlots[j].amber == amber[j])
+                            continue; // already right for its own producer
+                        std::swap(g_MeshSlots[i], g_MeshSlots[j]);
+                        break;
+                    }
+                }
+            }
+
             uintptr_t shown[kMeshPoolSize] = {};
             size_t shownCount = 0;
             for (size_t i = 0; i < kMeshPoolSize; ++i)
@@ -962,15 +1066,27 @@ namespace BZROpenShim::Hooks
                     slot.visible = false;
                     continue;
                 }
+                // A slot holding the wrong mesh is destroyed and re-made: the
+                // other lamp colour, or (once the generated mesh has failed)
+                // any generated mesh, so the stock one replaces it.
+                const char* const resource = amber[i] ? kRallyBeaconFactoryResource : kRallyBeaconResource;
+                if (slot.entity && (g_BeaconFallback ? slot.generated : slot.amber != amber[i]))
+                {
+                    DestroyShimOwnedMeshObject(slot.sceneManager, slot.node, slot.entity);
+                    slot = RallyMeshSlot{};
+                }
                 if (!slot.entity)
                 {
                     slot = RallyMeshSlot{};
                     bool created = false;
                     if (!g_BeaconFallback)
                     {
-                        created = CreateShimOwnedMeshObject(kRallyBeaconResource, slot.sceneManager, slot.node, slot.entity);
+                        created = CreateShimOwnedMeshObject(resource, slot.sceneManager, slot.node, slot.entity);
                         if (created)
+                        {
                             g_BeaconCreateFailures = 0;
+                            slot.generated = true;
+                        }
                         else
                         {
                             // A not-yet-ready scene also lands here: retry on
@@ -978,19 +1094,25 @@ namespace BZROpenShim::Hooks
                             // failure repeats.
                             slot = RallyMeshSlot{};
                             if (++g_BeaconCreateFailures < kMaxBeaconCreateFailures)
+                            {
+                                // Nothing may claim a beacon that is gone.
+                                HideAllMeshes();
                                 return;
+                            }
                             g_BeaconFallback = true;
                             Log(L"[RALLY] generated beacon mesh %hs could not be created %d times; using stock %hs\n",
-                                kRallyBeaconResource, g_BeaconCreateFailures, kRallyMeshName);
+                                resource, g_BeaconCreateFailures, kRallyMeshName);
                         }
                     }
                     if (!created)
                         created = CreateShimOwnedStockMeshObject(kRallyMeshName, slot.sceneManager, slot.node, slot.entity);
+                    if (created)
+                        slot.amber = amber[i];
                     if (created && !g_BeaconInUseLogged)
                     {
                         g_BeaconInUseLogged = true;
                         Log(L"[RALLY] rally beacon mesh in use: %hs\n",
-                            g_BeaconFallback ? kRallyMeshName : kRallyBeaconResource);
+                            g_BeaconFallback ? kRallyMeshName : resource);
                     }
                     if (!created)
                     {
@@ -1035,10 +1157,47 @@ namespace BZROpenShim::Hooks
 
         // ---- the HUD marker ------------------------------------------------
 
+        // Copy of the cached label for this producer's ODF; "Rally" on a miss.
+        // No lookup and no allocation: the painter must not block or throw.
+        // EnsureLabel (MeshTick) fills the cache.
+        LabelEntry LabelFor(void* producer)
+        {
+            char odf[kGameObjectClassOdfNameMax + 1] = {};
+            if (TryGetCraftOdfName(producer, odf, sizeof(odf)) && odf[0])
+            {
+                TableShared lock;
+                for (size_t i = 0; i < g_LabelCount; ++i)
+                    if (_stricmp(g_Labels[i].odf, odf) == 0)
+                        return g_Labels[i];
+            }
+            return GenericLabel();
+        }
+
+        // Backing-panel half width: the measured text when the frame offers a
+        // sane measure, else the per-glyph estimate.
+        int LabelPanelHalfWidth(const HudGaugeOverlay::Frame& frame, const LabelEntry& label) noexcept
+        {
+            float w = 0.0f, h = 0.0f;
+            if (frame.measure && frame.style)
+            {
+                __try
+                {
+                    frame.measure(frame.style, label.text, &w, &h);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    w = 0.0f;
+                }
+            }
+            if (std::isfinite(w) && w > 0.0f && w < 400.0f)
+                return static_cast<int>(w * 0.5f) + 6;
+            return Policy::LabelHalfWidth(label.length);
+        }
+
         // Shown only while a rallied producer is selected (BZCC behaviour).
-        // With a 3D beacon on the rally the square is left out; the dotted
-        // line and the "Rally" label stay, so the beacon reads as this
-        // producer's rally rather than a stock nav.
+        // With a 3D beacon on the rally the square is left out; the "Rally"
+        // label stays, so the beacon reads as this producer's rally rather
+        // than a stock nav.
         // Reads only: the camera record, the selection and the table.
         bool PaintRally(const HudGaugeOverlay::Frame& frame) noexcept
         {
@@ -1068,23 +1227,7 @@ namespace BZROpenShim::Hooks
                 if (!Policy::ProjectToScreen(cam, rally, rx, ry))
                     return; // behind the camera
 
-                float origin[3] = {};
-                float px = 0.0f, py = 0.0f;
-                if (TryGetGameObjectWorldPosition(producer, origin) &&
-                    Policy::ProjectToScreen(cam, origin, px, py))
-                {
-                    float dots[kMaxDots][2];
-                    const size_t n = Policy::LineDots(px, py, rx, ry, kDotSpacing, kMaxDots, dots);
-                    for (size_t i = 0; i < n && ok; ++i)
-                    {
-                        if (!Policy::OnScreen(dots[i][0], dots[i][1], frame.viewW, frame.viewH))
-                            continue;
-                        const int x = static_cast<int>(dots[i][0]);
-                        const int y = static_cast<int>(dots[i][1]);
-                        ok = SafeFill(frame, x - kDotHalf, y - kDotHalf, x + kDotHalf, y + kDotHalf, kDotArgb);
-                    }
-                }
-                if (!ok || !Policy::OnScreen(rx, ry, frame.viewW, frame.viewH))
+                if (!Policy::OnScreen(rx, ry, frame.viewW, frame.viewH))
                     return;
                 const int x = static_cast<int>(rx);
                 const int y = static_cast<int>(ry);
@@ -1094,16 +1237,73 @@ namespace BZROpenShim::Hooks
                 if (!ok)
                     return;
                 const int textY = y + kMarkerHalf + 2;
-                ok = HudGaugeOverlay::DrawPanelText(frame, x - 22, textY - 1, x + 22, textY + 13,
-                                                    kMarkerPanelArgb, x, textY, kMarkerText, kMarkerArgb, 1);
+                const LabelEntry label = LabelFor(producer);
+                const int half = LabelPanelHalfWidth(frame, label);
+                ok = HudGaugeOverlay::DrawPanelText(frame, x - half, textY - 1, x + half, textY + 13,
+                                                    kMarkerPanelArgb, x, textY, label.text, kMarkerArgb, 1);
             });
             return ok;
         }
 
+        // ---- the SPACE row label -------------------------------------------
+        // ControlPanel::Render localizes the SPACE row label with
+        // Localize("names", table[cmd * 2]) (FUN_004a08e0.c line 604). That
+        // one call site is redirected (CommandMenuSpaceLabelLocalizeCall), so
+        // while set mode is armed for the current selection (the state in
+        // which the confirm sets the rally, ArmedAndMatching) "Go To" reads
+        // "Rally"; every other key, and every other moment, goes to the
+        // original. No bind: stock "Go To".
+
+        using FnLocalize = const char*(__cdecl*)(const char* section, const char* key);
+        FnLocalize g_OrigSpaceLocalize = nullptr;
+
+        const char* __cdecl SpaceRowLocalize(const char* section, const char* key)
+        {
+            if (Policy::SpaceRowLabelOverride(ArmedAndMatching(), key))
+                return Policy::kSpaceRowArmedLabel;
+            return g_OrigSpaceLocalize(section, key);
+        }
+
+        // Patch thread, beside InstallPanelRow. Optional: the label stays stock
+        // when the row does not bind or the patch is refused.
+        void InstallSpaceLabel()
+        {
+            const uint32_t site = HookEngine::EngineAddress("CommandMenuSpaceLabelLocalizeCall");
+            if (site == 0)
+            {
+                Log(L"[RALLY] SPACE label call site does not bind; the SPACE row keeps Go To\n");
+                return;
+            }
+            uint8_t original[5] = {};
+            std::memcpy(original, reinterpret_cast<const void*>(static_cast<uintptr_t>(site)), sizeof(original));
+            int32_t origRel = 0;
+            std::memcpy(&origRel, original + 1, sizeof(origRel));
+            g_OrigSpaceLocalize =
+                reinterpret_cast<FnLocalize>(static_cast<uintptr_t>(site + 5 + static_cast<uint32_t>(origRel)));
+
+            HookEngine::PatchDef patch;
+            patch.address = site;
+            patch.type = HookEngine::PatchType::REL32;
+            patch.name = "ControlPanel::Render/SPACE label (rally)";
+            patch.verified = true;
+            patch.expected_original.assign(original, original + sizeof(original));
+            const int32_t rel = static_cast<int32_t>(reinterpret_cast<uintptr_t>(&SpaceRowLocalize)) -
+                                static_cast<int32_t>(site + 5);
+            patch.payload.assign(5, 0);
+            patch.payload[0] = 0xE8;
+            std::memcpy(patch.payload.data() + 1, &rel, sizeof(rel));
+            if (HookEngine::ApplyPatch(patch))
+                Log(L"[RALLY] SPACE row reads Rally while set mode is armed\n");
+            else
+                Log(L"[RALLY] SPACE label patch refused; the SPACE row keeps Go To\n");
+        }
+
         // ---- the command-panel row -----------------------------------------
-        // A 14th row under the stock TAB row while a Recycler/Factory is
-        // selected: a key box reading V and "Rally Point" ("Cancel Rally"
-        // while set mode is armed), drawn with the stock row calls of
+        // A V key and "Rally" ("Cancel" while set mode is armed for the
+        // selection) while a Recycler/Factory is selected, on the
+        // TAB row's line right-aligned to the scrap-cost column, or under the
+        // menu underlay when the TAB label is too long to leave room
+        // (Policy::ChoosePanelRowLayout). Drawn with the stock row calls of
         // ControlPanel::Render (FUN_004a08e0.c lines 698-711). Display only:
         // the engine hit-tests rows 0-12 alone. Evidence:
         // Docs/PRODUCER_RALLY_POINTS.md.
@@ -1120,9 +1320,33 @@ namespace BZROpenShim::Hooks
         // CommandMenuRowAnchors rows: 11 ALT, 12 TAB ({x, y} ints).
         constexpr size_t kAltAnchorOffset = 11 * 8;
         constexpr size_t kTabAnchorOffset = 12 * 8;
+        // CommandMenuRowRects row 12 .right ({left, top, right, bottom}).
+        constexpr size_t kTabRectRightOffset = 12 * 16 + 8;
+        // CommandUI bounds {left, top, right, bottom} (FUN_0049f9e0.c line 101).
+        constexpr size_t kBoundsTopOffset = 4;
+        // HudSpriteMaterialTable record stride (FUN_0068c560.c line 50).
+        constexpr size_t kSpriteRecordStride = 0x24;
         // The stock key sprite flags (right-align x, centre y, colour mode 1).
         constexpr uint32_t kKeySpriteFlags = 0x60001;
         constexpr char kKeyLetter[] = "V";
+        // The drawn cap: the stock key sheet's caps are opaque white with a
+        // black glyph (BZ_ASSETS sprite_n). Colours are ARGB, as
+        // HudColorWhite/HudColorBlue hold them.
+        constexpr uint32_t kKeyCapArgb = 0xFFFFFFFFu;
+        constexpr uint32_t kKeyGlyphArgb = 0xFF000000u;
+        // HudSpriteZ step that puts a fill behind the text drawn on it, as
+        // the stock text call does around its own background fill.
+        constexpr float kKeyCapZStep = 0.01f;
+        // The stock TAB label key (PTR_s_Cancel_008e7bec, FUN_004a08e0.c line
+        // 707) and a two-digit cost ("%02ld", line 1430).
+        constexpr char kTabLabelKey[] = "Cancel";
+        // Two digits: no stock ODF costs over 99, and a wider cost would run
+        // into the stock "P" at right - scaleX * 6 (lines 1464-1480) anyway.
+        constexpr char kCostSample[] = "00";
+        // A mod's key_V sprite wins; otherwise the cap is drawn at key_0's
+        // size (the stock single-character cap).
+        constexpr char kKeyVSpriteName[] = "key_V";
+        constexpr char kKeyCapSizeSprite[] = "key_0";
 
         uint32_t g_PanelPaneAddr = 0;      // HudPaneBuffer
         uint32_t g_PanelFontAddr = 0;      // UiFontContext
@@ -1137,6 +1361,14 @@ namespace BZROpenShim::Hooks
         uint32_t g_PanelSpriteAddr = 0;    // HudFeedbackSprite
         uint32_t g_PanelFillAddr = 0;      // HudFillRect
         uint32_t g_PanelScaleAddr = 0;     // HudFeedbackScale
+        uint32_t g_PanelRowRectsAddr = 0;  // CommandMenuRowRects
+        uint32_t g_PanelBoundsAddr = 0;    // CommandUiBoundsLeft
+        uint32_t g_PanelUnderlayIdAddr = 0; // CommandUiUnderlaySpriteId
+        uint32_t g_PanelViewportWAddr = 0; // HudViewportWidth
+        uint32_t g_PanelViewportHAddr = 0; // HudViewportHeight
+        uint32_t g_SpriteMaterialsAddr = 0; // HudSpriteMaterialTable
+        uint32_t g_SpriteZAddr = 0;        // HudSpriteZ
+        uint32_t g_UiLocalizeAddr = 0;     // UiLocalize, optional (TAB width)
         // Set once the rows bind (patch thread); the seam is registered from
         // the game thread the first time the feature is active, so with
         // rally off the stock render slot is never touched.
@@ -1149,10 +1381,11 @@ namespace BZROpenShim::Hooks
         bool g_KeySpritesResolved = false;
         ULONGLONG g_KeySpriteLastTry = 0;
         bool g_KeySpriteMissLogged = false;
-        int g_KeyVSprite = 0;   // a mod's key_V sprite, else 0
-        int g_KeyBoxW = 0;      // key_TAB atlas size, for our own box
+        int g_KeyVSprite = 0;   // a usable key_V sprite, else 0
+        int g_KeyBoxW = 0;      // the key's atlas size (key_V, else key_0)
         int g_KeyBoxH = 0;
         bool g_PanelRowFaultLogged = false;
+        Policy::PanelRowPlacement g_LastPlacement = Policy::PanelRowPlacement::Hidden;
 
         struct PanelRowInputs
         {
@@ -1164,6 +1397,11 @@ namespace BZROpenShim::Hooks
             int tabY = 0;
             int altY = 0;
             int inset = 0;
+            int rowRight = 0;
+            int boundsTop = 0;
+            int underlaySprite = 0;
+            int viewportW = 0;
+            int viewportH = 0;
             void* pane = nullptr;
             void* font = nullptr;
             uint32_t colour = 0;
@@ -1181,6 +1419,11 @@ namespace BZROpenShim::Hooks
                 in.tabY = *reinterpret_cast<const int*>(g_PanelAnchorsAddr + kTabAnchorOffset + 4);
                 in.altY = *reinterpret_cast<const int*>(g_PanelAnchorsAddr + kAltAnchorOffset + 4);
                 in.inset = *reinterpret_cast<const int*>(g_PanelKeyInsetAddr);
+                in.rowRight = *reinterpret_cast<const int*>(g_PanelRowRectsAddr + kTabRectRightOffset);
+                in.boundsTop = *reinterpret_cast<const int*>(g_PanelBoundsAddr + kBoundsTopOffset);
+                in.underlaySprite = *reinterpret_cast<const int*>(g_PanelUnderlayIdAddr);
+                in.viewportW = *reinterpret_cast<const int*>(g_PanelViewportWAddr);
+                in.viewportH = *reinterpret_cast<const int*>(g_PanelViewportHAddr);
                 in.pane = *reinterpret_cast<void* const*>(g_PanelPaneAddr);
                 in.font = *reinterpret_cast<void* const*>(g_PanelFontAddr);
                 in.colour = *reinterpret_cast<const uint32_t*>(g_PanelColourAddr);
@@ -1206,8 +1449,27 @@ namespace BZROpenShim::Hooks
             }
         }
 
-        // A mod's key_V wins; otherwise our box takes key_TAB's size. Cached
-        // once either is found; a miss retries at most once a second.
+        // A sprite row whose material did not resolve keeps a null MaterialPtr
+        // (HudSpriteMaterialTable); what the draw does with one is unverified,
+        // so such a row is never drawn.
+        bool SpriteMaterialResolved(int id)
+        {
+            if (id <= 0 || g_SpriteMaterialsAddr == 0)
+                return false;
+            __try
+            {
+                return *reinterpret_cast<const uint32_t*>(g_SpriteMaterialsAddr +
+                                                          static_cast<uint32_t>(id) * kSpriteRecordStride) != 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // A mod's key_V sprite wins when its row and material resolved;
+        // otherwise the cap is drawn at key_0's size. Cached once either is
+        // found; a miss retries at most once a second.
         void ResolveKeySprites()
         {
             if (g_KeySpritesResolved)
@@ -1216,39 +1478,117 @@ namespace BZROpenShim::Hooks
             if (g_KeySpriteLastTry != 0 && now - g_KeySpriteLastTry < kKeySpriteRetryMs)
                 return;
             g_KeySpriteLastTry = now;
-            g_KeyVSprite = SafeSpriteLookup("key_V");
-            if (g_KeyVSprite > 0)
+            const int id = SafeSpriteLookup(kKeyVSpriteName);
+            HudSpriteRectRecord rec = {};
+            if (id > 0 && SpriteMaterialResolved(id) && TryGetHudSpriteCurrentRecord(id, rec) && rec.w > 0 &&
+                rec.h > 0)
             {
                 g_KeySpritesResolved = true;
-                Log(L"[RALLY] command panel row uses the key_V sprite (id %d)\n", g_KeyVSprite);
+                g_KeyVSprite = id;
+                g_KeyBoxW = rec.w;
+                g_KeyBoxH = rec.h;
+                Log(L"[RALLY] command panel row uses the key_V sprite (id %d, %dx%d)\n", id, g_KeyBoxW, g_KeyBoxH);
                 return;
             }
+            if (id > 0 && !g_KeySpriteMissLogged)
+                Log(L"[RALLY] key_V sprite (id %d) has no material or size; not drawn\n", id);
             g_KeyVSprite = 0;
-            HudSpriteRectRecord tab = {};
-            const int tabId = SafeSpriteLookup("key_TAB");
-            if (tabId > 0 && TryGetHudSpriteCurrentRecord(tabId, tab) && tab.w > 0 && tab.h > 0)
+            HudSpriteRectRecord cap = {};
+            const int capId = SafeSpriteLookup(kKeyCapSizeSprite);
+            if (capId > 0 && TryGetHudSpriteCurrentRecord(capId, cap) && cap.w > 0 && cap.h > 0)
             {
                 g_KeySpritesResolved = true;
-                g_KeyBoxW = tab.w;
-                g_KeyBoxH = tab.h;
-                Log(L"[RALLY] command panel row draws its own key box (key_TAB size %dx%d)\n", g_KeyBoxW,
-                    g_KeyBoxH);
+                g_KeyBoxW = cap.w;
+                g_KeyBoxH = cap.h;
+                Log(L"[RALLY] command panel row draws its own key cap (key_0 size %dx%d)\n", g_KeyBoxW, g_KeyBoxH);
                 return;
             }
             if (!g_KeySpriteMissLogged)
             {
                 g_KeySpriteMissLogged = true;
-                Log(L"[RALLY] no key_V sprite and key_TAB size unreadable (id %d); panel row hidden, retrying\n",
-                    tabId);
+                Log(L"[RALLY] no key_V sprite and key_0 size unreadable (id %d); panel row hidden, retrying\n",
+                    capId);
             }
         }
 
-        bool DrawPanelRowSeh(const PanelRowInputs& in, int x, int y, const char* label)
+        bool ReadUiScale(float& sx, float& sy)
+        {
+            __try
+            {
+                const uint64_t scale = reinterpret_cast<FnUiScale>(g_PanelScaleAddr)();
+                const uint32_t sxBits = static_cast<uint32_t>(scale);
+                const uint32_t syBits = static_cast<uint32_t>(scale >> 32);
+                std::memcpy(&sx, &sxBits, sizeof(sx));
+                std::memcpy(&sy, &syBits, sizeof(sy));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return std::isfinite(sx) && std::isfinite(sy) && sx > 0.0f && sy > 0.0f;
+        }
+
+        // The text widths the layout needs, with the stock font calls. The row
+        // label is the wider of its two forms (Policy::PanelRowLabel), so the
+        // placement does not change when set mode arms. The TAB label is
+        // measured as the engine localizes it (UiLocalize); without that row
+        // the width is unknown and the layout takes the safe place under the
+        // underlay.
+        bool MeasurePanelRowSeh(const PanelRowInputs& in, Policy::PanelRowLayoutInput& layout)
+        {
+            const auto measure = reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr);
+            __try
+            {
+                float w = 0.0f, h = 0.0f;
+                measure(in.font, Policy::PanelRowLabel(false), &w, &h);
+                float armedW = 0.0f;
+                h = 0.0f;
+                measure(in.font, Policy::PanelRowLabel(true), &armedW, &h);
+                layout.labelW = armedW > w ? armedW : w;
+                layout.labelH = reinterpret_cast<FnTextHeight>(g_PanelTextHeightAddr)(in.font);
+                w = h = 0.0f;
+                measure(in.font, kCostSample, &w, &h);
+                layout.costW = w;
+                layout.cancelKnown = false;
+                if (g_UiLocalizeAddr)
+                {
+                    const char* tab = reinterpret_cast<FnLocalize>(g_UiLocalizeAddr)("names", kTabLabelKey);
+                    if (tab)
+                    {
+                        w = h = 0.0f;
+                        measure(in.font, tab, &w, &h);
+                        layout.cancelW = w;
+                        layout.cancelKnown = true;
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        // The key goes where the stock rows put theirs: right-aligned at
+        // anchor x - CommandMenuKeyInset, centred on the row y (the stock
+        // call passes flags 0x60001, FUN_004a08e0.c lines 698-701), and the
+        // label at anchor x, y - height / 2 (lines 707-712).
+        bool DrawPanelRowSeh(const PanelRowInputs& in, int x, int y, float sx, float sy, const char* label)
         {
             const auto fontDraw = reinterpret_cast<FnFontDraw>(g_PanelFontDrawAddr);
             const auto textHeight = reinterpret_cast<FnTextHeight>(g_PanelTextHeightAddr);
+            float* const spriteZ = reinterpret_cast<float*>(g_SpriteZAddr);
+            uint32_t* const fontColour = reinterpret_cast<uint32_t*>(in.font);
+            float savedZ = 0.0f;
+            bool zRaised = false;
+            uint32_t savedColour = 0;
+            bool colourSaved = false;
             __try
             {
+                // FUN_00689950: the font's first dword is its colour. Saved
+                // here and restored on both paths.
+                savedColour = *fontColour;
+                colourSaved = true;
                 if (g_KeyVSprite > 0)
                 {
                     reinterpret_cast<FnSpriteDraw>(g_PanelSpriteAddr)(in.pane, g_KeyVSprite, x - in.inset, y,
@@ -1256,39 +1596,72 @@ namespace BZROpenShim::Hooks
                 }
                 else
                 {
-                    const uint64_t scale = reinterpret_cast<FnUiScale>(g_PanelScaleAddr)();
-                    float sx = 1.0f, sy = 1.0f;
-                    const uint32_t sxBits = static_cast<uint32_t>(scale);
-                    const uint32_t syBits = static_cast<uint32_t>(scale >> 32);
-                    std::memcpy(&sx, &sxBits, sizeof(sx));
-                    std::memcpy(&sy, &syBits, sizeof(sy));
-                    // No usable scale this frame: label only.
-                    const bool scaleOk = std::isfinite(sx) && std::isfinite(sy) && sx > 0.0f && sy > 0.0f;
                     Policy::PixelRect box;
-                    if (scaleOk && Policy::KeyBoxRect(x, y, in.inset, g_KeyBoxW, g_KeyBoxH, sx, sy, box))
+                    Policy::FillRect cap[2];
+                    const int bands = Policy::KeyBoxRect(x, y, in.inset, g_KeyBoxW, g_KeyBoxH, sx, sy, box)
+                                          ? Policy::KeyCapFillRects(box, sx, cap)
+                                          : 0;
+                    if (bands > 0)
                     {
+                        // The cap one depth step behind the glyph drawn on it.
                         const auto fill = reinterpret_cast<FnFillRect>(g_PanelFillAddr);
-                        const int t = sx >= 2.0f ? static_cast<int>(sx) : 1;
-                        fill(in.pane, box.left, box.top, box.right, box.top + t, in.colour, 0);
-                        fill(in.pane, box.left, box.bottom - t, box.right, box.bottom, in.colour, 0);
-                        fill(in.pane, box.left, box.top, box.left + t, box.bottom, in.colour, 0);
-                        fill(in.pane, box.right - t, box.top, box.right, box.bottom, in.colour, 0);
+                        savedZ = *spriteZ;
+                        *spriteZ = savedZ + kKeyCapZStep;
+                        zRaised = true;
+                        for (int i = 0; i < bands; ++i)
+                            fill(in.pane, cap[i].x1, cap[i].y1, cap[i].x2, cap[i].y2, kKeyCapArgb, 0);
+                        *spriteZ = savedZ;
+                        zRaised = false;
                         float w = 0.0f, h = 0.0f;
                         reinterpret_cast<FnTextMeasure>(g_PanelTextMeasureAddr)(in.font, kKeyLetter, &w, &h);
-                        // FUN_00689950: the font's first dword is its colour.
-                        *reinterpret_cast<uint32_t*>(in.font) = in.colour;
+                        *fontColour = kKeyGlyphArgb;
                         const int cx = (box.left + box.right) / 2 - static_cast<int>(w / 2.0f);
                         const int cy = (box.top + box.bottom) / 2;
                         fontDraw(in.font, in.pane, cx, Policy::CenteredTextY(cy, textHeight(in.font)), kKeyLetter);
                     }
                 }
-                *reinterpret_cast<uint32_t*>(in.font) = in.colour;
+                *fontColour = in.colour;
                 fontDraw(in.font, in.pane, x, Policy::CenteredTextY(y, textHeight(in.font)), label);
+                *fontColour = savedColour;
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+                __try
+                {
+                    if (zRaised)
+                        *spriteZ = savedZ;
+                    if (colourSaved)
+                        *fontColour = savedColour;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
                 return false;
+            }
+        }
+
+        const wchar_t* PlacementName(Policy::PanelRowPlacement p)
+        {
+            switch (p)
+            {
+            case Policy::PanelRowPlacement::TabLine:
+                return L"on the TAB line";
+            case Policy::PanelRowPlacement::BelowUnderlay:
+                return L"under the menu underlay (TAB label too long)";
+            case Policy::PanelRowPlacement::BelowTab:
+                return L"one row under TAB (no underlay at this width)";
+            default:
+                return L"hidden (layout unreadable or off screen)";
+            }
+        }
+
+        void PanelRowFault()
+        {
+            if (!g_PanelRowFaultLogged)
+            {
+                g_PanelRowFaultLogged = true;
+                Log(L"[RALLY] command panel row draw faulted\n");
             }
         }
 
@@ -1321,18 +1694,47 @@ namespace BZROpenShim::Hooks
             gate.eligibleProducer = !EditorActive() && EligibleProducerSelected();
             if (!Policy::PanelRowVisible(gate))
                 return;
-            int x = 0, y = 0;
-            if (!Policy::PanelRowAnchor(in.tabX, in.tabY, in.altY, x, y))
-                return;
             ResolveKeySprites();
-            if (g_KeyVSprite <= 0 && (g_KeyBoxW <= 0 || g_KeyBoxH <= 0))
+            if (g_KeyBoxW <= 0 || g_KeyBoxH <= 0)
                 return;
-            const char* label = Policy::PanelRowLabel(g_Armed.load(std::memory_order_acquire));
-            if (!DrawPanelRowSeh(in, x, y, label) && !g_PanelRowFaultLogged)
+            float sx = 0.0f, sy = 0.0f;
+            if (!ReadUiScale(sx, sy))
+                return;
+
+            Policy::PanelRowLayoutInput layout;
+            layout.tabX = in.tabX;
+            layout.tabY = in.tabY;
+            layout.altY = in.altY;
+            layout.rowRight = in.rowRight;
+            layout.scaleX = sx;
+            layout.scaleY = sy;
+            layout.inset = in.inset;
+            layout.keyW = g_KeyBoxW;
+            layout.keyH = g_KeyBoxH;
+            layout.viewportW = in.viewportW;
+            layout.viewportH = in.viewportH;
+            // The underlay sprite FUN_004a08e0.c lines 360-365 picked this
+            // frame, sized as FUN_0068f0c0 reads it (record +0xE).
+            HudSpriteRectRecord underlay = {};
+            layout.underlayKnown = in.underlaySprite > 0 && TryGetHudSpriteCurrentRecord(in.underlaySprite, underlay);
+            layout.underlayTop = in.boundsTop;
+            layout.underlaySpriteH = underlay.h;
+            if (!MeasurePanelRowSeh(in, layout))
             {
-                g_PanelRowFaultLogged = true;
-                Log(L"[RALLY] command panel row draw faulted\n");
+                PanelRowFault();
+                return;
             }
+            const Policy::PanelRowLayout placed = Policy::ChoosePanelRowLayout(layout);
+            if (placed.placement != g_LastPlacement)
+            {
+                g_LastPlacement = placed.placement;
+                Log(L"[RALLY] command panel row %ls\n", PlacementName(placed.placement));
+            }
+            if (placed.placement == Policy::PanelRowPlacement::Hidden)
+                return;
+            if (!DrawPanelRowSeh(in, placed.labelX, placed.rowY, sx, sy,
+                                 Policy::PanelRowLabel(ArmedAndMatching())))
+                PanelRowFault();
         }
 
         // Patch thread, after the hooks are in. Optional like the marker.
@@ -1352,11 +1754,26 @@ namespace BZROpenShim::Hooks
                 { "HudFeedbackSprite", &g_PanelSpriteAddr },
                 { "HudFillRect", &g_PanelFillAddr },
                 { "HudFeedbackScale", &g_PanelScaleAddr },
+                { "CommandMenuRowRects", &g_PanelRowRectsAddr },
+                { "CommandUiBoundsLeft", &g_PanelBoundsAddr },
+                { "CommandUiUnderlaySpriteId", &g_PanelUnderlayIdAddr },
+                { "HudViewportWidth", &g_PanelViewportWAddr },
+                { "HudViewportHeight", &g_PanelViewportHAddr },
+                { "HudSpriteMaterialTable", &g_SpriteMaterialsAddr },
+                { "HudSpriteZ", &g_SpriteZAddr },
             };
             if (!HookEngine::BindEngineRows("Producer rally panel row", rows) || !EngineGlobals::UserObjectSlot())
             {
                 Log(L"[RALLY] command panel rows did not bind; panel row hidden\n");
                 return;
+            }
+            // Optional on its own: without it only the TAB label width is
+            // unknown, and the row goes under the underlay.
+            const HookEngine::EngineRow localizeRow[] = { { "UiLocalize", &g_UiLocalizeAddr } };
+            if (!HookEngine::BindEngineRows("Producer rally TAB label measure", localizeRow))
+            {
+                g_UiLocalizeAddr = 0;
+                Log(L"[RALLY] UiLocalize did not bind; the panel row goes under the underlay\n");
             }
             g_PanelRowPending.store(true, std::memory_order_release);
         }
@@ -1623,27 +2040,32 @@ namespace BZROpenShim::Hooks
         {
             namespace RB = BZROpenShim::RallyBeacon;
             std::error_code ec;
-            const NativeChunks::Piece piece = NativeChunks::RallyBeaconMesh();
-            const auto meshPath = cacheRoot / std::filesystem::path(kRallyBeaconResource);
-            bool current = false;
-            if (std::filesystem::file_size(meshPath, ec) == piece.mesh.size() && !ec)
+            // Recycler (green lamp) and Factory (amber lamp) variants.
+            for (const bool amberLamp : { false, true })
             {
-                std::ifstream existing(meshPath, std::ios::binary);
-                std::vector<uint8_t> bytes(piece.mesh.size());
-                current = existing.read(reinterpret_cast<char*>(bytes.data()),
-                                        static_cast<std::streamsize>(bytes.size())) &&
-                          bytes == piece.mesh;
-            }
-            ec.clear();
-            if (!current && !piece.mesh.empty())
-            {
-                std::filesystem::create_directories(meshPath.parent_path(), ec);
-                std::ofstream output(meshPath, std::ios::binary | std::ios::trunc);
-                output.write(reinterpret_cast<const char*>(piece.mesh.data()),
-                             static_cast<std::streamsize>(piece.mesh.size()));
-                output.close();
-                Log(L"[RALLY] wrote beacon mesh %hs triangles=%u ok=%u\n", meshPath.string().c_str(),
-                    piece.triangles, output ? 1u : 0u);
+                const NativeChunks::Piece piece = NativeChunks::RallyBeaconMesh(amberLamp);
+                const auto meshPath = cacheRoot / std::filesystem::path(
+                    amberLamp ? kRallyBeaconFactoryResource : kRallyBeaconResource);
+                bool current = false;
+                if (std::filesystem::file_size(meshPath, ec) == piece.mesh.size() && !ec)
+                {
+                    std::ifstream existing(meshPath, std::ios::binary);
+                    std::vector<uint8_t> bytes(piece.mesh.size());
+                    current = existing.read(reinterpret_cast<char*>(bytes.data()),
+                                            static_cast<std::streamsize>(bytes.size())) &&
+                              bytes == piece.mesh;
+                }
+                ec.clear();
+                if (!current && !piece.mesh.empty())
+                {
+                    std::filesystem::create_directories(meshPath.parent_path(), ec);
+                    std::ofstream output(meshPath, std::ios::binary | std::ios::trunc);
+                    output.write(reinterpret_cast<const char*>(piece.mesh.data()),
+                                 static_cast<std::streamsize>(piece.mesh.size()));
+                    output.close();
+                    Log(L"[RALLY] wrote beacon mesh %hs triangles=%u ok=%u\n", meshPath.string().c_str(),
+                        piece.triangles, output ? 1u : 0u);
+                }
             }
 
             const auto ours = cacheRoot / RB::kMaterialFile;
@@ -1809,6 +2231,7 @@ namespace BZROpenShim::Hooks
         {
             InstallMarker();
             InstallPanelRow();
+            InstallSpaceLabel();
         }
         RefreshProducerRallyPointsState();
     }

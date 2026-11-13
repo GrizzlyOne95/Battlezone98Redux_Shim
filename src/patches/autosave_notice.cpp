@@ -1,5 +1,5 @@
 // autosave_notice.cpp
-// BZR Open Shim - "Game autosaved." HUD notice
+// BZR Open Shim - "Game autosaved." / "Game quicksaved." HUD notice
 //
 // Copyright (C) 2025-2026 BZR Open Shim contributors
 // SPDX-License-Identifier: MIT
@@ -44,7 +44,7 @@ namespace BZROpenShim::AutoSaveNotice
     namespace
     {
         constexpr ULONGLONG kShowMs = 3000;
-        constexpr char kText[] = "Game autosaved.";
+        constexpr char kAutoSaveText[] = "Game autosaved.";
         // ARGB: black at alpha 0.55, and the old overlay's (0.82, 1, 0.82).
         constexpr uint32_t kPanelColor = 0x8C000000u;
         constexpr uint32_t kTextColor = 0xFFD1FFD1u;
@@ -54,12 +54,15 @@ namespace BZROpenShim::AutoSaveNotice
         // the first frame that draws it, so a pause or hidden HUD does not eat it.
         constexpr ULONGLONG kPending = 1;
         std::atomic<ULONGLONG> g_expiresAt{0};
+        // Static-lifetime string set by Show(); read by the painter.
+        std::atomic<const char*> g_text{kAutoSaveText};
 
-        bool MeasureText(const HudGaugeOverlay::Frame& frame, float& textW, float& textH) noexcept
+        bool MeasureText(const HudGaugeOverlay::Frame& frame, const char* text, float& textW,
+                         float& textH) noexcept
         {
             __try
             {
-                frame.measure(frame.style, kText, &textW, &textH);
+                frame.measure(frame.style, text, &textW, &textH);
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
@@ -85,8 +88,9 @@ namespace BZROpenShim::AutoSaveNotice
                 return true;
             }
 
+            const char* const text = g_text.load(std::memory_order_relaxed);
             float textW = 0.0f, textH = 0.0f;
-            if (!MeasureText(frame, textW, textH))
+            if (!MeasureText(frame, text, textW, textH))
             {
                 g_expiresAt.store(0, std::memory_order_relaxed);
                 return false;
@@ -96,7 +100,7 @@ namespace BZROpenShim::AutoSaveNotice
                 return true;
             if (!HudGaugeOverlay::DrawPanelText(frame, layout.x1, layout.y1, layout.x2, layout.y2,
                                                 kPanelColor, layout.textCentreX, layout.textTop,
-                                                kText, kTextColor, 1))
+                                                text, kTextColor, 1))
             {
                 g_expiresAt.store(0, std::memory_order_relaxed);
                 return false;
@@ -107,6 +111,11 @@ namespace BZROpenShim::AutoSaveNotice
 
     void Show() noexcept
     {
+        Show(kAutoSaveText);
+    }
+
+    void Show(const char* text) noexcept
+    {
         if (g_state == 0)
         {
             g_state = HudGaugeOverlay::Ensure() ? 1 : -1;
@@ -116,7 +125,10 @@ namespace BZROpenShim::AutoSaveNotice
                 LogShimA(LogLevel::Info, "autosave", "HUD notice unavailable; saves are unaffected");
         }
         if (g_state > 0)
+        {
+            g_text.store(text && *text ? text : kAutoSaveText, std::memory_order_relaxed);
             g_expiresAt.store(kPending, std::memory_order_relaxed);
+        }
     }
 
     void Hide() noexcept

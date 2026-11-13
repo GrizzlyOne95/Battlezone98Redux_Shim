@@ -863,6 +863,7 @@ namespace BZROpenShim
         extern int g_EngineFlamePrimaryRedTexture;
         extern void* g_EngineFlameSecondaryManager;
         extern bool g_EngineFlameVariantsInitAttempted;
+        extern bool g_EngineFlameSecondaryVariantsCloned;
         extern bool g_EngineFlameVariantsInitialized;
         extern bool g_EngineFlameVtableHooksInstalled;
         extern bool g_JetFlamesConfigInitialized;

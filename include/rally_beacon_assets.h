@@ -20,10 +20,15 @@ namespace BZROpenShim::RallyBeacon
     inline constexpr const char* kLampDiffuse = "openshim_rally_beacon_lamp_d.tga";
     inline constexpr const char* kLampSpecular = "openshim_rally_beacon_lamp_s.tga";
     inline constexpr const char* kLampEmissive = "openshim_rally_beacon_lamp_e.tga";
+    // Factory variant: amber lamp, same frame and specular.
+    inline constexpr const char* kLampAmberMaterial = "openshim_rally_beacon_lamp_fac";
+    inline constexpr const char* kLampAmberDiffuse = "openshim_rally_beacon_lamp_fac_d.tga";
+    inline constexpr const char* kLampAmberEmissive = "openshim_rally_beacon_lamp_fac_e.tga";
     inline constexpr unsigned kTextureSize = 8;
 
     inline constexpr const char* kTextureFiles[] = {kFrameDiffuse, kFrameSpecular, kLampDiffuse,
-                                                    kLampSpecular, kLampEmissive};
+                                                    kLampSpecular, kLampEmissive,
+                                                    kLampAmberDiffuse, kLampAmberEmissive};
 
     // 8x8, 24-bit top-left TGA. The mesh maps v = y / 6, so a vertical
     // gradient from `bottom` (row 0, ground) to `top` shades the beacon.
@@ -75,6 +80,16 @@ namespace BZROpenShim::RallyBeacon
             const float lo[3] = {0.20f, 1.00f, 0.40f}, hi[3] = {0.20f, 1.00f, 0.40f};
             return Tga(lo, hi);
         }
+        if (file == kLampAmberDiffuse)
+        {
+            const float lo[3] = {0.90f, 0.55f, 0.08f}, hi[3] = {1.00f, 0.72f, 0.20f};
+            return Tga(lo, hi);
+        }
+        if (file == kLampAmberEmissive)
+        {   // amber, same strength as the green lamp's glow
+            const float lo[3] = {1.00f, 0.60f, 0.05f}, hi[3] = {1.00f, 0.60f, 0.05f};
+            return Tga(lo, hi);
+        }
         return {};
     }
 
@@ -87,10 +102,15 @@ namespace BZROpenShim::RallyBeacon
 
     inline std::string MaterialScript()
     {
-        std::string script = std::string(kMarker) + " v1 (generated; do not edit).\n";
+        std::string script = std::string(kMarker) + " v3 (generated; do not edit).\n"
+            // Without this import the script only compiles when it is parsed
+            // after BZBase.material; resource-group init parses an existing
+            // file first and every material fails. Same as the gib scripts.
+            "import * from \"BZBase.material\"\n\n";
         const struct { const char* name; const char* diffuse; const char* specular; const char* emissive; } materials[] = {
             {kFrameMaterial, kFrameDiffuse, kFrameSpecular, "black.dds"},
-            {kLampMaterial, kLampDiffuse, kLampSpecular, kLampEmissive}};
+            {kLampMaterial, kLampDiffuse, kLampSpecular, kLampEmissive},
+            {kLampAmberMaterial, kLampAmberDiffuse, kLampSpecular, kLampAmberEmissive}};
         for (const auto& m : materials)
             script += std::string("material ") + m.name + " : BZBase\n{\n"
                 "    set_texture_alias DiffuseMap " + m.diffuse + "\n"

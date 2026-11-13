@@ -15,7 +15,10 @@ int main(int argc, char** argv)
     const auto script = MaterialScript();
     Check(script.rfind(kMarker, 0) == 0, "material script starts with the generated marker");
     Check(script == MaterialScript(), "material script is deterministic");
-    for (const auto* name : {kFrameMaterial, kLampMaterial})
+    const auto importAt = script.find("import * from \"BZBase.material\"");
+    Check(importAt != std::string::npos && importAt < script.find("material "),
+          "script imports BZBase before the first material (parse-order independent)");
+    for (const auto* name : {kFrameMaterial, kLampMaterial, kLampAmberMaterial})
         Check(script.find(std::string("material ") + name + " : BZBase") != std::string::npos,
               "material names match the mesh submeshes");
     for (const auto* file : kTextureFiles)
@@ -28,6 +31,19 @@ int main(int argc, char** argv)
     const std::string meshData(mesh.mesh.begin(), mesh.mesh.end());
     Check(meshData.find(kFrameMaterial) != std::string::npos && meshData.find(kLampMaterial) != std::string::npos,
           "mesh submesh material names match the script");
+
+    const auto amberMesh = BZROpenShim::NativeChunks::RallyBeaconMesh(true);
+    const std::string amberData(amberMesh.mesh.begin(), amberMesh.mesh.end());
+    Check(amberData.find(kLampAmberMaterial) != std::string::npos &&
+              amberData.find(kFrameMaterial) != std::string::npos,
+          "Factory mesh uses the frame and the amber lamp material");
+    Check(meshData.find(kLampAmberMaterial) == std::string::npos &&
+              amberMesh.triangles == mesh.triangles && amberMesh.mesh.size() > mesh.mesh.size() &&
+              amberMesh.name != mesh.name && amberMesh.mesh == BZROpenShim::NativeChunks::RallyBeaconMesh(true).mesh,
+          "Recycler mesh stays green; the amber one has the same geometry and its own deterministic name");
+    Check(TextureTga(kLampAmberDiffuse) != TextureTga(kLampDiffuse) &&
+              TextureTga(kLampAmberEmissive) != TextureTga(kLampEmissive),
+          "amber lamp textures differ from the green ones");
 
     for (const auto* file : kTextureFiles)
     {

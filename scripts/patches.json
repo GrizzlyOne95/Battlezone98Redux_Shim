@@ -3203,7 +3203,19 @@
       "name": "CommandMenuTextMeasure",
       "address": "0x00689AB0",
       "expected": "55 8B EC 83 EC 24 83 7D 10 00 74 0F 8B 45 10 F3",
-      "identity": "Shared UI font string measure on exact GOG Redux 2.2.301, cdecl (font, text, float* width, float* height); zeroes both outputs, then walks the glyphs (FUN_00689ab0.c). ControlPanel::Render 0x004A08E0 measures the SPACE label with it before drawing (FUN_004a08e0.c lines 605-609). Called by ProducerRallyPoints to centre its key letter."
+      "identity": "Shared UI font string measure on exact GOG Redux 2.2.301, cdecl (font, text, float* width, float* height); zeroes both outputs, then walks the glyphs (FUN_00689ab0.c). ControlPanel::Render 0x004A08E0 measures the SPACE label with it before drawing (FUN_004a08e0.c lines 605-609). Called by ProducerRallyPoints to centre its key letter and to place its row (both row labels, a two-digit cost and the TAB label)."
+    },
+    {
+      "name": "UiLocalize",
+      "address": "0x0081CB40",
+      "expected": "55 8B EC 83 EC 44 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "Localize(section, key) on exact GOG Redux 2.2.301, cdecl, caller pops (add esp,8 after the call at 0x004A26C6), the string returned in EAX (stored by the callers: mov [ebp-0x3c8],eax at 0x004A26C9; the decompile types it void). FUN_0081cb40.c line 40 logs \"Localization system missing string: \" on a miss. ControlPanel::Render localizes the TAB label with it (\"names\", PTR_s_Cancel_008e7bec -> \"Cancel\", FUN_004a08e0.c line 707). ProducerRallyPoints calls it only to measure that label for its row placement; the row falls back to the place under the underlay when this does not bind. Bytes: push ebp / mov ebp,esp / sub esp,0x44 / mov eax,[0x008E7000] (security cookie) / xor eax,ebp / mov [ebp-4],eax, read from the shipped image 2026-11-13."
+    },
+    {
+      "name": "CommandMenuSpaceLabelLocalizeCall",
+      "address": "0x004A207C",
+      "expected": "E8 BF AA 37 00 83 C4 08 89 85 78 FC FF FF",
+      "identity": "ControlPanel::Render 0x004A08E0, SPACE row label: call Localize 0x0081CB40 (\"names\", table[cmd * 2]) with cmd = ControlPanel +0x111C and the table at 0x008E7A18 (FUN_004a08e0.c line 604; mov edx,[ecx+0x111c] at 0x004A2069, mov eax,[edx*8+0x8e7a18] at 0x004A206F, push 0x0087736C \"names\" at 0x004A2077), then add esp,8 and the result stored to [ebp-0x388]. The ALT row reads the same table with a different instruction (mov ecx,[eax*8+0x8e7a18] at 0x004A26B4, line 677), so this site is the SPACE row only. ProducerRallyPoints redirects this one call (REL32) so the label reads \"Rally\" while rally set mode is armed and the key is \"Go To\" (0x00877EAC); every other case calls the original."
     },
     {
       "name": "HudViewportWidth",
@@ -4253,6 +4265,12 @@
       "address": "0x025F8F40",
       "kind": "data",
       "identity": "static HUD sprite rect records, id*0x24 (int16 x,y,w,h; float uv[4]); validated against stock atlas UVs before use"
+    },
+    {
+      "name": "HudSpriteMaterialTable",
+      "address": "0x025F8F38",
+      "kind": "data",
+      "identity": "HUD sprite records, id*0x24, starting 8 bytes before HudSpriteRectTable: +0 is the Ogre MaterialPtr (pRep at +0, use count at +4). The sprite-table parser 0x0068B340 resolves each row's material with Ogre::MaterialManager::getByName (FUN_0068b340.c lines 195-199) and assigns it here (imul ecx,[ebp-0x490],0x24; add ecx,0x25f8f38; call 0x00449910 at 0x0068B823-0x0068B830); the sprite draws 0x0068C560 and 0x0068CA30 index the same base (FUN_0068c560.c line 50, FUN_0068ca30.c line 48). A null pRep means the row's material did not resolve. Read only, by ProducerRallyPoints before it draws a key_V sprite."
     },
     {
       "name": "ViewRecord",

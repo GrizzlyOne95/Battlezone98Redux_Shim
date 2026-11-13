@@ -1341,6 +1341,20 @@ int main(int argc, char **argv)
                 "beacon sits on the ground (min y 0) and is 5.9 m tall");
         Require(bounds[0] < -3.0f && bounds[3] > 3.0f && bounds[2] < -3.0f && bounds[5] > 3.0f,
                 "beacon bounds include the chevron ring");
+        // The Factory variant: same layout and bounds, amber lamp material.
+        const auto amber = RallyBeaconMesh(true);
+        std::vector<Piece> amberPieces;
+        std::string amberError;
+        Require(Extract(amber.mesh, skeleton, amberPieces, amberError) && amberPieces.size() == 1 &&
+                    amberPieces[0].triangles == beacon.triangles && amber.triangles == beacon.triangles,
+                "amber beacon parses with the same submesh layout and triangle count");
+        const std::string amberData(amber.mesh.begin(), amber.mesh.end());
+        Require(amberData.find("openshim_rally_beacon_lamp_fac") != std::string::npos &&
+                    amber.mesh.size() == beacon.mesh.size() + 4 && SkeletonName(amber.mesh).empty(),
+                "amber beacon only renames the lamp material");
+        float amberBounds[7] = {};
+        std::memcpy(amberBounds, amber.mesh.data() + amber.mesh.size() - sizeof(amberBounds), sizeof(amberBounds));
+        Require(std::memcmp(amberBounds, bounds, sizeof(bounds)) == 0, "amber beacon has identical bounds");
     }
     Require(SkeletonName(mesh) == "test.skeleton", "shared geometry skeleton link");
     Require(Extract(mesh, skeleton, pieces, error), "extract rigid bone group");
