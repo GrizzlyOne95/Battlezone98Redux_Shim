@@ -80,6 +80,16 @@ namespace BZROpenShim
         // means the hook must not be written.
         bool InstallPathBlockHook(uint32_t site);
         void* GetPathBlockCellsDetourAddress();
+
+        // ProducerRallyPoints set mode (producer_rally_points.cpp): entry
+        // detours of the ground/object aim GetCommand and
+        // ControlPanel::BroadcastCommand. Index is -1 for any other patch
+        // name. Prepare checks the prologue and builds the trampoline (null:
+        // do not write the hook); Note records that the JMP5 landed. Set mode
+        // is offered only once all three are noted.
+        int ProducerRallyCommandHookIndex(const char* patchName);
+        void* PrepareProducerRallyCommandHook(int index, uint32_t site);
+        void NoteProducerRallyCommandHookInstalled(int index);
     }
     // REL32 target at HoverCraft::UpdateSounds' turbo-stop Sound::Find call.
     // Naked: reads the craft from the caller's frame, cdecl (name, owner) args.

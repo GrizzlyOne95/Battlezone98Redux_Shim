@@ -181,6 +181,8 @@ namespace BZROpenShim
                 EnsureSkinnedGibFleshMaterial(nativeRoot, g_ChunkPayloadResourceDirectories);
                 // ShellCasings' generated mesh and materials, same rules.
                 EnsureShellCasingAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
+                // The producer rally beacon's generated mesh and materials.
+                EnsureRallyBeaconAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
             }
         }
 

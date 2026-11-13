@@ -645,6 +645,15 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Allow explicit player attack orders against team-0 neutral objects. "
       "Diplomacy and autonomous targeting remain stock." },
+    // [Gameplay] like Attack Neutrals, but listed on the Controls page (the
+    // Gameplay page is full) because it is a key. Ships ON: default "On" (0).
+    { "Rally Points", "Gameplay", "ProducerRallyPoints", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "With a Recycler or Factory selected, V enters rally mode: aim like a Go order and "
+      "press the Reticle Command key (Space) to set its rally point; V again cancels, "
+      "Shift+V clears it. The key is rebindable in Input > RTS Actions (Rally Point). New "
+      "units from it drive there; scavengers and constructors do not. Single player only." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalTurbo,
@@ -974,7 +983,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
-    { "AllowNeutralAttackOrders", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },

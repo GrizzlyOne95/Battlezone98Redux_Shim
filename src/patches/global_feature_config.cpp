@@ -486,6 +486,10 @@ namespace BZROpenShim
                 g_AllowNeutralAttackOrders = value;
             }
 
+            // [Gameplay] ProducerRallyPoints; re-read here so the Options row
+            // applies live.
+            ReloadProducerRallyPointsConfig();
+
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;
             if (TryGetUserConfigBool(
                     kUserConfigDiagnosticsSection,
@@ -689,6 +693,10 @@ namespace BZROpenShim
             // deploy/pack-up around it. Revert drops per-process tracks.
             { "TurretAttackOrders", FeatureTier::SinglePlayer,
               &ResetTurretAttackOrders, &RefreshTurretAttackOrdersState },
+            // [Gameplay] ProducerRallyPoints: V/Shift+V rally points for
+            // Recycler/Factory. Revert drops the rally table at mission end.
+            { "ProducerRallyPoints", FeatureTier::SinglePlayer,
+              &ResetProducerRallyPoints, &RefreshProducerRallyPointsState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config

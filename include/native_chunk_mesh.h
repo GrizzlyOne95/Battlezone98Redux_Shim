@@ -140,4 +140,11 @@ unsigned StockFallbackBatchKind(std::string_view resource);
 // and openshim_casing_rim; recessed primer and a real hollow mouth.
 // Deterministic; an out-of-range side count returns an empty piece.
 Piece CasingMesh(unsigned sides);
+// Producer rally beacon (~5.9 m, origin at the base centre, Y up): hex plinth,
+// mast and braces in openshim_rally_beacon_frame; an octahedron lamp and four
+// ground chevrons in openshim_rally_beacon_lamp. position/normal/uv0, closed
+// flat-shaded solids, deterministic. amberLamp = true is the Factory variant:
+// same geometry, the lamp submesh uses openshim_rally_beacon_lamp_fac and the
+// piece is named openshim_rally_beacon_fac.
+Piece RallyBeaconMesh(bool amberLamp = false);
 } // namespace BZROpenShim::NativeChunks

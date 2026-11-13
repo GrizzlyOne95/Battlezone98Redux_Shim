@@ -720,6 +720,10 @@ openshim_add_test(background_run_policy_tests STD 20 SOURCES
     background_run_policy_tests.cpp
 )
 
+openshim_add_test(producer_rally_policy_tests STD 20 SOURCES
+    producer_rally_policy_tests.cpp
+)
+
 openshim_add_test(quicksave_key_policy_tests STD 20 SOURCES
     quicksave_key_policy_tests.cpp
 )
@@ -1119,3 +1123,9 @@ openshim_add_test(steam_launcher_argument_tests STD 17 SOURCES steam_launcher_ar
 
 openshim_add_test(shell_casing_policy_tests STD 20 SOURCES shell_casing_policy_tests.cpp)
 openshim_add_test(shell_casing_finish_tests STD 20 SOURCES shell_casing_finish_tests.cpp)
+openshim_add_test(rally_beacon_assets_tests STD 20 SOURCES
+    rally_beacon_assets_tests.cpp
+    ../src/patches/native_chunk_mesh.cpp
+    ../src/patches/native_chunk_cache.cpp
+    ../src/patches/gib_flesh_texture.cpp
+)

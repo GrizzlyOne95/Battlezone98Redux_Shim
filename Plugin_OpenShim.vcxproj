@@ -158,6 +158,7 @@
     <ClCompile Include="src\patches\ai_nearest_vehicle_lazy.cpp" />
     <ClCompile Include="src\patches\ai_native_orders.cpp" />
     <ClCompile Include="src\patches\turret_attack_orders.cpp" />
+    <ClCompile Include="src\patches\producer_rally_points.cpp" />
     <ClCompile Include="src\patches\ai_odf_tuning.cpp" />
     <ClCompile Include="src\patches\ai_unit_fixes.cpp" />
     <ClCompile Include="src\patches\ai_weapon_mask.cpp" />
@@ -395,6 +396,7 @@
     <ClInclude Include="include\deferred_modable_rebuild.h" />
     <ClInclude Include="include\deferred_modable_policy.h" />
     <ClInclude Include="include\background_run_policy.h" />
+    <ClInclude Include="include\producer_rally_policy.h" />
     <ClInclude Include="include\never_activate_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />
     <ClInclude Include="include\native_hud_layout.h" />
