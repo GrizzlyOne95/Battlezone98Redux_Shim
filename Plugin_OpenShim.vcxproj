@@ -193,6 +193,7 @@
     <ClCompile Include="src\patches\native_chunk_runtime.cpp" />
     <ClCompile Include="src\patches\skinned_gibs.cpp" />
     <ClCompile Include="src\patches\shell_casings.cpp" />
+    <ClCompile Include="src\patches\laser_sight.cpp" />
 
     <ClCompile Include="src\patches\path_block.cpp" />
     <ClCompile Include="src\patches\deferred_modable_rebuild.cpp" />

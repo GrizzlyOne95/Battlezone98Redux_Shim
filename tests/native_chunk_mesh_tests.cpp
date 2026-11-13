@@ -1356,6 +1356,24 @@ int main(int argc, char **argv)
         std::memcpy(amberBounds, amber.mesh.data() + amber.mesh.size() - sizeof(amberBounds), sizeof(amberBounds));
         Require(std::memcmp(amberBounds, bounds, sizeof(bounds)) == 0, "amber beacon has identical bounds");
     }
+    {
+        // LaserSight's generated beam tube.
+        Require(LaserBeamMesh(2).mesh.empty() && LaserBeamMesh(33).mesh.empty(), "invalid beam side counts fail closed");
+        const auto beam = LaserBeamMesh(8);
+        const std::string data(beam.mesh.begin(), beam.mesh.end());
+        Require(beam.mesh == LaserBeamMesh(8).mesh && beam.mesh.size() < 4096, "beam mesh is deterministic and small");
+        Require(data.find("openshim_lasersight_beam") != std::string::npos && SkeletonName(beam.mesh).empty(),
+                "beam uses the generated laser material and no skeleton");
+        Require(beam.triangles == 8u * 2u, "beam is an open tube: two triangles per side");
+        Require(Extract(beam.mesh, skeleton, pieces, error) && pieces.size() == 1 &&
+                    pieces[0].triangles == beam.triangles,
+                "beam mesh reloads through the Ogre mesh parser with every face");
+        float bounds[7] = {};
+        std::memcpy(bounds, beam.mesh.data() + beam.mesh.size() - sizeof(bounds), sizeof(bounds));
+        Require(std::fabs(bounds[2]) < 1e-5f && std::fabs(bounds[5] - 1.0f) < 1e-5f &&
+                    std::fabs(bounds[3] - 1.0f) < 1e-4f && std::fabs(bounds[0] + 1.0f) < 1e-3f,
+                "beam bounds span z 0..1 (muzzle to far end) and radius 1 at the muzzle");
+    }
     Require(SkeletonName(mesh) == "test.skeleton", "shared geometry skeleton link");
     Require(Extract(mesh, skeleton, pieces, error), "extract rigid bone group");
     Require(pieces.size() == 1 && pieces[0].name == "piece" && pieces[0].triangles == 1,

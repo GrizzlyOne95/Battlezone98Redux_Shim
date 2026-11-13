@@ -24,7 +24,7 @@ static const char* const kShimCategoryVideo[] = {
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
     "Jet Flames", "Emissive Pulse", "Star Twinkle", "Mesh Chunks",
-    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Skinned Gibs",
+    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Skinned Gibs",
     "Fracture Debris" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",

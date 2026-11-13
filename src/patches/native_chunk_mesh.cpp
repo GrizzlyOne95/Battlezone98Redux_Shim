@@ -1126,6 +1126,76 @@ Piece RallyBeaconMesh(bool amberLamp)
     chunk(out, 0x3000, body);
     return {amberLamp ? "openshim_rally_beacon_fac" : "openshim_rally_beacon", std::move(out), triangles};
 }
+Piece LaserBeamMesh(unsigned sides)
+{
+    if (sides < 3 || sides > 32)
+        return {};
+    // Open tube along local +Z from the muzzle (z = 0, radius 1) to the far
+    // end (z = 1, radius kFarRadius). The node scales x/y by the beam radius
+    // and z by its length. u runs around the tube, v along it.
+    constexpr float kFarRadius = 0.5f;
+    constexpr float kPi = 3.14159265358979f;
+    struct Vertex
+    {
+        V p, n;
+        float u, v;
+    };
+    std::vector<Vertex> vertices;
+    vertices.reserve(sides * 6u);
+    auto at = [&](unsigned i, float z, float radius) {
+        const float a = 2.0f * kPi * static_cast<float>(i % sides) / static_cast<float>(sides);
+        // Normal of the cone surface: radial, tipped towards +Z by the taper.
+        const float slope = 1.0f - kFarRadius;
+        const float l = std::sqrt(1.0f + slope * slope);
+        return Vertex{V{std::cos(a) * radius, std::sin(a) * radius, z},
+                      V{std::cos(a) / l, std::sin(a) / l, slope / l},
+                      static_cast<float>(i) / static_cast<float>(sides), z};
+    };
+    for (unsigned i = 0; i < sides; ++i)
+    {
+        const Vertex a0 = at(i, 0.0f, 1.0f), a1 = at(i + 1, 0.0f, 1.0f);
+        const Vertex b0 = at(i, 1.0f, kFarRadius), b1 = at(i + 1, 1.0f, kFarRadius);
+        for (const Vertex &v : {a0, a1, b1, a0, b1, b0})
+            vertices.push_back(v);
+    }
+    Geometry g;
+    g.count = static_cast<uint32_t>(vertices.size());
+    // Position, normal, uv0: the casing declaration.
+    g.elements = {{0, 2, 1, 0, 0}, {0, 2, 4, 12, 0}, {0, 1, 7, 24, 0}};
+    Buffer buffer{32, {}};
+    std::vector<uint32_t> indices;
+    for (const auto &v : vertices)
+    {
+        for (float value : {v.p[0], v.p[1], v.p[2], v.n[0], v.n[1], v.n[2], v.u, v.v})
+            put(buffer.data, value);
+        indices.push_back(static_cast<uint32_t>(indices.size()));
+    }
+    g.buffers.emplace(uint16_t{0}, std::move(buffer));
+    V lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
+    float radius = 0;
+    Bytes sub;
+    line(sub, "openshim_lasersight_beam");
+    put(sub, uint8_t{0});
+    put(sub, g.count);
+    put(sub, uint8_t{0});
+    for (auto index : indices)
+        put(sub, static_cast<uint16_t>(index));
+    chunk(sub, 0x5000, emitGeometry(g, indices, Frame{}, lo, hi, radius));
+    Bytes body{0};
+    chunk(body, 0x4000, sub);
+    Bytes bounds;
+    for (float v : lo)
+        put(bounds, v);
+    for (float v : hi)
+        put(bounds, v);
+    put(bounds, radius);
+    chunk(body, 0x9000, bounds);
+    Bytes out;
+    put(out, uint16_t{0x1000});
+    line(out, "[MeshSerializer_v1.8]");
+    chunk(out, 0x3000, body);
+    return {"openshim_lasersight", std::move(out), g.count / 3};
+}
 std::string SkeletonName(const Bytes &b)
 {
     try

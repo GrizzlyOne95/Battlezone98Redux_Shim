@@ -1856,6 +1856,9 @@ namespace BZROpenShim
         // Independent of ChunkMeshes: gibs have their own pool and gate.
         SubmitSkinnedGibsToRenderQueue(renderQueue);
         SubmitShellCasingsToRenderQueue(renderQueue);
+        // One branch when [General] LaserSight is off; keyed on the muzzle
+        // pose, so the repeat calls of one frame cost a few reads.
+        TickLaserSight();
 
         // Opt-in parity capture and deferred authored-normal installation.
         // Inert unless one of those terrain experiments is configured.

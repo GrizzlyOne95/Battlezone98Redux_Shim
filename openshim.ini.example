@@ -186,6 +186,17 @@ ShellCasingsDrawDistance = 70
 ; Default: cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
 ShellCasingsClasses = cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
 
+; Laser sight: a thin glowing beam from the player vehicle's selected weapon
+; to the first terrain or object it meets, up to 500 m. Vehicles only (no
+; beam on foot). Visual only. Forced off in a network game unless a mod or
+; EXU calls OpenShimSetLaserSightMode(1); 0 here always wins. Applies live
+; from the options menu, no restart. Needs no asset pack: the beam mesh,
+; texture, SM4 shader and openshim_lasersight_beam material are generated in
+; the chunk cache root (a chunk payload directory may ship its own
+; openshim_lasersight.material and friends).
+; Accepted: boolean. Default: OFF, including when this key is absent.
+LaserSight = 0
+
 ; Path-grid footprints from collision faces. Stock AI planning blocks the
 ; whole bounding box of every building, so tunnels, arcades and walk-in rooms
 ; are walls to the planner. An ODF opts in under [GameObjectClass]:
@@ -1688,6 +1699,13 @@ TraceSkinnedGibs = 0
 ; Accepted: boolean. Default: OFF.
 ; Legacy env alias: OPENSHIM_TRACE_SHELL_CASINGS
 TraceShellCasings = 0
+
+; LaserSight cost: every five seconds one [LASERSIGHT] line with the measured
+; per-call and per-recompute time (QueryPerformanceCounter) and the objects
+; tested by the last ray. Without it no clock is read.
+; Accepted: boolean. Default: OFF.
+; Env alias: OPENSHIM_TRACE_LASER_SIGHT
+TraceLaserSight = 0
 
 ; PathBlockFaces diagnostics: an ASCII dump of the path grid around every
 ; flagged building after its footprint is applied, plus removal lines. The
