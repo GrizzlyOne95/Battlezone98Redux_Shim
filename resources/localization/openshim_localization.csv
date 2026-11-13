@@ -257,7 +257,7 @@ openshim_opt:AiMultiProducerMakers:desc~A built class gets every producer that c
 openshim_opt:AllowNeutralAttackOrders:label~Attack Neutrals~~~~~~
 openshim_opt:AllowNeutralAttackOrders:desc~Allow explicit player attack orders against team-0 neutral objects. Diplomacy and autonomous targeting remain stock.~~~~~~
 openshim_opt:ProducerRallyPoints:label~Rally Points~~~~~~
-openshim_opt:ProducerRallyPoints:desc~With a Recycler or Factory selected, V sets its rally point to the ground under the reticle and Shift+V clears it. New units from it drive there; scavengers and constructors do not. Single player only.~~~~~~
+openshim_opt:ProducerRallyPoints:desc~With a Recycler or Factory selected, V enters rally mode: aim like a Go order and press the Reticle Command key (Space) to set its rally point; V again cancels, Shift+V clears it. New units from it drive there; scavengers and constructors do not. Single player only.~~~~~~
 openshim_opt:AutoGroupNewUnits:label~Auto Group~~~~~~
 openshim_opt:AutoGroupNewUnits:desc~Units your Recycler or Factory builds join a group on F1-F7: the first group where every unit is the same type and there are fewer than 10, else the first empty group. Scavengers, constructors and pilots are left out. Single player only.~~~~~~
 openshim_opt:GroupStrip:label~Group Strip~~~~~~

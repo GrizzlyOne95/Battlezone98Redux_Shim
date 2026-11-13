@@ -1748,6 +1748,12 @@ namespace BZROpenShim
             const std::filesystem::path& cacheRoot,
             const std::vector<std::filesystem::path>& payloadDirectories);
 
+        // The producer rally beacon's generated mesh and materials, same
+        // rules (producer_rally_points.cpp). Run before the group initialises.
+        void EnsureRallyBeaconAssets(
+            const std::filesystem::path& cacheRoot,
+            const std::vector<std::filesystem::path>& payloadDirectories);
+
         // Shim-owned mesh objects on the chunk payload group
         // (chunk_proxy_render.cpp), independent of ChunkMeshes.
         bool EnsureSkinnedGibResourceLocations();

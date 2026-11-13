@@ -85,6 +85,7 @@ void TestProtectedAndUnknown()
 {
     const std::vector<PruneEntry> entries = {Entry("fallback/v1", PruneKind::Protected, 90, 1),
                                              Entry("casings/v1", PruneKind::Protected, 90, 1),
+                                             Entry("rally/v1", PruneKind::Protected, 90, 1),
                                              Entry("openshim_casing.material", PruneKind::Protected, 90, 0),
                                              Entry("notes.txt", PruneKind::Unknown, 90, 1),
                                              Entry("native/v4/m", PruneKind::ModelFolder, 1, 10)};
@@ -138,16 +139,19 @@ void TestFilesystem()
     const std::string gibs = std::string(OPENSHIM_CHUNK_CACHE_GIBS_DIR);
     const std::string fallback = std::string(OPENSHIM_CHUNK_CACHE_FALLBACK_DIR);
     const std::string casings = std::string(OPENSHIM_CHUNK_CACHE_CASINGS_DIR);
+    const std::string rally = std::string(OPENSHIM_CHUNK_CACHE_RALLY_DIR);
     Write(root / "native/v0/abc/pieces.cache", "stale");
     Write(root / "gibs/v0/abc/gibs.cache", "stale");
     Write(root / "fallback/v0/stock_chunk1.mesh", "stale");
     Write(root / "casings/v0/openshim_casing.mesh", "stale");
+    Write(root / "rally/v0/openshim_rally_beacon.mesh", "stale");
     Write(root / native / "0123abcd/pieces.cache", "fresh");
     Write(root / native / "deadbeef/pieces.cache", "old");
     Write(root / native / "not-a-model/pieces.cache", "unknown");
     Write(root / gibs / "feedface/gibs.cache", "fresh");
     Write(root / fallback / "stock_chunk1.mesh", "keep");
     Write(root / casings / "openshim_casing.mesh", "keep");
+    Write(root / rally / "openshim_rally_beacon.mesh", "keep");
     Write(root / "openshim_gib_flesh.material", "keep");
     Write(root / "readme.txt", "keep");
     Age(root / native / "deadbeef", 90);
@@ -159,14 +163,15 @@ void TestFilesystem()
     const auto result = PruneChunkCache(root, policy);
     Check(result.scanned, "existing root is scanned");
     Check(!fs::exists(root / "native/v0") && !fs::exists(root / "gibs/v0") && !fs::exists(root / "fallback/v0") &&
-              !fs::exists(root / "casings/v0"),
+              !fs::exists(root / "casings/v0") && !fs::exists(root / "rally/v0"),
           "all obsolete version trees are deleted");
-    Check(result.obsoleteTrees.size() == 4, "each obsolete tree is reported");
+    Check(result.obsoleteTrees.size() == 5, "each obsolete tree is reported");
     Check(!fs::exists(root / native / "deadbeef"), "expired model folder is deleted");
     Check(fs::exists(root / native / "0123abcd") && fs::exists(root / gibs / "feedface"), "fresh folders survive");
     Check(fs::exists(root / native / "not-a-model"), "a folder that is not a fingerprint name is left alone");
-    Check(fs::exists(root / fallback / "stock_chunk1.mesh") && fs::exists(root / casings / "openshim_casing.mesh"),
-          "current fallback and casing shapes survive");
+    Check(fs::exists(root / fallback / "stock_chunk1.mesh") && fs::exists(root / casings / "openshim_casing.mesh") &&
+              fs::exists(root / rally / "openshim_rally_beacon.mesh"),
+          "current fallback, casing and rally beacon shapes survive");
     Check(fs::exists(root / "openshim_gib_flesh.material") && fs::exists(root / "readme.txt"),
           "loose files survive");
     Check(result.keptModels == 2, "kept model count excludes unknown and removed folders");

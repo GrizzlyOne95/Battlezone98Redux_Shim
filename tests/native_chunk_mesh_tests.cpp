@@ -1319,6 +1319,29 @@ int main(int argc, char **argv)
                     std::fabs(bounds[3] - 0.225f) < 1e-4f && std::fabs(bounds[0] + 0.225f) < 1e-3f,
                 "casing bounds span z -0.5..0.5 and the rim radius");
     }
+    {
+        // ProducerRallyPoints' generated drop-off beacon.
+        const auto beacon = RallyBeaconMesh();
+        const std::string data(beacon.mesh.begin(), beacon.mesh.end());
+        Require(!beacon.mesh.empty() && beacon.mesh == RallyBeaconMesh().mesh && beacon.mesh.size() < 32768,
+                "beacon mesh is non-empty, deterministic and small");
+        Require(data.find("openshim_rally_beacon_frame") != std::string::npos &&
+                    data.find("openshim_rally_beacon_lamp") != std::string::npos && SkeletonName(beacon.mesh).empty(),
+                "beacon uses the frame and lamp materials and no skeleton");
+        // Frame 84: two plinth prisms and the mast (20 each), three braces (8 each).
+        // Lamp 40: octahedron 8 plus four double-sided chevrons (8 each).
+        Require(beacon.triangles == 124u, "beacon triangle count");
+        Require(Extract(beacon.mesh, skeleton, pieces, error) && pieces.size() == 1 &&
+                    pieces[0].triangles == beacon.triangles,
+                "beacon mesh reloads through the Ogre mesh parser with every face");
+        float bounds[7] = {};
+        Require(beacon.mesh.size() > sizeof(bounds) + 6, "beacon has a bounds chunk");
+        std::memcpy(bounds, beacon.mesh.data() + beacon.mesh.size() - sizeof(bounds), sizeof(bounds));
+        Require(std::fabs(bounds[1]) < 1e-5f && std::fabs(bounds[4] - 5.9f) < 1e-4f,
+                "beacon sits on the ground (min y 0) and is 5.9 m tall");
+        Require(bounds[0] < -3.0f && bounds[3] > 3.0f && bounds[2] < -3.0f && bounds[5] > 3.0f,
+                "beacon bounds include the chevron ring");
+    }
     Require(SkeletonName(mesh) == "test.skeleton", "shared geometry skeleton link");
     Require(Extract(mesh, skeleton, pieces, error), "extract rigid bone group");
     Require(pieces.size() == 1 && pieces[0].name == "piece" && pieces[0].triangles == 1,
