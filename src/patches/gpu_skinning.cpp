@@ -2107,9 +2107,11 @@ namespace BZROpenShim
 
     void GpuSkinningRenderFrameTick()
     {
-        // A mission started from the command line is already RUN_STARTED
-        // when the transition seam installs, so no start notification comes;
-        // the first world render of a mission stands in for it.
+        // The only start path: the first world render of a mission. The run
+        // state seam does not start it, because on an in-mission load
+        // RUN_STARTED arrives before the old world is torn down
+        // (lifecycle_seams.cpp), and a command-line mission is already
+        // RUN_STARTED when the seam installs.
         if (!g_missionEvaluated)
             GpuSkinningNotifyMissionRunStateChanged(true);
         if (g_listenerInstalled || !g_active.load(std::memory_order_acquire))

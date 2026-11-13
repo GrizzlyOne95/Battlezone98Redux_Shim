@@ -595,7 +595,13 @@ namespace BZROpenShim
                 HeadlightNotifyMissionRunStateChanged(true);
                 WeaponPresentationMissionRunStateChanged(true);
                 FogWakeNotifyMissionRunStateChanged(true);
-                GpuSkinningNotifyMissionRunStateChanged(true);
+                // GPU skinning is not started here. On an in-mission load the
+                // state flips back to RUN_STARTED before the old world is torn
+                // down ("SetRunning: ... now RUN_STARTED" precedes "Sim Startup:
+                // Mission Load"), and its per-frame arena scan then read freed
+                // GameObjects (first-chance AVs in ReadBridgeRoots). Like GPU
+                // instancing, it starts at the first world render instead
+                // (GpuSkinningRenderFrameTick).
                 PilotFlashlightNotifyMissionRunStateChanged(true);
                 NotifyFracturePrewarmMissionRunState(true);
                 RequestTerrainTileBlendAtFirstSimTick();
