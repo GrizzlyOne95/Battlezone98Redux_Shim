@@ -338,6 +338,14 @@ namespace BZROpenShim
             if (!producerKey.hasValue)
                 return result;
 
+            static long cachedGeneration = 0;
+            const long generation = OdfIndexGeneration();
+            if (cachedGeneration != generation)
+            {
+                cachedGeneration = generation;
+                g_ProducerBuildMenuConfig.odfFileEntries.clear();
+            }
+
             const auto cached = g_ProducerBuildMenuConfig.odfFileEntries.find(producerKey.token);
             if (cached != g_ProducerBuildMenuConfig.odfFileEntries.end())
                 return cached->second;

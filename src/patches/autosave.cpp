@@ -687,6 +687,26 @@ namespace BZROpenShim
                 else
                 {
                     std::string filename = savePath.string();
+                    // SaveGame writes the slot in place. Set the last good
+                    // save aside first, so a faulted or refused save does not
+                    // leave a truncated file as the only one the load screen
+                    // offers.
+                    const std::filesystem::path previousPath =
+                        std::filesystem::path(savePath.wstring() + L".openshim.prev");
+                    std::error_code setAsideError;
+                    // A process that died inside SaveGame left the good copy
+                    // set aside and no slot: put it back before replacing it.
+                    if (!std::filesystem::exists(savePath, setAsideError) && !setAsideError &&
+                        std::filesystem::exists(previousPath, setAsideError) && !setAsideError)
+                    {
+                        std::filesystem::rename(previousPath, savePath, setAsideError);
+                    }
+                    setAsideError.clear();
+                    std::filesystem::remove(previousPath, setAsideError);
+                    setAsideError.clear();
+                    std::filesystem::rename(savePath, previousPath, setAsideError);
+                    const bool setAside = !setAsideError;
+
                     DWORD exceptionCode = 0;
                     const bool saved = InvokeNativeNormalSaveGame(
                         g_nativeSaveGame,
@@ -694,6 +714,28 @@ namespace BZROpenShim
                         filename.data(),
                         0,
                         exceptionCode);
+
+                    if (setAside)
+                    {
+                        std::error_code restoreError;
+                        if (exceptionCode != 0 || !saved)
+                        {
+                            std::filesystem::remove(savePath, restoreError);
+                            restoreError.clear();
+                            std::filesystem::rename(previousPath, savePath, restoreError);
+                            LogShimA(
+                                restoreError ? LogLevel::Error : LogLevel::Warn,
+                                "autosave",
+                                restoreError ? "Could not restore the previous %s (error=%d)"
+                                             : "Restored the previous %s after a failed save (error=%d)",
+                                savePath.filename().string().c_str(),
+                                restoreError.value());
+                        }
+                        else
+                        {
+                            std::filesystem::remove(previousPath, restoreError);
+                        }
+                    }
 
                     if (exceptionCode != 0)
                     {
