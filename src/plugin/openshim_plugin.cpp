@@ -46,6 +46,7 @@
 #include "ogre_animation_profiler.h"
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
+#include "soak_telemetry.h"
 #include "music_single_fill.h"
 #include "p2p_reliable_send_fix.h"
 #include "precise_timestep.h"
@@ -294,6 +295,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     // a sampled run always has frame boundaries recorded beside it. Dormant
     // unless OPENSHIM_PERF_TELEMETRY or OPENSHIM_PROFILE_NATIVE_CPU asks.
     PATCH_STAGE(BZROpenShim::InitializePerfTelemetry());
+    // Opt-in soak telemetry ([Diagnostics] SoakTelemetry): GPU-stall
+    // watchdog, heartbeat and lighting-change lines. Dormant unless asked.
+    PATCH_STAGE(BZROpenShim::InitializeSoakTelemetry());
     // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
     // Guest RKIT repair pick of allied damaged buildings (always on, fail closed).
@@ -388,6 +392,7 @@ namespace BZROpenShim
         BZROpenShim::UiFileScan::Shutdown();
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownPerfTelemetry();
+        BZROpenShim::ShutdownSoakTelemetry();
         BZROpenShim::ShutdownThreadScheduling();
         BZROpenShim::ShutdownOpenShimAssetSync();
         BZROpenShim::ShutdownOpenShimUpdater();
