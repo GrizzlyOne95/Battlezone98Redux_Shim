@@ -551,7 +551,8 @@ namespace BZROpenShim
         // capture slot, so the parse hook alone is a pure pass-through.
         if (!InstallInlineDetour32(g_ParseDetour, reinterpret_cast<uintptr_t>(parse),
                                    reinterpret_cast<void*>(&ParseHook), sizeof(kExpectedPrologue),
-                                   kExpectedPrologue, sizeof(kExpectedPrologue)))
+                                   kExpectedPrologue, sizeof(kExpectedPrologue),
+                                   reinterpret_cast<void* volatile*>(&g_ParseOriginal)))
         {
             LogFailureOnce("ScriptParser::parse detour failed");
             return;
@@ -560,7 +561,8 @@ namespace BZROpenShim
 
         if (!InstallInlineDetour32(g_LoadImportPathDetour, reinterpret_cast<uintptr_t>(loadImportPath),
                                    reinterpret_cast<void*>(&LoadImportPathHook), sizeof(kExpectedPrologue),
-                                   kExpectedPrologue, sizeof(kExpectedPrologue)))
+                                   kExpectedPrologue, sizeof(kExpectedPrologue),
+                                   reinterpret_cast<void* volatile*>(&g_LoadImportPathOriginal)))
         {
             LogFailureOnce("ScriptCompiler::loadImportPath detour failed (parse hook stays a pass-through)");
             return;

@@ -368,7 +368,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Contribution-ranked per-object local-light ordering. DX11 only. Restart required." },
     { "HD Terrain Tiles", "Terrain", "TerrainHdEnabled", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Full-resolution authored terrain tiles, with optional normal/specular maps, from a compatible "
       "pack. DX11 Enhanced only; other profiles keep the original atlas. Restart required." },
@@ -525,12 +525,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Walker-style convergence on an explicitly targeted craft. Single player only." },
     { "Muzzle Flashes", "SinglePlayer", "MuzzleFlash", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Authored muzzle flash meshes and smoke/light effects from weapon ODFs. Needs mod assets and "
       "ODF setup; no generic fallback. Experimental GOG single-player cannons. Restart required." },
     { "Muzzle Recoil", "SinglePlayer", "MeshRecoil", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Authored barrel-node or animation recoil from craft ODFs. Needs model nodes/clips and ODF "
       "setup; clips need EXU. Experimental GOG single-player cannons. Restart required." },

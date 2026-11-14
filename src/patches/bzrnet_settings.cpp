@@ -589,12 +589,20 @@ namespace BZROpenShim
             }
         }
 
+        // Set when the Steam bridge forced the relay flag on. With the route
+        // preference at Stock nothing else writes the flag, so without this a
+        // bridged game left every later game in the session on the relay.
+        static bool g_TunnelForcedRelay = false;
+
         static void ApplyBzrNetRoutePreference()
         {
-            if (!SocketTunnel::Requested() && g_BzrNetRoutePreference == BzrNetRoutePreference::Stock)
+            if (!SocketTunnel::Requested() && g_BzrNetRoutePreference == BzrNetRoutePreference::Stock &&
+                !g_TunnelForcedRelay)
                 return;
             if (!VerifyBzrNetGlobals())
                 return;
+            if (!SocketTunnel::Requested())
+                g_TunnelForcedRelay = false;
 
             const uint32_t value =
                 (SocketTunnel::Requested() || g_BzrNetRoutePreference == BzrNetRoutePreference::Relay) ? 1u : 0u;
@@ -694,6 +702,7 @@ namespace BZROpenShim
     bool EnsureBzrNetTunnelRelay()
     {
         if (!VerifyBzrNetGlobals()) return false;
+        g_TunnelForcedRelay = true;
         __try
         {
             *reinterpret_cast<volatile uint32_t*>(g_BzrNetForceRelayFlagAddr) = 1;

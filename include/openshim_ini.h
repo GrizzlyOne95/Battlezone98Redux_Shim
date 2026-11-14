@@ -31,4 +31,8 @@ namespace BZROpenShim
     // Reads a text file into lines with trailing CR/LF stripped. A missing or
     // unreadable file yields an empty vector.
     std::vector<std::string> ReadTextFileLines(const std::filesystem::path& path);
+    // True when `lines` (from ReadTextFileLines) is empty although the file on
+    // disk is not: the read failed, and writing `lines` back would replace the
+    // player's whole file.
+    bool TextFileReadLooksFailed(const std::filesystem::path& path, const std::vector<std::string>& lines);
 }

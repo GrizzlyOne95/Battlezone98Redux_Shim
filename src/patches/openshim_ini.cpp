@@ -123,4 +123,13 @@ namespace BZROpenShim
         }
         return lines;
     }
+
+    bool TextFileReadLooksFailed(const std::filesystem::path& path, const std::vector<std::string>& lines)
+    {
+        if (!lines.empty())
+            return false;
+        std::error_code error;
+        const auto size = std::filesystem::file_size(path, error);
+        return !error && size > 0;
+    }
 }

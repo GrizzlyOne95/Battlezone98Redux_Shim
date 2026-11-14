@@ -692,6 +692,11 @@ namespace BZROpenShim
             return "offline";
         }
 
+        // True when the last read found the file but could not open it (locked
+        // by a sync client or antivirus). Saving then would replace the whole
+        // career record with only this session's counters.
+        static bool g_CareerStatsFileUnreadable = false;
+
         static void ReadCareerStatsFile(std::unordered_map<std::string, std::string>& outData)
         {
             outData.clear();
@@ -699,7 +704,12 @@ namespace BZROpenShim
             const std::filesystem::path path = GetCareerStatsPath();
             std::ifstream input(path);
             if (!input.is_open())
+            {
+                std::error_code existsError;
+                g_CareerStatsFileUnreadable = std::filesystem::exists(path, existsError) && !existsError;
                 return;
+            }
+            g_CareerStatsFileUnreadable = false;
 
             std::string line;
             while (std::getline(input, line))
@@ -732,6 +742,9 @@ namespace BZROpenShim
         // (or is a deliberate reset), so once it is on disk nothing is pending.
         static bool SaveCareerStatsFile(const std::unordered_map<std::string, std::string>& data)
         {
+            // Pending counters stay queued and merge into the next good load.
+            if (g_CareerStatsFileUnreadable)
+                return false;
             if (!WriteCareerStatsFile(data))
                 return false;
             g_CareerPendingIncrements.clear();
@@ -1902,6 +1915,14 @@ namespace BZROpenShim
 
             std::error_code existsError;
             const bool fileExists = std::filesystem::exists(path, existsError);
+
+            if (g_CareerStatsFileUnreadable)
+            {
+                ReleaseSRWLockExclusive(&g_CareerStatsLock);
+                Log(L"[CAREER] Reset failed: the stats file could not be read (%hs)\n",
+                    path.string().c_str());
+                return CareerStatsResetResult::Failed;
+            }
 
             if (recordedKeys == 0)
             {

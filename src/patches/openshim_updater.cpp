@@ -811,8 +811,23 @@ namespace BZROpenShim
                 }
             }
 
-            const bool allCurrent = std::all_of(payloads.begin(), payloads.end(),
-                [](const RuntimePayload& payload) { return InstalledPayloadMatches(payload); });
+            // net.ini and scripts/patches.json are player-editable (the
+            // connection guide tells players to blank a net.ini key), so an
+            // edited copy is not "out of date": only a missing one is. Counting
+            // a hash difference here re-staged the whole suite at the same
+            // version and reverted the edit on exit.
+            const auto payloadCurrent = [&payloads](size_t index)
+            {
+                if (index == 1 || index == 2)
+                {
+                    std::error_code existsError;
+                    return std::filesystem::exists(payloads[index].destination, existsError) && !existsError;
+                }
+                return InstalledPayloadMatches(payloads[index]);
+            };
+            bool allCurrent = true;
+            for (size_t index = 0; index < payloads.size(); ++index)
+                allCurrent = allCurrent && payloadCurrent(index);
 
             // Downgrade guard. Both versions must parse, or nothing is staged:
             // an unreadable installed version is not a licence to overwrite it.
