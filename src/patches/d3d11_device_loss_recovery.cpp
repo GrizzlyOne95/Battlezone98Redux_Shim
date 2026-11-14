@@ -96,6 +96,11 @@ namespace BZROpenShim
         UINT g_BaselineVendor = 0;
         UINT g_BaselineDeviceId = 0;
         unsigned g_Creations = 0;
+        std::atomic<unsigned> g_Recoveries{0};  // devices created to replace a removed one
+        // Set when a removed device is replaced and cleared by the next
+        // successful creation, so a recovery whose first attempt fails still
+        // counts (the retry sees no previous device).
+        std::atomic<bool> g_RecoveryPending{false};
         ID3D11Device* g_LastDevice = nullptr;  // AddRef'd; released at the next creation
 
         // Test injector state.
@@ -446,6 +451,8 @@ namespace BZROpenShim
             {
                 recovery = g_HaveBaseline && previous->GetDeviceRemovedReason() != S_OK;
                 previous->Release();
+                if (recovery)
+                    g_RecoveryPending.store(true, std::memory_order_relaxed);
             }
 
             IDXGIAdapter1* substitute = nullptr;
@@ -536,6 +543,8 @@ namespace BZROpenShim
                     std::lock_guard<std::mutex> lock(g_Mutex);
                     g_LastDevice = *device;
                 }
+                if (g_RecoveryPending.exchange(false, std::memory_order_relaxed))
+                    g_Recoveries.fetch_add(1, std::memory_order_release);
                 // The timer removes the first device once; the file can remove
                 // each device in turn, recovered ones included.
                 if ((!recovery && g_TestLossAfterMs) || g_TestLossFile[0])
@@ -633,5 +642,10 @@ namespace BZROpenShim
                                                        static_cast<DWORD>(sizeof(debugLayer)));
         g_TestDebugLayer = debugLen > 0 && debugLen < sizeof(debugLayer) && BoolToken::IsTruthy(debugLayer, debugLen);
         g_DiscoveryThread = _beginthreadex(nullptr, 0, DiscoveryThreadProc, nullptr, 0, nullptr);
+    }
+
+    unsigned D3D11DeviceRecoveryCount()
+    {
+        return g_Recoveries.load(std::memory_order_acquire);
     }
 }

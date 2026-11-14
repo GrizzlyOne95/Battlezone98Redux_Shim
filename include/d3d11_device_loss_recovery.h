@@ -14,4 +14,9 @@ namespace BZROpenShim
     // untouched: discovery ends without hooks when the D3D11 renderer never
     // loads.
     void InitializeD3D11DeviceLossRecovery();
+
+    // How many devices have replaced a removed one this process. Features
+    // that hold raw D3D11 objects (views, shader identities) compare it per
+    // frame and rebuild when it moves. Stays 0 when recovery is off.
+    unsigned D3D11DeviceRecoveryCount();
 }
