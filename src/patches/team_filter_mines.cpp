@@ -1330,8 +1330,12 @@ namespace BZROpenShim
                             void* target = g_BzrFn_GameObjectGetObjByHandle(static_cast<int>(*handlePtr));
                             if (!target || target == magnetMinePtr) continue;
 
-                            // ORIGINAL check: vtable[+0x2c] targets? and distance.
-                            // We add TeamFilter check.
+                            // Stock (FUN_0050c650 decompile, lines 93-97) asks
+                            // the craft for its bounds through [obj+0x18]+0x2c
+                            // and tests them against the mine's range box; that
+                            // is a geometric test, not a targeting rule, and the
+                            // range search plus the distance check below cover
+                            // it. The team filter is the only added condition.
                             if (!TeamFilterShouldAffectObject(magnetMinePtr, target, filter))
                                 continue;
 

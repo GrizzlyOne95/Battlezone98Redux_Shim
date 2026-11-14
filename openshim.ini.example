@@ -94,8 +94,7 @@ CustomBindsUi = 1
 SettingsUi = 1
 
 ; Restored legacy death-chunk rendering / chunkMeshes support.
-; Accepted: boolean. Default: ON.
-; Set OFF only as a compatibility/emergency opt-out.
+; Accepted: boolean. Default: OFF (a missing key means off).
 ; Exposed on the OpenShim Settings page as "Mesh Chunks".
 ; Generates bone-group pieces automatically from the source Ogre mesh and
 ; skeleton. Cached under openshim/cache/chunks; no external payload pack is
@@ -1637,7 +1636,8 @@ UnitVoFeedback = Normal
 ; NOTE: AutoSave values are read as integers. Use numeric values shown below.
 
 ; Rolling single-player recovery save.
-; Accepted: 0 = OFF, non-zero = ON. Default: 1.
+; Accepted: 0 = OFF, non-zero = ON. Default: 0 (off when this key is absent,
+; so a missing [AutoSave] section never writes Save\auto.sav).
 Enabled = 1
 
 ; Seconds between rolling AutoSave writes.
