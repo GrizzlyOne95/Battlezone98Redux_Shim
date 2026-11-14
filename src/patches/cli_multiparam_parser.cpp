@@ -29,7 +29,7 @@
 // ---------------------------------------------------------------------------
 // Why the delimiter and not a post-parser write
 //
-// Docs/CLI_MULTIPARAM_PARSER_ACTIVE_PATCH_20260831.md proposed repairing the
+// Docs/Archive/2026/CLI_MULTIPARAM_PARSER_ACTIVE_PATCH_20260831.md proposed repairing the
 // parsed dimensions after ProcessCommandLine returns. Reading the decompile
 // out to the positional branch shows that cannot restore the feature, because
 // the split does more damage than losing the height. The orphaned "178" token

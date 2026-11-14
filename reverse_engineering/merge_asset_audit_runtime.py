@@ -16,7 +16,7 @@ Runtime evidence sources (DX11 unless stated; GOG 2.2.301, lcbench harness):
   - Shadow submissions from the distance-sweep logs: rqShadow stays ~63/f
     (3 cascades x 21 craft) at every distance in stock, because Redux writes
     EXTENT_INFINITE onto shared craft world meshes on spawn
-    (see reverse_engineering/craft_bounds_architecture_20260822.md).
+    (see reverse_engineering/notes/craft_bounds_architecture_20260822.md).
 
 Measured headline results baked into the manifest below:
   avtank.mesh material LOD: high-pssm lod0 <=250 m, lod1 appears at 250 m,

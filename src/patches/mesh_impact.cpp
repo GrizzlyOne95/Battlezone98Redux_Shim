@@ -13,7 +13,7 @@
 #include <vector>
 
 // Layout qualified against GOG 2.2.301; see
-// reverse_engineering/ordnance_hit_test_20261021.md for the call chain.
+// reverse_engineering/notes/ordnance_hit_test_20261021.md for the call chain.
 //
 // Bullet::Collision (thiscall, ret 0xC) tests the segment
 //   start = [this+0x14] obj position, dir = (endPos - start) / t, s in [0, t]

@@ -1,6 +1,6 @@
 // The SDK record copy honours the caller's declared capacity.
 //
-// Audit item P1-8 (Docs/CODE_AUDIT_20260925.md): pollEvent and
+// Audit item P1-8 (Docs/Archive/2026/CODE_AUDIT_20260925.md): pollEvent and
 // captureDeveloperSnapshot assigned a whole OpenShimEvent /
 // OpenShimDeveloperSnapshot into the caller's buffer, so a shim built against
 // a later, longer record would have written past a v2 caller's struct, and a

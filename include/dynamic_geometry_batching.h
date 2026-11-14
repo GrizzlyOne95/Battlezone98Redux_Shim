@@ -3,7 +3,7 @@
 // fast-sort hooks (src/patches/dynamic_geometry_hooks.cpp). They operate on
 // raw DynamicGeometryBatch bytes so the unit tests exercise the exact code the
 // hooks run. Offsets were measured on the GOG Redux executable; see
-// reverse_engineering/dynamic_geometry_begin_sort_20261021.md.
+// reverse_engineering/notes/dynamic_geometry_begin_sort_20261021.md.
 #pragma once
 
 #include <cstdint>

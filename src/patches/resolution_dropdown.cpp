@@ -17,7 +17,7 @@
 //
 // Config: [Graphics] ResolutionDropdown (default 1);
 // OPENSHIM_DISABLE_RESOLUTION_DROPDOWN=1 turns it off.
-// RE note: reverse_engineering/resolution_dropdown_20261107.md.
+// RE note: reverse_engineering/notes/resolution_dropdown_20261107.md.
 #include "resolution_dropdown.h"
 
 #include "bool_token.h"

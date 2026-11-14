@@ -763,7 +763,7 @@ Native Windows V5 checkpoint, 2026-10-12:
   and 22 changing groups. Buffer contents, renderable lifetimes and dense object
   motion remain unqualified.
 
-See [the demo validation report](DLSS_RT_DEMO_VALIDATION_20261012.md) for current
+See [the demo validation report](Archive/2026/DLSS_RT_DEMO_VALIDATION_20261012.md) for current
 feature states, local evidence and remaining quality gates.
 
 Native Windows checkpoint, 2026-10-11:

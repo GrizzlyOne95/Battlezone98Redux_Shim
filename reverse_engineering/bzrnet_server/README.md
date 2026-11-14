@@ -44,4 +44,4 @@ loopback by default and accepts development identities without retaining or
 validating Steam tickets. Do not expose it to an untrusted network.
 
 Recovered wire details and capture limits are documented in
-[`../bzrnet_protocol_capture_20260321.md`](../bzrnet_protocol_capture_20260321.md).
+[`../bzrnet_protocol_capture_20260321.md`](../notes/bzrnet_protocol_capture_20260321.md).

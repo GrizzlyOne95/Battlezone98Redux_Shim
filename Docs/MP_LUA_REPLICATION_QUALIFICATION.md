@@ -87,7 +87,7 @@ the decompiler's guessed signatures into native declarations.
    **OpenShim fix (2026-10-18):** `[Fixes] LuaSendLengthUnsigned` flips the
    decoder load to `MOVZX` and makes the encoder reject lengths above 255
    through its stock does-not-fit exit; see
-   `Docs/LUA_SEND_STRING_LENGTH_20261018.md`. It protects only patched
+   `Docs/Archive/2026/LUA_SEND_STRING_LENGTH_20261018.md`. It protects only patched
    receivers, so mixed sessions keep the 127-byte limit.
 6. **PROVEN:** table entry counts use a similar one-byte extension and signed
    decoder (`0x00505a10`, `0x00505b50`, `MOVSX` at `0x00505b70`). At 128 entries

@@ -2,7 +2,7 @@
 
 Read this only for reverse-engineering, binary-analysis, runtime-probing, signature, PDB, or native-hook work. Ordinary docs/API/build tasks do not need it.
 
-Prefer the stable `bzr-*` wrappers on `PATH` instead of package-specific install paths. If a wrapper is missing/broken or the toolchain must be installed on another PC, use `AGENT_TOOLING_SETUP.md`.
+Prefer the stable `bzr-*` wrappers on `PATH` instead of package-specific install paths. If a wrapper is missing/broken or the toolchain must be installed on another PC, use `Docs/AGENT_TOOLING_SETUP.md`.
 
 ## Choose the Smallest Useful Tool
 - **Ghidra MCP (`ghidra`) / `bzr-ghidra-mcp.cmd`** — first choice for functions, symbols, xrefs, entry bytes, disassembly, decompiler output, and project-backed static analysis.
@@ -79,7 +79,7 @@ If one of them is missing something, fix it in that repository, or report the ga
 
 ## Runtime / Safety Rules
 - Static addresses, decompiler output, leaked-PDB hints, and runtime bytes are different evidence classes; corroborate them rather than treating one as authoritative for all builds.
-- For leaked/private PDB work, follow `reverse_engineering/private_pdb_semantic_ranking.md`; same-RVA equality alone is not identity evidence.
+- For leaked/private PDB work, follow `reverse_engineering/notes/private_pdb_semantic_ranking.md`; same-RVA equality alone is not identity evidence.
 - For Steam runtime bytes, allow SteamStub/runtime settling before comparing against the GOG/static baseline.
 - A native patch must fail closed when the expected build, signature, bytes, or object lifetime cannot be validated.
 - Record the command, executable hash/build identity, process PID (for live work), addresses read, and tool/backend in the task evidence. Never promote a one-shot probe, static address, or unvalidated PDB hint to live-runtime proof.
@@ -87,4 +87,4 @@ If one of them is missing something, fix it in that repository, or report the ga
 - Never start a harness run while any other `battlezone98redux` process is running, including the user's own game. Never attach to, suspend, or stop a game process this task did not launch.
 
 ## Tool Availability
-The installed toolchain normally includes Ghidra/pyghidra, the Redux debugger bridge, WinDbg/cdb, Frida, angr, ghidriff, Qiling, Rizin/Cutter, Detect It Easy, Sysinternals, LLVM/MSVC utilities, and `bzr-*` build/archive/triage wrappers. Do not load or enumerate the full installation inventory unless a setup/repair task requires it; `AGENT_TOOLING_SETUP.md` is authoritative for installation and environment overrides.
+The installed toolchain normally includes Ghidra/pyghidra, the Redux debugger bridge, WinDbg/cdb, Frida, angr, ghidriff, Qiling, Rizin/Cutter, Detect It Easy, Sysinternals, LLVM/MSVC utilities, and `bzr-*` build/archive/triage wrappers. Do not load or enumerate the full installation inventory unless a setup/repair task requires it; `Docs/AGENT_TOOLING_SETUP.md` is authoritative for installation and environment overrides.

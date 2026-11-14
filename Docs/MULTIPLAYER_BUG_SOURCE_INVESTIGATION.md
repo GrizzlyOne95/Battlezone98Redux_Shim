@@ -880,10 +880,10 @@ Ordnance_SendNew                   │
 - `BZ1_Source/1.4/unpacked/bzone14_unpacked.exe` — Shrinker/LZO baseline for historical diff.
 - `BZ1_Source/Redux/Raw .C/*.c` — 31,948 Ghidra functions for Redux best-effort; `FUN_004b0420` misidentification corrected herein.
 - `BZR-OpenShim/reverse_engineering/decompilation_from_1.5_exe-pdb/1.5/all_decompiled.c` — stable copy of the 1.5 corpus used for line references.
-- `BZR-OpenShim/reverse_engineering/mp_ordnance_duplication_popgun_comparison_20260827.md` — Popper gate, Splinter unconditional call, DayWrecker misidentification retraction.
-- `BZR-OpenShim/reverse_engineering/splinter_spraybuilding_undead_bug_notes_20260319.md` — SPLINTER_UNDEAD vtable-slot fix at `0x00888228` → `0x005DA6E0`.
-- `BZR-OpenShim/reverse_engineering/coop_campaign_netcode_notes_20260324.md` — mission RPC via `Send`/`Receive`, `SetLocal` danger, Reloaded `rl_coop_mission.lua`.
-- `BZR-OpenShim/reverse_engineering/bzrnet_protocol_capture_20260321.md` + `bzrnet_server/server.py` — `DoP2PConnect`/`DoJoinLobby` without password.
+- `BZR-OpenShim/reverse_engineering/notes/mp_ordnance_duplication_popgun_comparison_20260827.md` — Popper gate, Splinter unconditional call, DayWrecker misidentification retraction.
+- `BZR-OpenShim/reverse_engineering/notes/splinter_spraybuilding_undead_bug_notes_20260319.md` — SPLINTER_UNDEAD vtable-slot fix at `0x00888228` → `0x005DA6E0`.
+- `BZR-OpenShim/reverse_engineering/notes/coop_campaign_netcode_notes_20260324.md` — mission RPC via `Send`/`Receive`, `SetLocal` danger, Reloaded `rl_coop_mission.lua`.
+- `BZR-OpenShim/reverse_engineering/notes/bzrnet_protocol_capture_20260321.md` + `bzrnet_server/server.py` — `DoP2PConnect`/`DoJoinLobby` without password.
 - `BZR-OpenShim/src/patches/net_optimizer.cpp` — `0x008e8d14` governor, burst detection `kBurstThresholdPps=100`, socket buffers.
 - `battlezone-netcode-patch/resources/INVESTIGATION_WRITEUP.md` — rigid sequential discard, 45 ms reorder V3.
 - `BZR-OpenShim/src/patches/bzr_hooks.cpp` — SPLINTER_UNDEAD + constructor remote-build fixes (reference patterns).

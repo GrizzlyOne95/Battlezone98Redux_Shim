@@ -80,7 +80,7 @@ Therefore:
 
 This investigation builds directly on:
 
-- `Docs/FOG_COMPOSITOR_QUALIFICATION_20260908.md`
+- `Docs/Archive/2026/FOG_COMPOSITOR_QUALIFICATION_20260908.md`
 - `Docs/DX11_ENHANCED_RENDERING_ROADMAP.md`
 - `Docs/DX11_ENHANCED_FXAA.md`
 - `src/patches/dx11_enhanced_fxaa.cpp`

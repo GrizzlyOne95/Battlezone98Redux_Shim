@@ -2,15 +2,15 @@
 
 Updated 2026-09-29. This is the committed, combined OpenShim/EXU handoff. It
 supersedes the untracked working tracker in the older primary OpenShim checkout.
-The detailed findings remain in [OpenShim's audit](CODE_AUDIT_20260925.md) and
+The detailed findings remain in [OpenShim's audit](Archive/2026/CODE_AUDIT_20260925.md) and
 [EXU's audit](https://github.com/GrizzlyOne95/ExtraUtilities/blob/main/Docs/CODE_AUDIT_20260927.md).
 Historical "resolved" entries can retain explicitly deferred follow-ups; they
 are not a claim that every release qualification lane has run.
 
 The interrupted audit implementation is now merged. The subsequent
-[Campaign Reimagined validation](CAMPAIGN_REIMAGINED_VALIDATION_20260929.md)
+[Campaign Reimagined validation](Archive/2026/CAMPAIGN_REIMAGINED_VALIDATION_20260929.md)
 passes a real GOG campaign startup/exit smoke on DX9 and DX11. The later
-[complete-suite candidate](CR_SUITE_RELEASE_20260929.md) closes the package and
+[complete-suite candidate](Archive/2026/CR_SUITE_RELEASE_20260929.md) closes the package and
 updater's missing loader/plugin work and passes in-game Setup replacement.
 Candidate source checkpoints are merged in OpenShim #382, bzfile #25 and CR
 #111. CR #112 adds the local preparation command; its complete 59-step GOG
@@ -118,7 +118,7 @@ Other open work at recovery time is separately owned: OpenShim #165 (fog),
 
 This table is historical. By September 29 the primary OpenShim, EXU, CR, and
 bzfile checkouts had moved to `agent/release-validation-20260928`. See the
-[current validation report](CAMPAIGN_REIMAGINED_VALIDATION_20260929.md) for their
+[current validation report](Archive/2026/CAMPAIGN_REIMAGINED_VALIDATION_20260929.md) for their
 revisions, uncommitted work, and the isolated validation branch. Do not reset
 those primary checkouts to the older states below.
 

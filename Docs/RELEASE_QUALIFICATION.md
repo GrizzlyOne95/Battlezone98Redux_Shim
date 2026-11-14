@@ -105,7 +105,7 @@ Acceptance:
 - 10 cycles complete with no CRASH, HANG or CRASH-LOG on the Alt-Tab, Alt-Enter and toggle steps
 - the game still renders and responds to input afterwards, and exits cleanly
 - with `-EditMode`, a failure on the Shift-F9 step is reported as `KNOWN-300`: it is the open editor task-mode crash
-  (`Docs/ROADMAP_CODE_VALIDATION_20261007.md`, item 300), not a new regression. It does not fail
+  (`Docs/Archive/2026/ROADMAP_CODE_VALIDATION_20261007.md`, item 300), not a new regression. It does not fail
   the gate (the run stops there with `Known300Stop` set, so run the remaining cycles on a relaunched game if needed), but any change in its behavior from the previous candidate needs explaining
 
 ## Steam 2.2.301

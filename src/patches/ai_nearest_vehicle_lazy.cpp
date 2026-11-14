@@ -18,7 +18,7 @@
 // remembers its arguments, and the scan runs with those same arguments when
 // one of the three readers is about to run. Exactness rests on three facts,
 // checked against the GOG image (see
-// reverse_engineering/attacktask_exact_optimisation_20261021.md):
+// reverse_engineering/notes/attacktask_exact_optimisation_20261021.md):
 //  - every path from DoState's entry to a reader passes the prolog call;
 //  - avoidObj is read only by those three UnitTask methods, and every call
 //    of them on an AttackTask is one of the five sites patched here, all

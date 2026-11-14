@@ -214,7 +214,7 @@ The feature must not alter damage, projectile direction, cadence, ammo, hardpoin
 ## Reusable OpenShim patterns (do not reinvent)
 
 - `sun_flash` (`include/sun_flash.h`, `src/patches/sun_flash.cpp`): REL32 call-site redirect + naked thunk + fail-closed verify. Use this discipline for any `ScreenFlash`-adjacent exposure pump, and leave explosion callers `0x0047F605,0x004AD2C2` untouched unless explicitly in scope.
-- `EngineFlame` fork (`include/bzr_hooks.h:104-106`, `reverse_engineering/engine_flame_color_notes.md`): hook before `AddFlame` while owner is known, route to cloned managers, patch vtable slots. Template if flash needs owner-aware routing.
+- `EngineFlame` fork (`include/bzr_hooks.h:104-106`, `reverse_engineering/notes/engine_flame_color_notes.md`): hook before `AddFlame` while owner is known, route to cloned managers, patch vtable slots. Template if flash needs owner-aware routing.
 - Ordnance/convergence detours (`src/patches/bzr_hooks.cpp:1180-1289`, `trampolines.cpp`): JMP5 over whole instructions preserving `EBP` frame. Reuse the shot-commit site if recoil already pins it.
 - `render_effect_intent.h` (`SSAO/DepthHaze/SoftParticles`): long-term provider for soft-particle/HDR flash; `DX11_ENHANCED_RENDERING_ROADMAP.md:346-394` already reserves additive emissive/projectile + muzzle exposure.
 - Compat payload (`src/engine/dx11_legacy_material_compat.cpp`, `resources/renderer/enhanced/`, `ENHANCED_RENDERER_MATERIAL_OWNERSHIP.md`): add a muzzle/additive technique here rather than forking materials per-weapon.

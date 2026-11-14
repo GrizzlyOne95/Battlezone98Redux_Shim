@@ -1,5 +1,5 @@
 // lua_send_length.h -- pure, host-testable half of the Lua Send string-length
-// fix. Design, evidence and failure modes: Docs/LUA_SEND_STRING_LENGTH_20261018.md.
+// fix. Design, evidence and failure modes: Docs/Archive/2026/LUA_SEND_STRING_LENGTH_20261018.md.
 //
 // The Lua network packet codec stores a string length (or table count) in the
 // low five bits of the type byte, with 31 meaning "one extension byte follows".

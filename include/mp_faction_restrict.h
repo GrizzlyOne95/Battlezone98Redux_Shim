@@ -12,7 +12,7 @@
 // all-faction `netveh.odf` and deleted the toggle, so a Redux host has no way
 // to get the restricted pool back short of shipping a custom .vxt per map.
 //
-// See reverse_engineering/any_nation_redux_resolution_20260902.md for the full
+// See reverse_engineering/notes/any_nation_redux_resolution_20260902.md for the full
 // evidence chain, and mp_faction_restrict.cpp for what is actually patched.
 //
 // Scope: local list construction only. It is NOT synchronized — see the header

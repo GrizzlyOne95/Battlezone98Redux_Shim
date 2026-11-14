@@ -18,7 +18,7 @@ make the repository private is superseded and is not an instruction to act.
   unintended source changes in the compared branch trees. Those are historical
   results, not a validation of today's moving branches/tags.
 - The exact draft removal list is preserved in
-  [audit_20260925/history_paths_to_remove.txt](audit_20260925/history_paths_to_remove.txt).
+  [audit_20260925/history_paths_to_remove.txt](Archive/2026/audit_20260925/history_paths_to_remove.txt).
   This is a proposal for review, not permission to remove additional paths.
 
 The original detailed runbook and removal list have also been copied out of

@@ -143,7 +143,7 @@ namespace BZROpenShim
         // and run the stock body under an SEH filter that converts only C++
         // exceptions (0xE06D7363) into the same outcome as a missing thumbnail:
         // a cleared out SharedPtr slot. AVs and other faults still crash loudly.
-        // See reverse_engineering/bmp_thumbnail_crash_20260824.md.
+        // See reverse_engineering/notes/bmp_thumbnail_crash_20260824.md.
         uint32_t g_ThumbnailMaterialApplySiteAddr = 0;
 
         constexpr size_t kThumbnailMaterialApplyDetourLen = 5;

@@ -18,7 +18,7 @@
 // 1-4 and recomputes step 5 with alpha = 1 - exp(-dt / tau), then repeats 6.
 // Step 2 discards the display at the start of every frame, so the blend never
 // feeds back into physics. A sentinel frame keeps the stock result.
-// See reverse_engineering/remote_object_smoothing_20261107.md.
+// See reverse_engineering/notes/remote_object_smoothing_20261107.md.
 
 #include "remote_object_smoothing.h"
 

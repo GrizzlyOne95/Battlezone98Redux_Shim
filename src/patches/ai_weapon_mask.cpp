@@ -168,7 +168,7 @@ namespace BZROpenShim
         // deliberate enhancement, off by default.
         //
         // Full derivation:
-        // reverse_engineering/howitzer_minelayer_weapon_mask_root_cause_20260817.md
+        // reverse_engineering/notes/howitzer_minelayer_weapon_mask_root_cause_20260817.md
         // ------------------------------------------------------------------
 
         // Redux GameObject / Carrier layout. Do not substitute the 1.5 values;

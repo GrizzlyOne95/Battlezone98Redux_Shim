@@ -14,7 +14,7 @@
 // A shot that passes between parts keeps flying; a hit lands on the hull.
 // Stands down in network games.
 //
-// See reverse_engineering/ordnance_hit_test_20261021.md.
+// See reverse_engineering/notes/ordnance_hit_test_20261021.md.
 namespace BZROpenShim::MeshImpact
 {
     void InitializeGlobal(); // Reads the INI/env request and installs the hooks.

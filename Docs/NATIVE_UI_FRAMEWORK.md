@@ -4,7 +4,7 @@ OpenShim Native UI v1 is a small, versioned wrapper around the Redux `cUI` ABI t
 
 It is intentionally conservative. The first public surface wraps only behavior whose constructor, ownership, input ordering, and lifetime have already been exercised by OpenShim's native Options/Input UI work.
 
-The GOG shell reverse-engineering pass now also has a binary-grounded MainScreen/navigation map. See `reverse_engineering/REDUX_SHELL_UI_RE_MAP.md`. That evidence is strong enough to define the intended MainMenu host and shell-navigation architecture, but the MainMenu host remains **not public in Native UI v1 until its child hierarchy/input behavior is live-validated**.
+The GOG shell reverse-engineering pass now also has a binary-grounded MainScreen/navigation map. See `reverse_engineering/notes/REDUX_SHELL_UI_RE_MAP.md`. That evidence is strong enough to define the intended MainMenu host and shell-navigation architecture, but the MainMenu host remains **not public in Native UI v1 until its child hierarchy/input behavior is live-validated**.
 
 ## Goals
 
@@ -150,7 +150,7 @@ Known callback-derived IDs include:
 0x1C  cUI_Mods
 ```
 
-The full `0x01..0x2A` factory map, constructor addresses, allocation sizes, holes, and conditional cases are documented in `reverse_engineering/REDUX_SHELL_UI_RE_MAP.md`.
+The full `0x01..0x2A` factory map, constructor addresses, allocation sizes, holes, and conditional cases are documented in `reverse_engineering/notes/REDUX_SHELL_UI_RE_MAP.md`.
 
 ## OpenShim shell screens (custom screen IDs)
 

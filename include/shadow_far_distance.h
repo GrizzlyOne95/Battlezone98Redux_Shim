@@ -6,7 +6,7 @@
 // tests/shadow_far_distance_tests.cpp. bzr_hooks.cpp reads the configured
 // string, asks this what to write, and re-issues the game's own setter.
 //
-// The defect (reverse_engineering/shadow_cutoff_root_cause_20260825.md):
+// The defect (reverse_engineering/notes/shadow_cutoff_root_cause_20260825.md):
 //
 //   FUN_00680fe0 calls SceneManager::setShadowFarDistance(128.0) for every
 //   shadow quality. Ogre's Focused/LiSPSM fit -- which PSSM uses -- clips the

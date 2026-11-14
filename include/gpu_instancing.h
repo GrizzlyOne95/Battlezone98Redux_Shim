@@ -10,7 +10,7 @@ namespace BZROpenShim
     // as one instanced draw through the instanced twin of that pass (see
     // gpu_skinning.h); everything else renders exactly as before. Any fault
     // disables the feature for the rest of the process.
-    // See reverse_engineering/gpu_instancing_design_20261021.md.
+    // See reverse_engineering/notes/gpu_instancing_design_20261021.md.
 
     void GpuInstancingNotifyMissionRunStateChanged(bool running);
 

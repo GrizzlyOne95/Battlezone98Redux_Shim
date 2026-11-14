@@ -9,7 +9,7 @@ Campaign scenarios exercise mission mechanics (gates, objectives, films,
 results, replication): they kill enemies, pull timers forward and teleport
 craft through the probe. The separate `nbattle` map exercises native AI combat,
 natural destruction and scrap with bounded replacement waves and four-client
-network captures. See [battle-load qualification](../network_battle_load_validation_20261009.md).
+network captures. See [battle-load qualification](../notes/network_battle_load_validation_20261009.md).
 
 After preparing the private clients and qualified windowed native deployment:
 

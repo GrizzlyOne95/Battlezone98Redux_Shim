@@ -88,7 +88,7 @@ namespace BZROpenShim
         // Live GOG Person offsets, re-derived from disassembly of the shipped
         // exe (the advisory beta PDB is drifted). Uniform +8 vs the PDB through
         // the vehicle fields, then +0x20 for the animation tail. See
-        // reverse_engineering/jump_sniping_crouch_fix_20260713.md.
+        // reverse_engineering/notes/jump_sniping_crouch_fix_20260713.md.
         constexpr size_t kPersonObjOffset = 0x0F0;          // PDB 0xE8 render obj
 
         constexpr size_t kGameObjectVelocityYOffset = 0x12C; // PDB 0x124 euler.v.y

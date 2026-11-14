@@ -76,7 +76,7 @@ content intent. Campaign Reimagined owns content and art direction.**
   Because startup control is new and not yet UI-proven, the settings-UI
   backend row remains hidden; hand-edited ini values drive the seam.
   Evidence and validation matrix:
-  `reverse_engineering/renderer_startup_backend_selection_20260825.md`.
+  `reverse_engineering/notes/renderer_startup_backend_selection_20260825.md`.
 - EXU/content cannot force a backend; the bridge exposes read-only queries.
 
 ## 3. RenderProfile semantics
@@ -259,7 +259,7 @@ Automated (this branch):
   dumpbin.
 - **Headless runtime qualification** (GOG install, lcbench harness; driver:
   `scripts/render_profile_matrix.ps1`, full report and evidence index in
-  `Docs/RENDER_PROFILE_RUNTIME_QUALIFICATION_20260824.md`, per-case logs under
+  `Docs/Archive/2026/RENDER_PROFILE_RUNTIME_QUALIFICATION_20260824.md`, per-case logs under
   `reverse_engineering/snapshots/render_profile_matrix/`). All cases PASS:
 
 | Case | Asserts |
@@ -304,7 +304,7 @@ transition matrix, restart persistence through the actual UI.
    (`[Startup] BackendTransport=0`). Since 2026-10-26 the Video page has a
    restart-required Renderer row and the shipped ini enables the transport
    (preset revision 11); see §2 and
-   `reverse_engineering/renderer_startup_backend_selection_20260825.md` for
+   `reverse_engineering/notes/renderer_startup_backend_selection_20260825.md` for
    the ownership contract and validation evidence. A profile change made on
    the game thread (every EXU mission request) is applied to the window's
    viewports immediately. One made off-thread sets a pending flag that the

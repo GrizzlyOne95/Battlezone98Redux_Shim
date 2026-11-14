@@ -9,7 +9,7 @@
 // toward its dead-reckoned physics state by a fixed 0.3 (position) and 0.5
 // (rotation) per frame, so the smoothing time constant shrinks with frame
 // rate. This replaces the factors with 1 - exp(-dt / tau).
-// See reverse_engineering/remote_object_smoothing_20261107.md.
+// See reverse_engineering/notes/remote_object_smoothing_20261107.md.
 
 #pragma once
 
