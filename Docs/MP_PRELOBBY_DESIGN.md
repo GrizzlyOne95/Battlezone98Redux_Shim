@@ -102,7 +102,7 @@ Confidence labels follow the gate-status convention (**CONFIRMED** from code,
   (`[Network] ReauthOnNicknameChange`) closes the port-1337 TCP socket
   (`RecycleBzrNetWebSocket`) and relies on the stock reconnect. It does not
   re-send on the same socket. Treat
-  `reverse_engineering/bzrnet_nickname_reauth_design_20260905.md` as out of
+  `reverse_engineering/notes/bzrnet_nickname_reauth_design_20260905.md` as out of
   date on that point.
 - **Recycle gate:** the recycle is only taken with a valid lobby object and no
   in-game net id.
@@ -350,7 +350,7 @@ Deferring would mean stalling `FUN_006c35c0` until the panel closes:
 
 Not a toggle. Redux has no standalone LAN mode. The lobby service coordinates
 every game, even when gameplay traffic stays on the LAN
-(`reverse_engineering/redux_tcpip_lan_multiplayer_investigation_20260713.md`).
+(`reverse_engineering/notes/redux_tcpip_lan_multiplayer_investigation_20260713.md`).
 
 A real LAN option means an OpenShim-hosted control plane on the host machine,
 found by broadcast, with the security work above. Until then, "LAN" is a Custom

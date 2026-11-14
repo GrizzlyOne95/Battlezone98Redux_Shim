@@ -213,7 +213,7 @@ static float g_FrustumCullMargin = 0.25f;
 // culling impossible. Default ON ([Fixes] RestoreCraftBounds); the switch table
 // in bzr_hooks.cpp sets this before install. See the block comment above
 // MeshSetBoundsHook for the located call site and the reasoning, and
-// reverse_engineering/craft_bounds_architecture_20260822.md for the evidence.
+// reverse_engineering/notes/craft_bounds_architecture_20260822.md for the evidence.
 bool g_RestoreCraftBoundsEnabled = false;
 static float g_RestoreCraftBoundsScale = 2.0f;
 static bool g_RestoreCraftBoundsAllMeshes = false;
@@ -333,7 +333,7 @@ static FnOgreCameraGetDerivedPosition g_OgreFn_CameraGetDerivedPosition = nullpt
 // is unset, getLodCamera returns the camera itself and the main camera is used.
 static FnOgreCameraGetLodCamera g_OgreFn_CameraGetLodCamera = nullptr;
 // RenderGlobals record (signature-checked "RenderGlobals" row). +0x10 is the
-// main Camera* (reverse_engineering/redux_scene_ui_boundary_20260921.md:60).
+// main Camera* (reverse_engineering/notes/redux_scene_ui_boundary_20260921.md:60).
 constexpr uintptr_t kRenderGlobalsMainCameraOffset = 0x10;
 static ScrapRender::ScrapMeshSet<16> g_ScrapMeshes;
 static ScrapRender::ShadowCameraOrder g_ScrapShadowCameraOrder;
@@ -1013,7 +1013,7 @@ static FrustumCullOutcome DecideFrustumCull(
 
 // Gathers the fog-distance inputs for one non-shadow Entity traversal and
 // returns the decision from include/fog_distance_cull.h. Render-globals record
-// layout (reverse_engineering/redux_scene_ui_boundary_20260921.md:55-66):
+// layout (reverse_engineering/notes/redux_scene_ui_boundary_20260921.md:55-66):
 // +0x08 SceneManager, +0x10 main Camera, +0x1C main Viewport. The glow
 // compositor re-renders the main camera into a viewport whose material scheme
 // is "glow"; that pass also fades to fog (fogColour 0) and may cull too.

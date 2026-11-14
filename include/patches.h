@@ -148,7 +148,7 @@ namespace BZROpenShim
             // so for some far-clip values (driven by the TRN's NormalView
             // VisibilityRange) the projected z rounds past the near plane and
             // the whole layer is clipped. Repoint the mulss operand at a
-            // constant with real margin; see Docs/FEEDBACK_MASTER_20260909.md
+            // constant with real margin; see Docs/Archive/2026/FEEDBACK_MASTER_20260909.md
             // section 12.1.
             { 0, HookEngine::PatchType::DWORD, {}, "HUD 2D Depth Floor Margin", false, {} },
             { 0, HookEngine::PatchType::BYTE1, { 0xEB }, "Vehicle List Mod Fix 3/4 (Always Update Vehicle Control)", false, {} },

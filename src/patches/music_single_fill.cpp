@@ -14,7 +14,7 @@
 // FillBufferWithSound again. The constructor's decode is overwritten before it
 // is heard. The call is __thiscall with two stack arguments and an unused
 // result, so it becomes `add esp,8` plus NOPs.
-// See reverse_engineering/frame_hitch_va_measurement_20261020.md.
+// See reverse_engineering/notes/frame_hitch_va_measurement_20261020.md.
 
 #include "music_single_fill.h"
 

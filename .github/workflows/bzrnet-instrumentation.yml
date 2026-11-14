@@ -21,8 +21,9 @@ on:
       - 'net.ini'
       - 'tests/CMakeLists.txt'
       - 'reverse_engineering/*bzrnet*'
-      - 'reverse_engineering/BZRNET_NATIVE_INSTRUMENTATION.md'
-      - 'bzrnet_capture_windows.ps1'
+      - 'reverse_engineering/notes/*bzrnet*'
+      - 'reverse_engineering/notes/BZRNET_NATIVE_INSTRUMENTATION.md'
+      - 'scripts/diagnostics/bzrnet_capture_windows.ps1'
       - 'BZROpenShim.vcxproj'
       - 'src/dllmain.cpp'
       - '.github/workflows/bzrnet-instrumentation.yml'
@@ -64,7 +65,7 @@ jobs:
           $tokens = $null
           $errors = $null
           [System.Management.Automation.Language.Parser]::ParseFile(
-            (Resolve-Path '.\bzrnet_capture_windows.ps1'),
+            (Resolve-Path '.\scripts\diagnostics\bzrnet_capture_windows.ps1'),
             [ref]$tokens,
             [ref]$errors
           ) | Out-Null

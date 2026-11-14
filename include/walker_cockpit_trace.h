@@ -6,7 +6,7 @@ namespace BZROpenShim
 {
     // Walker first-person cockpit jitter investigation instrument.
     //
-    // Scope (see reverse_engineering/walker_jitter_expanded_result_20260902.md):
+    // Scope (see reverse_engineering/notes/walker_jitter_expanded_result_20260902.md):
     // the expanded EXU bench proved only that the top-level vehicle world
     // transform is stable while stationary. It did NOT qualify the cockpit
     // ("_c") hierarchy, the POV node, or the camera path, and it did not

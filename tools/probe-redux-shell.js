@@ -1,8 +1,8 @@
 // Battlezone 98 Redux GOG v2.2.301 shell/UI runtime probe.
 //
 // Read-only diagnostic for the static RE in:
-//   reverse_engineering/REDUX_SHELL_UI_RE_MAP.md
-//   reverse_engineering/REDUX_SHELL_UI_GATE_STATUS.md
+//   reverse_engineering/notes/REDUX_SHELL_UI_RE_MAP.md
+//   reverse_engineering/notes/REDUX_SHELL_UI_GATE_STATUS.md
 //
 // Usage (from the provisioned RE environment):
 //   frida -n battlezone98redux.exe -l tools/probe-redux-shell.js

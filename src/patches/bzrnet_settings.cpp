@@ -34,7 +34,7 @@ namespace BZROpenShim
         //
         // This changes route preference, NOT session discovery. Neither setting
         // creates a LAN or direct-IP mode; see
-        // reverse_engineering/redux_tcpip_lan_multiplayer_investigation_20260713.md.
+        // reverse_engineering/notes/redux_tcpip_lan_multiplayer_investigation_20260713.md.
         //
         // Both globals were confirmed against the shipped GOG image (sha256
         // 8d71f56c1314e69a8ad38f4eeaf20a8ff825965a84cf196e5f77ea4cc3377413,

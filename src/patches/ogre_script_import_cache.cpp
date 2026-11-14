@@ -9,7 +9,7 @@
 // "Modable" group on every mod-set change, and ~970 mod materials begin with
 // `import * from "BZBase.material"` (or CR_BZBase / sprites), so the same base
 // files are opened, lexed, parsed and converted once per importing file.
-// Sampled 2026-10-03 (Docs/OGRE_LOAD_HITCH_MEASUREMENT_20261003.md):
+// Sampled 2026-10-03 (Docs/Archive/2026/OGRE_LOAD_HITCH_MEASUREMENT_20261003.md):
 // loadImportPath was 30-34% of the Modable parse phase.
 //
 // What is cached: the *concrete* node list ScriptParser::parse returns for an

@@ -59,7 +59,7 @@ effective DXR/cinematic frames and 111 extra SDK presentations reported by
 DLSS-G. A sampled visible native terrain draw produced 243200 domain invocations;
 144 padded bounds and 27 material passes were restored on clean exit. All 60
 deployment/config hashes were restored. Detailed evidence and remaining limits
-are in [DLSS_RT_DEMO_VALIDATION_20261012.md](DLSS_RT_DEMO_VALIDATION_20261012.md).
+are in [DLSS_RT_DEMO_VALIDATION_20261012.md](Archive/2026/DLSS_RT_DEMO_VALIDATION_20261012.md).
 
 ## Implementation sequence and acceptance
 

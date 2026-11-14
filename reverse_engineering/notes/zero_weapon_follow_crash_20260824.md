@@ -1,0 +1,101 @@
+# weaponMask = 00000 Follow Crash - Investigation Status
+
+Date: 2026-08-24
+Build: GOG `battlezone98redux.exe` 2.2.301. Status: **not reproduced on the
+current build; no patch installed** (deliberately - see below). This report
+records everything the next investigator needs.
+
+## Prior art
+
+- `reverse_engineering/notes/howitzer_minelayer_weapon_mask_root_cause_20260817.md`
+  mapped the weapon-mask subsystem exhaustively (1.5 vs Redux): ODF
+  `weaponMask` is a decimal digit string; `GameObject::GameObject` decodes it
+  into a 5-bit mask at `GameObject+0x218`; consumers are `FireAt`
+  (`0x005CB140`) and `UnitTask::UpdateWeapon` (`0x00604130`);
+  `Carrier::SetSelected` (`0x004D9880`) masks with `existant`.
+- EXU `FeaturesToLookInto` item 49 records the original report and that no
+  crash dump was ever attached to a follow crash.
+
+## Static re-check of zero-mask safety (this pass)
+
+Decompiled and audited every mask consumer found so far for `mask == 0`:
+
+| function | address | zero-mask behaviour |
+|---|---|---|
+| UnitTask weapon init | `0x005FEDD0` | special-slot scan (`0x00605270`) returns `-1`; the `mask & ~(1<<slot)` step is guarded by `if (-1 < slot)`; best-weapon pick (`0x00466BE0`) pre-initialises all out-params and loops over mask bits only |
+| special-slot scan | `0x00605270` | returns -1 / null weapon pointer cleanly |
+| best-weapon pick | `0x00466BE0` | no set bits -> defaults returned, no indexing |
+| Carrier::SetSelected | `0x004D9880` | `selected = mask & existant` = 0, benign |
+
+No unguarded index or pointer derivation from a zero mask is visible in any
+of these. Whatever crashes for affected users either lives in a path not yet
+identified or requires additional state (see experiments).
+
+## Live repro attempts (GOG 2.2.301, this workstation)
+
+Harness: dedicated addon mod `addon\wmtest0` (lcbench-derived terrain,
+hex-patched `msn_filename`/`TerrainName`; Lua drives spawns/orders; stock
+`avtank.odf` copied into the mod with `weaponMask=00000`, weapons removed in
+one variant). Telemetry via Lua `print` -> `logs\BZLogger.txt`.
+
+| attempt | configuration | outcome |
+|---|---|---|
+| 1 | unarmed follower Follow(player), enemy waves attacking player | both followers died in combat; no crash |
+| 2 | unarmed (no weapon slots at all + mask 00000) Follow(armed ally) | follows indefinitely; no crash after 60 s |
+| 3 | same, sustained waves | no crash |
+
+Notes for future attempts:
+
+- Custom unit names need matching `.vdf`/`.mesh` assets ("no hardpoint named
+  'GC1'" otherwise); overriding stock-named ODFs (`avtank.odf` inside the mod)
+  avoids this while still allowing field edits.
+- `baseName = "avtank"` inheritance does not resolve stock archive ODFs;
+  ship a full copy instead.
+- The two unhandled crashes at `exe+0xF92F4` in `openshim_crash.log`
+  (2026-08-23) are teardown-time faults in `LensFlare::~LensFlare`
+  (`FUN_004F9250`), unrelated to weaponMask. An earlier revision of this note
+  called it a "LensFlare-constructor"; that was wrong, and the correction
+  matters because it changes the fix. It is a destructor, not a constructor: it
+  writes its own vtable pointers back into `this+0x00`, `this+0x28` and
+  `this+0x2C` and then calls `Ogre::RenderQueueListener::~RenderQueueListener`
+  at `this+0x28`. It runs only from the atexit thunk `0x00866C60`
+  (`mov ecx,0x009B7C28; call 0x004F9250; pop ebp; ret`), so it executes during
+  CRT exit, after static destruction has already taken `Ogre::MaterialManager`
+  down. It calls `Ogre::MaterialManager::getSingleton` through the IAT slot
+  `0x00869EC0` and dereferences the null result twice, once per technique, with
+  no null test, to reach vtable `+0x38`. Confirmed against
+  `openshim_crash_20260928_200455.dmp`: `0xC0000005` at `0x004F92F4` with
+  `EDX=0`, faulting thread 49188 (the main thread), returning to the
+  `0x00866C60` thunk with `[ebp-0x44]=0x009B7C28`. Live memory and the on-disk
+  image were compared over `0x00866C00-0x00866D00` and `0x004F9200-0x004F9400`
+  and differ in zero bytes, so both sites are stock. Guarded by the
+  "LensFlare MaterialManager Guard 1/2" and "2/2" patches; see
+  `../Docs/AGENT_PATCH_WORKFLOW.md`. The two sites have identical relative
+  layout, differing only in the stack displacement (`B4`/`B0`) and the local
+  string ([`ebp-0x28h`] against [`ebp-0x40h`]), so each guard derives both of
+  its destinations from its own site address.
+- Historical workaround lore says "do not ship all-zero weaponMask"; if the
+  crash predates the current exe revision, byte-drift may have moved or fixed
+  it. Run `bzr-ghidriff` against any older redistributable exe before
+  assuming the defect is current.
+
+## Next experiments (in order)
+
+1. Drive the order through the real command UI (select unit, issue Follow,
+   click ally) rather than Lua `Follow()` - rules out a UI-command-only
+   consumer.
+2. Repeat with the followed object destroyed mid-follow, and with
+   Formation/Defend2 orders.
+3. Exercise retaliation paths: damage the unarmed follower so its AI runs
+   FireAt/target selection without an explicit attack order.
+4. If a crash lands, the shim crash logger (`openshim_crash.log` +
+   minidump) gives module+RVA immediately; map through the corpus as done
+   above.
+
+## Why no patch ships now
+
+Every known consumer is provably zero-safe, and forcing the mask non-zero
+globally would change intentional no-fire behaviour (per the 2026-08-17
+report, artillery/minelayer paths ignore the mask entirely). A speculative
+guard would be unvalidatable dead code; per the work order this issue stays
+unpatched until a repro exists.

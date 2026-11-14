@@ -2,7 +2,7 @@
 // BZR Open Shim - multi-page mission briefings on the pre-launch briefing
 // screen (cUI_Mission). Page 1 is the stock screen; pages 2..9 come from
 // <mission>_N.des and optional sidebar/media/wav files next to it. See
-// Docs/BRIEFING_PAGES.md and reverse_engineering/briefing_pages_20261110.md.
+// Docs/BRIEFING_PAGES.md and reverse_engineering/notes/briefing_pages_20261110.md.
 //
 // Four entry detours, all pass-through until every one of them is in:
 //   cUI_Mission ctor        -- brackets the build so page 1 can be captured

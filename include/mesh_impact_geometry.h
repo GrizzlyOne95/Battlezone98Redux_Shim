@@ -2,7 +2,7 @@
 // Pure geometry for mesh-accurate ordnance impacts: a per-part triangle BVH
 // built once from the engine's own collision polygons, and a segment cast
 // against it. No engine or Windows dependencies, so it is unit tested on the
-// host. See reverse_engineering/ordnance_hit_test_20261021.md.
+// host. See reverse_engineering/notes/ordnance_hit_test_20261021.md.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

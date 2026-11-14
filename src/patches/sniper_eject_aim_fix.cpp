@@ -2,7 +2,7 @@
 // BZR Open Shim - keep a pilot's shot on the reticle while the pilot body is
 // tilted (ejected sideways, pitched or rolled).
 //
-// Root cause (see reverse_engineering/sniper_eject_misalignment.md):
+// Root cause (see reverse_engineering/notes/sniper_eject_misalignment.md):
 //   Person::Simulate (GOG 0x0059D340) ends with
 //     aimPitch(+0x280) = controls.pitch(+0xC8) * 0.5
 //     [if the compensation gate holds] aimPitch -= bodyFront.y (entity+0x3C)

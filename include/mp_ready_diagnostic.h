@@ -18,7 +18,7 @@
 // mismatch stands the whole diagnostic down rather than reporting a value it
 // cannot vouch for.
 //
-// See reverse_engineering/mp_not_ready_readiness_chain.md for the derivation.
+// See reverse_engineering/notes/mp_not_ready_readiness_chain.md for the derivation.
 
 namespace BZROpenShim
 {

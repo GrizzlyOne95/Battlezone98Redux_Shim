@@ -1,6 +1,6 @@
 // scavenger_process_guard.h
 // BZR Open Shim - decision logic for the AI_Team_Compute_Other scavenger
-// process guard (see Docs/SCAVENGER_NETPROCESS_OVERWRITE_20261014.md).
+// process guard (see Docs/Archive/2026/SCAVENGER_NETPROCESS_OVERWRITE_20261014.md).
 //
 // Header-only and free of Windows and engine dependencies so that
 // tests/scavenger_process_guard_tests.cpp can pin every verdict.

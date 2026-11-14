@@ -2,7 +2,7 @@
 // object on every peer of a multiplayer session.
 //
 // ============================================================================
-// THE DEFECT (Redux 2.2.301, exact GOG image; Docs/MP_SPLINTER_RUNS_20261027.md)
+// THE DEFECT (Redux 2.2.301, exact GOG image; Docs/Archive/2026/MP_SPLINTER_RUNS_20261027.md)
 // ============================================================================
 //
 // A thrown SprayBomb is replicated as ordnance (the launcher's bounces already

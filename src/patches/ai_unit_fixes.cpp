@@ -588,7 +588,7 @@ namespace BZROpenShim
     // "no position" sentinel, -1.0f, at this+0x3C (0x005C4126) -- past the
     // end of that allocation, onto the next heap entry's header. The Windows
     // heap notices later (0xC0000374) in an unrelated allocation or free.
-    // See Docs/SCAVENGER_NETPROCESS_OVERWRITE_20261014.md for the evidence.
+    // See Docs/Archive/2026/SCAVENGER_NETPROCESS_OVERWRITE_20261014.md for the evidence.
     //
     // The guard takes the call site, not the callee, so every other caller
     // of GetScrapPosition (all of them local ScavengerProcess code) keeps

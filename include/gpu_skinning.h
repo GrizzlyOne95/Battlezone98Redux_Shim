@@ -19,7 +19,7 @@ namespace BZROpenShim
     //
     // Output is not bit-identical to the CPU path: shader float math reorders
     // the blend, so silhouettes can move by sub-pixel amounts.
-    // See reverse_engineering/gpu_skinning_investigation_20261020.md.
+    // See reverse_engineering/notes/gpu_skinning_investigation_20261020.md.
 
     void GpuSkinningNotifyMissionRunStateChanged(bool running);
 

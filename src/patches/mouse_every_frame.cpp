@@ -21,7 +21,7 @@
 // just before the compare: a tiny positive value in single player, the
 // original constant in network games and while the step is zero (paused).
 // Zero would divide by a zero accumulator when paused.
-// See reverse_engineering/mouse_every_frame_20261020.md.
+// See reverse_engineering/notes/mouse_every_frame_20261020.md.
 
 #include "mouse_every_frame.h"
 

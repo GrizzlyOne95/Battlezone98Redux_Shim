@@ -4,7 +4,7 @@ PRODMENU gives a Recycler, Factory or Constructor nested build pages taken from
 a native `[Builder]` tree. It replaces the producers' `UpdateModeList`,
 `SetActiveMode` and `Deselect` vtable slots and hooks ControlPanel
 PostLoad/Cleanup. See "Hook sites" and "Submenu cost" in
-`reverse_engineering/producer_build_menu_notes.md`.
+`reverse_engineering/notes/producer_build_menu_notes.md`.
 
 The feature is on by default and needs no configuration file. A producer only
 gets pages when its ODF names a menu root; every other producer keeps its stock

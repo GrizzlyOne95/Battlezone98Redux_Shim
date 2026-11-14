@@ -113,7 +113,7 @@ namespace BZROpenShim
             g_DynamicGeometryMaterialBlendedCounts[kDynamicGeometryMaterialSampleCapacity] = {};
 
         // --- Piece reuse, material cache and fast sort -------------------
-        // See reverse_engineering/dynamic_geometry_begin_sort_20261021.md.
+        // See reverse_engineering/notes/dynamic_geometry_begin_sort_20261021.md.
         using FnDgBeginByMaterial =
             void(__thiscall*)(void* dg, const void* material, int32_t op, float dist);
         using FnDgBeginByName =

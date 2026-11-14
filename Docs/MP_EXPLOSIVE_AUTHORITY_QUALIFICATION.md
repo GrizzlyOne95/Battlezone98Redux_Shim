@@ -10,7 +10,7 @@ not used as proof of Redux network behavior.
 
 **2026-10-07 trace qualification:** the receiver-only symptom and focused
 capture follow-up are in
-[DAYWRECKER_RECEIVER_LIFETIME_INVESTIGATION_20261007.md](DAYWRECKER_RECEIVER_LIFETIME_INVESTIGATION_20261007.md).
+[DAYWRECKER_RECEIVER_LIFETIME_INVESTIGATION_20261007.md](Archive/2026/DAYWRECKER_RECEIVER_LIFETIME_INVESTIGATION_20261007.md).
 The existing MPAUTH hook logs simulation entry as detonation and labels a
 receive lookup MISS without observing that lookup. Its messages do not alone
 prove effects, reconstruction, or a new lifetime. The follow-up supplies an

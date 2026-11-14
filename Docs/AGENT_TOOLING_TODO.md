@@ -1,6 +1,6 @@
 # OpenShim Agent RE Tooling Roadmap
 
-This file is the implementation backlog for agent-facing reverse-engineering tooling. It is **not** a startup checklist. For normal RE work, use `AGENT_TOOLING.md`; for installation/repair, use `AGENT_TOOLING_SETUP.md`.
+This file is the implementation backlog for agent-facing reverse-engineering tooling. It is **not** a startup checklist. For normal RE work, use `AGENT_TOOLING.md`; for installation/repair, use `Docs/AGENT_TOOLING_SETUP.md`.
 
 The goal is to turn recurring OpenShim reverse-engineering work into deterministic, scriptable workflows rather than continuing to add standalone tools without integration.
 
@@ -224,7 +224,7 @@ The persisted index may use SQLite plus compact JSON metadata if that improves q
 - Never auto-transfer a symbol because an RVA happens to match.
 - Never transfer leaked-build stack/register locations as released-build facts.
 - Preserve source PDB identity, GUID/age, tool/backend, source hash, and extraction time in index metadata.
-- Private/leaked-PDB application remains governed by `reverse_engineering/private_pdb_semantic_ranking.md`.
+- Private/leaked-PDB application remains governed by `reverse_engineering/notes/private_pdb_semantic_ranking.md`.
 
 ### Acceptance criteria
 
@@ -336,7 +336,7 @@ When a phase is implemented:
 
 - change its status to **Implemented**;
 - link the actual script/wrapper/tests instead of retaining speculative installation prose;
-- update `scripts/install_agent_re_tooling.ps1` and `AGENT_TOOLING_SETUP.md` if dependencies changed;
+- update `scripts/install_agent_re_tooling.ps1` and `Docs/AGENT_TOOLING_SETUP.md` if dependencies changed;
 - add only the concise task-selection guidance needed in `AGENT_TOOLING.md`;
 - record validation and known limitations;
 - remove superseded recommendations rather than keeping historical shopping-list text.

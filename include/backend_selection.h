@@ -3,7 +3,7 @@
 // OpenShim backend-selection boot-request and Ogre.cfg transport logic.
 //
 // Owns the decision core for the startup backend seam documented in
-// reverse_engineering/renderer_startup_backend_selection_20260825.md:
+// reverse_engineering/notes/renderer_startup_backend_selection_20260825.md:
 //
 //   persistent requested renderer (openshim.ini [Graphics] Renderer)
 //     + launch-scoped CLI override (/renderer:dx9|dx11|gl)

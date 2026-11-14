@@ -17,7 +17,7 @@ An item belongs here only when the failure mechanism is understood well enough t
 
 Technical plan:
 
-`Docs/CLI_MULTIPARAM_PARSER_ACTIVE_PATCH_20260831.md`
+`Docs/Archive/2026/CLI_MULTIPARAM_PARSER_ACTIVE_PATCH_20260831.md`
 
 Primary RE deliverable:
 

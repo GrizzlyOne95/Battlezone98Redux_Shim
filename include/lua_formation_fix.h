@@ -1,6 +1,6 @@
 // lua_formation_fix.h -- engine-independent logic for the repaired Lua
 // Formation binding (src/patches/lua_formation_fix.cpp,
-// Docs/LUA_FORMATION_BINDING_20261014.md).
+// Docs/Archive/2026/LUA_FORMATION_BINDING_20261014.md).
 //
 // Stock binding 0x005079B0 is a byte-for-byte copy of Recycle(unit, prio):
 // it reads argument 1 as a handle and argument 2 with luaL_optinteger, then
