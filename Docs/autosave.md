@@ -4,7 +4,7 @@ OpenShim can own single-player autosaving without requiring EXU or mission Lua.
 
 ## Behavior
 
-- Enabled by default for active single-player gameplay.
+- Off unless `[AutoSave] Enabled=1` is set (a missing key means off). When on, it runs during active single-player gameplay.
 - Disabled automatically for network games.
 - Does not save while the pause/options/save/load/restart UI is active or while another cursor-driven shell screen is active. Terrain edit mode (`0x009454B8`) is **not** treated as a hard no-save condition: unscripted single-player / Instant Action missions can carry that flag while still allowing a manual SaveGame, so OpenShim only logs its state as diagnostic and leaves the save eligible. Dump `battlezone98redux.exe.38660.dmp` was taken with `editMode=1`, `wrapperActive=1`, `screenType=1` and showed the previous gate would have permanently suppressed the timer that had been armed at `09:38:20.698` with `initialDelay=10000ms`.
 - Uses BZR's native `SaveGame(char*, int)` serializer on the game/main thread.
@@ -64,7 +64,7 @@ RespectExternalAutoSave=1
 
 `IntervalSeconds` is clamped to 10-3600 seconds. `InitialDelaySeconds` is clamped to 0-600 seconds. `RetrySeconds` is clamped to 5-120 seconds.
 
-Set `Enabled=0` to retain OpenShim's AutoSave load-button support while disabling engine-level automatic save creation. The in-game AutoSave toggle writes this same key.
+Set `Enabled=1` to turn on engine-level automatic save creation. With `Enabled=0` (or no key) OpenShim's AutoSave load-button support still works. The in-game AutoSave toggle writes this same key.
 
 ## QuickSave / QuickLoad
 

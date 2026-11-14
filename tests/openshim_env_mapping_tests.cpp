@@ -123,6 +123,9 @@ namespace
         Check(Mapped(ini, "OPENSHIM_ENABLE_LOBBY_BAN_BUTTON") == "1", "ENABLE_ name reads the key as written");
         Check(Mapped(ini, "OPENSHIM_DISABLE_LOBBY_BAN_BUTTON") == "0", "DISABLE_ name reads it inverted");
 
+        // A missing ChunkMeshes key means off, not "unmapped" (which read as on).
+        Check(Mapped(ini, "OPENSHIM_DISABLE_CHUNK_MESH_PROXY") == "1", "missing ChunkMeshes key disables chunk meshes");
+
         // Three legacy chunk switches share the one ChunkMeshes key.
         ini.Set("General", "ChunkMeshes", "false");
         for (const char* name : {"OPENSHIM_DISABLE_CHUNK_EXPERIMENTS", "BZR_DISABLE_CHUNK_MESH_PROXY",
