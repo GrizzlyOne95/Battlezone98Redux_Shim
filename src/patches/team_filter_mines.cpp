@@ -762,6 +762,13 @@ namespace BZROpenShim
             if (!TryGetObjectOdfToken(objectPtr, odfToken))
                 return false;
 
+            const long generation = OdfIndexGeneration();
+            if (cache.odfIndexGeneration != generation)
+            {
+                cache.odfIndexGeneration = generation;
+                cache.odfEntries.clear();
+            }
+
             const auto cached = cache.odfEntries.find(odfToken);
             if (cached != cache.odfEntries.end())
             {

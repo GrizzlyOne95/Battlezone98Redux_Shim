@@ -262,6 +262,12 @@ namespace BZROpenShim
         static SRWLOCK g_OdfIndexLock = SRWLOCK_INIT;
         static std::shared_ptr<const OdfSearchPath::OdfDirectoryIndex> g_OdfIndex;
         static volatile long g_OdfIndexRebuildInFlight = 0;
+        // Bumped on every publish. Caches of values parsed from ODF files
+        // compare it and drop their entries when it moves: the index is
+        // rebuilt off-thread when a world goes live, so an entry (a miss
+        // included) resolved against the previous mission's snapshot would
+        // otherwise stick for the rest of the process.
+        static volatile long g_OdfIndexGeneration = 0;
 
         static std::shared_ptr<const OdfSearchPath::OdfDirectoryIndex> BuildOdfIndexSnapshot()
         {
@@ -274,6 +280,12 @@ namespace BZROpenShim
             AcquireSRWLockExclusive(&g_OdfIndexLock);
             g_OdfIndex = std::move(index);
             ReleaseSRWLockExclusive(&g_OdfIndexLock);
+            InterlockedIncrement(&g_OdfIndexGeneration);
+        }
+
+        long OdfIndexGeneration()
+        {
+            return InterlockedCompareExchange(&g_OdfIndexGeneration, 0, 0);
         }
 
         static std::shared_ptr<const OdfSearchPath::OdfDirectoryIndex> GetOdfIndex()

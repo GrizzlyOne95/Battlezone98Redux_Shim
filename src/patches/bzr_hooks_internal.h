@@ -1207,6 +1207,7 @@ namespace BZROpenShim
         struct TeamFilterCache
         {
             bool initialized = false;
+            long odfIndexGeneration = 0;
             std::unordered_map<std::string, TeamFilterConfig> odfEntries = {};
         };
         struct ListNodePtrValue
@@ -1245,6 +1246,9 @@ namespace BZROpenShim
         void RequestOdfIndexRebuild();
         // Per frame: requests a rebuild when a world goes live.
         void TickOdfIndexWorldEdge();
+        // Changes whenever the ODF directory index is republished; see
+        // odf_helpers.cpp. Per-ODF caches clear themselves when it moves.
+        long OdfIndexGeneration();
         extern bool g_MagnetMineSimulateHookInstalled;
         extern TeamFilterCache g_MagnetMineTeamFilterCache;
         extern bool g_MagnetZeroRangeGuardEnabled;
@@ -1328,6 +1332,7 @@ namespace BZROpenShim
         struct AiTuningCache
         {
             bool initialized = false;
+            long odfIndexGeneration = 0;
             std::unordered_map<std::string, AiTuningConfig> odfEntries = {};
         };
         // Per-unit AI tuning override set at runtime through the EXU bridge.

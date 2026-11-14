@@ -3248,6 +3248,13 @@ namespace BZROpenShim
             if (!TryGetObjectOdfToken(objectPtr, odfToken))
                 return false;
 
+            const long generation = OdfIndexGeneration();
+            if (g_AiTuningCache.odfIndexGeneration != generation)
+            {
+                g_AiTuningCache.odfIndexGeneration = generation;
+                g_AiTuningCache.odfEntries.clear();
+            }
+
             const auto cached = g_AiTuningCache.odfEntries.find(odfToken);
             if (cached != g_AiTuningCache.odfEntries.end())
             {
