@@ -15,6 +15,7 @@
 #include "openshim_preset_migration.h"
 #include "openshim_assets.h"
 #include "terrain_proxy.h"
+#include "soak_telemetry.h"
 #include "terrain_tile_blend.h"
 #include "planet_environment.h"
 #include "bzr_options_ui.h"
@@ -870,6 +871,9 @@ namespace BZROpenShim
 
         static void __fastcall RootDestructorExitSeam(void* root, void* /*edx*/)
         {
+            // Stop the soak watchdog before the render system goes away; its
+            // fence is leaked with the device (see below). No-op when off.
+            ShutdownSoakTelemetry();
             __try
             {
                 ArmD3D11ExitTeardownSkip();
