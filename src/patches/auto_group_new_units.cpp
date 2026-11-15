@@ -290,6 +290,7 @@ namespace BZROpenShim::Hooks
             const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(built)));
             const uintptr_t cls = ClassOf(built);
             unit.playerTeam = IsPlayerTeam(built);
+            unit.isCraft = VtableDerivesFrom(vtable, ".?AVCraft@@");
             unit.isScavenger = VtableTypeNameMatches(vtable, ".?AVScavenger@@");
             unit.isConstructor = VtableTypeNameMatches(vtable, ".?AVConstructionRig@@");
             unit.isPerson = IsPersonObject(built);

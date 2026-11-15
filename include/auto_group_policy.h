@@ -142,6 +142,7 @@ namespace BZROpenShim
         {
             bool present = false;
             bool playerTeam = false;
+            bool isCraft = false;     // RTTI derives from Craft (not a powerup, pod or mine)
             bool isScavenger = false;
             bool isConstructor = false;
             bool isPerson = false;
@@ -159,6 +160,7 @@ namespace BZROpenShim
             Scavenger,
             Constructor,
             Pilot,
+            NotCraft,
             Building,
             NotCommandable,
             NoHandle,
@@ -179,6 +181,8 @@ namespace BZROpenShim
                 return BuiltUnitVerdict::Pilot;
             if (unit.isBuilding)
                 return BuiltUnitVerdict::Building;
+            if (!unit.isCraft)
+                return BuiltUnitVerdict::NotCraft;
             if (!unit.canCommand)
                 return BuiltUnitVerdict::NotCommandable;
             if (!unit.handleValid)
@@ -198,6 +202,7 @@ namespace BZROpenShim
             case BuiltUnitVerdict::Scavenger: return "scavenger";
             case BuiltUnitVerdict::Constructor: return "constructor";
             case BuiltUnitVerdict::Pilot: return "pilot";
+            case BuiltUnitVerdict::NotCraft: return "not a vehicle";
             case BuiltUnitVerdict::Building: return "building";
             case BuiltUnitVerdict::NotCommandable: return "not commandable";
             case BuiltUnitVerdict::NoHandle: return "no handle";

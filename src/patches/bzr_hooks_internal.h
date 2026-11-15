@@ -1366,6 +1366,7 @@ namespace BZROpenShim
         };
         bool TryParseFloatValue(const char* value, float& out);
         bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName);
+        bool VtableDerivesFrom(uintptr_t vtableAddress, const char* typeName);
         extern bool g_AiOdfGameplayTuningActive;
         extern AiTuningCache g_AiTuningCache;
         extern std::unordered_map<uintptr_t, AiUnitTuningOverride> g_AiUnitTuningOverridesByObject;

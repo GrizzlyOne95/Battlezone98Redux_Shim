@@ -184,6 +184,7 @@ namespace
         BuiltUnit u;
         u.present = true;
         u.playerTeam = true;
+        u.isCraft = true;
         u.canCommand = true;
         u.handleValid = true;
         u.odfKnown = true;
@@ -206,6 +207,11 @@ namespace
         u = Eligible();
         u.isPerson = true;
         Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Pilot, "pilot skipped");
+        u.isCraft = false; // Pilot is checked before NotCraft, whatever isCraft says
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Pilot, "non-craft pilot still logs pilot");
+        u = Eligible();
+        u.isCraft = false; // a powerup, camera pod or mine
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::NotCraft, "non-craft (powerup) skipped");
         u = Eligible();
         u.isBuilding = true;
         Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Building, "building skipped");

@@ -453,8 +453,12 @@ binds `group_select_0`..`group_select_6` to F1-F7, each with a
 stricter than BZCC (which compares only the first member), so a mixed group
 the player built by hand is never touched.
 
+Only objects whose RTTI derives from `Craft` (`.?AVCraft@@`) are grouped, so
+powerups, camera pods and mines a producer builds are skipped ("not a
+vehicle").
+
 Skipped: other teams, a null unit, scavengers, constructors, pilots
-(RTTI name contains `Person`), buildings (class id 2), units that cannot be
+(RTTI name contains `Person`), buildings (class id 2), non-Craft objects, units that cannot be
 commanded, units whose ODF name cannot be read, and units already in any of
 the ten groups. Dead handles are not counted and the
 stored list is never compacted: stock already removes a deleted object from

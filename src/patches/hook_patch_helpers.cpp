@@ -263,6 +263,56 @@ namespace BZROpenShim
             }
         }
 
+        // True when the object's MSVC RTTI class is `typeName` or derives from
+        // it. 32-bit layout: CompleteObjectLocator +0x10 -> ClassHierarchy-
+        // Descriptor (+0x08 numBaseClasses, +0x0C pBaseClassArray); each
+        // BaseClassDescriptor +0x00 -> TypeDescriptor, name at +0x08. The
+        // array lists the class itself first, then every base.
+        bool VtableDerivesFrom(uintptr_t vtableAddress, const char* typeName)
+        {
+            if (!vtableAddress || !typeName || !*typeName)
+                return false;
+
+            __try
+            {
+                const uintptr_t completeObjectLocator =
+                    *reinterpret_cast<const uint32_t*>(vtableAddress - sizeof(uint32_t));
+                if (!completeObjectLocator)
+                    return false;
+
+                const uintptr_t hierarchy =
+                    *reinterpret_cast<const uint32_t*>(completeObjectLocator + 0x10);
+                if (!hierarchy)
+                    return false;
+
+                const uint32_t numBaseClasses =
+                    *reinterpret_cast<const uint32_t*>(hierarchy + 0x08);
+                const uintptr_t baseClassArray =
+                    *reinterpret_cast<const uint32_t*>(hierarchy + 0x0C);
+                if (!baseClassArray || numBaseClasses == 0 || numBaseClasses > 64)
+                    return false;
+
+                for (uint32_t i = 0; i < numBaseClasses; ++i)
+                {
+                    const uintptr_t baseClass =
+                        *reinterpret_cast<const uint32_t*>(baseClassArray + i * sizeof(uint32_t));
+                    if (!baseClass)
+                        continue;
+                    const uintptr_t typeDescriptor = *reinterpret_cast<const uint32_t*>(baseClass);
+                    if (!typeDescriptor)
+                        continue;
+                    const char* name = reinterpret_cast<const char*>(typeDescriptor + 0x08);
+                    if (std::strcmp(name, typeName) == 0)
+                        return true;
+                }
+                return false;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         bool IsExuModuleLoaded()
         {
             // The headlight gate asks every rendered frame, and EXU comes and
