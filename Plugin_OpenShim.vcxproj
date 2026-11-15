@@ -398,6 +398,7 @@
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\briefing_pages_policy.h" />
     <ClInclude Include="include\ordnance_entity_leak_policy.h" />
+    <ClInclude Include="include\live_object_gate.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />
     <ClInclude Include="include\deferred_modable_policy.h" />
     <ClInclude Include="include\background_run_policy.h" />

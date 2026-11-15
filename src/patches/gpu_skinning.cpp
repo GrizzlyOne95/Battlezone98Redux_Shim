@@ -34,6 +34,7 @@
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "gpu_skinning_hlsl.h"
+#include "live_object_gate.h"
 #include "memory_access.h"
 #include "render_profile_runtime.h"
 #include "shim_log.h"
@@ -134,6 +135,8 @@ namespace BZROpenShim
         using FnFindElement = const void* (__thiscall*)(void*, int, uint16_t);
         using FnElementType = int(__thiscall*)(const void*);
         using FnFrameListener = void(__thiscall*)(void*, void*);
+        using FnHasEntity = bool(__thiscall*)(void*, const std::string&);
+        using FnGetEntity = void* (__thiscall*)(void*, const std::string&);
 
         struct OgreApi
         {
@@ -193,6 +196,10 @@ namespace BZROpenShim
             FnPtrAt16 meshVertexDataByTrackHandle = nullptr;
             FnFindElement findElementBySemantic = nullptr;
             FnElementType elementType = nullptr;
+            // Liveness proof for a scanned Entity (EntityProvenLive).
+            FnStringRef movableName = nullptr;
+            FnHasEntity sceneHasEntity = nullptr;
+            FnGetEntity sceneGetEntity = nullptr;
         };
 
         OgreApi g_ogre;
@@ -274,6 +281,9 @@ namespace BZROpenShim
             uint32_t clones = 0;
             uint32_t programs = 0;
             uint32_t programsReused = 0;
+            // Scanned Entity pointers skipped because the live scene does not
+            // own them (destroyed, or not an Entity of this scene).
+            uint32_t unownedSkips = 0;
             uint32_t rejects[static_cast<int>(Reject::Count)] = {};
         };
         Stats g_stats;
@@ -307,6 +317,8 @@ namespace BZROpenShim
             // restoration notification on the render thread.
             std::vector<std::string> surfaceBases;
             std::vector<int> weights;
+            // Consecutive frames this entity failed EntityProvenLive.
+            unsigned unprovenFrames = 0;
         };
         std::unordered_map<void*, EntityRecord> g_converted;
         DWORD g_variantThread = 0;
@@ -549,6 +561,10 @@ namespace BZROpenShim
             o.findElementBySemantic = ResolveOgreProc<FnFindElement>(
                 "?findElementBySemantic@VertexDeclaration@Ogre@@UBEPBVVertexElement@2@W4VertexElementSemantic@2@G@Z");
             o.elementType = ResolveOgreProc<FnElementType>("?getType@VertexElement@Ogre@@QBE?AW4VertexElementType@2@XZ");
+            o.movableName = ResolveOgreProc<FnStringRef>("?getName@MovableObject@Ogre@@UBEABV" OS_STR "XZ");
+            o.sceneHasEntity = ResolveOgreProc<FnHasEntity>("?hasEntity@SceneManager@Ogre@@UBE_NABV" OS_STR "@Z");
+            o.sceneGetEntity = ResolveOgreProc<FnGetEntity>(
+                "?getEntity@SceneManager@Ogre@@UBEPAVEntity@2@ABV" OS_STR "@Z");
 #undef OS_STR
 
             const void* const required[] = {
@@ -568,7 +584,8 @@ namespace BZROpenShim
                 o.entityHasVertexAnimation, o.entityHardwareAnimation, o.entityBoneMatrices,
                 o.entitySoftwareRequests, o.entityMesh, o.entitySubEntityCount, o.entitySubEntity,
                 o.subEntityMaterial, o.subEntitySetMaterial, o.meshVertexDataByTrackHandle,
-                o.findElementBySemantic, o.elementType,
+                o.findElementBySemantic, o.elementType, o.movableName, o.sceneHasEntity,
+                o.sceneGetEntity,
             };
             size_t missing = 0;
             for (const void* proc : required)
@@ -1643,8 +1660,78 @@ namespace BZROpenShim
 
         bool IsPointerShaped(const void* candidate)
         {
-            const uintptr_t address = reinterpret_cast<uintptr_t>(candidate);
-            return address >= 0x00010000 && (address % sizeof(void*)) == 0;
+            return LiveObjectGate::IsCandidatePointer(reinterpret_cast<uintptr_t>(candidate));
+        }
+
+        // The Entity's name, copied out without trusting the pointer: the
+        // memory may be a freed Entity's. Reads only, bounded, under SEH.
+        bool ReadEntityNameSeh(const void* entity, char* out, size_t outSize, size_t& length, bool& shaped)
+        {
+            length = 0;
+            shaped = false;
+            __try
+            {
+                const std::string* const name = g_ogre.movableName(const_cast<void*>(entity));
+                if (!name)
+                    return false;
+                const size_t size = name->size();
+                shaped = LiveObjectGate::IsEntityNameShaped(size, name->capacity()) && size < outSize;
+                if (!shaped)
+                    return true;
+                std::memcpy(out, name->data(), size);
+                out[size] = '\0';
+                length = size;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // The queries only see the local copy of the name, never the Entity.
+        bool QuerySceneOwnsCxx(void* sceneManager, const void* entity, const char* name, size_t length,
+                               bool& hasEntity, bool& sameObject)
+        {
+            try
+            {
+                const std::string key(name, length);
+                hasEntity = g_ogre.sceneHasEntity(sceneManager, key);
+                sameObject = hasEntity && g_ogre.sceneGetEntity(sceneManager, key) == entity;
+                return true;
+            }
+            catch (...)
+            {
+                return false;
+            }
+        }
+
+        bool QuerySceneOwnsSeh(void* sceneManager, const void* entity, const char* name, size_t length,
+                               bool& hasEntity, bool& sameObject)
+        {
+            __try
+            {
+                return QuerySceneOwnsCxx(sceneManager, entity, name, length, hasEntity, sameObject);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // An Entity pointer read out of engine memory is acted on only while
+        // the live SceneManager maps its name back to it. A destroyed Entity
+        // has left that map even when its memory still holds the vtable, so a
+        // freed one is skipped instead of being read through or written to.
+        bool EntityProvenLive(void* sceneManager, void* entity)
+        {
+            LiveObjectGate::EntityProbe probe;
+            char name[LiveObjectGate::kMaxEntityNameLength + 1];
+            size_t length = 0;
+            probe.nameRead = ReadEntityNameSeh(entity, name, sizeof(name), length, probe.nameShaped);
+            if (probe.nameRead && probe.nameShaped)
+                probe.queryOk = QuerySceneOwnsSeh(sceneManager, entity, name, length, probe.hasEntity, probe.sameObject);
+            return LiveObjectGate::IsEntityProvenLive(probe);
         }
 
         // The same OBJ76 reads as Hooks::CaptureChunkBridgeSnapshot: the
@@ -1710,6 +1797,11 @@ namespace BZROpenShim
 
         void ScanFrame()
         {
+            // Every Entity is proven against this scene before it is touched;
+            // without one nothing can be proven, so the frame is skipped.
+            void* const sceneManager = Hooks::GetOgreSceneManagerRuntime();
+            if (!sceneManager)
+                return;
             g_variantThread = GetCurrentThreadId();
             std::unordered_map<void*,std::vector<SurfaceVariantChange>> variants;
             std::unordered_set<void*> variantsHandled;
@@ -1724,6 +1816,7 @@ namespace BZROpenShim
             const bool convertPass = (g_frame++ % kConvertIntervalFrames) == 0;
 
             std::unordered_set<void*> live;
+            std::unordered_set<void*> held;  // tracked, unproven this frame, record kept
             live.reserve(total * 2);
             for (size_t index = 0; index < total; ++index)
             {
@@ -1739,12 +1832,27 @@ namespace BZROpenShim
                 };
                 for (void* entity : candidates)
                 {
-                    if (!entity || !live.insert(entity).second)
+                    if (!entity || live.count(entity) != 0 || held.count(entity) != 0)
                         continue;
 
                     const auto converted = g_converted.find(entity);
                     if (converted != g_converted.end())
                     {
+                        // A tracked Entity Ogre does not own this frame is not
+                        // touched. Its record is held for a few frames (one
+                        // false negative must not strand it on clones), then
+                        // dropped below untouched.
+                        if (!EntityProvenLive(sceneManager, entity))
+                        {
+                            const unsigned failures = ++converted->second.unprovenFrames;
+                            if (failures == 1)
+                                ++g_stats.unownedSkips;
+                            if (LiveObjectGate::KeepUnprovenRecord(failures))
+                                held.insert(entity);
+                            continue;
+                        }
+                        converted->second.unprovenFrames = 0;
+                        live.insert(entity);
                         // Resolve queued assignments only after the existing
                         // arena walk has proved this entity is still live.
                         const auto changes=variants.find(entity);
@@ -1771,6 +1879,7 @@ namespace BZROpenShim
                         g_rejected.insert(entity);
                         continue;
                     }
+                    live.insert(entity);
                     if (!convertPass || g_rejected.count(entity) != 0)
                         continue;
                     char rtti[64];
@@ -1778,6 +1887,12 @@ namespace BZROpenShim
                     if (!className || std::strcmp(className, ".?AVEntity@Ogre@@") != 0)
                     {
                         g_rejected.insert(entity);
+                        continue;
+                    }
+                    // Not rejected: a later pass may find it registered.
+                    if (!EntityProvenLive(sceneManager, entity))
+                    {
+                        ++g_stats.unownedSkips;
                         continue;
                     }
 
@@ -1812,7 +1927,8 @@ namespace BZROpenShim
                 std::lock_guard<std::mutex> lock(g_variantMutex);
                 for (auto& entry:variants)
                 {
-                    if (variantsHandled.count(entry.first) || !live.count(entry.first)) continue;
+                    if (variantsHandled.count(entry.first) ||
+                        (!live.count(entry.first) && !held.count(entry.first))) continue;
                     for (auto& change:entry.second)
                     {
                         auto& slot=g_pendingVariants[entry.first];
@@ -1833,7 +1949,7 @@ namespace BZROpenShim
             // Entities no longer in the arena are not touched again: their
             // pointers may be dangling, and a reused address starts fresh.
             for (auto it = g_converted.begin(); it != g_converted.end();)
-                it = live.count(it->first) ? std::next(it) : g_converted.erase(it);
+                it = (live.count(it->first) || held.count(it->first)) ? std::next(it) : g_converted.erase(it);
             for (auto it = g_rootProbes.begin(); it != g_rootProbes.end();)
                 it = it->second.seenFrame == frame ? std::next(it) : g_rootProbes.erase(it);
             if (convertPass)
@@ -1911,9 +2027,10 @@ namespace BZROpenShim
                 rejects += "=" + std::to_string(g_stats.rejects[i]);
             }
             LogShimA(LogLevel::Info, kComponent,
-                "[GPUSKIN] mission summary: converted=%u reconverted=%u reverted=%u clones=%u programs=%u reused=%u rejects={%s}",
+                "[GPUSKIN] mission summary: converted=%u reconverted=%u reverted=%u clones=%u programs=%u reused=%u "
+                "unowned_skips=%u rejects={%s}",
                 g_stats.converted, g_stats.reconverted, g_stats.reverted, g_stats.clones,
-                g_stats.programs, g_stats.programsReused, rejects.c_str());
+                g_stats.programs, g_stats.programsReused, g_stats.unownedSkips, rejects.c_str());
             if (g_buildTwins)
             {
                 LogShimA(LogLevel::Info, kComponent,

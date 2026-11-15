@@ -131,9 +131,10 @@ namespace BZROpenShim
         // reading the object after it has stopped being userObject.
         //
         // Reading an object the engine may be tearing down is only safe because
-        // IsLiveHeadlightObjectSlot rejects anything whose primary vtable is not
-        // inside the exe's code region: a freed-and-reused slot fails that test
-        // rather than yielding plausible garbage. The watch is also hard-bounded
+        // IsLiveHeadlightObjectSlot rejects anything that is not an in-use arena
+        // slot (exe-range vtable and a non-zero sequence number, see
+        // live_object_gate.h): a freed slot fails that test rather than
+        // yielding plausible garbage. The watch is also hard-bounded
         // in ticks so a pointer that gets recycled into another live GameObject
         // cannot be mistaken for the pilot indefinitely.
         static void* g_PilotTeamWatchObject = nullptr;
