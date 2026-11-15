@@ -99,6 +99,28 @@ namespace BZROpenShim
                 float spinDamp = 0.6f;
                 float maxLifetime = 12.0f;
                 float sinkSeconds = 3.0f; // bigger pieces: a slower sink reads as weight
+                // Sink dust: soft camera-facing puffs around the piece's
+                // footprint when its sink starts (dustBurst + 1 per metre of
+                // radius, capped), then one every dustTrickleEvery seconds
+                // over the first dustTrickleFor seconds of the sink. Each
+                // rises, drifts outward, grows dustGrow times over its life
+                // and fades out. Cosmetic and local; no engine calls.
+                float dustBurst = 3.0f;
+                int dustBurstMax = 6;
+                float dustTrickleEvery = 0.5f;
+                float dustTrickleFor = 1.5f;
+                float dustLifeMin = 2.0f;
+                float dustLifeMax = 3.0f;
+                float dustRiseMin = 0.3f; // m/s
+                float dustRiseMax = 0.8f;
+                float dustSpread = 0.4f;  // outward drift, m/s, easing off with age
+                float dustSizeRadii = 1.0f; // start size (metres across) per metre of radius
+                float dustSizeMin = 0.8f;
+                float dustSizeMax = 4.0f;
+                float dustGrow = 2.5f;
+                float dustAlpha = 0.6f;   // peak opacity
+                float dustFadeIn = 0.12f; // fraction of the life spent fading in
+                size_t dustMaxPuffs = 96; // live puffs at once; the oldest is reused
             };
             constexpr MetalTuning kMetalTuning = {};
 
@@ -491,7 +513,8 @@ namespace BZROpenShim
                 bool impacted = false;
                 bool hasGround = true;
                 bool metal = false; // fracture piece: metal ground response
-                bool dusted = false; // sink dust puff already thrown
+                bool dusted = false; // sink dust burst already thrown
+                float dustClock = 0.0f; // seconds towards the next trickle puff
                 // Main-camera frustum test, refreshed every tick. Unknown (no
                 // camera, test failed) counts as in view: the old behaviour.
                 bool inView = true;
@@ -544,6 +567,26 @@ namespace BZROpenShim
             }
 
             // ---- Sink and crumble ---------------------------------------------
+            // Why gibs leave, counted for the TraceSkinnedGibs summary.
+            enum GibExit : int
+            {
+                kExitSunk,          // finished its in-view sink
+                kExitHiddenSinking, // left the view mid-sink
+                kExitHiddenLinger,  // linger over while off screen
+                kExitNeverSeen,     // settled without ever being on screen
+                kExitPressure,      // released off screen by pool pressure
+                kExitLifetime,      // hard lifetime cap
+                kExitAirborne,      // never landed
+                kExitInvalid,       // position went non-finite
+                kExitCount
+            };
+            constexpr const char* kExitNames[kExitCount] = {"sunk",     "hidden-sinking", "hidden-linger", "never-seen",
+                                                            "pressure", "lifetime",       "airborne",      "invalid"};
+            uint32_t g_ExitCounts[kExitCount] = {};
+            uint32_t g_SinkStarts = 0;
+            uint32_t g_DustEmitted = 0;
+            GibExit g_LastExit = kExitLifetime;
+
             float SinkSeconds(const GibSlot& slot)
             {
                 return slot.metal ? kMetalTuning.sinkSeconds : kTuning.sinkSeconds;
@@ -555,6 +598,7 @@ namespace BZROpenShim
                     return;
                 const float scale = std::max({std::fabs(slot.scale.x), std::fabs(slot.scale.y), std::fabs(slot.scale.z)});
                 slot.sinking = true;
+                ++g_SinkStarts;
                 slot.sinkElapsed = 0.0f;
                 slot.sinkStartY = slot.position.y;
                 slot.sinkDistance = std::max(kTuning.sinkDepth, slot.radius * scale * kTuning.sinkDepthRadii);
@@ -601,13 +645,51 @@ namespace BZROpenShim
                 if (standing <= soft)
                     return;
                 if (oldestHidden)
+                {
                     ReleaseSlot(*oldestHidden);
+                    ++g_ExitCounts[kExitPressure];
+                }
                 else if (oldestResting)
                     StartSinking(*oldestResting);
             }
 
+            // ---- Sink dust state ------------------------------------------------
+            // One shim-owned Ogre BillboardSet in the scene it was made in,
+            // and the puffs it draws (render space, like the pool).
+            struct DustPuff
+            {
+                Vec3 position = {};
+                Vec3 drift = {};
+                float rise = 0.0f;
+                float age = 0.0f;
+                float life = 1.0f;
+                float size = 1.0f;
+                float shade = 1.0f;
+            };
+            struct DustState
+            {
+                void* sceneManager = nullptr;
+                void* set = nullptr;
+                bool disabled = false; // something did not resolve or faulted: off for the process
+                bool drawn = false;    // the set still holds billboards from the last push
+                size_t count = 0;
+                uint32_t seed = 0x2545F491u;
+                DustPuff puffs[kMetalTuning.dustMaxPuffs];
+            };
+            DustState g_Dust;
+
+            // Drops the set without touching it: its scene is gone or going.
+            void ForgetDust()
+            {
+                g_Dust.sceneManager = nullptr;
+                g_Dust.set = nullptr;
+                g_Dust.drawn = false;
+                g_Dust.count = 0;
+            }
+
             void ForgetAll(const wchar_t* reason)
             {
+                ForgetDust();
                 size_t forgotten = 0;
                 for (GibSlot& slot : g_Slots)
                     if (slot.node || slot.entity)
@@ -675,142 +757,363 @@ namespace BZROpenShim
             }
 
             // ---- Sink dust ----------------------------------------------------
-            // A fracture piece throws a stock ground-hit puff where it starts
-            // to sink. Purely cosmetic and local: Explosion::Init (0x004C9AB0)
-            // copies the 64-byte matrix, takes a null owner, and creates no
-            // distributed object; these ODFs have damageRadius 0.
-            // One name only: a missing name makes Find probe for <name>.odf on
-            // every call, so no fallback list. It names a sound (explSound).
-            constexpr const char* kSinkDustOdf = "xbulgnd";
-            constexpr int kMaxDustPerTick = 2;
-            int g_DustThisTick = 0;
-
-            using FnExplosionFind = void*(__cdecl*)(uint32_t nameLo, uint32_t nameHi);
-            using FnExplosionBuild = void*(__thiscall*)(void* explosionClass, const void* matrix, void* owner);
-            struct DustApi
+            // A fracture piece that starts to sink in view kicks up soft dust
+            // puffs (kMetalTuning.dust*): billboards in one shim-owned Ogre
+            // BillboardSet with the generated openshim_fracture_dust material.
+            // Purely cosmetic and local: no engine call, no shared random
+            // stream (stock ChunkEffect::CreateChunklet advances the engine's
+            // Pseudo_Rand counter, so chunklets are not used here). Every tick
+            // the set is cleared and refilled from g_Dust.puffs: clear() and
+            // createBillboard() move billboards between the set's own pool
+            // lists, so nothing is allocated. The shipped OgreMain exports no
+            // Billboard::setPosition, hence the refill.
+            using FnOgreBillboardSetVoid = void(__thiscall*)(void*);
+            using FnOgreBillboardSetBool = void(__thiscall*)(void*, bool);
+            using FnOgreBillboardSetDimensions = void(__thiscall*)(void*, float, float);
+            struct DustOgreApi
             {
-                FnExplosionFind find = nullptr;
-                FnExplosionBuild build = nullptr;
+                FnOgreGetRootSceneNode getRootSceneNode = nullptr;
+                FnOgreCreateBillboardSet createSet = nullptr;
+                FnOgreAttachObject attachObject = nullptr;
+                FnOgreSetBillboardsInWorldSpace setWorldSpace = nullptr;
+                FnOgreSetDefaultDimensions setDefaultDimensions = nullptr;
+                FnOgreSetBillboardMaterialName setMaterialName = nullptr;
+                FnOgreBillboardSetBool setAutoextend = nullptr;
+                FnOgreBillboardSetBool setCastShadows = nullptr;
+                FnOgreCreateBillboard createBillboard = nullptr;
+                FnOgreBillboardSetDimensions setDimensions = nullptr;
+                FnOgreBillboardSetVoid clear = nullptr;
+                FnOgreBillboardSetVoid updateBounds = nullptr;
+                FnOgreDestroyBillboardSet destroySet = nullptr;
+                void* (*getMaterialManager)() = nullptr;
+                bool(__thiscall* resourceExists)(void*, const std::string&) = nullptr;
+                bool ok = false;
             };
 
-            const DustApi& ResolveDustApi()
+            const DustOgreApi& ResolveDustOgreApi()
             {
-                static DustApi api;
+                static DustOgreApi api;
                 static bool attempted = false;
                 if (attempted)
                     return api;
                 attempted = true;
-                uint32_t find = 0, build = 0;
-                const HookEngine::EngineRow rows[] = {
-                    {"ExplosionClassFind", &find},
-                    {"ExplosionClassBuild", &build},
-                };
-                if (!HookEngine::BindEngineRows("Fracture sink dust", rows))
-                {
-                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] sink dust off: explosion calls do not bind\n");
-                    return api;
-                }
-                api.find = reinterpret_cast<FnExplosionFind>(static_cast<uintptr_t>(find));
-                api.build = reinterpret_cast<FnExplosionBuild>(static_cast<uintptr_t>(build));
+                api.getRootSceneNode =
+                    ResolveOgreProc<FnOgreGetRootSceneNode>("?getRootSceneNode@SceneManager@Ogre@@UAEPAVSceneNode@2@XZ");
+                api.createSet = ResolveOgreProc<FnOgreCreateBillboardSet>(
+                    "?createBillboardSet@SceneManager@Ogre@@UAEPAVBillboardSet@2@I@Z");
+                api.attachObject =
+                    ResolveOgreProc<FnOgreAttachObject>("?attachObject@SceneNode@Ogre@@UAEXPAVMovableObject@2@@Z");
+                api.setWorldSpace = ResolveOgreProc<FnOgreSetBillboardsInWorldSpace>(
+                    "?setBillboardsInWorldSpace@BillboardSet@Ogre@@UAEX_N@Z");
+                api.setDefaultDimensions =
+                    ResolveOgreProc<FnOgreSetDefaultDimensions>("?setDefaultDimensions@BillboardSet@Ogre@@UAEXMM@Z");
+                api.setMaterialName = ResolveOgreProc<FnOgreSetBillboardMaterialName>(
+                    "?setMaterialName@BillboardSet@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@0@Z");
+                api.setAutoextend = ResolveOgreProc<FnOgreBillboardSetBool>("?setAutoextend@BillboardSet@Ogre@@UAEX_N@Z");
+                api.setCastShadows = ResolveOgreProc<FnOgreBillboardSetBool>("?setCastShadows@MovableObject@Ogre@@QAEX_N@Z");
+                api.createBillboard = ResolveOgreProc<FnOgreCreateBillboard>(
+                    "?createBillboard@BillboardSet@Ogre@@QAEPAVBillboard@2@MMMABVColourValue@2@@Z");
+                api.setDimensions = ResolveOgreProc<FnOgreBillboardSetDimensions>("?setDimensions@Billboard@Ogre@@QAEXMM@Z");
+                api.clear = ResolveOgreProc<FnOgreBillboardSetVoid>("?clear@BillboardSet@Ogre@@UAEXXZ");
+                api.updateBounds = ResolveOgreProc<FnOgreBillboardSetVoid>("?_updateBounds@BillboardSet@Ogre@@UAEXXZ");
+                api.destroySet = ResolveOgreProc<FnOgreDestroyBillboardSet>(
+                    "?destroyBillboardSet@SceneManager@Ogre@@UAEXPAVBillboardSet@2@@Z");
+                api.getMaterialManager =
+                    ResolveOgreProc<void* (*)()>("?getSingletonPtr@MaterialManager@Ogre@@SAPAV12@XZ");
+                api.resourceExists = ResolveOgreProc<bool(__thiscall*)(void*, const std::string&)>(
+                    "?resourceExists@ResourceManager@Ogre@@UAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
+                api.ok = api.getRootSceneNode && api.createSet && api.attachObject && api.setWorldSpace &&
+                         api.setDefaultDimensions && api.setMaterialName && api.setAutoextend && api.setCastShadows &&
+                         api.createBillboard && api.setDimensions && api.clear && api.updateBounds && api.destroySet &&
+                         api.getMaterialManager && api.resourceExists;
                 return api;
             }
 
-            void* FindDustClass(FnExplosionFind find, const char* odf)
+            void DisableDust(const wchar_t* why)
             {
-                char name[8] = {};
-                std::memcpy(name, odf, std::min<size_t>(std::strlen(odf), sizeof(name)));
-                uint32_t lo = 0, hi = 0;
-                std::memcpy(&lo, name, 4);
-                std::memcpy(&hi, name + 4, 4);
-                __try
-                {
-                    return find(lo, hi);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    return nullptr;
-                }
+                g_Dust.disabled = true;
+                ForgetDust();
+                LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] sink dust off: %ls\n", why);
             }
 
-            bool BuildDust(FnExplosionBuild build, void* explosionClass, const void* matrix)
+            // Ogre throws C++ exceptions (a missing material, for one): caught
+            // here so the SEH callers below keep only hardware faults. The
+            // lambda is its own function, so those __try frames stay free of
+            // objects that need unwinding (C2712).
+            template <typename Call>
+            bool DustCatchThrow(Call&& call)
             {
-                __try
+                try
                 {
-                    build(explosionClass, matrix, nullptr);
+                    call();
                     return true;
                 }
-                __except (EXCEPTION_EXECUTE_HANDLER)
+                catch (...)
                 {
                     return false;
                 }
             }
 
-            // One to three puffs over the piece's footprint, by size.
-            void SpawnSinkDust(const GibSlot& slot, FnTerrainHeightAt terrain)
+            constexpr unsigned long kDustCppExceptionCode = 0xE06D7363UL;
+            int DustSehFilter(unsigned long code)
             {
-                static bool s_failed = false;
-                const DustApi& api = ResolveDustApi();
-                const uintptr_t originAddr = WorldRenderOriginAddr();
-                if (s_failed || !api.find || !api.build || !terrain || !originAddr || g_DustThisTick >= kMaxDustPerTick)
-                    return;
-                // Looked up per puff, never cached: the class list belongs to
-                // the mission and is rebuilt by the next one.
-                void* const explosionClass = FindDustClass(api.find, kSinkDustOdf);
-                if (!explosionClass)
+                return code == kDustCppExceptionCode ? EXCEPTION_CONTINUE_SEARCH : EXCEPTION_EXECUTE_HANDLER;
+            }
+
+            // setMaterialName falls back to BaseWhite (white squares) when the
+            // material is missing, so its presence is checked first.
+            bool DustMaterialExistsSeh(const DustOgreApi& api, const std::string* material)
+            {
+                bool exists = false;
+                __try
                 {
-                    s_failed = true;
-                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] sink dust off: explosion %hs not found\n",
-                                       kSinkDustOdf);
+                    return DustCatchThrow([&] {
+                        void* const manager = api.getMaterialManager();
+                        exists = manager && api.resourceExists(manager, *material);
+                    }) && exists;
+                }
+                __except (DustSehFilter(GetExceptionCode()))
+                {
+                    return false;
+                }
+            }
+
+            bool CreateDustSetSeh(const DustOgreApi& api, void* sceneManager, const std::string* material,
+                                  const std::string* group, void*& outSet)
+            {
+                outSet = nullptr;
+                __try
+                {
+                    return DustCatchThrow([&] {
+                        void* const root = api.getRootSceneNode(sceneManager);
+                        if (!root)
+                            return;
+                        void* const set = api.createSet(sceneManager, static_cast<uint32_t>(kMetalTuning.dustMaxPuffs));
+                        if (!set)
+                            return;
+                        // Owned by the scene from here: destroyAllMovableObjects frees it.
+                        outSet = set;
+                        api.setWorldSpace(set, true);
+                        api.setAutoextend(set, false);
+                        api.setCastShadows(set, false);
+                        // _updateBounds pads by the default size: the largest puff.
+                        const float largest = kMetalTuning.dustSizeMax * kMetalTuning.dustGrow * 1.2f;
+                        api.setDefaultDimensions(set, largest, largest);
+                        api.setMaterialName(set, *material, *group);
+                        api.attachObject(root, set);
+                    }) && outSet;
+                }
+                __except (DustSehFilter(GetExceptionCode()))
+                {
+                    return false;
+                }
+            }
+
+            bool EnsureDustSet(void* sceneManager)
+            {
+                if (g_Dust.set && g_Dust.sceneManager == sceneManager)
+                    return true;
+                const DustOgreApi& api = ResolveDustOgreApi();
+                if (!api.ok)
+                {
+                    DisableDust(L"Ogre billboard calls do not resolve");
+                    return false;
+                }
+                // The material is generated into the chunk payload group.
+                if (!EnsureSkinnedGibResourceLocations())
+                {
+                    DisableDust(L"chunk payload resource group unavailable");
+                    return false;
+                }
+                const std::string material = NativeChunks::kFractureDustMaterialName;
+                const std::string group = kChunkPayloadResourceRootName;
+                if (!DustMaterialExistsSeh(api, &material))
+                {
+                    DisableDust(L"openshim_fracture_dust material not loaded");
+                    return false;
+                }
+                void* set = nullptr;
+                const bool ok = CreateDustSetSeh(api, sceneManager, &material, &group, set);
+                if (!ok)
+                {
+                    // A half-built set stays with its scene (freed at teardown); never touched again.
+                    DisableDust(L"BillboardSet setup failed (is openshim_fracture_dust.material loaded?)");
+                    return false;
+                }
+                g_Dust.sceneManager = sceneManager;
+                g_Dust.set = set;
+                g_Dust.drawn = false;
+                LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] sink dust on: set=0x%08X material=%hs\n",
+                                   static_cast<uint32_t>(reinterpret_cast<uintptr_t>(set)), material.c_str());
+                return true;
+            }
+
+            float DustRandom()
+            {
+                g_Dust.seed = g_Dust.seed * 1664525u + 1013904223u;
+                return static_cast<float>(g_Dust.seed >> 8) * (1.0f / 16777216.0f);
+            }
+
+            // Ages and moves the live puffs; the expired leave (order is not kept).
+            void AdvanceDust(float dt)
+            {
+                for (size_t i = 0; i < g_Dust.count;)
+                {
+                    DustPuff& puff = g_Dust.puffs[i];
+                    puff.age += dt;
+                    if (puff.age >= puff.life)
+                    {
+                        puff = g_Dust.puffs[--g_Dust.count];
+                        continue;
+                    }
+                    const float ease = 1.0f - puff.age / puff.life; // drift eases off
+                    puff.position = Add(puff.position, Scale(puff.drift, dt * ease));
+                    puff.position.y += puff.rise * dt;
+                    ++i;
+                }
+            }
+
+            void EmitDust(const GibSlot& slot, int puffs, FnTerrainHeightAt terrain)
+            {
+                if (g_Dust.disabled || puffs <= 0)
+                    return;
+                const MetalTuning& t = kMetalTuning;
+                const float scale = std::max({std::fabs(slot.scale.x), std::fabs(slot.scale.y), std::fabs(slot.scale.z)});
+                const float radius = std::max(slot.radius * scale, 0.1f);
+                const float start = std::clamp(radius * t.dustSizeRadii, t.dustSizeMin, t.dustSizeMax);
+                for (int i = 0; i < puffs; ++i)
+                {
+                    DustPuff* puff = nullptr;
+                    if (g_Dust.count < t.dustMaxPuffs)
+                        puff = &g_Dust.puffs[g_Dust.count++];
+                    else
+                    {
+                        // Full: reuse the one furthest through its life.
+                        puff = &g_Dust.puffs[0];
+                        for (size_t k = 1; k < g_Dust.count; ++k)
+                            if (g_Dust.puffs[k].age / g_Dust.puffs[k].life > puff->age / puff->life)
+                                puff = &g_Dust.puffs[k];
+                    }
+                    const float angle = DustRandom() * 6.2831853f;
+                    const float c = std::cos(angle), s = std::sin(angle);
+                    const float reach = std::sqrt(DustRandom()) * radius * 0.8f;
+                    const float x = slot.position.x + c * reach;
+                    const float z = slot.position.z + s * reach;
+                    float ground = slot.position.y;
+                    TerrainHeightSafe(terrain, x, z, ground);
+                    puff->size = start * (0.8f + 0.4f * DustRandom());
+                    // Centre above the ground so the soft disc does not cut into it.
+                    puff->position = {x, ground + puff->size * 0.35f, z};
+                    const float spread = t.dustSpread * (0.5f + 0.5f * DustRandom());
+                    puff->drift = {c * spread, 0.0f, s * spread};
+                    puff->rise = t.dustRiseMin + (t.dustRiseMax - t.dustRiseMin) * DustRandom();
+                    puff->life = t.dustLifeMin + (t.dustLifeMax - t.dustLifeMin) * DustRandom();
+                    puff->age = 0.0f;
+                    puff->shade = 0.85f + 0.15f * DustRandom();
+                    ++g_DustEmitted;
+                }
+            }
+
+            // Burst when the sink starts, then a trickle over its first part.
+            void DustForSinkingPiece(GibSlot& slot, float dt, FnTerrainHeightAt terrain)
+            {
+                const MetalTuning& t = kMetalTuning;
+                if (!slot.dusted)
+                {
+                    slot.dusted = true;
+                    slot.dustClock = 0.0f;
+                    const float scale = std::max({std::fabs(slot.scale.x), std::fabs(slot.scale.y), std::fabs(slot.scale.z)});
+                    const int burst = std::clamp(static_cast<int>(t.dustBurst + slot.radius * scale), 1, t.dustBurstMax);
+                    EmitDust(slot, burst, terrain);
                     return;
                 }
-                const float origin[3] = {reinterpret_cast<const float*>(originAddr)[0],
-                                         reinterpret_cast<const float*>(originAddr)[1],
-                                         reinterpret_cast<const float*>(originAddr)[2]};
-                const float scale = std::max({std::fabs(slot.scale.x), std::fabs(slot.scale.y), std::fabs(slot.scale.z)});
-                const float size = slot.radius * scale;
-                const int puffs = std::clamp(static_cast<int>(size / 1.5f) + 1, 1, kMaxDustPerTick);
-                uint32_t seed = static_cast<uint32_t>(slot.serial * 2654435761u) | 1u;
-                auto unit = [&seed]() {
-                    seed = seed * 1664525u + 1013904223u;
-                    return static_cast<float>(seed >> 8) / 16777216.0f * 2.0f - 1.0f;
-                };
-                for (int i = 0; i < puffs && g_DustThisTick < kMaxDustPerTick; ++i)
+                if (slot.sinkElapsed > t.dustTrickleFor)
+                    return;
+                slot.dustClock += dt;
+                if (slot.dustClock >= t.dustTrickleEvery)
                 {
-                    const float rx = slot.position.x + (i ? unit() * size * 0.6f : 0.0f);
-                    const float rz = slot.position.z + (i ? unit() * size * 0.6f : 0.0f);
-                    // Render -> sim (see TerrainHeightSafe): x + ox, -(z + oz).
-                    const double sx = static_cast<double>(rx) + origin[0];
-                    const double sz = -(static_cast<double>(rz) + origin[2]);
-                    double sy = 0.0;
-                    __try
-                    {
-                        sy = terrain(sx, sz);
-                    }
-                    __except (EXCEPTION_EXECUTE_HANDLER)
-                    {
-                        return;
-                    }
-                    if (!std::isfinite(sy))
-                        return;
-                    // Engine object matrix: right, up, front (9 floats), pad,
-                    // then position as 3 doubles at +0x28 (obj+0x20 layout).
-                    struct alignas(8) EngineMatrix
-                    {
-                        float right[3];
-                        float up[3];
-                        float front[3];
-                        float pad;
-                        double posit[3];
-                    };
-                    static_assert(sizeof(EngineMatrix) == 64, "engine matrix is 16 dwords");
-                    const EngineMatrix matrix = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 0.0f, {sx, sy, sz}};
-                    if (!BuildDust(api.build, explosionClass, &matrix))
-                    {
-                        s_failed = true;
-                        LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] sink dust off: explosion build faulted\n");
-                        return;
-                    }
-                    ++g_DustThisTick;
+                    slot.dustClock -= t.dustTrickleEvery;
+                    EmitDust(slot, 1, terrain);
+                }
+            }
+
+            bool PushDustSeh(const DustOgreApi& api, void* set)
+            {
+                __try
+                {
+                    return DustCatchThrow([&] {
+                        const MetalTuning& t = kMetalTuning;
+                        api.clear(set);
+                        for (size_t i = 0; i < g_Dust.count; ++i)
+                        {
+                            const DustPuff& puff = g_Dust.puffs[i];
+                            const float life = std::clamp(puff.age / puff.life, 0.0f, 1.0f);
+                            const float fadeIn = std::min(life / t.dustFadeIn, 1.0f);
+                            const float fadeOut = (1.0f - life) * (1.0f - life);
+                            const float grow = 1.0f - (1.0f - life) * (1.0f - life); // fast early, then slow
+                            const float size = puff.size * (1.0f + (t.dustGrow - 1.0f) * grow);
+                            // Grey only (R = G = B): DX11's Effect program reads
+                            // the packed colour .bgra; the tone is the material's.
+                            const OgreColourValue colour = {puff.shade, puff.shade, puff.shade,
+                                                            t.dustAlpha * fadeIn * fadeOut};
+                            void* const billboard =
+                                api.createBillboard(set, puff.position.x, puff.position.y, puff.position.z, colour);
+                            if (billboard)
+                                api.setDimensions(billboard, size, size);
+                        }
+                        api.updateBounds(set);
+                    });
+                }
+                __except (DustSehFilter(GetExceptionCode()))
+                {
+                    return false;
+                }
+            }
+
+            // Mirrors g_Dust.puffs into the set, once per tick, after the pool walk.
+            void PushDust(void* sceneManager)
+            {
+                if (g_Dust.disabled || !sceneManager)
+                    return;
+                // Another scene: the old set went with it; never touch it.
+                if (g_Dust.set && g_Dust.sceneManager != sceneManager)
+                    ForgetDust();
+                if (!g_Dust.count && !g_Dust.drawn)
+                    return;
+                if (!EnsureDustSet(sceneManager))
+                    return;
+                if (!PushDustSeh(ResolveDustOgreApi(), g_Dust.set))
+                {
+                    DisableDust(L"BillboardSet update faulted");
+                    return;
+                }
+                g_Dust.drawn = g_Dust.count != 0;
+            }
+
+            bool ClearDustSetSeh(const DustOgreApi& api, void* set)
+            {
+                __try
+                {
+                    return DustCatchThrow([&] {
+                        api.clear(set);
+                        api.updateBounds(set);
+                    });
+                }
+                __except (DustSehFilter(GetExceptionCode()))
+                {
+                    return false;
+                }
+            }
+
+            bool DestroyDustSetSeh(const DustOgreApi& api, void* sceneManager, void* set)
+            {
+                __try
+                {
+                    return DustCatchThrow([&] { api.destroySet(sceneManager, set); });
+                }
+                __except (DustSehFilter(GetExceptionCode()))
+                {
+                    return false;
                 }
             }
 
@@ -1118,34 +1421,38 @@ namespace BZROpenShim
                 const float friction = slot.metal ? kMetalTuning.friction : kTuning.friction;
                 const float spinDamp = slot.metal ? kMetalTuning.spinDamp : kTuning.spinDamp;
                 const float sinkSeconds = SinkSeconds(slot);
-                if (slot.age >= maxLifetime + sinkSeconds)
+                auto exit = [](GibExit why) {
+                    g_LastExit = why;
                     return false;
+                };
+                if (slot.age >= maxLifetime + sinkSeconds)
+                    return exit(kExitLifetime);
 
                 // Off screen, leaving is invisible: no sink, no dust.
                 if (slot.sinking)
                 {
                     if (!slot.inView)
-                        return false;
+                        return exit(kExitHiddenSinking);
                     slot.sinkElapsed += dt;
                     const float t = std::min(slot.sinkElapsed / sinkSeconds, 1.0f);
                     slot.position.y = slot.sinkStartY - slot.sinkDistance * t * t;
-                    return slot.sinkElapsed < sinkSeconds;
+                    return slot.sinkElapsed < sinkSeconds || exit(kExitSunk);
                 }
                 if (slot.settled)
                 {
                     slot.settledAge += dt;
                     if (!slot.seen && slot.settledAge >= kTuning.neverSeenGrace)
-                        return false;
+                        return exit(kExitNeverSeen);
                     if (slot.settledAge >= g_Config.linger || slot.age >= maxLifetime - sinkSeconds)
                     {
                         if (!slot.inView)
-                            return false;
+                            return exit(kExitHiddenLinger);
                         StartSinking(slot);
                     }
                     return true;
                 }
                 if (slot.age >= maxLifetime)
-                    return false; // still airborne (no ground below): just retire
+                    return exit(kExitAirborne); // still airborne (no ground below): just retire
 
                 slot.velocity.y -= kTuning.gravity * dt;
                 slot.position = Add(slot.position, Scale(slot.velocity, dt));
@@ -1161,7 +1468,7 @@ namespace BZROpenShim
                 {
                     // No terrain: the ground is -infinity; fall, then expire.
                     slot.hasGround = false;
-                    return Finite(slot.position);
+                    return Finite(slot.position) || exit(kExitInvalid);
                 }
                 const float lift = slot.radius * kTuning.contactRadius;
                 if (slot.position.y - lift < ground)
@@ -1188,7 +1495,7 @@ namespace BZROpenShim
                         }
                     }
                 }
-                return Finite(slot.position);
+                return Finite(slot.position) || exit(kExitInvalid);
             }
 
             // Drops entries whose chunk has retired, or whose address now holds
@@ -1550,6 +1857,11 @@ namespace BZROpenShim
             }
         }
 
+        namespace
+        {
+            void ProbeReleasedGibSlots(); // trace only; defined with the render probe
+        }
+
         void TickSkinnedGibs(void* chunkEffect, float dt)
         {
             if (!IsSkinnedGibsEnabled() && !IsFractureEnabled())
@@ -1557,7 +1869,8 @@ namespace BZROpenShim
             PruneSuppressed(chunkEffect);
             // Same thread and context as the fracture spawn it prepares for.
             TickFracturePrewarm();
-            if (!g_ActiveCount)
+            // Dust outlives the piece that threw it: keep ticking until it is gone.
+            if (!g_ActiveCount && !g_Dust.count && !g_Dust.drawn)
                 return;
             if (IsPauseMenuOpen())
                 return;
@@ -1575,9 +1888,7 @@ namespace BZROpenShim
             const bool cameraKnown = g_Config.drawDistance > 0 && TryGetMainViewCamera(camera, &fovY);
             const float zoom = PoolDrawDistance::ZoomDistanceScale(fovY);
             SinkOldestWhenNearlyFull(sceneManager);
-            g_DustThisTick = 0;
-            size_t dustSlots[kMaxDustPerTick] = {};
-            int dustCount = 0;
+            AdvanceDust(dt);
             void* const viewCamera = GetMainViewCameraObject();
             for (GibSlot& slot : g_Slots)
             {
@@ -1597,7 +1908,10 @@ namespace BZROpenShim
                 {
                     const float center[3] = {slot.position.x, slot.position.y, slot.position.z};
                     const float scale = std::max({std::fabs(slot.scale.x), std::fabs(slot.scale.y), std::fabs(slot.scale.z)});
-                    if (!IsSphereInCameraView(viewCamera, center, std::max(slot.radius * scale, 0.05f), visible))
+                    // Padded: a piece at the screen edge, or one whose mesh
+                    // sits off its node origin, still counts as in view.
+                    const float padded = std::max(slot.radius * scale, 0.05f) * 1.5f + 1.0f;
+                    if (!IsSphereInCameraView(viewCamera, center, padded, visible))
                         visible = true;
                 }
                 slot.inView = visible;
@@ -1605,16 +1919,18 @@ namespace BZROpenShim
                 const bool wasResting = slot.settled && !slot.sinking;
                 if (!StepGib(slot, dt, terrain))
                 {
+                    ++g_ExitCounts[g_LastExit];
+                    if (g_Config.trace)
+                        LogChunkDiagnostic("skinnedgibs",
+                                           L"[SKINNEDGIBS] release serial=%llu mesh=%hs why=%hs pos=(%.2f, %.2f, %.2f)\n",
+                                           static_cast<unsigned long long>(slot.serial), slot.mesh.c_str(),
+                                           kExitNames[g_LastExit], static_cast<double>(slot.position.x),
+                                           static_cast<double>(slot.position.y), static_cast<double>(slot.position.z));
                     ReleaseSlot(slot);
                     continue;
                 }
-                // Not dusted until the per-tick cap lets it through: a puff
-                // late by a frame or two still reads as the sink starting.
-                if (slot.sinking && slot.metal && !slot.dusted && dustCount < kMaxDustPerTick)
-                {
-                    dustSlots[dustCount++] = static_cast<size_t>(&slot - g_Slots.data());
-                    slot.dusted = true;
-                }
+                if (slot.sinking && slot.metal)
+                    DustForSinkingPiece(slot, dt, terrain);
                 const float at[3] = {slot.position.x, slot.position.y, slot.position.z};
                 const PoolDrawDistance::Transition cull = PoolDrawDistance::Decide(
                     slot.distanceCulled, cameraKnown, cameraKnown ? PoolDrawDistance::DistanceSquared(at, camera) * zoom * zoom : 0.0f,
@@ -1639,12 +1955,31 @@ namespace BZROpenShim
                 else if (show)
                     slot.distanceCulled = false;
             }
-            // Puffs are built after the pool walk: building an explosion runs
-            // engine code (a modded ODF could deal damage and spawn gibs), so
-            // it must not run while the loop holds references into g_Slots.
-            for (int i = 0; i < dustCount; ++i)
-                if (dustSlots[i] < g_Slots.size() && g_Slots[dustSlots[i]].active)
-                    SpawnSinkDust(g_Slots[dustSlots[i]], terrain);
+            // One push of every live puff into the dust BillboardSet.
+            PushDust(sceneManager);
+
+            // Cumulative exit summary, once a second of sim time, trace only.
+            static float s_summaryClock = 0.0f;
+            s_summaryClock += dt;
+            if (g_Config.trace && s_summaryClock >= 1.0f)
+            {
+                s_summaryClock = 0.0f;
+                wchar_t exits[256] = {};
+                size_t used = 0;
+                for (int i = 0; i < kExitCount && used < _countof(exits); ++i)
+                {
+                    const int n = _snwprintf_s(exits + used, _countof(exits) - used, _TRUNCATE, L" %hs=%u", kExitNames[i],
+                                               g_ExitCounts[i]);
+                    if (n < 0)
+                        break;
+                    used += static_cast<size_t>(n);
+                }
+                LogChunkDiagnostic("skinnedgibs",
+                                   L"[SKINNEDGIBS] leave: active=%zu sinkStarts=%u dust=%u live=%zu camera=%u exits:%ls\n",
+                                   g_ActiveCount, g_SinkStarts, g_DustEmitted, g_Dust.count, viewCamera ? 1u : 0u,
+                                   exits);
+                ProbeReleasedGibSlots();
+            }
         }
 
         namespace
@@ -1821,6 +2156,31 @@ namespace BZROpenShim
                 g_SubmitCalls = 0;
                 g_SubmitEntities = 0;
             }
+
+            // A released slot must be hidden and parked far below the world.
+            // Report any that Ogre still draws, or that sits anywhere else.
+            void ProbeReleasedGibSlots()
+            {
+                unsigned reported = 0;
+                for (const GibSlot& slot : g_Slots)
+                {
+                    if (slot.active || !slot.entity || reported >= 4)
+                        continue;
+                    GibProbeResult r;
+                    ProbeGibEntitySeh(slot.entity, GetGibProbeApi(), r);
+                    if (r.visible != 1 && r.position[1] < -50000.0f && !r.faulted)
+                        continue;
+                    ++reported;
+                    LogChunkDiagnostic(
+                        "skinnedgibs",
+                        L"[SKINNEDGIBS] released slot still live: serial=%llu mesh=%hs visible=%d inScene=%d "
+                        L"nodePos=(%.2f, %.2f, %.2f) nodeScale=(%.3f, %.3f, %.3f) fault=%u\n",
+                        static_cast<unsigned long long>(slot.serial), slot.mesh.c_str(), r.visible, r.inScene,
+                        static_cast<double>(r.position[0]), static_cast<double>(r.position[1]),
+                        static_cast<double>(r.position[2]), static_cast<double>(r.scale[0]),
+                        static_cast<double>(r.scale[1]), static_cast<double>(r.scale[2]), r.faulted ? 1u : 0u);
+                }
+            }
         }
 
         bool IsSkinnedGibEntity(const void* entity)
@@ -1890,6 +2250,14 @@ namespace BZROpenShim
             // frees the hidden pool entities DeactivateSkinnedGibs kept for
             // reuse. Destroy them with their nodes first, then forget them.
             // Another scene manager's teardown leaves the pool alone.
+            // destroyAllEntities spares billboard sets, so the dust set would
+            // outlive the mission in a live scene: destroy it here as well.
+            if (g_Dust.set && g_Dust.sceneManager == sceneManager)
+            {
+                if (!DestroyDustSetSeh(ResolveDustOgreApi(), sceneManager, g_Dust.set))
+                    DisableDust(L"BillboardSet destroy faulted");
+                ForgetDust();
+            }
             bool matched = false;
             for (GibSlot& slot : g_Slots)
             {
@@ -1921,6 +2289,15 @@ namespace BZROpenShim
             g_Suppressed.clear();
             g_Capture.active = false;
             g_FailedMeshes.clear();
+            // Dust too; the set stays for reuse, like the hidden gibs.
+            g_Dust.count = 0;
+            if (g_Dust.set && g_Dust.drawn && g_Dust.sceneManager == GetOgreSceneManagerRuntime())
+            {
+                if (ClearDustSetSeh(ResolveDustOgreApi(), g_Dust.set))
+                    g_Dust.drawn = false;
+                else
+                    DisableDust(L"BillboardSet clear faulted");
+            }
             ResetSkinnedGibPayloads();
             if (hidden)
             {
@@ -1999,7 +2376,7 @@ namespace BZROpenShim
                     output << script;
                     output.close();
                     wrote = true;
-                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote default flesh material %hs ok=%u\n",
+                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] wrote generated material %hs ok=%u\n",
                                        ours.string().c_str(), output ? 1u : 0u);
                     return false;
                 };
@@ -2070,6 +2447,44 @@ namespace BZROpenShim
                     if (NC::IsGeneratedGibFleshTga(readHead(legacy)))
                         std::filesystem::remove(legacy, ec);
                     ec.clear();
+                }
+                // The sink dust material and its generated texture: written
+                // when missing or different, the texture removed (when ours)
+                // once a pack or the user supplies the material.
+                if (IsFractureEnabled())
+                {
+                    bool wroteDust = false;
+                    const bool dustForeign =
+                        ensureFile(NC::kFractureDustMaterialFile, NC::kFractureDustMaterialMarker,
+                                   NC::FractureDustMaterialHeader(), NC::FractureDustMaterialScript(), wroteDust);
+                    const std::vector<uint8_t> tga = NC::FractureDustTextureTga();
+                    const auto path = cacheRoot / NC::kFractureDustTextureFile;
+                    bool same = false;
+                    if (std::filesystem::file_size(path, ec) == tga.size() && !ec)
+                    {
+                        std::ifstream in(path, std::ios::binary);
+                        std::vector<char> existing(tga.size());
+                        in.read(existing.data(), static_cast<std::streamsize>(existing.size()));
+                        same = in.gcount() == static_cast<std::streamsize>(tga.size()) &&
+                               std::memcmp(existing.data(), tga.data(), tga.size()) == 0;
+                    }
+                    ec.clear();
+                    if (dustForeign)
+                    {
+                        if (same)
+                            std::filesystem::remove(path, ec);
+                        ec.clear();
+                    }
+                    else if (!same)
+                    {
+                        std::filesystem::create_directories(cacheRoot, ec);
+                        ec.clear();
+                        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+                        out.write(reinterpret_cast<const char*>(tga.data()), static_cast<std::streamsize>(tga.size()));
+                        out.close();
+                        LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] wrote sink dust texture %hs ok=%u\n",
+                                           path.string().c_str(), out ? 1u : 0u);
+                    }
                 }
                 if (!IsSkinnedGibsEnabled())
                     return;

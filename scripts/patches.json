@@ -5377,12 +5377,6 @@
       "identity": "ExplosionClass::Build thiscall (matrix, owner obj), ret 8"
     },
     {
-      "name": "ExplosionClassFind",
-      "address": "0x004CB870",
-      "expected": "55 8B EC 6A FF 68 88 9E 84 00 64 A1 00 00 00 00 50 83 EC 60",
-      "identity": "ExplosionClass::Find cdecl (u32 nameLo, u32 nameHi) -> class or 0; masks both halves 0x7f7f7f7f, scans the class list, else loads <name>.odf; strings 'Explosion \"%s\" not found'; caller 0x004C9880 pushes hi, lo, calls, add esp 8, stores eax"
-    },
-    {
       "name": "BulletCollisionEntry",
       "address": "0x00480F40",
       "expected": "55 8B EC 81 EC AC 00 00 00 A1 00 70 8E 00 33 C5",

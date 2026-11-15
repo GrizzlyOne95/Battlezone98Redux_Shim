@@ -218,9 +218,15 @@ person's death itself:
      on screen goes 1.5 s after settling instead of after the linger.
    - On screen, it sinks fully underground (depth from its own radius; 2 s
      for gibs, 3 s for fracture pieces) while shrinking away over the second
-     half of the sink. A fracture piece also throws a stock ground-hit dust
-     puff (`xbulgnd`, with its stock sound; no damage, local only, at most
-     two per tick). A sinking piece that leaves the view is released.
+     half of the sink. A fracture piece also kicks up dust: 3-6 soft puffs
+     (by its size) around its footprint at ground level, then one every
+     0.5 s over the first 1.5 s of the sink. Each puff lives 2-3 s, rises
+     0.3-0.8 m/s, drifts outward, grows to 2.5x and fades out. They are
+     billboards in one OpenShim-owned Ogre `BillboardSet` with a generated
+     material (`openshim_fracture_dust`, built like the stock alpha-blend
+     sprites); at most 96 live at once, the oldest reused. No engine call,
+     no sound, local only. A sinking piece that leaves the view is
+     released.
 
    At most `SkinnedGibsMax` gibs live at once. Past three quarters of that,
    one resting gib per tick is cleared early: the oldest off-screen one is

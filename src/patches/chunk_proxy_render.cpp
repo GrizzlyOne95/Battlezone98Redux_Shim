@@ -2472,7 +2472,10 @@ namespace BZROpenShim
 
         using FnOgreCameraSphereVisible = bool(__thiscall*)(const void* camera, const void* sphere, void* culledBy);
 
+        using FnOgreTargetNumViewports = unsigned short(__thiscall*)(const void*);
+
         static bool TryReadMainViewCameraObjectSeh(FnOgreRootSingleton getRoot, FnOgreRootAutoWindow getWindow,
+                                                   FnOgreTargetNumViewports getNumViewports,
                                                    FnOgreTargetViewport getViewport, FnOgreViewportCamera getCamera,
                                                    void** out)
         {
@@ -2480,7 +2483,8 @@ namespace BZROpenShim
             {
                 void* const root = getRoot();
                 void* const window = root ? getWindow(root) : nullptr;
-                void* const viewport = window ? getViewport(window, 0) : nullptr;
+                // getViewport(0) on a window with none throws (no viewport yet).
+                void* const viewport = window && getNumViewports(window) > 0 ? getViewport(window, 0) : nullptr;
                 *out = viewport ? getCamera(viewport) : nullptr;
                 return *out != nullptr;
             }
@@ -2501,10 +2505,14 @@ namespace BZROpenShim
                 ResolveOgreProc<FnOgreTargetViewport>("?getViewport@RenderTarget@Ogre@@UAEPAVViewport@2@G@Z");
             static const FnOgreViewportCamera getCamera =
                 ResolveOgreProc<FnOgreViewportCamera>("?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ");
+            static const FnOgreTargetNumViewports getNumViewports =
+                ResolveOgreProc<FnOgreTargetNumViewports>("?getNumViewports@RenderTarget@Ogre@@UBEGXZ");
             void* camera = nullptr;
-            if (!getRoot || !getWindow || !getViewport || !getCamera)
+            if (!getRoot || !getWindow || !getNumViewports || !getViewport || !getCamera)
                 return nullptr;
-            return TryReadMainViewCameraObjectSeh(getRoot, getWindow, getViewport, getCamera, &camera) ? camera : nullptr;
+            return TryReadMainViewCameraObjectSeh(getRoot, getWindow, getNumViewports, getViewport, getCamera, &camera)
+                       ? camera
+                       : nullptr;
         }
 
         static bool TrySphereVisibleSeh(FnOgreCameraSphereVisible isVisible, void* camera, const float sphere[4],
