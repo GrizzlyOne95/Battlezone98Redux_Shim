@@ -605,7 +605,15 @@ namespace BZROpenShim
                             *transform,
                             hardpointX,
                             hardpointZ,
-                            sample.range,
+                            // Only the reticle range is clamped: a short
+                            // reticle-ground hit (aiming down) swung the
+                            // barrels sideways. A locked target keeps the
+                            // stock range, so its stand-downs and the
+                            // reticle fallback still work.
+                            logReticleApplication
+                                ? WeaponConvergence::ClampWalkerConvergenceRange(
+                                      sample.range, hardpointZ)
+                                : sample.range,
                             solution) !=
                         WeaponConvergence::SolveResult::Converged)
                     {

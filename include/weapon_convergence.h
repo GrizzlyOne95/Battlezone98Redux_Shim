@@ -415,6 +415,25 @@ namespace BZROpenShim::WeaponConvergence
         return SolveResult::Converged;
     }
 
+    // Closest point, measured forward of the hardpoint, that the shim's
+    // convergence will aim a barrel at. Not part of stock Walker, which only
+    // sees explicit-target ranges. Reticle convergence also sees the ground a
+    // few metres ahead when the player aims down, and the Walker yaw
+    // atan(hardX / (range - hardZ)) then turns an off-centre barrel (and the
+    // laser sight that follows it) 30 degrees or more to the side. At 15 m a
+    // barrel 1.5 m off-centre turns at most about 6 degrees.
+    inline constexpr float kMinConvergenceLead = 15.0f;
+
+    // The range to hand SolveWalkerStyleRange: closer targets converge as if
+    // they were kMinConvergenceLead ahead of the hardpoint. Clamping (rather
+    // than standing down) keeps the barrel from snapping as the range crosses
+    // the limit.
+    inline float ClampWalkerConvergenceRange(float range, float hardpointRelativeZ)
+    {
+        const float minimum = hardpointRelativeZ + kMinConvergenceLead;
+        return range < minimum ? minimum : range;
+    }
+
     // Walker-style convergence used by stock BZ1/BZR target convergence.
     //
     // Redux 0x0060F320 preserves the BZ1 1.5 algorithm exactly. The explicit

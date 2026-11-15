@@ -3829,10 +3829,10 @@ bool buildOpenLoopCap(const std::vector<V> &tri, Bytes &submesh, uint32_t &capTr
         }
         bool banded = false;
         const size_t loopFirst = cap.vertices.size();
-        if (addEarCap(cap, points, normal, centre, 1.0f, false, banded))
+        if (addEarCap(cap, points, normal, centre, FractureOptions{}.capUvScale, false, banded))
             splitDroppedRimPoints(cap, loopFirst);
         else
-            addFanCap(cap, points, normal, centre, 1.0f);
+            addFanCap(cap, points, normal, centre, FractureOptions{}.capUvScale);
         ++stats.capLoops;
     }
     if (cap.indices[kZoneMuscle].empty())

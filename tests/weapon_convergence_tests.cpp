@@ -509,6 +509,40 @@ namespace
             "short-range convergence did not keep the barrel aimed down and forward");
     }
 
+    void TestShortRangeConvergenceIsClampedToTheMinimumLead()
+    {
+        // Aiming down at the ground 3 m ahead with a barrel 1.5 m off-centre:
+        // the raw Walker yaw is atan(1.5 / 2) = 37 degrees to the side.
+        const float hardX = 1.5f;
+        const float hardZ = 1.0f;
+        Require(ClampWalkerConvergenceRange(3.0f, hardZ) == hardZ + kMinConvergenceLead,
+            "a ground range inside the minimum lead was not clamped");
+        Require(ClampWalkerConvergenceRange(120.0f, hardZ) == 120.0f,
+            "a normal range was changed by the clamp");
+
+        const Matrix stock = MakePitchDownMatrix(0.8f);
+
+        // Control: unclamped, the same barrel swings well past 30 degrees.
+        Solution raw = {};
+        Require(SolveWalkerStyleRange(stock, hardX, hardZ, 3.0f, raw) == SolveResult::Converged,
+            "the unclamped control solve was refused");
+        const float rawCosYaw = raw.mountLocal.frontX * stock.frontX +
+                                raw.mountLocal.frontY * stock.frontY +
+                                raw.mountLocal.frontZ * stock.frontZ;
+        Require(rawCosYaw < std::cos(30.0f * 3.14159265f / 180.0f),
+            "the unclamped control did not show the large sideways yaw");
+
+        Solution solution = {};
+        Require(SolveWalkerStyleRange(stock, hardX, hardZ, ClampWalkerConvergenceRange(3.0f, hardZ), solution) ==
+                SolveResult::Converged,
+            "a clamped short range was refused");
+        const float cosYaw = solution.mountLocal.frontX * stock.frontX +
+                             solution.mountLocal.frontY * stock.frontY +
+                             solution.mountLocal.frontZ * stock.frontZ;
+        Require(cosYaw > std::cos(6.0f * 3.14159265f / 180.0f),
+            "a clamped short range still turned the barrel more than 6 degrees");
+    }
+
     void TestSafetyStopsAndDegenerateInput()
     {
         const Matrix mountWorld = MakeYawMatrix(0.0f, 0.0, 0.0, 0.0);
@@ -554,6 +588,7 @@ int main()
     TestWalkerStyleRangeCorrectionPreMultipliesStockAim();
     TestWalkerStyleRangeIgnoresOffAxisTargetBearing();
     TestWalkerStyleRangeStandsDownInsideTheHardpointReach();
+    TestShortRangeConvergenceIsClampedToTheMinimumLead();
     TestSafetyStopsAndDegenerateInput();
     std::printf("weapon_convergence_tests: all checks passed\n");
     return 0;
