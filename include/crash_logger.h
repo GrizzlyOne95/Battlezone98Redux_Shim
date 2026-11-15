@@ -12,4 +12,10 @@ namespace BZROpenShim
     //   OPENSHIM_DISABLE_CRASH_VEH=1     - skip the first-chance vectored logger
     //   OPENSHIM_DISABLE_CRASH_DUMP=1    - skip minidump writing
     void InstallCrashLogger();
+
+    // For a deliberate fail-closed exit (no exception, no dump): appends
+    // "<time> FAIL-CLOSED [component]: reason" to logs\openshim_crash.log and
+    // keeps a dated openshim_crash_YYYYMMDD_HHMMSS.log copy, as a crash does.
+    // Does nothing when the crash logger is not installed.
+    void WriteCrashLogFailClosed(const char* component, const char* reason);
 }

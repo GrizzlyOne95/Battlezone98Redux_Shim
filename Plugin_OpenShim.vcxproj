@@ -475,6 +475,7 @@
     <ClInclude Include="include\d3d_compile_cache.h" />
     <ClInclude Include="include\dxbc_cache_policy.h" />
     <ClInclude Include="include\d3d11_device_loss_recovery.h" />
+    <ClInclude Include="include\d3d11_recovery_policy.h" />
     <ClInclude Include="include\d3d11_fullscreen_toggle.h" />
     <ClInclude Include="include\d3d11_primary_monitor.h" />
     <ClInclude Include="include\resolution_list_filter.h" />
