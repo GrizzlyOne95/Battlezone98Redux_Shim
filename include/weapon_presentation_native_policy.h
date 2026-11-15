@@ -170,6 +170,32 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
         return isPerson || hasCraftOffset;
     }
 
+    // cockpitFlashOffset<N>: the player's cockpit model draws its gun away
+    // from the hull hardpoint, so in cockpit view the flash uses this offset
+    // instead of flashOffset<N>. View mode 1 is the cockpit view (the
+    // CurrentViewMode global; EXU GetCameraView reads the same int). A missing
+    // or unreadable view mode keeps the normal offset. It never enables a
+    // flash on its own: FlashAllowed still gates on flashOffset<N>.
+    constexpr int kCockpitViewMode = 1;
+
+    inline bool UseCockpitFlashOffset(bool localPlayer, std::optional<int> viewMode,
+        bool hasCockpitOffset) noexcept
+    {
+        return localPlayer && viewMode && *viewMode == kCockpitViewMode && hasCockpitOffset;
+    }
+
+    // Cockpit placement for a weapon flash, applied the way flashOffset<N> is:
+    // replaces the mesh offset, and the render offset only when it defaulted
+    // from the mesh offset (an explicit muzzleRenderOffset wins in both views).
+    inline FlashOffsets CockpitFlashOffsets(const FlashConfig& weaponFlash, bool renderOffsetDefaulted,
+        const WeaponConvergence::Vec3& offset) noexcept
+    {
+        FlashOffsets result{ weaponFlash.offset, weaponFlash.muzzleRender.offset };
+        if (weaponFlash.IsMesh()) result.mesh = offset;
+        if (renderOffsetDefaulted && weaponFlash.muzzleRender.Valid()) result.render = offset;
+        return result;
+    }
+
     // recoilCockpit<N>: "1"/"true" or "0"/"false"; anything else is nullopt
     // and the caller fails closed (no cockpit kick).
     inline std::optional<bool> CockpitFlag(std::string_view text) noexcept
@@ -289,9 +315,9 @@ namespace BZROpenShim::WeaponPresentation::NativePolicy
     }
 
     constexpr size_t kCraftSlots = 5;
-    constexpr std::array<std::string_view, 12> kCraftSlotKeys = {"recoilDistance", "recoilReturn",
+    constexpr std::array<std::string_view, 13> kCraftSlotKeys = {"recoilDistance", "recoilReturn",
         "recoilPlaybackRate", "recoilName", "flashOffset", "recoilKick", "recoilAnimation", "recoilCockpit",
-        "recoilSpin", "recoilHold", "casingOffset", "casingDirection"};
+        "recoilSpin", "recoilHold", "casingOffset", "casingDirection", "cockpitFlashOffset"};
 
     // Slots that inherit the base ODF's keys: the loading ODF has no
     // presentation key for the slot and both name the same weaponHardN.
