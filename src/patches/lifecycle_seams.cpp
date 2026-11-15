@@ -9,6 +9,7 @@
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
+#include "scene_mutation_drain.h"
 #include "engine_globals.h"
 #include "game_state.h"
 #include "openshim_ini.h"
@@ -115,6 +116,7 @@ namespace BZROpenShim
             ForgetProducerRallyMeshes(L"clearScene");
             ForgetLaserSightSceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
+            SceneMutationDrainSceneTeardown();
             ForgetMultiplayerFlagSceneResources(L"clearScene");
             if (g_OgreFn_ClearSceneOriginal)
                 g_OgreFn_ClearSceneOriginal(sceneManager);
@@ -136,6 +138,7 @@ namespace BZROpenShim
             ForgetProducerRallyMeshes(L"destroyAllMovableObjects");
             ForgetLaserSightSceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
+            SceneMutationDrainSceneTeardown();
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
             if (g_OgreFn_DestroyAllMovablesOriginal)
                 g_OgreFn_DestroyAllMovablesOriginal(sceneManager);
@@ -195,6 +198,7 @@ namespace BZROpenShim
             DestroyShellCasingSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyProducerRallySceneObjects(sceneManager, L"destroyAllEntities");
             DestroyLaserSightSceneObjects(sceneManager, L"destroyAllEntities");
+            SceneMutationDrainSceneTeardown();
             OrdnanceEntityLeakOnSceneEntitiesDestroyed();
             if (g_OgreFn_DestroyAllEntitiesOriginal)
                 g_OgreFn_DestroyAllEntitiesOriginal(sceneManager);

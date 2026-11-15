@@ -194,6 +194,7 @@
     <ClCompile Include="src\patches\skinned_gibs.cpp" />
     <ClCompile Include="src\patches\shell_casings.cpp" />
     <ClCompile Include="src\patches\laser_sight.cpp" />
+    <ClCompile Include="src\patches\scene_mutation_drain.cpp" />
 
     <ClCompile Include="src\patches\path_block.cpp" />
     <ClCompile Include="src\patches\deferred_modable_rebuild.cpp" />
@@ -437,6 +438,8 @@
     <ClInclude Include="include\bzr_hooks.h" />
     <ClInclude Include="include\unit_damage.h" />
     <ClInclude Include="include\unit_damage_policy.h" />
+    <ClInclude Include="include\scene_mutation_drain.h" />
+    <ClInclude Include="include\scene_mutation_drain_policy.h" />
     <ClInclude Include="include\weapon_presentation.h" />
     <ClInclude Include="include\weapon_presentation_hooks.h" />
     <ClInclude Include="include\weapon_presentation_native.h" />
@@ -475,6 +478,7 @@
     <ClInclude Include="include\d3d_compile_cache.h" />
     <ClInclude Include="include\dxbc_cache_policy.h" />
     <ClInclude Include="include\d3d11_device_loss_recovery.h" />
+    <ClInclude Include="include\d3d11_recovery_policy.h" />
     <ClInclude Include="include\d3d11_fullscreen_toggle.h" />
     <ClInclude Include="include\d3d11_primary_monitor.h" />
     <ClInclude Include="include\resolution_list_filter.h" />

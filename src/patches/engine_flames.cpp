@@ -44,6 +44,7 @@
 #include "pond_class_label.h"
 #include "engine_flame_color.h"
 #include "odf_item_hooks.h"
+#include "scene_mutation_drain.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -1110,6 +1111,9 @@ namespace BZROpenShim
     {
         if (!g_BzrFn_EngineFlameSubmit || !thisPtr)
             return;
+        // A render-queue callback: chunk mesh proxies driven from here only
+        // request their scene objects once the drain is installed.
+        const RenderQueueHookScope renderQueueScope;
 
         EnsureEngineFlameVariantsInitialized();
         g_BzrFn_EngineFlameSubmit(thisPtr, camera);

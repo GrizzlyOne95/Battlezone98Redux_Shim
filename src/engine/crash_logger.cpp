@@ -474,4 +474,32 @@ namespace BZROpenShim
                  g_VectoredHandle ? "on" : "off",
                  reinterpret_cast<void*>(g_PreviousFilter));
     }
+
+    void WriteCrashLogFailClosed(const char* component, const char* reason)
+    {
+        if (!g_CrashLogPath[0])
+            return;
+        if (InterlockedCompareExchange(&g_InHandler, 1, 0) != 0)
+            return;
+        static char buffer[1024];
+        size_t offset = 0;
+        AppendTimestamp(buffer, sizeof(buffer), offset);
+        AppendString(buffer, sizeof(buffer), offset, " FAIL-CLOSED [");
+        AppendString(buffer, sizeof(buffer), offset, component ? component : "?");
+        AppendString(buffer, sizeof(buffer), offset, "]: ");
+        AppendString(buffer, sizeof(buffer), offset, reason ? reason : "(no reason given)");
+        AppendString(buffer, sizeof(buffer), offset, "\r\n");
+        WriteToCrashLog(buffer, offset);
+        if (g_DumpDirectory[0])
+        {
+            static char path[MAX_PATH];
+            const size_t stemLength = BuildCrashStem(path, sizeof(path));
+            if (stemLength + sizeof(".log") <= sizeof(path))
+            {
+                SetExtension(path, sizeof(path), stemLength, ".log");
+                CopyCrashLog(path);
+            }
+        }
+        InterlockedExchange(&g_InHandler, 0);
+    }
 }

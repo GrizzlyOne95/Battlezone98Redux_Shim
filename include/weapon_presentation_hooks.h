@@ -13,7 +13,12 @@ namespace BZROpenShim::Hooks
         WeaponPresentation::Backend& backend, WeaponPresentation::Settings settings);
     WeaponPresentation::Runtime* TryGetSingleplayerWeaponPresentationRuntime() noexcept;
 
-    void RefreshWeaponPresentationState() noexcept;
+    // The world render-queue hook passes PosesOnly once the frameStarted
+    // drain is installed; any call made inside that hook (weapon ctor/dtor/
+    // SetWeapon) is downgraded to PosesOnly as well.
+    void RefreshWeaponPresentationState(
+        WeaponPresentation::Runtime::SceneAccess access =
+            WeaponPresentation::Runtime::SceneAccess::Full) noexcept;
     void WeaponPresentationMissionRunStateChanged(bool running) noexcept;
     void WeaponPresentationSceneTeardownBegin() noexcept;
     void WeaponPresentationSceneTeardownComplete() noexcept;
