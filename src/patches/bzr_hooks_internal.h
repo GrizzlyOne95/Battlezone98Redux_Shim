@@ -1815,6 +1815,11 @@ namespace BZROpenShim
         // (the auto-created window's viewport 0), in the same Ogre world space
         // as the pool nodes.
         bool TryGetMainViewCamera(float position[3], float* fovYRadians);
+        // The main view's Ogre::Camera, or null; read it once per tick.
+        void* GetMainViewCameraObject();
+        // Camera::isVisible(Sphere) in the pool nodes' Ogre world space. False
+        // when the test could not run (visible is then left as it was).
+        bool IsSphereInCameraView(void* camera, const float center[3], float radius, bool& visible);
         void DestroyShimOwnedMeshObject(void* sceneManager, void* node, void* entity);
         // Creates a detached (no node, never rendered) entity of the mesh in
         // the current scene and destroys it at once, leaving the mesh and its
