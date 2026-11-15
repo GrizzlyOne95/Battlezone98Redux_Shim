@@ -47,6 +47,8 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "scene_mutation_drain.h"
+#include "scene_mutation_drain_policy.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -129,6 +131,10 @@ namespace BZROpenShim
         std::vector<std::filesystem::path> g_ChunkPayloadResourceDirectories = {};
         void* g_ChunkProxyBillboardSet = nullptr;
         std::vector<ChunkProxySlot> g_ChunkProxySlots = {};
+        // Mesh proxy objects asked for inside a render-queue callback, built by
+        // CreateRequestedChunkMeshProxyObjects at the drain
+        // (include/scene_mutation_drain_policy.h). Keyed by slot occupant.
+        static SceneMutationDrain::SlotRequests<const uint8_t*> g_ChunkMeshProxyCreateRequests;
         void* g_GenericChunkBatchManualObject = nullptr;
         void* g_GenericChunkBatchSceneNode = nullptr;
         void* g_GenericChunkBatchSceneManager = nullptr;
@@ -1357,6 +1363,18 @@ namespace BZROpenShim
             if (slot.sceneNode && slot.entity)
                 return true;
 
+            // Never create inside the traversal once the drain is installed:
+            // ask for the objects; the next drain builds them hidden and the
+            // following render tick positions and shows them.
+            if (InsideRenderQueueHookWithDeferral())
+            {
+                const size_t index = static_cast<size_t>(&slot - g_ChunkProxySlots.data());
+                if (slot.objectBytes &&
+                    g_ChunkMeshProxyCreateRequests.Request(index, slot.objectBytes, g_ChunkProxySlots.size()))
+                    NoteSceneMutationRequested();
+                return false;
+            }
+
             // Back off only after a failed attempt (Ogre not ready yet). Arming
             // the throttle on success too would let just one fragment per second
             // acquire an entity, while chunk entries expire within 400ms.
@@ -1648,8 +1666,22 @@ namespace BZROpenShim
         // Entity::isVisible on a destroyed chunk entity while the loading
         // screen still rendered frames. Forget everything without calling
         // into Ogre; resources are lazily recreated on the next tick.
+        void CreateRequestedChunkMeshProxyObjects()
+        {
+            if (g_ChunkMeshProxyCreateRequests.Empty())
+                return;
+            g_ChunkMeshProxyCreateRequests.Drain(
+                g_ChunkProxySlots.size(),
+                [](size_t index) -> const uint8_t* {
+                    const ChunkProxySlot& slot = g_ChunkProxySlots[index];
+                    return slot.active ? slot.objectBytes : nullptr;
+                },
+                [](size_t index) { (void)EnsureChunkMeshProxySlot(g_ChunkProxySlots[index]); });
+        }
+
         void ForgetAllChunkProxySceneResources(const wchar_t* reason)
         {
+            g_ChunkMeshProxyCreateRequests.Clear();
             size_t forgotten = 0;
             for (ChunkProxySlot& slot : g_ChunkProxySlots)
             {

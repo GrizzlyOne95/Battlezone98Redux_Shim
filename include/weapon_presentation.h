@@ -213,7 +213,12 @@ namespace BZROpenShim::WeaponPresentation
         // pass. A repeated serial cannot recover a shared node twice. Rendering
         // never supplies dt. Zero dt freezes; invalid dt/serial is rejected.
         bool BeginSimulationStep(uint64_t stepSerial, float dt) noexcept;
-        void SynchronizeVisuals(Backend& backend) noexcept;
+        // PosesOnly skips every flash create and cancel/detach (scene object
+        // creation and destruction) and leaves them due for the next Full
+        // call; animation, recoil and flash pose updates still run. The world
+        // render-queue hook uses it (include/scene_mutation_drain_policy.h).
+        enum class SceneAccess : uint8_t { Full, PosesOnly };
+        void SynchronizeVisuals(Backend& backend, SceneAccess access = SceneAccess::Full) noexcept;
 
         // Paired around native scene destruction. Nested clearScene ->
         // destroyAllMovableObjects retains stable slots through the outer return.
