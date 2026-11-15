@@ -162,7 +162,7 @@ bool prepare(void *entity, char *sourceName, size_t capacity)
         return false;
     // Bump kNativeChunkAlgorithmVersion whenever Extract's output changes, so
     // caches written by an older algorithm are not reused.
-    constexpr uint8_t kNativeChunkAlgorithmVersion = 2; // 2: open boundary loops of each piece are capped
+    constexpr uint8_t kNativeChunkAlgorithmVersion = 3; // 2: open boundary loops of each piece are capped; 3: cap UVs at one tile per 4 m
     uint64_t hash = (14695981039346656037ull ^ kNativeChunkAlgorithmVersion) * 1099511628211ull;
     for (const auto *source : {&bytes, &skeleton})
         for (uint8_t c : *source)
@@ -798,7 +798,7 @@ bool prepareFracture(const std::string &meshName, const std::string &group,
     }
     // Bump kFractureAlgorithmVersion whenever the cutter, caps or FractureOptions
     // defaults change: it is hashed in, so old positive and negative caches miss.
-    constexpr uint8_t kFractureAlgorithmVersion = 3; // 3: any skinned hull is one piece (turret models are gated by the caller)
+    constexpr uint8_t kFractureAlgorithmVersion = 4; // 3: any skinned hull is one piece (turret models are gated by the caller); 4: cap UVs at one tile per 4 m
     uint64_t hash = (14695981039346656037ull ^ kFractureAlgorithmVersion) * 1099511628211ull;
     for (const auto *source : {&bytes, &skeleton})
         for (uint8_t c : *source)

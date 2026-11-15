@@ -187,6 +187,10 @@ namespace BZROpenShim
 
         constexpr size_t kWeaponHardpointOffset = 0x14;
 
+        // Muzzle offset (3 floats) in the hardpoint frame; MountWorldMatrix
+        // pushes it through that frame at 0x00611701.
+        constexpr size_t kWeaponMuzzleOffsetOffset = 0x1C;
+
         // The weapon's _OBJ76 carries its MAT_3D at kObj76TransformOffset, not
         // at the object head. Stock pushes obj+0x20 into RefreshWeaponTransform
         // at 0x005F0A38.
@@ -517,17 +521,14 @@ namespace BZROpenShim
             }
         }
 
-        // Shared exact-Walker hardpoint post-pass.
+        // Hardpoint convergence post-pass shared by both public features.
+        // Stock class-specific UpdateWeaponAim runs before this function.
         //
-        // This is the convergence mechanism for both public features. The only
-        // intended distinction is the provider of ConvergenceRangeSample:
-        //
-        //   Weapon Convergence  -> explicit GameObject target range
-        //   Reticle Convergence -> smart-reticle object/ground range
-        //
-        // Stock class-specific UpdateWeaponAim runs before this function. The
-        // post-pass then reproduces only Walker's proven convergence stage.
-        static int ApplyWalkerConvergencePostPass(
+        //   Target Convergence  -> explicit GameObject target range, applied
+        //                          with Walker's range-only yaw (stock, as-is)
+        //   Reticle Convergence -> each barrel pointed from its muzzle at the
+        //                          smart-reticle world point (object or ground)
+        static int ApplyConvergencePostPass(
             void* craft,
             const ConvergenceRangeSample& sample,
             bool logReticleApplication)
@@ -555,8 +556,7 @@ namespace BZROpenShim
             // reports barrels already rewritten: the caller's fallback must
             // never run the reticle pass on top of a partial target pass.
             volatile int converged = 0;
-            float lastHardpointX = 0.0f;
-            float lastHardpointZ = 0.0f;
+            float lastResidualDegrees = 0.0f;
 
             __try
             {
@@ -601,29 +601,61 @@ namespace BZROpenShim
                         kObj76TransformOffset);
 
                     WeaponConvergence::Solution solution = {};
-                    if (WeaponConvergence::SolveWalkerStyleRange(
+                    WeaponConvergence::SolveResult result;
+                    if (logReticleApplication)
+                    {
+                        // Reticle: turn each barrel so it fires from its
+                        // muzzle through the aim point (minimal arc, stock
+                        // roll kept). Same goal as BZ2's UpdateWeaponAim,
+                        // which aims every hardpoint at one point on the
+                        // reticle ray. Walker's range-only yaw assumes a
+                        // level aim; pitched down at the ground it ignores
+                        // the pitch and the hardpoint's height, and swung
+                        // barrels and laser sights off to the side.
+                        //
+                        // The firing sites spawn from weaponObj->mat * M, and
+                        // M is MountWorldMatrix (0x006116A0):
+                        // obj_rel_parent_matrix(hard, nullptr) with the
+                        // muzzle offset at weapon+0x1C pushed through it
+                        // (0x00611701). Built the same way here so the aim
+                        // origin is the muzzle.
+                        ConvergenceMatrix hardpointWorld = {};
+                        objRelParentMatrix(&hardpointWorld, hardpoint, nullptr);
+                        const auto& muzzleOffset =
+                            *reinterpret_cast<const ConvergenceVec3*>(
+                                reinterpret_cast<const uint8_t*>(weapon) +
+                                kWeaponMuzzleOffsetOffset);
+                        const ConvergenceMatrix mountWorld =
+                            WeaponConvergence::MuzzleWorld(hardpointWorld, muzzleOffset);
+                        result = WeaponConvergence::Solve(
+                            *transform, mountWorld, sample.reference, solution,
+                            /*clampToDeviationLimit*/ true);
+                        if (result == WeaponConvergence::SolveResult::Converged)
+                            lastResidualDegrees = solution.residualDegrees;
+                    }
+                    else
+                    {
+                        // Locked target: stock Walker, unchanged.
+                        result = WeaponConvergence::SolveWalkerStyleRange(
                             *transform,
                             hardpointX,
                             hardpointZ,
                             sample.range,
-                            solution) !=
-                        WeaponConvergence::SolveResult::Converged)
-                    {
-                        continue;
+                            solution);
                     }
+                    if (result != WeaponConvergence::SolveResult::Converged)
+                        continue;
 
                     converged = converged + 1;
                     *transform = solution.mountLocal;
                     refreshWeaponTransform(weaponObject, transform);
-                    lastHardpointX = hardpointX;
-                    lastHardpointZ = hardpointZ;
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 if (!g_PlayerReticleConvergenceLayoutFaultLogged)
                 {
-                    Log(L"[CONVERGE] shared Walker post-pass faulted while reading craft/carrier/weapon layout "
+                    Log(L"[CONVERGE] convergence post-pass faulted while reading craft/carrier/weapon layout "
                         L"(craft=0x%p carrierOffset=0x%X)\n",
                         craft,
                         static_cast<uint32_t>(kCraftCarrierOffset));
@@ -644,17 +676,16 @@ namespace BZROpenShim
                 {
                     g_PlayerReticleConvergenceLastLogTick = now;
                     ++g_PlayerReticleConvergenceLogCount;
-                    Log(L"[CONVERGE] shared exact-Walker post-pass applied to %d hardpoint(s) "
-                        L"rangeSource=%hs rangeReference=(%.1f, %.1f, %.1f) "
-                        L"range=%.1f lastHardpointXZ=(%.3f, %.3f)\n",
+                    Log(L"[CONVERGE] reticle point-at applied to %d hardpoint(s) "
+                        L"source=%hs aimPoint=(%.1f, %.1f, %.1f) "
+                        L"range=%.1f residualDeg=%.3f\n",
                         converged,
                         sample.source,
                         static_cast<double>(sample.reference.x),
                         static_cast<double>(sample.reference.y),
                         static_cast<double>(sample.reference.z),
                         static_cast<double>(sample.range),
-                        static_cast<double>(lastHardpointX),
-                        static_cast<double>(lastHardpointZ));
+                        static_cast<double>(lastResidualDegrees));
                 }
             }
 
@@ -666,7 +697,7 @@ namespace BZROpenShim
             ConvergenceRangeSample sample = {};
             if (!TryGetReticleConvergenceRange(craft, sample))
                 return;
-            ApplyWalkerConvergencePostPass(craft, sample, true);
+            ApplyConvergencePostPass(craft, sample, true);
         }
 
         // One convergence source per frame, never both. Each pass rebuilds the
@@ -687,7 +718,7 @@ namespace BZROpenShim
             {
                 ConvergenceRangeSample sample = {};
                 if (TryGetExplicitTargetConvergenceRange(craft, sample) &&
-                    ApplyWalkerConvergencePostPass(craft, sample, false) > 0)
+                    ApplyConvergencePostPass(craft, sample, false) > 0)
                 {
                     return;
                 }

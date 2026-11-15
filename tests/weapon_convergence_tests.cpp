@@ -509,6 +509,72 @@ namespace
             "short-range convergence did not keep the barrel aimed down and forward");
     }
 
+    void TestReticleAimDownHitsTheGroundPointWithBothBarrels()
+    {
+        // Craft level and yawed, barrels pitched 0.8 rad down by the stock
+        // aim, reticle on the ground about 3 m ahead and below. Each barrel
+        // must fire through the reticle point, as BZ2 does, which Walker's
+        // level-aim yaw never managed.
+        const Matrix craftWorld = MakeYawMatrix(0.7f, 100.0, 20.0, -40.0);
+        const Matrix stock = MakePitchDownMatrix(0.8f);
+        const Vec3 rayFront = Front(Multiply(stock, craftWorld));
+        const Vec3 craftOrigin = Position(craftWorld);
+        const float reticleRange = 3.5f;
+        const Vec3 groundPoint = {
+            craftOrigin.x + rayFront.x * reticleRange,
+            craftOrigin.y + rayFront.y * reticleRange,
+            craftOrigin.z + rayFront.z * reticleRange,
+        };
+
+        // Toed-in hardpoints with a muzzle 0.8 m ahead of the pivot, as
+        // MountWorldMatrix (0x006116A0) applies it.
+        const Vec3 muzzleOffset = { 0.0f, 0.1f, 0.8f };
+        for (float hardX : { -1.5f, 1.5f })
+        {
+            const Matrix hardRel = MakeYawMatrix(hardX > 0.0f ? -0.1f : 0.1f, hardX, 0.3, 1.0);
+            const Matrix pivotWorld = Multiply(hardRel, craftWorld);
+            const Matrix mountWorld = MuzzleWorld(pivotWorld, muzzleOffset);
+
+            // Independent reference for M: hardpoint world rotation, position =
+            // pivot + muzzle offset in that rotation.
+            const double muzzleX = pivotWorld.positionX + pivotWorld.rightX * muzzleOffset.x +
+                pivotWorld.upX * muzzleOffset.y + pivotWorld.frontX * muzzleOffset.z;
+            const double muzzleY = pivotWorld.positionY + pivotWorld.rightY * muzzleOffset.x +
+                pivotWorld.upY * muzzleOffset.y + pivotWorld.frontY * muzzleOffset.z;
+            const double muzzleZ = pivotWorld.positionZ + pivotWorld.rightZ * muzzleOffset.x +
+                pivotWorld.upZ * muzzleOffset.y + pivotWorld.frontZ * muzzleOffset.z;
+            Require(std::fabs(mountWorld.positionX - muzzleX) < 1e-5 &&
+                    std::fabs(mountWorld.positionY - muzzleY) < 1e-5 &&
+                    std::fabs(mountWorld.positionZ - muzzleZ) < 1e-5 &&
+                    mountWorld.frontX == pivotWorld.frontX && mountWorld.upY == pivotWorld.upY,
+                "MuzzleWorld did not match MountWorldMatrix's shape");
+
+            Solution solution = {};
+            Require(Solve(stock, mountWorld, groundPoint, solution) == SolveResult::Converged,
+                "aiming down at nearby ground was refused");
+
+            const Vec3 origin = FireOrigin(solution.mountLocal, mountWorld);
+            Vec3 toGround = { groundPoint.x - origin.x, groundPoint.y - origin.y, groundPoint.z - origin.z };
+            Require(Normalize(toGround), "ground point sat on the barrel");
+            Require(AngleBetweenDegrees(FireDirection(solution.mountLocal, mountWorld), toGround) < 0.05f,
+                "a barrel did not fire through the reticle ground point");
+
+            // Control: solving from the pivot instead of the muzzle misses.
+            Solution pivotSolution = {};
+            Require(Solve(stock, pivotWorld, groundPoint, pivotSolution) == SolveResult::Converged,
+                "control pivot solve was refused");
+            Require(AngleBetweenDegrees(FireDirection(pivotSolution.mountLocal, mountWorld), toGround) > 3.0f,
+                "control: ignoring the muzzle offset unexpectedly hit the ground point");
+
+            // Control: the Walker range-only yaw misses the same point.
+            Solution walker = {};
+            Require(SolveWalkerStyleRange(stock, hardX, 1.0f, reticleRange, walker) == SolveResult::Converged,
+                "control Walker solve was refused");
+            Require(AngleBetweenDegrees(FireDirection(walker.mountLocal, mountWorld), toGround) > 3.0f,
+                "control: Walker unexpectedly hit the ground point");
+        }
+    }
+
     void TestSafetyStopsAndDegenerateInput()
     {
         const Matrix mountWorld = MakeYawMatrix(0.0f, 0.0, 0.0, 0.0);
@@ -522,6 +588,22 @@ namespace
         Require(Solve(mountLocal, mountWorld, { 0.0f, 0.0f, -500.0f }, solution) ==
                 SolveResult::ExceedsDeviationLimit,
             "a target directly behind the barrel was not rejected");
+        Require(Solve(mountLocal, mountWorld, { 0.0f, 0.0f, -500.0f }, solution, true) ==
+                SolveResult::ExceedsDeviationLimit,
+            "clamping turned a barrel toward a target behind it");
+
+        // 60 degrees off, in front: refused without clamping; with clamping the
+        // barrel holds exactly at the 45-degree stop, turned toward the target.
+        const Vec3 wide = { 500.0f * std::sin(1.0471976f), 0.0f, 500.0f * std::cos(1.0471976f) };
+        Require(Solve(mountLocal, mountWorld, wide, solution) == SolveResult::ExceedsDeviationLimit,
+            "a 60-degree target was accepted without clamping");
+        Require(Solve(mountLocal, mountWorld, wide, solution, true) == SolveResult::Converged,
+            "clamping refused a 60-degree target in front");
+        const Vec3 clampedFront = FireDirection(solution.mountLocal, mountWorld);
+        Require(std::fabs(AngleBetweenDegrees(clampedFront, { 0.0f, 0.0f, 1.0f }) - 45.0f) < 0.05f,
+            "clamped barrel is not at the 45-degree stop");
+        Require(clampedFront.x > 0.0f && std::fabs(clampedFront.y) < 1e-4f,
+            "clamped barrel did not turn toward the target");
 
         Matrix broken = Identity();
         broken.rightX = 7.5f;  // not a rotation
@@ -554,6 +636,7 @@ int main()
     TestWalkerStyleRangeCorrectionPreMultipliesStockAim();
     TestWalkerStyleRangeIgnoresOffAxisTargetBearing();
     TestWalkerStyleRangeStandsDownInsideTheHardpointReach();
+    TestReticleAimDownHitsTheGroundPointWithBothBarrels();
     TestSafetyStopsAndDegenerateInput();
     std::printf("weapon_convergence_tests: all checks passed\n");
     return 0;

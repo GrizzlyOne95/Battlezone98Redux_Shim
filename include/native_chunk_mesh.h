@@ -121,7 +121,10 @@ struct FractureOptions
     float minFaceFraction = 0.04f; // a cut leaving a side with fewer source faces is retried
     uint32_t cutAttempts = 4;
     float tiltDegrees = 30.0f;
-    float capUvScale = 1.0f;
+    // Texture repeats per mesh unit (metre) on cut faces. The cap texture is a
+    // 512 px photo-like image, so a 1 m tile reads as fine speckle on a
+    // building; 0.25 is one tile per 4 m.
+    float capUvScale = 0.25f;
     uint32_t minFaces = 16;       // sources with fewer triangles are not cut
     std::string interiorMaterial = "openshim_fracture_interior";
 };
