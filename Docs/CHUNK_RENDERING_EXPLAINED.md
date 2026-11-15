@@ -210,10 +210,24 @@ person's death itself:
    ×10 per axis, +5 up, a kick away from the body's origin, the body's own
    velocity, random spin). OpenShim integrates them itself from the engine's
    chunk tick: gravity, a soft thud on the terrain (low bounce, high friction),
-   lie still for `SkinnedGibsLinger` seconds, sink, disappear. At most
-   `SkinnedGibsMax` gibs live at once; the oldest resting one is recycled
-   first. Gibs farther than `SkinnedGibsDrawDistance` metres from the camera
-   are hidden (still simulated) until they come back inside.
+   lie still for `SkinnedGibsLinger` seconds, then leave. How they leave
+   depends on the main camera's frustum (Ogre `Camera::isVisible`, one test
+   per piece per tick):
+   - Off screen (or hidden by the draw distance), a piece is simply released;
+     nobody sees it go. A piece that comes to rest without ever having been
+     on screen goes 1.5 s after settling instead of after the linger.
+   - On screen, it sinks fully underground (depth from its own radius; 2 s
+     for gibs, 3 s for fracture pieces) while shrinking away over the second
+     half of the sink. A fracture piece also throws a stock ground-hit dust
+     puff (`xbulgnd`, with its stock sound; no damage, local only, at most
+     two per tick). A sinking piece that leaves the view is released.
+
+   At most `SkinnedGibsMax` gibs live at once. Past three quarters of that,
+   one resting gib per tick is cleared early: the oldest off-screen one is
+   released, else the oldest starts its sink. A full pool recycles an
+   off-screen gib first, then the one furthest through its sink, then the
+   oldest resting one. Gibs farther than `SkinnedGibsDrawDistance` metres
+   from the camera are hidden (still simulated) until they come back inside.
 4. **No double bodies.** The body mesh is hidden, and the engine's own legacy
    chunks for that death keep simulating (their smoke and pops are unchanged)
    but the chunk renderer is told not to draw them. Nothing in the engine's

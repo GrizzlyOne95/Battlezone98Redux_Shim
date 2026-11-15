@@ -74,8 +74,19 @@ namespace BZROpenShim
                 float settleSpeed = 0.6f;   // below this after a bounce: at rest
                 float contactRadius = 0.35f; // fraction of radius kept above ground
                 float heavyRadius = 0.3f;   // larger pieces spin at half rate
+                // Sink: the piece goes fully underground, depth from its own
+                // bounding radius (centre to radius below a 45-degree slope),
+                // never less than sinkDepth. It starts slowly (t squared).
                 float sinkDepth = 0.4f;
+                float sinkDepthRadii = 2.0f;
                 float sinkSeconds = 2.0f;
+                // Crumble: over the last half of the sink the piece shrinks
+                // to crumbleMinScale (not 0: Ogre bounds stay non-degenerate).
+                float crumbleFraction = 0.5f;
+                float crumbleMinScale = 0.05f;
+                // A piece that comes to rest without ever having been on
+                // screen goes this long after settling, not after the linger.
+                float neverSeenGrace = 1.5f;
                 float maxLifetime = 20.0f;
                 float maxStep = 0.1f;
             };
@@ -87,6 +98,7 @@ namespace BZROpenShim
                 float friction = 0.4f;
                 float spinDamp = 0.6f;
                 float maxLifetime = 12.0f;
+                float sinkSeconds = 3.0f; // bigger pieces: a slower sink reads as weight
             };
             constexpr MetalTuning kMetalTuning = {};
 
@@ -479,6 +491,11 @@ namespace BZROpenShim
                 bool impacted = false;
                 bool hasGround = true;
                 bool metal = false; // fracture piece: metal ground response
+                bool dusted = false; // sink dust puff already thrown
+                // Main-camera frustum test, refreshed every tick. Unknown (no
+                // camera, test failed) counts as in view: the old behaviour.
+                bool inView = true;
+                bool seen = false; // in view at least once since spawn
                 // Hidden by SkinnedGibsDrawDistance; only that cull sets it.
                 bool distanceCulled = false;
                 Vec3 position = {};
@@ -490,6 +507,8 @@ namespace BZROpenShim
                 float age = 0.0f;
                 float settledAge = 0.0f;
                 float sinkElapsed = 0.0f;
+                float sinkStartY = 0.0f;
+                float sinkDistance = 0.0f;
                 uint64_t serial = 0;
             };
             std::vector<GibSlot> g_Slots;
@@ -522,6 +541,69 @@ namespace BZROpenShim
             bool SceneMatches(const GibSlot& slot, void* sceneManager)
             {
                 return slot.sceneManager && slot.sceneManager == sceneManager;
+            }
+
+            // ---- Sink and crumble ---------------------------------------------
+            float SinkSeconds(const GibSlot& slot)
+            {
+                return slot.metal ? kMetalTuning.sinkSeconds : kTuning.sinkSeconds;
+            }
+
+            void StartSinking(GibSlot& slot)
+            {
+                if (slot.sinking)
+                    return;
+                const float scale = std::max({std::fabs(slot.scale.x), std::fabs(slot.scale.y), std::fabs(slot.scale.z)});
+                slot.sinking = true;
+                slot.sinkElapsed = 0.0f;
+                slot.sinkStartY = slot.position.y;
+                slot.sinkDistance = std::max(kTuning.sinkDepth, slot.radius * scale * kTuning.sinkDepthRadii);
+            }
+
+            // 1 until the crumble starts, then down to crumbleMinScale at the
+            // end of the sink (smoothstep).
+            float CrumbleFactor(const GibSlot& slot)
+            {
+                if (!slot.sinking)
+                    return 1.0f;
+                const float seconds = SinkSeconds(slot);
+                const float start = seconds * (1.0f - kTuning.crumbleFraction);
+                const float t = std::clamp((slot.sinkElapsed - start) / (seconds - start), 0.0f, 1.0f);
+                const float s = t * t * (3.0f - 2.0f * t);
+                return 1.0f - s * (1.0f - kTuning.crumbleMinScale);
+            }
+
+            // Past three quarters of SkinnedGibsMax, clear one resting gib per
+            // tick: the oldest off-screen one is released outright (nobody
+            // sees it go); only when every resting gib is in view does the
+            // oldest start its sink early. A full pool then rarely has to pop
+            // a piece that is sitting in plain view.
+            void SinkOldestWhenNearlyFull(void* sceneManager)
+            {
+                const size_t soft = std::max<size_t>(g_Config.maxGibs, 1) * 3 / 4;
+                size_t standing = 0;
+                GibSlot* oldestResting = nullptr;
+                GibSlot* oldestHidden = nullptr;
+                for (GibSlot& slot : g_Slots)
+                {
+                    // A slot from a torn-down scene is forgotten by the tick
+                    // loop; never release or move it from here.
+                    if (!slot.active || slot.sinking || !SceneMatches(slot, sceneManager))
+                        continue;
+                    ++standing;
+                    if (!slot.settled)
+                        continue;
+                    if (!oldestResting || slot.serial < oldestResting->serial)
+                        oldestResting = &slot;
+                    if (!slot.inView && (!oldestHidden || slot.serial < oldestHidden->serial))
+                        oldestHidden = &slot;
+                }
+                if (standing <= soft)
+                    return;
+                if (oldestHidden)
+                    ReleaseSlot(*oldestHidden);
+                else if (oldestResting)
+                    StartSinking(*oldestResting);
             }
 
             void ForgetAll(const wchar_t* reason)
@@ -592,6 +674,146 @@ namespace BZROpenShim
                 return true;
             }
 
+            // ---- Sink dust ----------------------------------------------------
+            // A fracture piece throws a stock ground-hit puff where it starts
+            // to sink. Purely cosmetic and local: Explosion::Init (0x004C9AB0)
+            // copies the 64-byte matrix, takes a null owner, and creates no
+            // distributed object; these ODFs have damageRadius 0.
+            // One name only: a missing name makes Find probe for <name>.odf on
+            // every call, so no fallback list. It names a sound (explSound).
+            constexpr const char* kSinkDustOdf = "xbulgnd";
+            constexpr int kMaxDustPerTick = 2;
+            int g_DustThisTick = 0;
+
+            using FnExplosionFind = void*(__cdecl*)(uint32_t nameLo, uint32_t nameHi);
+            using FnExplosionBuild = void*(__thiscall*)(void* explosionClass, const void* matrix, void* owner);
+            struct DustApi
+            {
+                FnExplosionFind find = nullptr;
+                FnExplosionBuild build = nullptr;
+            };
+
+            const DustApi& ResolveDustApi()
+            {
+                static DustApi api;
+                static bool attempted = false;
+                if (attempted)
+                    return api;
+                attempted = true;
+                uint32_t find = 0, build = 0;
+                const HookEngine::EngineRow rows[] = {
+                    {"ExplosionClassFind", &find},
+                    {"ExplosionClassBuild", &build},
+                };
+                if (!HookEngine::BindEngineRows("Fracture sink dust", rows))
+                {
+                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] sink dust off: explosion calls do not bind\n");
+                    return api;
+                }
+                api.find = reinterpret_cast<FnExplosionFind>(static_cast<uintptr_t>(find));
+                api.build = reinterpret_cast<FnExplosionBuild>(static_cast<uintptr_t>(build));
+                return api;
+            }
+
+            void* FindDustClass(FnExplosionFind find, const char* odf)
+            {
+                char name[8] = {};
+                std::memcpy(name, odf, std::min<size_t>(std::strlen(odf), sizeof(name)));
+                uint32_t lo = 0, hi = 0;
+                std::memcpy(&lo, name, 4);
+                std::memcpy(&hi, name + 4, 4);
+                __try
+                {
+                    return find(lo, hi);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return nullptr;
+                }
+            }
+
+            bool BuildDust(FnExplosionBuild build, void* explosionClass, const void* matrix)
+            {
+                __try
+                {
+                    build(explosionClass, matrix, nullptr);
+                    return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+
+            // One to three puffs over the piece's footprint, by size.
+            void SpawnSinkDust(const GibSlot& slot, FnTerrainHeightAt terrain)
+            {
+                static bool s_failed = false;
+                const DustApi& api = ResolveDustApi();
+                const uintptr_t originAddr = WorldRenderOriginAddr();
+                if (s_failed || !api.find || !api.build || !terrain || !originAddr || g_DustThisTick >= kMaxDustPerTick)
+                    return;
+                // Looked up per puff, never cached: the class list belongs to
+                // the mission and is rebuilt by the next one.
+                void* const explosionClass = FindDustClass(api.find, kSinkDustOdf);
+                if (!explosionClass)
+                {
+                    s_failed = true;
+                    LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] sink dust off: explosion %hs not found\n",
+                                       kSinkDustOdf);
+                    return;
+                }
+                const float origin[3] = {reinterpret_cast<const float*>(originAddr)[0],
+                                         reinterpret_cast<const float*>(originAddr)[1],
+                                         reinterpret_cast<const float*>(originAddr)[2]};
+                const float scale = std::max({std::fabs(slot.scale.x), std::fabs(slot.scale.y), std::fabs(slot.scale.z)});
+                const float size = slot.radius * scale;
+                const int puffs = std::clamp(static_cast<int>(size / 1.5f) + 1, 1, kMaxDustPerTick);
+                uint32_t seed = static_cast<uint32_t>(slot.serial * 2654435761u) | 1u;
+                auto unit = [&seed]() {
+                    seed = seed * 1664525u + 1013904223u;
+                    return static_cast<float>(seed >> 8) / 16777216.0f * 2.0f - 1.0f;
+                };
+                for (int i = 0; i < puffs && g_DustThisTick < kMaxDustPerTick; ++i)
+                {
+                    const float rx = slot.position.x + (i ? unit() * size * 0.6f : 0.0f);
+                    const float rz = slot.position.z + (i ? unit() * size * 0.6f : 0.0f);
+                    // Render -> sim (see TerrainHeightSafe): x + ox, -(z + oz).
+                    const double sx = static_cast<double>(rx) + origin[0];
+                    const double sz = -(static_cast<double>(rz) + origin[2]);
+                    double sy = 0.0;
+                    __try
+                    {
+                        sy = terrain(sx, sz);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return;
+                    }
+                    if (!std::isfinite(sy))
+                        return;
+                    // Engine object matrix: right, up, front (9 floats), pad,
+                    // then position as 3 doubles at +0x28 (obj+0x20 layout).
+                    struct alignas(8) EngineMatrix
+                    {
+                        float right[3];
+                        float up[3];
+                        float front[3];
+                        float pad;
+                        double posit[3];
+                    };
+                    static_assert(sizeof(EngineMatrix) == 64, "engine matrix is 16 dwords");
+                    const EngineMatrix matrix = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, 0.0f, {sx, sy, sz}};
+                    if (!BuildDust(api.build, explosionClass, &matrix))
+                    {
+                        s_failed = true;
+                        LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] sink dust off: explosion build faulted\n");
+                        return;
+                    }
+                    ++g_DustThisTick;
+                }
+            }
+
             Vec3 GroundNormal(FnTerrainHeightAt fn, float x, float z)
             {
                 constexpr float kStep = 0.25f;
@@ -656,19 +878,32 @@ namespace BZROpenShim
                 }
                 if (anyFree)
                     return anyFree;
-                // Full: recycle the oldest gib already at rest, else the oldest.
+                // Full: recycle the oldest gib off screen, else the one furthest
+                // through its sink (mostly gone already), else the oldest at
+                // rest, else the oldest.
+                GibSlot* oldestHidden = nullptr;
+                GibSlot* furthestSinking = nullptr;
                 GibSlot* oldestSettled = nullptr;
                 GibSlot* oldest = nullptr;
                 for (GibSlot& slot : g_Slots)
                 {
                     if (!slot.active)
                         continue;
+                    if (!slot.inView && (!oldestHidden || slot.serial < oldestHidden->serial))
+                        oldestHidden = &slot;
+                    if (slot.sinking &&
+                        (!furthestSinking || slot.sinkElapsed / SinkSeconds(slot) >
+                                                 furthestSinking->sinkElapsed / SinkSeconds(*furthestSinking)))
+                        furthestSinking = &slot;
                     if (slot.settled && (!oldestSettled || slot.serial < oldestSettled->serial))
                         oldestSettled = &slot;
                     if (!oldest || slot.serial < oldest->serial)
                         oldest = &slot;
                 }
-                GibSlot* victim = oldestSettled ? oldestSettled : oldest;
+                GibSlot* victim = oldestHidden      ? oldestHidden
+                                  : furthestSinking ? furthestSinking
+                                  : oldestSettled   ? oldestSettled
+                                                    : oldest;
                 if (victim)
                     ReleaseSlot(*victim);
                 return victim;
@@ -812,6 +1047,11 @@ namespace BZROpenShim
                     slot->age = 0.0f;
                     slot->settledAge = 0.0f;
                     slot->sinkElapsed = 0.0f;
+                    slot->sinkStartY = 0.0f;
+                    slot->sinkDistance = 0.0f;
+                    slot->dusted = false;
+                    slot->inView = true;
+                    slot->seen = false;
                     slot->settled = false;
                     slot->sinking = false;
                     slot->impacted = false;
@@ -877,20 +1117,31 @@ namespace BZROpenShim
                 const float restitution = slot.metal ? kMetalTuning.restitution : kTuning.restitution;
                 const float friction = slot.metal ? kMetalTuning.friction : kTuning.friction;
                 const float spinDamp = slot.metal ? kMetalTuning.spinDamp : kTuning.spinDamp;
-                if (slot.age >= maxLifetime + kTuning.sinkSeconds)
+                const float sinkSeconds = SinkSeconds(slot);
+                if (slot.age >= maxLifetime + sinkSeconds)
                     return false;
 
+                // Off screen, leaving is invisible: no sink, no dust.
                 if (slot.sinking)
                 {
+                    if (!slot.inView)
+                        return false;
                     slot.sinkElapsed += dt;
-                    slot.position.y -= kTuning.sinkDepth / kTuning.sinkSeconds * dt;
-                    return slot.sinkElapsed < kTuning.sinkSeconds;
+                    const float t = std::min(slot.sinkElapsed / sinkSeconds, 1.0f);
+                    slot.position.y = slot.sinkStartY - slot.sinkDistance * t * t;
+                    return slot.sinkElapsed < sinkSeconds;
                 }
                 if (slot.settled)
                 {
                     slot.settledAge += dt;
-                    if (slot.settledAge >= g_Config.linger || slot.age >= maxLifetime - kTuning.sinkSeconds)
-                        slot.sinking = true;
+                    if (!slot.seen && slot.settledAge >= kTuning.neverSeenGrace)
+                        return false;
+                    if (slot.settledAge >= g_Config.linger || slot.age >= maxLifetime - sinkSeconds)
+                    {
+                        if (!slot.inView)
+                            return false;
+                        StartSinking(slot);
+                    }
                     return true;
                 }
                 if (slot.age >= maxLifetime)
@@ -1323,6 +1574,11 @@ namespace BZROpenShim
             float fovY = 0.0f;
             const bool cameraKnown = g_Config.drawDistance > 0 && TryGetMainViewCamera(camera, &fovY);
             const float zoom = PoolDrawDistance::ZoomDistanceScale(fovY);
+            SinkOldestWhenNearlyFull(sceneManager);
+            g_DustThisTick = 0;
+            size_t dustSlots[kMaxDustPerTick] = {};
+            int dustCount = 0;
+            void* const viewCamera = GetMainViewCameraObject();
             for (GibSlot& slot : g_Slots)
             {
                 if (!slot.active)
@@ -1332,11 +1588,32 @@ namespace BZROpenShim
                     ForgetSlot(slot);
                     continue;
                 }
+                // Last tick's frustum (planes from the last render). A piece
+                // hidden by the draw-distance cull is out of view.
+                bool visible = true;
+                if (slot.distanceCulled)
+                    visible = false;
+                else if (viewCamera)
+                {
+                    const float center[3] = {slot.position.x, slot.position.y, slot.position.z};
+                    const float scale = std::max({std::fabs(slot.scale.x), std::fabs(slot.scale.y), std::fabs(slot.scale.z)});
+                    if (!IsSphereInCameraView(viewCamera, center, std::max(slot.radius * scale, 0.05f), visible))
+                        visible = true;
+                }
+                slot.inView = visible;
+                slot.seen = slot.seen || visible;
                 const bool wasResting = slot.settled && !slot.sinking;
                 if (!StepGib(slot, dt, terrain))
                 {
                     ReleaseSlot(slot);
                     continue;
+                }
+                // Not dusted until the per-tick cap lets it through: a puff
+                // late by a frame or two still reads as the sink starting.
+                if (slot.sinking && slot.metal && !slot.dusted && dustCount < kMaxDustPerTick)
+                {
+                    dustSlots[dustCount++] = static_cast<size_t>(&slot - g_Slots.data());
+                    slot.dusted = true;
                 }
                 const float at[3] = {slot.position.x, slot.position.y, slot.position.z};
                 const PoolDrawDistance::Transition cull = PoolDrawDistance::Decide(
@@ -1354,11 +1631,20 @@ namespace BZROpenShim
                     continue; // nothing moved
                 const float position[3] = {slot.position.x, slot.position.y, slot.position.z};
                 const float quat[4] = {slot.orientation.w, slot.orientation.x, slot.orientation.y, slot.orientation.z};
-                if (!SetShimOwnedObjectTransform(slot.node, slot.entity, position, quat, nullptr))
+                // Only a sinking piece changes scale; others keep the spawn scale.
+                const float crumble = CrumbleFactor(slot);
+                const float scale[3] = {slot.scale.x * crumble, slot.scale.y * crumble, slot.scale.z * crumble};
+                if (!SetShimOwnedObjectTransform(slot.node, slot.entity, position, quat, slot.sinking ? scale : nullptr))
                     ForgetSlot(slot);
                 else if (show)
                     slot.distanceCulled = false;
             }
+            // Puffs are built after the pool walk: building an explosion runs
+            // engine code (a modded ODF could deal damage and spawn gibs), so
+            // it must not run while the loop holds references into g_Slots.
+            for (int i = 0; i < dustCount; ++i)
+                if (dustSlots[i] < g_Slots.size() && g_Slots[dustSlots[i]].active)
+                    SpawnSinkDust(g_Slots[dustSlots[i]], terrain);
         }
 
         namespace
