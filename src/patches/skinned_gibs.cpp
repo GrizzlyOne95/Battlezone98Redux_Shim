@@ -1646,7 +1646,7 @@ namespace BZROpenShim
             const std::filesystem::path& cacheRoot,
             const std::vector<std::filesystem::path>& payloadDirectories)
         {
-            if ((!IsSkinnedGibsEnabled() && !IsFractureEnabled()) || cacheRoot.empty())
+            if ((!IsSkinnedGibsEnabled() && !IsFractureEnabled() && !g_EnableChunkMeshProxy) || cacheRoot.empty())
                 return;
             try
             {
@@ -1716,8 +1716,9 @@ namespace BZROpenShim
                                        ours.string().c_str(), output ? 1u : 0u);
                     return false;
                 };
-                // FractureOnePiece's interior material (its own producer, own key).
-                if (IsFractureEnabled())
+                // The interior material: FractureOnePiece's cut caps and the open-loop caps of
+                // native chunk pieces (any model with native chunk meshes active).
+                if (IsFractureEnabled() || g_EnableChunkMeshProxy)
                 {
                     bool wroteInterior = false;
                     const bool interiorForeign =

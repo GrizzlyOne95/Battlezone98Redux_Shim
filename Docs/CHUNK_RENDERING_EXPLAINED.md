@@ -250,6 +250,10 @@ that spawns the four stock pilots and kills them one by one. It needs
 
 ---
 
+### Multi-part pieces are capped
+
+A multi-part model (a building such as `abcomm`) is split per bone, and each part is an open shell: a tower has no floor where it sat on the base. After splitting, `Extract` welds each piece's positions (about 1e-5 of the piece size), finds the boundary edges and closes every closed loop with an extra submesh using `openshim_fracture_interior`, the same material the one-piece fracture caps use. Loops are skipped (and counted as `openLoops` in the `[CHUNKNATIVE]` log line, next to `capLoops`) when they are open chains, pinched, larger than 300 points, tiny, strongly non-planar, or when the piece is a flat sheet along the loop normal (a cap would put a coincident back face on it). The material is written whenever native chunk meshes are active, not only with FractureOnePiece. Cached native pieces carry an algorithm version in their folder hash, so caches written before capping are not reused.
+
 ## Current status
 
 - Vehicles: working when compatible chunk assets are detected.
