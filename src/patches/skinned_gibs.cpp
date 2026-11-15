@@ -24,6 +24,7 @@
 // chunk proxies. Simulation: ChunkEffect::Simulate's dt.
 
 #include "bzr_hooks_internal.h"
+#include "fracture_interior_resources.h"
 #include "game_state.h"
 #include "gib_flesh_texture.h"
 #include "hook_engine.h"
@@ -1725,22 +1726,64 @@ namespace BZROpenShim
                         ensureFile(NC::kFractureInteriorMaterialFile, NC::kFractureInteriorMaterialMarker,
                                    NC::FractureInteriorMaterialHeader(), NC::FractureInteriorMaterialScript(),
                                    wroteInterior);
-                    const auto path = cacheRoot / NC::kFractureInteriorTextureFile;
-                    const auto head = readHead(path);
-                    if (interiorForeign)
+                    // The maps are DDS files embedded in this DLL (fracture_interior_textures.rc):
+                    // written when missing or different, removed (when byte-identical to ours) once
+                    // a pack or the user supplies the material. To change the look, override the
+                    // material (with its own textures), not these files: a differing copy is rewritten.
+                    HMODULE self = nullptr;
+                    GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                       reinterpret_cast<LPCSTR>(&EnsureSkinnedGibFleshMaterial), &self);
+                    const struct { int id; const char* file; } maps[] = {
+                        {IDR_FRACTURE_INTERIOR_DIFFUSE, NC::kFractureInteriorTextureFile},
+                        {IDR_FRACTURE_INTERIOR_NORMAL, NC::kFractureInteriorNormalFile},
+                        {IDR_FRACTURE_INTERIOR_SPECULAR, NC::kFractureInteriorSpecularFile},
+                        {IDR_FRACTURE_INTERIOR_EMISSIVE, NC::kFractureInteriorEmissiveFile}};
+                    for (const auto& map : maps)
                     {
-                        if (NC::IsGeneratedGibFleshTga(head))
-                            std::filesystem::remove(path, ec);
-                    }
-                    else if (!NC::IsCurrentGibFleshTga(head))
-                    {
-                        const auto tga = NC::FractureInteriorTextureTga();
+                        const HRSRC info = self ? FindResourceA(self, MAKEINTRESOURCEA(map.id), RT_RCDATA) : nullptr;
+                        const HGLOBAL handle = info ? LoadResource(self, info) : nullptr;
+                        const auto* bytes = handle ? static_cast<const char*>(LockResource(handle)) : nullptr;
+                        const DWORD size = info ? SizeofResource(self, info) : 0;
+                        if (!bytes || size == 0)
+                        {
+                            LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] interior texture %hs missing from module\n",
+                                               map.file);
+                            continue;
+                        }
+                        const auto path = cacheRoot / map.file;
+                        bool same = false;
+                        if (std::filesystem::file_size(path, ec) == size && !ec)
+                        {
+                            std::ifstream in(path, std::ios::binary);
+                            std::string existing(size, '\0');
+                            in.read(existing.data(), static_cast<std::streamsize>(size));
+                            same = in.gcount() == static_cast<std::streamsize>(size) &&
+                                   std::memcmp(existing.data(), bytes, size) == 0;
+                        }
+                        ec.clear();
+                        if (interiorForeign)
+                        {
+                            if (same)
+                                std::filesystem::remove(path, ec);
+                            ec.clear();
+                            continue;
+                        }
+                        if (same)
+                            continue;
+                        std::filesystem::create_directories(cacheRoot, ec);
+                        ec.clear();
                         std::ofstream out(path, std::ios::binary | std::ios::trunc);
-                        out.write(reinterpret_cast<const char*>(tga.data()), static_cast<std::streamsize>(tga.size()));
+                        out.write(bytes, static_cast<std::streamsize>(size));
                         out.close();
                         LogChunkDiagnostic("skinnedgibs", L"[FRACTURE] wrote interior texture %hs ok=%u\n",
                                            path.string().c_str(), out ? 1u : 0u);
                     }
+                    // The procedural TGA of earlier versions.
+                    const auto legacy = cacheRoot / NC::kFractureInteriorLegacyTextureFile;
+                    if (NC::IsGeneratedGibFleshTga(readHead(legacy)))
+                        std::filesystem::remove(legacy, ec);
+                    ec.clear();
                 }
                 if (!IsSkinnedGibsEnabled())
                     return;

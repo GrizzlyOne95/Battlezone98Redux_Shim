@@ -25,7 +25,7 @@ namespace BZROpenShim::NativeChunks
 // of each generated file's first line / TGA id, which is how the runtime
 // recognises (and replaces) a stale generated copy, while a file without the
 // marker is the user's and is left alone.
-inline constexpr const char *kGibFleshVersion = "v9";
+inline constexpr const char *kGibFleshVersion = "v10";
 inline constexpr const char *kGibFleshMaterialName = "openshim_gib_flesh";
 inline constexpr const char *kGibFleshMaterialFile = "openshim_gib_flesh.material";
 // Skin, fat, bone and marrow live in their own file so a mod can restyle the
@@ -52,11 +52,17 @@ std::vector<GibFleshTexture> GibFleshTextures();
 // to a payload pack's own file of the same name).
 inline constexpr const char *kFractureInteriorMaterialName = "openshim_fracture_interior";
 inline constexpr const char *kFractureInteriorMaterialFile = "openshim_fracture_interior.material";
-inline constexpr const char *kFractureInteriorTextureFile = "openshim_fracture_interior.tga";
+// The cap texture set is embedded in the plugin (fracture_interior_textures.rc)
+// and written beside the material; the .tga is the earlier generated texture,
+// removed when found.
+inline constexpr const char *kFractureInteriorTextureFile = "openshim_fracture_interior.dds";
+inline constexpr const char *kFractureInteriorNormalFile = "openshim_fracture_interior_n.dds";
+inline constexpr const char *kFractureInteriorSpecularFile = "openshim_fracture_interior_s.dds";
+inline constexpr const char *kFractureInteriorEmissiveFile = "openshim_fracture_interior_e.dds";
+inline constexpr const char *kFractureInteriorLegacyTextureFile = "openshim_fracture_interior.tga";
 inline constexpr const char *kFractureInteriorMaterialMarker = "// OpenShim FractureOnePiece default interior material";
 std::string FractureInteriorMaterialHeader();
 std::string FractureInteriorMaterialScript();
-std::vector<uint8_t> FractureInteriorTextureTga();
 
 // Full first lines of the current generated files, without the newline.
 std::string GibFleshMaterialHeader();
