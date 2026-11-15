@@ -594,8 +594,11 @@ namespace BZROpenShim::WeaponPresentation
         return true;
     }
 
-    void Runtime::SynchronizeVisuals(Backend& backend) noexcept
+    void Runtime::SynchronizeVisuals(Backend& backend, SceneAccess access) noexcept
     {
+        // Creating or cancelling a flash creates or destroys scene objects;
+        // PosesOnly leaves that state untouched so the next Full call acts on it.
+        const bool mutate = access == SceneAccess::Full;
         for (auto it = impl_->animations.begin(); it != impl_->animations.end();)
         {
             auto& anim = it->second;
@@ -613,7 +616,7 @@ namespace BZROpenShim::WeaponPresentation
         for (auto it = impl_->weapons.begin(); it != impl_->weapons.end();)
         {
             Impl::Weapon& weapon = *it->second;
-            if (weapon.config.IsMesh())
+            if (weapon.config.IsMesh() && mutate)
             {
                 if (!impl_->Active() || weapon.retired || weapon.remaining <= 0)
                 {
@@ -628,7 +631,7 @@ namespace BZROpenShim::WeaponPresentation
             }
             if (!impl_->Active() || weapon.retired || weapon.renderRemaining <= 0.0f)
             {
-                if (weapon.renderer)
+                if (weapon.renderer && mutate)
                     (void)backend.DetachFlash(weapon.renderer);
                 if (weapon.retired && !weapon.renderer && !weapon.meshFlash)
                 {
@@ -638,6 +641,7 @@ namespace BZROpenShim::WeaponPresentation
             }
             else if (!weapon.renderCreateAttempted)
             {
+                if (!mutate) { ++it; continue; }
                 weapon.renderCreateAttempted = true;
                 const auto& effect = weapon.config.muzzleRender.Valid()
                     ? weapon.config.muzzleRender.effect : weapon.config.effect;

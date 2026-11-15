@@ -1038,6 +1038,63 @@ namespace
     }
 }
 
+namespace
+{
+    // The world render-queue hook runs PosesOnly: no flash may be created or
+    // cancelled there (crash dump 20980: an EXU mesh flash destroyed mid-sort).
+    void TestPosesOnlyDefersFlashCreateAndCancel()
+    {
+        const auto PosesOnly = WP::Runtime::SceneAccess::PosesOnly;
+        WP::FlashConfig mesh;
+        mesh.mesh = "MyFlash.mesh"; mesh.duration = 0.08f;
+        Require(mesh.Valid(), "test mesh flash config invalid");
+
+        FakeBackend backend;
+        WP::Runtime runtime;
+        Start(runtime, true, true);
+        auto request = Request(); request.flash = mesh;
+        const auto token = Bind(runtime, request);
+        Require(runtime.Fire(token, 1, WC::Identity()).flashStarted, "mesh shot ignored");
+        runtime.BeginSimulationStep(1, 0.01f);
+        runtime.SynchronizeVisuals(backend, PosesOnly);
+        runtime.SynchronizeVisuals(backend, PosesOnly); // a second camera
+        Require(backend.meshCreates == 0, "PosesOnly created a mesh flash");
+        Require(!backend.recoilPoses.empty(), "PosesOnly skipped the recoil pose");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.meshCreates == 1, "deferred mesh flash not created by the Full pass");
+        Near(backend.meshLifetime, 0.07, "deferred mesh flash lifetime wrong");
+
+        runtime.BeginSimulationStep(2, 0.2f); // flash expires
+        runtime.SynchronizeVisuals(backend, PosesOnly);
+        Require(backend.meshCancels == 0 && runtime.Inspect().meshFlashAttachments == 1,
+            "PosesOnly cancelled a mesh flash");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.meshCancels == 1 && runtime.Inspect().meshFlashAttachments == 0,
+            "deferred cancel not run by the Full pass");
+        Finish(runtime, backend);
+
+        FakeBackend render;
+        WP::Runtime legacy;
+        Start(legacy, true, false);
+        auto plain = Request(); plain.recoil.reset();
+        const auto legacyToken = Bind(legacy, plain);
+        legacy.Fire(legacyToken, 1, WC::Identity());
+        legacy.SynchronizeVisuals(render, PosesOnly);
+        Require(render.creates == 0, "PosesOnly created a native flash");
+        legacy.SynchronizeVisuals(render);
+        Require(render.creates == 1, "deferred native flash not created");
+        legacy.SetMuzzlePose(legacyToken, WC::Identity());
+        legacy.SetSession(false, true); // leaving play retires the flash
+        legacy.SynchronizeVisuals(render, PosesOnly);
+        Require(render.detaches == 0 && legacy.Inspect().nativeAttachments == 1,
+            "PosesOnly detached a native flash");
+        legacy.SynchronizeVisuals(render);
+        Require(render.detaches == 1 && legacy.Inspect().nativeAttachments == 0,
+            "deferred detach not run by the Full pass");
+        legacy.InvalidateResources();
+    }
+}
+
 int main()
 {
     {
@@ -1060,6 +1117,7 @@ int main()
         Near(backend.animationCalls.back().time, 0, "spin stopped at a non-rest phase");
     }
     TestMeshFlashPolicyAndRuntime();
+    TestPosesOnlyDefersFlashCreateAndCancel();
     TestMuzzleRenderAlongsideMesh();
     TestCraftFlashOffsetOverride();
     TestRecoilKickOptIn();

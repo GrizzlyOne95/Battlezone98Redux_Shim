@@ -38,6 +38,8 @@
 
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
+#include "scene_mutation_drain.h"
+#include "scene_mutation_drain_policy.h"
 #include "game_state.h"
 #include "hook_engine.h"
 #include "laser_sight_assets.h"
@@ -599,6 +601,11 @@ namespace BZROpenShim
                 bool arcCreated = false;
                 bool arcVisible = false;
                 bool arcFailed = false; // as `failed`, for the arc pieces
+                // Asked for by a render-queue tick that may not create scene
+                // objects; PrepareLaserSightSceneObjects builds them at
+                // frameStarted. ForgetBeam (scene teardown) drops the request.
+                SceneMutationDrain::DeferredCreate beamCreate;
+                SceneMutationDrain::DeferredCreate arcCreate;
             };
             Beam g_Beam;
 
@@ -673,13 +680,17 @@ namespace BZROpenShim
                              reason ? reason : L"unspecified");
             }
 
-            bool EnsureBeam(void* sceneManager)
+            // deferred: inside a render-queue callback once the frameStarted
+            // drain is installed; the beam is then only requested.
+            bool EnsureBeam(void* sceneManager, bool deferred)
             {
                 if (g_Beam.sceneManager && g_Beam.sceneManager != sceneManager)
                     ForgetBeam(L"scene manager changed"); // its objects went with the old scene
                 if (g_Beam.entity)
                     return true;
                 if (g_Beam.failed)
+                    return false;
+                if (!g_Beam.beamCreate.Allow(deferred))
                     return false;
                 void* created = nullptr;
                 void* node = nullptr;
@@ -719,11 +730,15 @@ namespace BZROpenShim
             }
 
             // The arc pieces, in the straight beam's scene (EnsureBeam ran).
-            bool EnsureArc()
+            // deferred as for EnsureBeam; the caller draws the straight beam
+            // until the requested pieces exist.
+            bool EnsureArc(bool deferred)
             {
                 if (g_Beam.arcCreated)
                     return true;
                 if (g_Beam.arcFailed || !g_Beam.sceneManager)
+                    return false;
+                if (!g_Beam.arcCreate.Allow(deferred))
                     return false;
                 for (unsigned k = 0; k < LS::kArcSegments; ++k)
                 {
@@ -880,7 +895,7 @@ namespace BZROpenShim
             bool RecomputeArc(const Snapshot& snap, const Vec3& origin, Vec3 muzzle, Vec3 front, Vec3 up,
                               const Ballistics& ballistics)
             {
-                if (!EnsureArc())
+                if (!EnsureArc(InsideRenderQueueHookWithDeferral()))
                     return false;
                 LS::Arc arc;
                 arc.origin = muzzle;
@@ -1032,7 +1047,8 @@ namespace BZROpenShim
                 }
                 void* const sceneManager = GetOgreSceneManagerRuntime();
                 Vec3 origin = {0, 0, 0};
-                if (!sceneManager || !ReadRenderOrigin(origin) || !EnsureBeam(sceneManager))
+                if (!sceneManager || !ReadRenderOrigin(origin) ||
+                    !EnsureBeam(sceneManager, InsideRenderQueueHookWithDeferral()))
                     return;
 
                 const DWORD now = GetTickCount();
@@ -1116,6 +1132,19 @@ namespace BZROpenShim
             g_Stats.callTicks += ticks;
             g_Stats.callMax = std::max(g_Stats.callMax, ticks);
             MaybeLogStats();
+        }
+
+        void PrepareLaserSightSceneObjects()
+        {
+            const bool wantBeam = g_Beam.beamCreate.Take();
+            const bool wantArc = g_Beam.arcCreate.Take();
+            if ((!wantBeam && !wantArc) || g_State != ConfigState::On)
+                return;
+            void* const sceneManager = GetOgreSceneManagerRuntime();
+            if (!sceneManager || !EnsureBeam(sceneManager, false))
+                return;
+            if (wantArc && EnsureArc(false))
+                g_Key.valid = false; // the last recompute drew the straight beam instead
         }
 
         void ReloadLaserSightConfig()

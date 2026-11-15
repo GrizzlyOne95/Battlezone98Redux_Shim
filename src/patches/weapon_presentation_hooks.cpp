@@ -1,6 +1,7 @@
 #include "weapon_presentation_hooks.h"
 #include "weapon_presentation_native.h"
 #include "bzr_hooks_internal.h"
+#include "scene_mutation_drain.h"
 
 #include <memory>
 
@@ -46,15 +47,19 @@ namespace BZROpenShim::Hooks
         return g_Runtime && g_Runtime->AcceptingBindings() ? g_Runtime.get() : nullptr;
     }
 
-    void RefreshWeaponPresentationState() noexcept
+    void RefreshWeaponPresentationState(WeaponPresentation::Runtime::SceneAccess access) noexcept
     {
         if (!WeaponPresentationNativeThreadAllowed()) return;
         RefreshWeaponPresentationNativePoses();
         if (!g_Runtime || !g_Backend)
             return;
         RefreshSessionGate();
+        // The weapon ctor/dtor/SetWeapon hooks can fire inside the world
+        // render-queue hook; there no flash may be created or destroyed.
+        if (InsideRenderQueueHookWithDeferral())
+            access = WeaponPresentation::Runtime::SceneAccess::PosesOnly;
         // Renderer synchronization only. dt comes from the simulation adapter.
-        g_Runtime->SynchronizeVisuals(*g_Backend);
+        g_Runtime->SynchronizeVisuals(*g_Backend, access);
     }
 
     void WeaponPresentationMissionRunStateChanged(bool running) noexcept
