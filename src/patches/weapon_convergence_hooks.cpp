@@ -136,6 +136,17 @@ namespace BZROpenShim
 
         constexpr size_t kReticlePositionOffset = 0xCC; // gPos
 
+        // The crosshair ray. Reticle::Simulate rewrites a MAT_3D at Reticle+0x28
+        // every frame: vehicle matrix (0x005BA6B1-0x005BA6BB), eye position
+        // doubles at +0x50/+0x58/+0x60 (0x005BA6C8-0x005BA6E8), then the
+        // reticle pitch applied in place (0x005BA903-0x005BA946, position
+        // unchanged), all before it looks for an object or the ground. FindGroundPos casts along exactly this
+        // ray: origin = the matrix position (0x005BCCC3 -> 0x00447F73, doubles at
+        // matrix+0x28) and direction = the matrix front (0x005BCD1D -> 0x004560C3,
+        // floats at matrix+0x18), gPos = origin + t * front (0x005BCDA4-0x005BCE02).
+        constexpr size_t kReticleRayFrontOffset = 0x28 + 0x18;   // 3 floats
+        constexpr size_t kReticleRayOriginOffset = 0x28 + 0x28;  // 3 doubles
+
         // SmartReticlePooledRange is NOT a reticle range variable: it is a pooled read-only
         // 200.0f literal in .rdata that 112 unrelated .text sites also load
         // (comparisons, field initializers, arithmetic all over the game).
@@ -489,14 +500,42 @@ namespace BZROpenShim
                     *reinterpret_cast<void* const*>(g_ReticleGlobalAddr + kReticleSelectObjectOffset);
                 if (selectObject)
                 {
+                    // The smart reticle picks an object NEAR the crosshair, not
+                    // under it, so its centre is often off the crosshair line.
+                    // BZ2/BZCC never aim at the object itself: the aim point is
+                    // always reticlePos + reticleFront * |target - reticlePos|
+                    // (BZCC 0x00541B0F-0x00541BCC). Do the same, so shots go
+                    // where the crosshair points and only the range comes from
+                    // the object.
                     float objectPosition[3] = {};
                     if (!TryGetWalkerGameObjectPosition(selectObject, objectPosition))
                         return false;
 
+                    const auto* const rayFront = reinterpret_cast<const float*>(
+                        g_ReticleGlobalAddr + kReticleRayFrontOffset);
+                    const auto* const rayOrigin = reinterpret_cast<const double*>(
+                        g_ReticleGlobalAddr + kReticleRayOriginOffset);
+
+                    const double fx = rayFront[0], fy = rayFront[1], fz = rayFront[2];
+                    const double frontLength = std::sqrt(fx * fx + fy * fy + fz * fz);
+                    const double ox = objectPosition[0] - rayOrigin[0];
+                    const double oy = objectPosition[1] - rayOrigin[1];
+                    const double oz = objectPosition[2] - rayOrigin[2];
+                    const double range = std::sqrt(ox * ox + oy * oy + oz * oz);
+                    if (!std::isfinite(frontLength) || frontLength < 0.5 || frontLength > 1.5 ||
+                        !std::isfinite(range) || !std::isfinite(rayOrigin[0]) ||
+                        !std::isfinite(rayOrigin[1]) || !std::isfinite(rayOrigin[2]))
+                    {
+                        return false;
+                    }
+
+                    const double scale = range / frontLength;
                     return TryBuildConvergenceRangeSample(
                         craft,
-                        { objectPosition[0], objectPosition[1], objectPosition[2] },
-                        "reticle-object",
+                        { static_cast<float>(rayOrigin[0] + fx * scale),
+                          static_cast<float>(rayOrigin[1] + fy * scale),
+                          static_cast<float>(rayOrigin[2] + fz * scale) },
+                        "reticle-object-ray",
                         outSample);
                 }
 
@@ -527,7 +566,7 @@ namespace BZROpenShim
         //   Target Convergence  -> explicit GameObject target range, applied
         //                          with Walker's range-only yaw (stock, as-is)
         //   Reticle Convergence -> each barrel pointed from its muzzle at the
-        //                          smart-reticle world point (object or ground)
+        //                          point on the crosshair ray (ground hit, or object distance)
         static int ApplyConvergencePostPass(
             void* craft,
             const ConvergenceRangeSample& sample,

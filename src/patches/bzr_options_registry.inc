@@ -584,7 +584,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsReticleConvAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Aims your hardpoints at the unit under the reticle (its centre) or the ground point; no target lock needed. Player only, single player only." },
+      "Converges your hardpoints on the crosshair line at the distance of the unit or ground under it; no target lock needed. Player only, single player only." },
     { "Reticle Range", "SinglePlayer", "SmartReticleRange", nullptr, 0,
       kShimSettingsReticleRangeValues, kShimSettingsReticleRangeLabels, 4, 3,
       ShimSettingApplyGroup::GlobalImprovement,

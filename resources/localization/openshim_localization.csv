@@ -237,7 +237,7 @@ openshim_opt:ResolutionListFilter:desc~Keep the Video options resolution list sh
 openshim_opt:ResolutionDropdown:label~Resolution List~~~~~~
 openshim_opt:ResolutionDropdown:desc~Left click on the Video options resolution opens a list to pick from instead of cycling. Right click keeps the stock behaviour. Restart required.~~~~~~
 openshim_opt:PlayerReticleConvergence:label~Reticle Convergence~~~~~~
-openshim_opt:PlayerReticleConvergence:desc~Aims your hardpoints at the unit under the reticle (its centre) or the ground point; no target lock needed. Player only, single player only.~~~~~~
+openshim_opt:PlayerReticleConvergence:desc~Converges your hardpoints on the crosshair line at the distance of the unit or ground under it; no target lock needed. Player only, single player only.~~~~~~
 openshim_opt:SmartReticleRange:label~Reticle Range~~~~~~
 openshim_opt:SmartReticleRange:desc~Smart-reticle targeting distance; Stock is Redux's 200. This value is single player only; a mission calling EXU SetReticleRange (BZP, Reloaded) also sets it online.~~~~~~
 openshim_opt:SmartScavengerPathing:label~Smart Scavengers~~~~~~

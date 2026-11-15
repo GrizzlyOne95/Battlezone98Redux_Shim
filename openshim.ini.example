@@ -2661,8 +2661,9 @@ MuzzleFlash = 0
 MeshRecoil = 0
 
 ; Reticle Convergence: player only. Each hardpoint is pointed from its muzzle
-; at the unit under the reticle (its centre) or at the ground point the
-; reticle hits. No target lock is required: aiming at a unit or terrain is
+; at a point on the crosshair line: the ground point the reticle hits, or,
+; when the reticle picks a unit, the point on that line at the unit's
+; distance (as BZ2 does). No target lock is required: aiming at a unit or terrain is
 ; enough; with no valid world point (for example open sky), stock aim is
 ; retained. A locked target takes priority when Target Convergence is on.
 ; Accepted: boolean. Default: ON.
