@@ -720,6 +720,10 @@ openshim_add_test(background_run_policy_tests STD 20 SOURCES
     background_run_policy_tests.cpp
 )
 
+openshim_add_test(soak_telemetry_policy_tests STD 17 SOURCES
+    soak_telemetry_policy_tests.cpp
+)
+
 openshim_add_test(producer_rally_policy_tests STD 20 SOURCES
     producer_rally_policy_tests.cpp
 )

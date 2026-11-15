@@ -1722,6 +1722,22 @@ TracePathBlock = 0
 ; Accepted: boolean. Default: OFF.
 TraceAIBuildLedger = 0
 
+; Soak telemetry for overnight stability runs (read-only; see AGENT_TOOLING.md,
+; "Soak telemetry"). A D3D11.4 fence signalled at render-queue-group ends,
+; frame start and before Present is watched from a worker thread: no GPU
+; progress for SoakGpuStallMs logs one [GPUWATCH] stall line naming the last
+; completed and first pending stage. The same thread logs a [SOAK] heartbeat
+; every 5 s and main-loop stalls of 2 s or more, and the render thread logs
+; [LIGHTING] lines (with a rate-limited frame capture) when ambient, fog, sun or
+; material scheme step suddenly. Off installs nothing; a device without
+; ID3D11Device5 (older Wine) keeps the heartbeat and lighting parts only.
+; Accepted: boolean. Default: OFF.
+; Env override: OPENSHIM_SOAK_TELEMETRY (wins when set)
+SoakTelemetry = 0
+; GPU stall threshold in milliseconds (200..60000). Default: 1000.
+; Env override: OPENSHIM_SOAK_GPU_STALL_MS
+SoakGpuStallMs = 1000
+
 ; Explain a "Not Ready" multiplayer entry on the main menu. The stock shell has
 ; no way to say why: its readiness getter returns only ready/not-ready, so the
 ; "no inet" and "no auth" tooltips it carries are unreachable and every cause --

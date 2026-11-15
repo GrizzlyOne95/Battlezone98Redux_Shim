@@ -21,6 +21,7 @@
 #include "backend_selection.h"
 #include "startup_backend_seam.h"
 #include "dx11_draw_guard_policy.h"
+#include "soak_telemetry.h"
 #include "dx11_legacy_material_compat.h"
 #include "enhanced_resource_bootstrap.h"
 #include "openshim_assets.h"
@@ -4512,6 +4513,9 @@ namespace BZROpenShim::RenderProfiles
                                                         bool doLightIteration,
                                                         const void* manualLightList)
         {
+            // Names the material of the next soak-telemetry fence signal; one
+            // branch when that diagnostic is off.
+            SoakTelemetryNotePass(pass);
             // Fast path: two atomic loads and two exported one-line getters.
             if (pass != nullptr &&
                 s_dx11GuardEnabled.load(std::memory_order_relaxed) &&
