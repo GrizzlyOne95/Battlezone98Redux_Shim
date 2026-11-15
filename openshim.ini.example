@@ -2647,9 +2647,10 @@ MeshAccurateHits = 0
 ; turbo, the convergence dispatchers, the smart-reticle range cell) as well as
 ; the flag-checked ones.
 
-; Weapon convergence: make hover/wingman-style fixed weapons use the stock
-; Walker-style convergence behavior against the craft's explicit target.
-; From the player's perspective this requires manually targeting a unit.
+; Target Convergence: hover/wingman/turret craft converge their fixed weapons
+; on the craft's locked target with the stock Walker convergence. Applies to
+; the player and to every AI craft with a target; the player has to lock a
+; target for it to engage.
 ; Accepted: boolean. Default: ON.
 WeaponConvergence = 1
 ; Master switches for experimental authored GOG/SP cannon presentation.
@@ -2659,11 +2660,11 @@ WeaponConvergence = 1
 MuzzleFlash = 0
 MeshRecoil = 0
 
-; Reticle convergence: use the same gameplay concept, but converge the local
-; player's weapon hardpoints on the smart-reticle world point instead of an
-; explicit target. No target lock is required: aiming at a unit or terrain is
-; enough; if the reticle has no valid world point (for example open sky), stock
-; aim is retained.
+; Reticle Convergence: player only. Each hardpoint is pointed from its muzzle
+; at the unit under the reticle (its centre) or at the ground point the
+; reticle hits. No target lock is required: aiming at a unit or terrain is
+; enough; with no valid world point (for example open sky), stock aim is
+; retained. A locked target takes priority when Target Convergence is on.
 ; Accepted: boolean. Default: ON.
 ; Legacy INI alias: SmartReticleConvergence
 PlayerReticleConvergence = 1

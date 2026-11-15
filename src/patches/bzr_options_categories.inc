@@ -62,7 +62,7 @@ static const char* const kShimCategoryControls[] = {
     "Satellite Zoom", "Satellite Pan", "Editor Placement", "Background Mouse",
     "Run in Background", "Rally Points", "Auto Group", "Group Strip" };
 static const char* const kShimCategoryGameplay[] = {
-    "Aim Convergence", "Reticle Converge", "Reticle Range", "Ordnance Velocity",
+    "Target Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
     "Smart Scavengers", "Turret AA Pitch", "Legacy Tank AI", "Howitzer Volley",
     "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };

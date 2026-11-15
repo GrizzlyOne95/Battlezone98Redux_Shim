@@ -162,6 +162,26 @@ namespace BZROpenShim::WeaponConvergence
         return out;
     }
 
+    // weapon->M as MountWorldMatrix (0x006116A0) builds it: the hardpoint's
+    // world frame (obj_rel_parent_matrix(hard, nullptr), 0x006116D0) with its
+    // position moved to the muzzle offset (weapon+0x1C) pushed through that
+    // frame as a point (0x00611701 -> 0x0081FD40, then 0x0044B7D0).
+    inline Matrix MuzzleWorld(
+        const Matrix& hardpointWorld,
+        const Vec3& muzzleOffset)
+    {
+        Matrix mount = hardpointWorld;
+        Matrix offset = Identity();
+        offset.positionX = muzzleOffset.x;
+        offset.positionY = muzzleOffset.y;
+        offset.positionZ = muzzleOffset.z;
+        const Matrix muzzle = Multiply(offset, mount);
+        mount.positionX = muzzle.positionX;
+        mount.positionY = muzzle.positionY;
+        mount.positionZ = muzzle.positionZ;
+        return mount;
+    }
+
     // Semantics of Matrix_Inverse (0x008203F0). Valid for the orthonormal
     // frames the object hierarchy stores, which is all this ever sees.
     inline Matrix Invert(const Matrix& value)
@@ -335,13 +355,20 @@ namespace BZROpenShim::WeaponConvergence
     };
 
     // `mountLocal` is weapon->obj+0x20 as the stock aim update just left it;
-    // `mountWorld` is weapon->M at weapon+0x28. `target` is the smart reticle
-    // point in world space.
+    // `mountWorld` is weapon->M (see MuzzleWorld). `target` is the aim point
+    // in world space.
+    //
+    // `clampToDeviationLimit`: a target in front of the barrel but more than
+    // the deviation stop off its stock aim is turned toward by exactly the
+    // stop instead of refused, so a barrel tracking a point that drifts past
+    // the stop holds at the edge rather than snapping back to stock aim.
+    // Targets behind the barrel are still refused.
     inline SolveResult Solve(
         const Matrix& mountLocal,
         const Matrix& mountWorld,
         const Vec3& target,
-        Solution& outSolution)
+        Solution& outSolution,
+        bool clampToDeviationLimit = false)
     {
         if (!IsFinite(mountWorld) || !IsRotationOrthonormal(mountWorld) ||
             !IsFinite(mountLocal) || !IsRotationOrthonormal(mountLocal))
@@ -370,8 +397,30 @@ namespace BZROpenShim::WeaponConvergence
 
         const Vec3 stockFront = Front(world);
         const float deviationCos = Dot(stockFront, desired);
-        if (!std::isfinite(deviationCos) || deviationCos < kMaxDeviationCos)
-            return SolveResult::ExceedsDeviationLimit;
+        if (!std::isfinite(deviationCos))
+            return SolveResult::DegenerateInput;
+        if (deviationCos < kMaxDeviationCos)
+        {
+            if (!clampToDeviationLimit || deviationCos <= 0.0f)
+                return SolveResult::ExceedsDeviationLimit;
+
+            // Rotate stockFront toward desired by exactly the stop angle.
+            Vec3 across = {
+                desired.x - stockFront.x * deviationCos,
+                desired.y - stockFront.y * deviationCos,
+                desired.z - stockFront.z * deviationCos,
+            };
+            if (!Normalize(across))
+                return SolveResult::DegenerateInput;
+            const float sinLimit = std::sqrt(1.0f - kMaxDeviationCos * kMaxDeviationCos);
+            desired = {
+                stockFront.x * kMaxDeviationCos + across.x * sinLimit,
+                stockFront.y * kMaxDeviationCos + across.y * sinLimit,
+                stockFront.z * kMaxDeviationCos + across.z * sinLimit,
+            };
+            if (!Normalize(desired))
+                return SolveResult::DegenerateInput;
+        }
 
         Matrix arc = {};
         if (!BuildArcRotation(stockFront, desired, Up(world), arc))
@@ -413,25 +462,6 @@ namespace BZROpenShim::WeaponConvergence
         outSolution.residualDegrees =
             std::acos(verifyCos) * (180.0f / 3.14159265358979f);
         return SolveResult::Converged;
-    }
-
-    // Closest point, measured forward of the hardpoint, that the shim's
-    // convergence will aim a barrel at. Not part of stock Walker, which only
-    // sees explicit-target ranges. Reticle convergence also sees the ground a
-    // few metres ahead when the player aims down, and the Walker yaw
-    // atan(hardX / (range - hardZ)) then turns an off-centre barrel (and the
-    // laser sight that follows it) 30 degrees or more to the side. At 15 m a
-    // barrel 1.5 m off-centre turns at most about 6 degrees.
-    inline constexpr float kMinConvergenceLead = 15.0f;
-
-    // The range to hand SolveWalkerStyleRange: closer targets converge as if
-    // they were kMinConvergenceLead ahead of the hardpoint. Clamping (rather
-    // than standing down) keeps the barrel from snapping as the range crosses
-    // the limit.
-    inline float ClampWalkerConvergenceRange(float range, float hardpointRelativeZ)
-    {
-        const float minimum = hardpointRelativeZ + kMinConvergenceLead;
-        return range < minimum ? minimum : range;
     }
 
     // Walker-style convergence used by stock BZ1/BZR target convergence.
