@@ -150,10 +150,15 @@ const ZoneSpec kZones[] = {
 // scalar parameters set the way the stock pilots set them. NormalMap,
 // SpecularMap and EmissiveMap keep BZBase's neutral defaults (flat_n.png,
 // white.png, black.png), so there is no emissive glow and no normal detail.
+// A non-empty `specularMap` replaces the white SpecularMap: the Enhanced
+// shader reads a white map as its strongest reflection, which on a near-black
+// diffuse leaves only the reflected sky and fog colour (a flat, untextured look).
 std::string stockMaterial(const std::string &name, const std::string &textureFile, const std::string &specular,
-                          const std::string &shininess)
+                          const std::string &shininess, const std::string &specularMap = std::string())
 {
-    return "material " + name + " : BZBase\n{\n\tset_texture_alias DiffuseMap " + textureFile +
+    const std::string specularAlias =
+        specularMap.empty() ? std::string() : "\n\tset_texture_alias SpecularMap " + specularMap;
+    return "material " + name + " : BZBase\n{\n\tset_texture_alias DiffuseMap " + textureFile + specularAlias +
            "\n\n\tset $diffuse \"1 1 1\"\n\tset $ambient \"1 1 1\"\n\tset $specular \"" + specular +
            "\"\n\tset $shininess \"" + shininess + "\"\n\tset $bias \"0\"\n}\n";
 }
@@ -216,7 +221,8 @@ std::string FractureInteriorMaterialScript()
            "// Override it with an openshim_fracture_interior.material at the top of a chunk payload\n"
            "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
            "import * from \"BZBase.material\"\n\n" +
-           stockMaterial(kFractureInteriorMaterialName, kFractureInteriorTextureFile, "0.30 0.28 0.26", "40");
+           stockMaterial(kFractureInteriorMaterialName, kFractureInteriorTextureFile, "0.30 0.28 0.26", "40",
+                         kFractureInteriorTextureFile);
 }
 
 std::vector<uint8_t> FractureInteriorTextureTga()

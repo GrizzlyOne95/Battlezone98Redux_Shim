@@ -953,6 +953,10 @@ namespace BZROpenShim
         static uint32_t g_RejectedSunLights = 0;
         static const void* g_LastRejectedSunLight = nullptr;
         static constexpr uint32_t kSunReplacementLogLimit = 20;
+        // Set when the mission leaves simulation: Redux keeps one SceneManager
+        // for the process, so the next mission's sun reads as a rebuild unless
+        // the boundary is remembered.
+        static bool g_SunMissionBoundaryPending = false;
 
         // The allocator can put a rebuilt sun at the address of the one it
         // replaced, and then the pointer alone reads as "unchanged" and the
@@ -966,10 +970,31 @@ namespace BZROpenShim
         static LONG g_LastSunBuild = 0;
         static int g_SunBuildHook = 0;  // 0 untried, 1 installed, -1 stood down
 
+        // The rebuilt sun carries stock ambient and power. The per-frame watch
+        // runs from the render-queue hook, after Ogre has already uploaded the
+        // ambient colour for this frame, so restoring only there drew one
+        // stock-lit frame per rebuild: a one-frame flash every time combat
+        // teardown refreshed the sun. Restore here, as soon as the builder has
+        // written TerrainMasterLight (0x0067DF70 assigns it), so the values
+        // are back before the next ambient upload. The frame watch then sees
+        // this generation as already handled and stays the fallback.
+        // Only mid-mission rebuilds take this path: the mission-load build
+        // (0x0077E990 -> 0x0067E0E0) and the first sun after a boundary stay
+        // on the per-frame path, so the per-world baseline keeps its timing.
+        // Nothing may unwind into the engine's EH frames from here.
         static void __cdecl SunBuildHook()
         {
             g_SunBuildOriginal();
             InterlockedIncrement(&g_SunBuilds);
+            if (!g_PilotFlashlightWorldRunning || g_SunMissionBoundaryPending)
+                return;
+            try
+            {
+                WatchSunLightReplacement();
+            }
+            catch (...)
+            {
+            }
         }
 
         // Called from the frame callback; the builder runs only on this
@@ -1339,10 +1364,6 @@ namespace BZROpenShim
         static SunLightState g_BaselinePre = {};
         static SunLightState g_BaselinePost = {};
         static uint32_t g_BaselineMask = 0;
-        // Set when the mission leaves simulation: Redux keeps one SceneManager
-        // for the process, so the next mission's sun reads as a rebuild unless
-        // the boundary is remembered.
-        static bool g_SunMissionBoundaryPending = false;
 
         static void NoteSunMissionBoundary()
         {
