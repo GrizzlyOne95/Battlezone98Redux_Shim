@@ -150,15 +150,10 @@ const ZoneSpec kZones[] = {
 // scalar parameters set the way the stock pilots set them. NormalMap,
 // SpecularMap and EmissiveMap keep BZBase's neutral defaults (flat_n.png,
 // white.png, black.png), so there is no emissive glow and no normal detail.
-// A non-empty `specularMap` replaces the white SpecularMap: the Enhanced
-// shader reads a white map as its strongest reflection, which on a near-black
-// diffuse leaves only the reflected sky and fog colour (a flat, untextured look).
 std::string stockMaterial(const std::string &name, const std::string &textureFile, const std::string &specular,
-                          const std::string &shininess, const std::string &specularMap = std::string())
+                          const std::string &shininess)
 {
-    const std::string specularAlias =
-        specularMap.empty() ? std::string() : "\n\tset_texture_alias SpecularMap " + specularMap;
-    return "material " + name + " : BZBase\n{\n\tset_texture_alias DiffuseMap " + textureFile + specularAlias +
+    return "material " + name + " : BZBase\n{\n\tset_texture_alias DiffuseMap " + textureFile +
            "\n\n\tset $diffuse \"1 1 1\"\n\tset $ambient \"1 1 1\"\n\tset $specular \"" + specular +
            "\"\n\tset $shininess \"" + shininess + "\"\n\tset $bias \"0\"\n}\n";
 }
@@ -217,33 +212,20 @@ std::string FractureInteriorMaterialHeader()
 
 std::string FractureInteriorMaterialScript()
 {
+    // Burnt machinery with ember cracks: the embedded DDS set (colour, normal,
+    // a low specular map and an emissive map of the embers).
     return FractureInteriorMaterialHeader() + "\n" +
            "// Override it with an openshim_fracture_interior.material at the top of a chunk payload\n"
            "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
-           "import * from \"BZBase.material\"\n\n" +
-           stockMaterial(kFractureInteriorMaterialName, kFractureInteriorTextureFile, "0.30 0.28 0.26", "40",
-                         kFractureInteriorTextureFile);
-}
-
-std::vector<uint8_t> FractureInteriorTextureTga()
-{
-    // Near-black scorched metal: tileable mottle with a faint warm scorch.
-    constexpr unsigned Z = 64;
-    std::vector<uint8_t> rgb(static_cast<size_t>(Z) * Z * 3);
-    for (unsigned y = 0; y < Z; ++y)
-        for (unsigned x = 0; x < Z; ++x)
-        {
-            const float u = (static_cast<float>(x) + 0.5f) / Z, v = (static_cast<float>(y) + 0.5f) / Z;
-            const float blob = fbm(u, v, 4, 140);
-            const float grain = vnoise(u * 16.0f, v * 16.0f, 16, 16, 141) - 0.5f;
-            const float level = (0.055f + 0.07f * blob) * (1.0f + grain * 0.35f);
-            const float scorch = clamp01((fbm(u, v, 3, 142) - 0.45f) * 2.0f) * 0.03f;
-            uint8_t *dst = &rgb[(static_cast<size_t>(y) * Z + x) * 3];
-            dst[0] = static_cast<uint8_t>(clamp01(level + scorch) * 255.0f + 0.5f);
-            dst[1] = static_cast<uint8_t>(clamp01(level + scorch * 0.5f) * 255.0f + 0.5f);
-            dst[2] = static_cast<uint8_t>(clamp01(level) * 255.0f + 0.5f);
-        }
-    return tga24(Z, Z, rgb);
+           "// The override must ship its own textures: these generated ones are removed once it exists.\n"
+           "import * from \"BZBase.material\"\n\n"
+           "material " + std::string(kFractureInteriorMaterialName) + " : BZBase\n{\n"
+           "\tset_texture_alias DiffuseMap " + kFractureInteriorTextureFile + "\n"
+           "\tset_texture_alias NormalMap " + kFractureInteriorNormalFile + "\n"
+           "\tset_texture_alias SpecularMap " + kFractureInteriorSpecularFile + "\n"
+           "\tset_texture_alias EmissiveMap " + kFractureInteriorEmissiveFile + "\n\n"
+           "\tset $diffuse \"1 1 1\"\n\tset $ambient \"1 1 1\"\n\tset $specular \"0.30 0.28 0.26\"\n"
+           "\tset $shininess \"40\"\n\tset $bias \"0\"\n}\n";
 }
 
 std::vector<GibFleshTexture> GibFleshTextures()

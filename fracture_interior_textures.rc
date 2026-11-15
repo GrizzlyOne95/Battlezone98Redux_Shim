@@ -1,0 +1,10 @@
+#include "include/fracture_interior_resources.h"
+#include <windows.h>
+
+// The cap texture set for fracture and native chunk caps ships inside the
+// plugin; the runtime writes it beside openshim_fracture_interior.material in
+// the chunk cache root. Built by resources/chunks/build_fracture_interior_maps.py.
+IDR_FRACTURE_INTERIOR_DIFFUSE  RCDATA "resources/chunks/openshim_fracture_interior.dds"
+IDR_FRACTURE_INTERIOR_NORMAL   RCDATA "resources/chunks/openshim_fracture_interior_n.dds"
+IDR_FRACTURE_INTERIOR_SPECULAR RCDATA "resources/chunks/openshim_fracture_interior_s.dds"
+IDR_FRACTURE_INTERIOR_EMISSIVE RCDATA "resources/chunks/openshim_fracture_interior_e.dds"

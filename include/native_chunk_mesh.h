@@ -24,8 +24,17 @@ struct Piece
     uint32_t triangles = 0;
     float center[3] = {0, 0, 0};
 };
+// Extract also closes each piece's open boundary loops (the parts of a
+// multi-part model are open shells) with an extra submesh using
+// openshim_fracture_interior; flat sheets, noise-sized, non-planar and huge
+// loops stay open. Cap triangles count in Piece::triangles.
+struct ChunkCapStats
+{
+    uint32_t capLoops = 0;  // loops closed
+    uint32_t openLoops = 0; // loops left open (skipped)
+};
 bool Extract(const std::vector<uint8_t> &mesh, const std::vector<uint8_t> &skeleton, std::vector<Piece> &pieces,
-             std::string &error);
+             std::string &error, ChunkCapStats *capStats = nullptr);
 std::string SkeletonName(const std::vector<uint8_t> &mesh);
 // World-space (sim axes) displacement that moves a fragment's origin from its
 // bone pivot onto the piece centre. right/up/front are the fragment's legacy

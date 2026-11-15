@@ -160,7 +160,10 @@ bool prepare(void *entity, char *sourceName, size_t capacity)
     auto skeletonName = NativeChunks::SkeletonName(bytes);
     if (skeletonName.empty() || !readResource(manager, skeletonName, group, skeleton))
         return false;
-    uint64_t hash = 14695981039346656037ull;
+    // Bump kNativeChunkAlgorithmVersion whenever Extract's output changes, so
+    // caches written by an older algorithm are not reused.
+    constexpr uint8_t kNativeChunkAlgorithmVersion = 2; // 2: open boundary loops of each piece are capped
+    uint64_t hash = (14695981039346656037ull ^ kNativeChunkAlgorithmVersion) * 1099511628211ull;
     for (const auto *source : {&bytes, &skeleton})
         for (uint8_t c : *source)
         {
@@ -177,10 +180,11 @@ bool prepare(void *entity, char *sourceName, size_t capacity)
     const auto ready = readyCaches.find(folder);
     const bool reused = ready != readyCaches.end() ? (cached = ready->second, true)
                                                   : NativeChunks::ReadCache(root / folder, cached);
+    NativeChunks::ChunkCapStats capStats;
     if (!reused)
     {
         std::vector<NativeChunks::Piece> pieces;
-        if (!NativeChunks::Extract(bytes, skeleton, pieces, error))
+        if (!NativeChunks::Extract(bytes, skeleton, pieces, error, &capStats))
         {
             LogChunkDiagnostic("chunknative", L"[CHUNKNATIVE] unsupported mesh=%hs reason=%hs\n", name.c_str(),
                                error.c_str());
@@ -216,8 +220,9 @@ bool prepare(void *entity, char *sourceName, size_t capacity)
         NativeChunks::TouchCacheFolder(root / folder);
     LogChunkDiagnostic("chunknative",
                        L"[CHUNKNATIVE] %hs mesh=%hs group=%hs pieces=%zu "
-                       L"triangles=%u cache=%hs prepareMs=%.3f\n",
+                       L"triangles=%u capLoops=%u openLoops=%u cache=%hs prepareMs=%.3f\n",
                        reused ? "reused" : "generated", name.c_str(), group.c_str(), result.pieces.size(), triangles,
+                       capStats.capLoops, capStats.openLoops,
                        (root / folder).string().c_str(),
                        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count());
     return result.extracted;

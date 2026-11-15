@@ -493,6 +493,7 @@
     <ClInclude Include="include\dx11_enhanced_fxaa_resources.h" />
     <ClInclude Include="include\options_ui_l10n.h" />
     <ClInclude Include="include\options_ui_l10n_resources.h" />
+    <ClInclude Include="include\fracture_interior_resources.h" />
     <ClInclude Include="include\ogre_animation_profiler.h" />
     <ClInclude Include="include\pilot_fp_animation_trace.h" />
     <ClInclude Include="include\walker_cockpit_trace.h" />
@@ -598,6 +599,7 @@
     </ResourceCompile>
     <ResourceCompile Include="dx11_enhanced_fxaa.rc" />
     <ResourceCompile Include="options_ui_l10n.rc" />
+    <ResourceCompile Include="fracture_interior_textures.rc" />
     <ResourceCompile Include="launcher_proxy.rc">
       <AdditionalIncludeDirectories>$(SolutionDir)bin\$(Configuration);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
