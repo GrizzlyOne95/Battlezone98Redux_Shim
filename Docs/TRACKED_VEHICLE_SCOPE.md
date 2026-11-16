@@ -4,7 +4,7 @@
 
 Paths: BZ2D = Battlezone_Source\BZ2\_analysis\global_decompile\bzcc_battlezone2_20190509\results\bins\battlezone2_unpacked.exe-a533c2\decomps
 BZ2E = ...\bz2edit_a130_best_effort\results\bins\bz2edit.exe-33db6d\decomps
-BZRC = Battlezone_Source\BZ1\Redux\Raw .C (Steam/GOG-matching addresses; HoverCraft ctor 004E96D0 and Simulate 004EA300 match patches.json)
+BZRC = Battlezone_Source\BZ1\Redux\Raw .C (Steam/GOG-matching addresses; HoverCraft ctor 004E96D0 matches patches.json; 004EA300 is UpdateGimbals, not Simulate — see section 4)
 All BZCC function names below are b131p PDB name-transfers (file headers say "STRONG INFERENCE - not proven for BZCC").
 
 ## 1. How BZ2/BZCC does tracked vehicles
@@ -21,7 +21,7 @@ All BZCC function names below are b131p PDB name-transfers (file headers say "ST
 ## 2. What BZR has
 - Class factory: each class has a static descriptor; +0x14 = 4CC signature, +0x18 = classLabel string, +0x1C = rank, vtable slot +8 = BuildClass. Examples in BZRC: HoverCraftClass label "hover" (FUN_004efca0, signature 'HOVR'), Walker "walker" (FUN_00610030), wingman, turret, turrettank, person, scavenger, producer, i76building (FUN_0047ff00), etc.; derived from CraftClass (FUN_004af0a0). GameObjectClass::Find (0x004E0F70) reads [GameObjectClass] classLabel (hashes 0xD3DD9CEC/0x92D04727), walks descriptors comparing +0x18 via _stricmp, then calls BuildClass (patches.json lines 986-1003).
 - BZR has NO tracked class (no TrackedVehicle in BZR PDB list; BZ1 has HoverCraft, Walker, TurretTank, TurretCraft, Person). Walker is the only non-hover Craft locomotion (BZ1 1.5 functions/004b/004b7104 Walker::Simulate, 19 KB).
-- Hover physics: HoverCraft::Simulate (GOG 0x004EA300; BZ1.5 functions/0049/0049dcf8_HoverCraft_Simulate.c lines 305-340): terrain floor sample -> height ratio -> thrustRatio = 0.9/((r-1)^2*0.25+1)+0.1, buoyancy term 9.8 - (r-1)*normal.y*19.6, i.e. no spring-contact model. GOG Redux copy at BZRC FUN_004ea300 is mostly gimbal/nacelle visuals (558 lines) - the rest of the force model is not located in the Redux decomp (UNVERIFIED where).
+- Hover physics (SUPERSEDED by section 4: the force model is 0x004EBFD0): HoverCraft::Simulate (GOG 0x004EA300; BZ1.5 functions/0049/0049dcf8_HoverCraft_Simulate.c lines 305-340): terrain floor sample -> height ratio -> thrustRatio = 0.9/((r-1)^2*0.25+1)+0.1, buoyancy term 9.8 - (r-1)*normal.y*19.6, i.e. no spring-contact model. GOG Redux copy at BZRC FUN_004ea300 is mostly gimbal/nacelle visuals (558 lines) - the rest of the force model is not located in the Redux decomp (UNVERIFIED where).
 - ODF keys decoded by FNV-1a/32 over lowercase (same hash as pond_class_label.cpp:33): [HoverCraftClass] section 0xC9835423; verified names via brute match: velocForward, velocReverse, velocStrafe, accelThrust, accelBrake, omegaSpin, omegaTurn, alphaDamp, rollStrafe, accelJump (BZRC FUN_004f0130 lines 30-60 + my hash script). Remaining keys unnamed.
 - Hover subclasses share HoverCraftVtable 0x0087ABE4: APC, Minelayer, SAV, Scavenger, Armory (patches.json 3929-3962). Any new class derived from HoverCraft would also need these paths.
 - OpenShim prior art for extending classes:
@@ -38,3 +38,19 @@ All BZCC function names below are b131p PDB name-transfers (file headers say "ST
 ## Recommendation (minimal viable slice)
 Step 1 (S): Option (a) with skeletal tread animation via exu.SetEntityAnimationTime on a hover-class ODF; validates art, ODF tuning and sound before engine work. Step 2 (M): Option (b) restricted to ground clamp + no strafe + pivot turn for ODF-flagged "tracked" units, only after locating the real hover force integration in GOG (HoverCraft::Simulate 0x004EA300 is visual in the Redux decomp; check Craft::Simulate/PostSimulate and the obj76 physics). Do not start (c).
 Blockers/UNVERIFIED: where Redux applies hover forces; per-instance material clone behavior; exact GOG address of HoverCraftClass::BuildClass; whether BZCC key names match the a130 ChangeLog list.
+
+## 4. Hover force model, located (2026-11-16)
+- GOG 0x004EA300 is HoverCraft::UpdateGimbals (visual only), called from PostSimulate 0x004EE780 (vtable slot 16). The force model is HoverCraft::Simulate GOG 0x004EBFD0 = HoverCraftVtable 0x0087ABE4 slot 15 (+0x3c; read_bytes 0x0087AC20 = 0x004EBFD0, 0x0087AC24 = 0x004EE780, checked in the shipping GOG exe). BZ1.5 equivalent 0049dcf8. It carries the 9.8 / 19.6 / 4.9 and 0.9/((r-1)^2*0.25+1)+0.1 constants.
+- Per tick: GameObject_Simulate -> vtable+0x3c -> 0x004EBFD0 (writes speed +0x11c, veloc +0x12c, omega +0x138, accel +0x144, alpha +0x150, thrustRatio +0x2b0, throttle +0x2b4, airBorne +0x2b8; control struct at +0x230: steer +0xc4, pitch +0xc8, strafe +0xcc, throttle +0xd0) -> tail call Craft::Simulate 0x004AB380 (sanitise, matrix re-orthonormalise, UpdatePosition, AI/weapons).
+- The hover subclasses (APC, Minelayer, SAV, Scavenger, Armory) override slot 15 and call 0x004EBFD0 directly, so "own slot-15 function, then tail-call Craft::Simulate" is a pattern the stock exe already uses.
+- [HoverCraftClass] class offsets +0x328..+0x354 map to velocForward, velocReverse, velocStrafe, accelThrust, accelBrake, omegaSpin, omegaTurn, alphaSteer, accelJump, setAltitude, accelDragStop/Full (FNV-1a hashes re-checked). Keys at +0x358..+0x370: UNVERIFIED pairing.
+- UNVERIFIED: which pass adds veloc*dt to position (probably the entity move/collision pass, so writing veloc/omega as hover does is enough); vtable slot 39 (0x004A8AB0) meaning. Also, the 0x004EA300 "Simulate" labels in scripts/patches.json (around lines 480 and 1168) are wrong; fix them in the tracked-class PR.
+
+## 5. Design: real tracked class
+- Registration: new classLabel `tracked` (4CC kept 'HOVR' so stock sig checks keep treating it as a vehicle), aliased onto HoverCraftClass with the pond pattern (src/patches/pond_class_label.cpp). Object layout, save/load (BZN stores the ODF), collision dispatch (entity type 1) and AI UnitProcess stay hover's.
+- Behaviour: after stock construction, the instance's vptr points at an OpenShim copy of HoverCraftVtable with slot 15 = TrackedSimulate and slot 16 = TrackedPostSimulate.
+- TrackedSimulate: a port of the BZCC contact model, reduced: N contact points per side (default 3) from the collision box, spring/damper along the terrain normal, gravity, side friction (no strafe), differential tread speeds from throttle+steer (pivot turn at standstill), slope limit. Writes the same craft fields as hover (veloc/omega/accel/alpha/speed; thrustRatio=1, airBorne from contact count) and tail-calls Craft::Simulate 0x004AB380.
+- ODF: hover keys velocForward/velocReverse/omegaSpin/omegaTurn/accelThrust/accelBrake keep their meaning; new [TrackedClass] keys for suspension stiffness/damping, contact count, friction, max slope; defaults chosen so a hover ODF switched to classLabel = tracked drives sensibly.
+- Treads (phase 2): TrackedPostSimulate calls stock PostSimulate, then scrolls per-side tread sub-mesh UVs (parts named *tread*, as BZCC) or drives a tread skeleton clip from per-side tread speed. Per-instance material handling must be checked first.
+- MP: the code runs in every peer's sim tick, so it must be deterministic and every peer needs the same OpenShim build. Without the OpenShim class a peer fails to build `tracked` (stock Find has no such label): it needs a documented requirement and a qualification pass (phase 3).
+- Phases: P1 registration + physics + player/AI driving (live test on flat ground, slope, pivot turn, save/load). P2 tread visuals + sounds. P3 MP qualification.
