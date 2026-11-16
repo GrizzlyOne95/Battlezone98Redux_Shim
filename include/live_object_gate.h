@@ -94,5 +94,56 @@ namespace BZROpenShim
         {
             return consecutiveFailures < kMaxUnprovenFrames;
         }
+
+        // Bridge roots. The scan reads a root at OBJ76+0xF0 and at the owner's
+        // +0xF0, then the Entity at root+0x94. On many object kinds those
+        // slots hold floats (a stress run read 0x450C6124) or other data, and
+        // a root that happened to sit in mapped memory used to keep a cached
+        // "readable" verdict until its page was released and the read faulted.
+        // A root is now read every frame only once it has been proven: its
+        // +0x94 held an Ogre::Entity (readable, OgreMain vtable, Entity RTTI).
+        // An unproven root is (re)proven with fresh page queries when it is
+        // first seen and on convert passes, and skipped on other frames.
+        enum class RootAction
+        {
+            Skip,   // unproven, not due a proof this frame: no read
+            Prove,  // query pages, read +0x94, prove the Entity
+            Read,   // proven: read +0x94 (SEH only, as before)
+        };
+
+        constexpr RootAction BridgeRootAction(bool proven, bool firstSeen, bool convertPass)
+        {
+            return proven ? RootAction::Read
+                 : (firstSeen || convertPass) ? RootAction::Prove
+                 : RootAction::Skip;
+        }
+
+        // An object whose RTTI may be walked without faulting: its vtable lies
+        // in the module that defines the class (OgreMain.dll for an Entity),
+        // aligned, with vtable[-1] inside that image too. An exe address read
+        // out of a junk root (0x004F2CE0, a function prologue) fails here, so
+        // its "vtable" -- code bytes -- is never dereferenced.
+        constexpr bool IsVtableInModule(std::uintptr_t vtable, std::uintptr_t moduleBase, std::uintptr_t moduleEnd)
+        {
+            return moduleBase != 0 && moduleEnd > moduleBase && (vtable % 4u) == 0 &&
+                   vtable >= moduleBase + 4u && vtable < moduleEnd;
+        }
+
+        // The MSVC RTTI walk: vtable -> CompleteObjectLocator (vtable[-1]) ->
+        // TypeDescriptor (+12) -> name (+8). Each hop must at least look like a
+        // pointer before it is followed.
+        constexpr bool IsRttiHopShaped(std::uintptr_t pointer)
+        {
+            return IsCandidatePointer(pointer);
+        }
+
+        // A hop the walk reads at `pointer + readOffset` (4 bytes, or the name
+        // start), required inside the module so the read cannot fault.
+        constexpr bool IsRttiHopInModule(std::uintptr_t pointer, std::uintptr_t readOffset,
+                                         std::uintptr_t moduleBase, std::uintptr_t moduleEnd)
+        {
+            return moduleBase != 0 && IsRttiHopShaped(pointer) && pointer >= moduleBase &&
+                   pointer < moduleEnd && readOffset + 4u <= moduleEnd - pointer;
+        }
     }
 }

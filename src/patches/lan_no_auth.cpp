@@ -135,6 +135,22 @@ uintptr_t PlatformReadyCode(uintptr_t site)
 {
     return originalReady ? reinterpret_cast<uintptr_t>(originalReady) : site;
 }
+namespace
+{
+    int CallOriginalReady()
+    {
+        __try { return originalReady(); }
+        __except(EXCEPTION_EXECUTE_HANDLER) { return -1; }
+    }
+}
+int DetouredPlatformReady()
+{
+    // originalReady is published only once the detour owns the gate. Same
+    // answer as LocalReady; Ready() guards its own native reads, and only the
+    // stock call runs under SEH (no C++ locals or locks in that frame).
+    if (!originalReady) return -1;
+    return Requested() ? (Ready() ? 1 : 0) : CallOriginalReady();
+}
 void PumpMainThread()
 {
     // The provider normally supplies the first credential callback. Explicit

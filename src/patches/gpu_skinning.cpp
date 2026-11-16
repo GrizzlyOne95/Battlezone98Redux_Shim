@@ -347,13 +347,15 @@ namespace BZROpenShim
         size_t g_pendingVariantCount=0;
         std::unordered_set<void*> g_rejected;
 
-        // Bridge root -> VirtualQuery verdict. Querying every root every frame
-        // cost ~7% of an 80-craft frame. A readable root stays trusted while it
-        // keeps appearing (SEH still guards the reads); an unreadable one is
-        // re-queried on convert passes. Roots unseen for a frame are dropped.
+        // Bridge root -> proof verdict. Querying every root every frame cost
+        // ~7% of an 80-craft frame, so only a proven root (its +0x94 held an
+        // Ogre::Entity) is read every frame, under SEH alone. An unproven root
+        // is proven with fresh page queries when first seen and on convert
+        // passes (LiveObjectGate::BridgeRootAction). Roots unseen for a frame
+        // are dropped.
         struct RootProbe
         {
-            bool readable = false;
+            bool proven = false;
             uint32_t seenFrame = 0;
         };
         std::unordered_map<void*, RootProbe> g_rootProbes;
@@ -1790,21 +1792,115 @@ namespace BZROpenShim
             }
         }
 
+        bool ReadVtable(const void* object, uintptr_t& vtable)
+        {
+            __try
+            {
+                vtable = *static_cast<const uintptr_t*>(object);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                vtable = 0;
+                return false;
+            }
+        }
+
+        // The RTTI hops an Entity's walk takes: CompleteObjectLocator at
+        // vtable[-1], TypeDescriptor at col+12. The caller has put the vtable
+        // inside OgreMain, so the first read cannot leave the image.
+        bool ReadRttiHops(uintptr_t vtable, uintptr_t& col, uintptr_t& descriptor)
+        {
+            __try
+            {
+                col = reinterpret_cast<const uintptr_t*>(vtable)[-1];
+                descriptor = 0;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                col = 0;
+                return false;
+            }
+        }
+
+        bool ReadDescriptor(uintptr_t col, uintptr_t& descriptor)
+        {
+            __try
+            {
+                descriptor = *reinterpret_cast<const uintptr_t*>(col + 12);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                descriptor = 0;
+                return false;
+            }
+        }
+
+        constexpr const char* kEntityRtti = ".?AVEntity@Ogre@@";
+
+        // Whether a pointer read out of engine memory is an Ogre::Entity,
+        // checked so that junk raises no fault: the object's first word must
+        // be readable, and its vtable, CompleteObjectLocator and TypeDescriptor
+        // must each lie in OgreMain.dll (where an Entity's are), so every RTTI
+        // read stays inside that image. The RTTI name test is the one the scan
+        // always used, so the same Entities pass.
+        bool IsOgreEntityObject(const void* entity)
+        {
+            if (!IsPointerShaped(entity) || !MemoryAccess::IsReadable(entity, sizeof(void*)))
+                return false;
+            uintptr_t vtable = 0;
+            uintptr_t ogreBase = 0;
+            uintptr_t ogreEnd = 0;
+            if (!ReadVtable(entity, vtable) || !Hooks::TryGetOgreModuleRange(ogreBase, ogreEnd) ||
+                !LiveObjectGate::IsVtableInModule(vtable, ogreBase, ogreEnd))
+                return false;
+            uintptr_t col = 0;
+            uintptr_t descriptor = 0;
+            if (!ReadRttiHops(vtable, col, descriptor) ||
+                !LiveObjectGate::IsRttiHopInModule(col, 12u, ogreBase, ogreEnd) ||
+                !ReadDescriptor(col, descriptor) ||
+                !LiveObjectGate::IsRttiHopInModule(descriptor, 8u, ogreBase, ogreEnd))
+                return false;
+            char rtti[64];
+            const char* className = Hooks::TryGetRttiClassName(entity, rtti, sizeof(rtti));
+            return className && std::strcmp(className, kEntityRtti) == 0;
+        }
+
+        // The roots are candidate layout reads: on many object kinds OBJ76+0xF0
+        // or the owner's +0xF0 holds a float or other data, which can land in
+        // mapped memory for a while and then fault once that page goes. Only a
+        // root proven to lead to an Entity is trusted frame to frame.
         void* ResolveRootEntity(void* root, uint32_t frame, bool convertPass)
         {
             if (!root)
                 return nullptr;
             auto [it, inserted] = g_rootProbes.try_emplace(root);
             RootProbe& probe = it->second;
-            if (inserted || (!probe.readable && convertPass))
-                probe.readable = MemoryAccess::IsReadable(root, 0xA8 + sizeof(void*));
             probe.seenFrame = frame;
             void* entity = nullptr;
-            if (probe.readable && !ReadRootEntity(root, entity))
-                probe.readable = false;
-            // +0x94 is not an entity on every object kind; skip float-like junk
-            // before TryGetRttiClassName faults on it (logged as an AV).
-            return IsPointerShaped(entity) ? entity : nullptr;
+            switch (LiveObjectGate::BridgeRootAction(probe.proven, inserted, convertPass))
+            {
+            case LiveObjectGate::RootAction::Skip:
+                return nullptr;
+            case LiveObjectGate::RootAction::Prove:
+                if (!MemoryAccess::IsReadable(root, 0xA8 + sizeof(void*)) || !ReadRootEntity(root, entity) ||
+                    !IsOgreEntityObject(entity))
+                    return nullptr;
+                probe.proven = true;
+                return entity;
+            case LiveObjectGate::RootAction::Read:
+                if (!ReadRootEntity(root, entity))
+                {
+                    probe.proven = false;
+                    return nullptr;
+                }
+                // A proven root's +0x94 may since hold something else; the
+                // rtti stage checks it with IsOgreEntityObject before use.
+                return IsPointerShaped(entity) ? entity : nullptr;
+            }
+            return nullptr;
         }
 
         // Where the scan was when it faulted, for the disable message.
@@ -1909,9 +2005,7 @@ namespace BZROpenShim
                     if (!convertPass || g_rejected.count(entity) != 0)
                         continue;
                     g_scanStage = "rtti";
-                    char rtti[64];
-                    const char* className = Hooks::TryGetRttiClassName(entity, rtti, sizeof(rtti));
-                    if (!className || std::strcmp(className, ".?AVEntity@Ogre@@") != 0)
+                    if (!IsOgreEntityObject(entity))
                     {
                         g_rejected.insert(entity);
                         continue;
