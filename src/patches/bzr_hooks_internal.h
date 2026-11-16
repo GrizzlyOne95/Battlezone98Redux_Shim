@@ -1732,6 +1732,7 @@ namespace BZROpenShim
         // Mission entered (true) or left (false) simulation: arms or stops the
         // per-mission fracture first-use prewarm, driven from TickSkinnedGibs.
         void NotifyFracturePrewarmMissionRunState(bool running);
+        void NotifyFracturePrewarmSceneEntitiesDestroyed();
         // PathBlockFaces (path_block.cpp): forget the per-mission blocker
         // registry and ODF cache. No-op when the hook is not installed.
         void ResetPathBlockState(const wchar_t* reason);
@@ -2268,6 +2269,7 @@ namespace BZROpenShim
         void RevertPilotFlashlightToBaseline();
         void ForgetPilotFlashlight(const wchar_t* reason);
         void PilotFlashlightNotifyMissionRunStateChanged(bool enteringSimulation);
+        void PilotFlashlightNotifySceneEntitiesDestroyed();
         // Marks every cached light list dirty when the engine replaces the sun.
         void WatchSunLightReplacement();
         bool IsPilotOnFoot(void* player);

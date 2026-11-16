@@ -194,6 +194,20 @@ namespace BZROpenShim
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(sceneManager)),
                 domeCleared ? 1 : 0,
                 planeCleared ? 1 : 0);
+            // Only the world's scene ends a mission.
+            void* const worldScene = GetOgreSceneManagerRuntime();
+            const bool worldEnds = !worldScene || worldScene == sceneManager;
+            // Same pairing as clearScene: weapon node records and cockpit
+            // twins name objects of the world that is ending.
+            const bool weaponTeardown = worldEnds && g_OgreFn_DestroyAllEntitiesOriginal;
+            if (weaponTeardown)
+                WeaponPresentationSceneTeardownBegin();
+            if (worldEnds)
+            {
+                // destroyAllLights follows in the same call and frees the light.
+                PilotFlashlightNotifySceneEntitiesDestroyed();
+                NotifyFracturePrewarmSceneEntitiesDestroyed();
+            }
             DestroySkinnedGibSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyShellCasingSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyProducerRallySceneObjects(sceneManager, L"destroyAllEntities");
@@ -203,9 +217,9 @@ namespace BZROpenShim
             OrdnanceEntityLeakOnSceneEntitiesDestroyed();
             if (g_OgreFn_DestroyAllEntitiesOriginal)
                 g_OgreFn_DestroyAllEntitiesOriginal(sceneManager);
-            // Only the world's scene ends a mission.
-            void* const worldScene = GetOgreSceneManagerRuntime();
-            if (!worldScene || worldScene == sceneManager)
+            if (weaponTeardown)
+                WeaponPresentationSceneTeardownComplete();
+            if (worldEnds)
                 GpuSkinningNotifySceneEntitiesDestroyed();
         }
 

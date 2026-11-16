@@ -61,8 +61,16 @@ namespace BZROpenShim::HudFeedback::StockReticleFx
         };
         std::array<Entry, 8> g_entries;
         size_t g_used = 0;
-        uint32_t g_serial = 0;
-        constexpr uint32_t kMaxClones = 64;
+        uint32_t g_serial = 0; // names only; never reset, so names stay unique
+        // Clones built since the last mission reset. A process-wide cap ran
+        // out after enough missions in one session and turned the shader off
+        // for the rest of it; per mission it still bounds a bad rebuild loop.
+        // Accepted cost: each mission leaves its clones (usually one per HUD
+        // atlas) registered in the MaterialManager. Reusing them across a
+        // reset would key on a source pointer that may have been freed and
+        // recycled as another material.
+        uint32_t g_missionClones = 0;
+        constexpr uint32_t kMaxClonesPerMission = 16;
         std::atomic<bool> g_invalidate{false};
 
         template<class T> T Export(const char* name) { return reinterpret_cast<T>(OgreRuntime::ResolveExport(name)); }
@@ -190,7 +198,11 @@ namespace BZROpenShim::HudFeedback::StockReticleFx
 
     bool Draw(void* viewport, const Frame& f) noexcept
     {
-        if (g_invalidate.exchange(false)) g_used = 0;
+        if (g_invalidate.exchange(false))
+        {
+            g_used = 0;
+            g_missionClones = 0;
+        }
         if (!Bind()) return false;
         // The quad grows about the aim point: require stock centering and
         // no horizontal mirroring, which would swap the cell's U bounds.
@@ -204,7 +216,8 @@ namespace BZROpenShim::HudFeedback::StockReticleFx
         for (size_t i = 0; i < g_used; ++i) if (g_entries[i].source == source) entry = &g_entries[i];
         if (!entry)
         {
-            if (g_serial >= kMaxClones) return false;
+            if (g_missionClones >= kMaxClonesPerMission) return false;
+            ++g_missionClones;
             if (g_used == g_entries.size()) g_used = 0;
             Entry& slot = g_entries[g_used];
             if (!BuildGuarded(slot, source))

@@ -418,25 +418,13 @@ namespace BZROpenShim
         }
 
         // A destroyed Ogre object leaves its allocation readable for a while,
-        // so a null check proves nothing. A live Light's vptr points into
-        // OgreMain.dll's image; a freed or recycled allocation's does not.
+        // so a null check proves nothing, and an OgreMain vptr alone does not
+        // prove it is still a Light: a freed Light keeps its base classes'
+        // vtables, and a recycled block can be another Ogre object. Require
+        // both of Ogre::Light's own vtable pointers.
         static bool PilotFlashlightLightLooksLive(void* light)
         {
-            if (!light)
-                return false;
-            uintptr_t ogreBase = 0;
-            uintptr_t ogreEnd = 0;
-            if (!TryGetOgreModuleRange(ogreBase, ogreEnd))
-                return false;
-            __try
-            {
-                const uintptr_t vptr = *reinterpret_cast<const uintptr_t*>(light);
-                return vptr >= ogreBase && vptr < ogreEnd;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER)
-            {
-                return false;
-            }
+            return IsLiveOgreLight(light);
         }
 
         // Mission lifecycle seam. Leaving simulation destroys every Ogre object
@@ -452,6 +440,16 @@ namespace BZROpenShim
                 ForgetPilotFlashlight(L"left simulation");
                 NoteSunMissionBoundary();
             }
+        }
+
+        // SceneManager::destroyAllEntities, the real end of a mission's world
+        // (destroyAllLights follows in the same call). The run state can be
+        // RUN_STARTED again by now on an in-mission load, so the light and the
+        // sun snapshot taken since would otherwise outlive the scene.
+        void PilotFlashlightNotifySceneEntitiesDestroyed()
+        {
+            ForgetPilotFlashlight(L"destroyAllEntities");
+            NoteSunMissionBoundary();
         }
 
         static void RetirePilotFlashlight(const wchar_t* reason)

@@ -1700,6 +1700,14 @@ namespace BZROpenShim
             g_Prewarm.seen.clear();
         }
 
+        // destroyAllEntities. On an in-mission load the run state is already
+        // RUN_STARTED before the old world is torn down, so passes may have run
+        // against meshes of the world that is ending; start them over.
+        void NotifyFracturePrewarmSceneEntitiesDestroyed()
+        {
+            NotifyFracturePrewarmMissionRunState(g_Prewarm.running);
+        }
+
         bool IsSkinnedGibsEnabled()
         {
             InitializeConfig();
