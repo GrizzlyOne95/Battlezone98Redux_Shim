@@ -1147,6 +1147,38 @@ namespace BZROpenShim
             return true;
         }
 
+        // Mode-stress driver (mode_stress_driver.cpp): selects `mapFile` in the
+        // live Create Game screen through the same re-filter letter jump uses,
+        // keeping the current filter. `selected` receives the map selected
+        // afterwards; false when the screen hook is not installed or no screen.
+        bool SelectCreateScreenMapByFile(const char* mapFile, char* selected, size_t selectedSize)
+        {
+            if (selected && selectedSize)
+                selected[0] = '\0';
+            if (!mapFile || !g_CreateScreenSlot || !g_MapFilterRefresh || !g_ComponentSelectedEntry)
+                return false;
+            uint8_t* screen = CurrentCreateScreen();
+            if (!screen)
+                return false;
+            uint8_t* component = nullptr;
+            char label[256] = {};
+            char reselect[260] = {};
+            if (!TryPrepareRefresh(screen, component, label, sizeof(label), reselect, sizeof(reselect)) ||
+                !TryRunRefresh(component, label, mapFile))
+                return false;
+            __try
+            {
+                const uint8_t* entry = g_ComponentSelectedEntry(component);
+                if (entry && selected)
+                    CopyEngineString(entry + kMapEntryFileName, selected, selectedSize);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
         namespace
         {
             enum class FiltersInstall

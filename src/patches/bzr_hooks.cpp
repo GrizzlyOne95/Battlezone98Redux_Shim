@@ -27,6 +27,7 @@
 #include "gpu_instancing.h"
 #include "gpu_skinning.h"
 #include "soak_telemetry.h"
+#include "mode_stress_driver.h"
 #include "mp_vehicle_preview_fix.h"
 #include "steam_public_listing.h"
 #include "steam_tunnel_join.h"
@@ -1898,6 +1899,8 @@ namespace BZROpenShim
         // Installs the opt-in soak telemetry frame listener once; one branch
         // after that (or when [Diagnostics] SoakTelemetry is off).
         SoakTelemetryRenderTick();
+        // The same once-only install for the opt-in mode-transition stress driver.
+        ModeStressRenderTick();
 
         // This runs once per camera. The fog wake runtime steps a fixed cadence
         // off a monotonic clock, so the extra calls cost a clock read rather

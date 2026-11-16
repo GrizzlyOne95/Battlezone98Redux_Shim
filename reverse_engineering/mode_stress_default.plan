@@ -1,0 +1,32 @@
+# Default plan for Run-BZRModeStress.ps1 (Docs/RELEASE_QUALIFICATION.md,
+# "Mode-transition stress (unattended)"). Grammar: include/mode_stress_plan.h.
+#
+#   mission <file.bzn> <seconds> [campaign]   campaign-mode load
+#   ia <file.bzn> <seconds>                   Instant Action load
+#   mp_host <file.bzn> <seconds>              host a one-player LAN game in this process
+#   shell <seconds>                           idle on the main menu
+#   loop <n>                                  run the whole list n times
+#
+# <seconds> counts from "ready" (the mission sim loop running). Every load
+# returns to the main menu before the next step. The CR missions need Campaign
+# Reimagined (Workshop 3686673790) installed (campaign ids from its crcampgn,
+# crbd and crch .ini files). call2arm.bzn is the "Legacy Instant Action" addon
+# map (mapType instant_action); swap in any Instant Action map the install has.
+# multdm11.bzn is a stock deathmatch map from the game room's map list (not
+# its default selection, so the map pick is exercised); mp_host needs the
+# harness's NoAuthLan and Sync Join settings (Run-BZRModeStress.ps1 header).
+
+shell 5
+mission misn03cr.bzn 60 cr_campaign
+shell 3
+mission bd01cr.bzn 60 cr_blackdog
+shell 3
+ia call2arm.bzn 60
+shell 3
+mp_host multdm11.bzn 30
+mission misn04cr.bzn 60 cr_campaign
+shell 3
+mp_host multdm11.bzn 30
+mission ch01cr.bzn 60 cr_chinese
+shell 5
+loop 2
