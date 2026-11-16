@@ -10,6 +10,7 @@
 #include "bool_token.h"
 #include "bzr_object_layout.h"
 #include "bzr_hooks_internal.h"
+#include "live_object_gate.h"
 #include "engine_globals.h"
 #include "game_state.h"
 #include "openshim_ini.h"
@@ -295,7 +296,8 @@ namespace BZROpenShim
         // MSVC RTTI: vtable[-1] -> CompleteObjectLocator, +12 -> TypeDescriptor,
         // +8 -> the decorated name. Every step is bounds-checked and the whole
         // walk sits under SEH, so an object without RTTI yields "?" rather than
-        // a fault.
+        // a fault. Each hop must also be pointer-shaped (IsRttiHopShaped), so
+        // code bytes or floats are refused before they fault.
         const char* TryGetRttiClassName(const void* object, char* buffer, size_t bufferSize)
         {
             if (!object || !buffer || bufferSize == 0)
@@ -304,13 +306,13 @@ namespace BZROpenShim
             __try
             {
                 auto* const* vtable = *reinterpret_cast<void* const* const*>(object);
-                if (!vtable)
+                if (!LiveObjectGate::IsRttiHopShaped(reinterpret_cast<uintptr_t>(vtable)))
                     return "?";
                 const auto* col = reinterpret_cast<const uint8_t*>(vtable[-1]);
-                if (!col)
+                if (!LiveObjectGate::IsRttiHopShaped(reinterpret_cast<uintptr_t>(col)))
                     return "?";
                 const auto* descriptor = *reinterpret_cast<const uint8_t* const*>(col + 12);
-                if (!descriptor)
+                if (!LiveObjectGate::IsRttiHopShaped(reinterpret_cast<uintptr_t>(descriptor)))
                     return "?";
                 const char* name = reinterpret_cast<const char*>(descriptor + 8);
                 size_t i = 0;

@@ -89,6 +89,38 @@ namespace
         Check(KeepUnprovenRecord(kMaxUnprovenFrames - 1u), "below the limit keeps the record");
         Check(!KeepUnprovenRecord(kMaxUnprovenFrames), "the limit drops the record");
     }
+
+    void BridgeRoots()
+    {
+        Check(BridgeRootAction(true, false, false) == RootAction::Read, "proven root is read every frame");
+        Check(BridgeRootAction(true, true, true) == RootAction::Read, "proven root needs no new proof");
+        Check(BridgeRootAction(false, true, false) == RootAction::Prove, "new root is proven at once");
+        Check(BridgeRootAction(false, false, true) == RootAction::Prove, "unproven root is re-proven on a convert pass");
+        Check(BridgeRootAction(false, false, false) == RootAction::Skip,
+              "unproven root (0x450C6124, a float) is not read between convert passes");
+    }
+
+    void RttiWalk()
+    {
+        const std::uintptr_t base = 0x10000000u;
+        const std::uintptr_t end = 0x10800000u;
+        Check(IsVtableInModule(0x106C83B0u, base, end), "Entity vftable inside OgreMain");
+        Check(!IsVtableInModule(0x004F2CE0u, base, end), "exe code read as an object is not an Entity");
+        Check(!IsVtableInModule(0x8B55FF8Bu, base, end), "prologue bytes read as a vtable");
+        Check(!IsVtableInModule(base, base, end), "vtable[-1] would sit before the image");
+        Check(IsVtableInModule(base + 4u, base, end), "first slot that keeps vtable[-1] inside");
+        Check(!IsVtableInModule(end, base, end), "one past the image");
+        Check(!IsVtableInModule(0x106C83B1u, base, end), "misaligned");
+        Check(!IsVtableInModule(0x106C83B0u, 0u, 0u), "OgreMain not loaded");
+        Check(!IsRttiHopShaped(0x00EC8B55u), "unaligned code bytes are not a hop");
+        Check(!IsRttiHopShaped(0u), "null hop");
+        Check(IsRttiHopShaped(0x10712340u), "aligned image address is a hop");
+        Check(IsRttiHopInModule(0x10712340u, 12u, base, end), "COL inside OgreMain");
+        Check(!IsRttiHopInModule(0x20000000u, 12u, base, end), "COL outside OgreMain");
+        Check(!IsRttiHopInModule(end - 8u, 12u, base, end), "col+12 would run past the image");
+        Check(IsRttiHopInModule(end - 16u, 12u, base, end), "col+12 is the image's last dword");
+        Check(!IsRttiHopInModule(0x10712341u, 8u, base, end), "misaligned descriptor");
+    }
 }
 
 int main()
@@ -98,5 +130,7 @@ int main()
     EntityNames();
     EntityProbes();
     UnprovenRecords();
+    BridgeRoots();
+    RttiWalk();
     return OpenShimTest::ExitCode();
 }

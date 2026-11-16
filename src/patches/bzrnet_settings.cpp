@@ -7,6 +7,7 @@
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
+#include "lan_no_auth.h"
 #include "net_optimizer.h"
 #include "socket_tunnel.h"
 #include "patcher.h"
@@ -676,8 +677,15 @@ namespace BZROpenShim
     // The stock readiness gate (0x00764870, int __cdecl(void)): the Steam or
     // Galaxy identity is up and the BZRNet client is authorised. -1 when the
     // site fails its byte guard, so callers can tell "unknown" from "no".
+    // With Network/NoAuthLan the LAN module detours this gate, and its jump
+    // fails the IsNetworkInit byte guard; the game then gets the detour's
+    // answer (LAN admission, or the stock code when LAN is not requested),
+    // so callers get the same.
     int QueryStockIsNetworkInit()
     {
+        const int detoured = LanNoAuth::DetouredPlatformReady();
+        if (detoured >= 0)
+            return detoured;
         static uint32_t s_address = 0;
         uint32_t address = s_address;
         if (address == 0 &&
