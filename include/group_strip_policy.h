@@ -34,8 +34,10 @@ namespace BZROpenShim
         struct StripGroup
         {
             int group = -1;      // 0..6
-            int liveCount = 0;   // members whose handle still resolves
+            int liveCount = 0;   // members whose handle still resolves; 0 shows "F<n> -"
             bool mixed = false;  // a live member of another class than the first
+            int added = 0;       // members gained in the last kFlashMs, shown as " +N"
+            bool memberList = false; // its GroupMemberMenu list is open, shown as "F<n>>"
             char name[kNameBufferSize] = {}; // the first live member's display name
         };
 
@@ -124,15 +126,26 @@ namespace BZROpenShim
             return out;
         }
 
-        // Writes one entry: "F<n> <count>x<name>[+]". nameLimit caps the name
-        // length; a longer name keeps nameLimit-1 characters and a '.'.
-        // nameLimit 0 leaves the name out ("F1 4", "F3 3+"). Returns the
-        // length written (0 when it does not fit in outSize).
+        // Writes one entry: "F<n>[>] <count>x<name>[+][ +<added>]", or
+        // "F<n> -" for an empty group. nameLimit caps the name length; a
+        // longer name keeps nameLimit-1 characters and a '.'. nameLimit 0
+        // leaves the name out ("F1 4", "F3 3+"). Returns the length written
+        // (0 when it does not fit in outSize).
         inline size_t FormatEntry(const StripGroup& g, size_t nameLimit, char* out, size_t outSize)
         {
             if (!out || outSize == 0)
                 return 0;
             out[0] = '\0';
+            if (g.liveCount <= 0)
+            {
+                const int written = std::snprintf(out, outSize, "F%d -", g.group + 1);
+                if (written < 0 || static_cast<size_t>(written) >= outSize)
+                {
+                    out[0] = '\0';
+                    return 0;
+                }
+                return static_cast<size_t>(written);
+            }
             char name[kNameBufferSize] = {};
             size_t len = 0;
             while (len < sizeof(name) - 1 && g.name[len] != '\0')
@@ -156,9 +169,15 @@ namespace BZROpenShim
                     name[len] = '\0';
                 }
             }
+            char flash[16] = {};
+            if (g.added > 0)
+                std::snprintf(flash, sizeof(flash), " +%d", g.added);
+            const char* const marker = g.memberList ? ">" : "";
             const int written = name[0] != '\0'
-                ? std::snprintf(out, outSize, "F%d %dx%s%s", g.group + 1, g.liveCount, name, g.mixed ? "+" : "")
-                : std::snprintf(out, outSize, "F%d %d%s", g.group + 1, g.liveCount, g.mixed ? "+" : "");
+                ? std::snprintf(out, outSize, "F%d%s %dx%s%s%s", g.group + 1, marker, g.liveCount, name,
+                                g.mixed ? "+" : "", flash)
+                : std::snprintf(out, outSize, "F%d%s %d%s%s", g.group + 1, marker, g.liveCount, g.mixed ? "+" : "",
+                                flash);
             if (written < 0 || static_cast<size_t>(written) >= outSize)
             {
                 out[0] = '\0';
@@ -452,6 +471,100 @@ namespace BZROpenShim
         inline bool Overlaps(const Rect& a, const Rect& b)
         {
             return a.x1 < b.x2 && b.x1 < a.x2 && a.y1 < b.y2 && b.y1 < a.y2;
+        }
+
+        // ---- discoverability -----------------------------------------------
+
+        // How long a group's entry shows " +N" after it gains members.
+        constexpr uint64_t kFlashMs = 2000;
+
+        // One keyed group's live members from the previous snapshot.
+        struct FlashState
+        {
+            bool seen = false; // false until the first snapshot: no flash on load
+            int count = 0;
+            uint32_t handles[kGroupCapacity] = {};
+            uint64_t until = 0;
+            int added = 0;
+        };
+
+        // Feeds this snapshot's live handles and returns the "+N" to show
+        // now (0 for none). Only additions flash; deaths and removals do not.
+        // Additions inside a running flash add to it and restart the timer.
+        inline int UpdateFlash(FlashState& s, const uint32_t* live, int count, uint64_t now)
+        {
+            if (count < 0 || !live)
+                count = 0;
+            if (count > kGroupCapacity)
+                count = kGroupCapacity;
+            if (s.seen)
+            {
+                int added = 0;
+                for (int i = 0; i < count; ++i)
+                {
+                    bool known = false;
+                    for (int j = 0; j < s.count && !known; ++j)
+                        known = s.handles[j] == live[i];
+                    if (!known && live[i] != 0)
+                        ++added;
+                }
+                if (added > 0)
+                {
+                    s.added = (now < s.until ? s.added : 0) + added;
+                    s.until = now + kFlashMs;
+                }
+            }
+            s.seen = true;
+            s.count = count;
+            for (int i = 0; i < count; ++i)
+                s.handles[i] = live[i];
+            if (now >= s.until)
+                s.added = 0;
+            return s.added;
+        }
+
+        // While units are selected and no member list is open, the strip
+        // lists every keyed group (empty ones as "F<n> -") and a dim
+        // "Ctrl+F1-F7: assign" hint, so the binding is discoverable.
+        inline bool HintMode(int selectNum, int memberGroup)
+        {
+            return selectNum > 0 && memberGroup < 0;
+        }
+
+        // Copies the entries the strip shows from all seven keyed groups (in
+        // key order): every one in hint mode, else those with live members.
+        // Returns the count.
+        inline size_t SelectShown(const StripGroup (&all)[kKeyedGroupCount], bool hint,
+                                  StripGroup (&out)[kKeyedGroupCount])
+        {
+            size_t n = 0;
+            for (const StripGroup& g : all)
+                if (hint || g.liveCount > 0)
+                    out[n++] = g;
+            return n;
+        }
+
+        // Where the hint goes: on the strip's line right of its panel when it
+        // fits inside the screen margin, else under the panel when that stays
+        // in the top third. False when neither fits (the hint is skipped).
+        inline bool PlaceHint(const Rect& panel, int hintW, int hintH, int viewW, int viewH, const Spacing& sp,
+                              int& x, int& y)
+        {
+            if (hintW <= 0 || hintH <= 0)
+                return false;
+            if (panel.x2 + sp.gap + hintW <= viewW - sp.margin)
+            {
+                x = panel.x2 + sp.gap;
+                y = panel.y1 + sp.pad;
+                return true;
+            }
+            if (panel.y2 + sp.pad + hintH <= viewH / 3 && panel.x1 + sp.pad + hintW <= viewW - sp.margin)
+            {
+                x = panel.x1 + sp.pad;
+                y = panel.y2 + sp.pad;
+                return true;
+            }
+            return false;
         }
     }
 }

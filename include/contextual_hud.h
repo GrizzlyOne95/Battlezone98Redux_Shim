@@ -31,6 +31,18 @@ namespace BZROpenShim::ContextualHud
     using CommandPanelPostDraw = void (*)(void* controlPanel, float opacity);
     bool RegisterCommandPanelPostDraw(CommandPanelPostDraw callback);
 
+    // Render scope on the same slot and wrapper, for a consumer that must
+    // change engine state the stock render reads and put it back after.
+    // `before` runs on the frame thread just before the stock render
+    // (outside the fade scope, also while EXU owns the presentation) and
+    // returns true when it changed something; `after` then runs from the
+    // wrapper's __finally, so also when a fault unwinds through the stock
+    // render. Both run inside SEH. One consumer; same return rules as
+    // RegisterCommandPanelPostDraw.
+    using CommandPanelBeforeRender = bool (*)(void* controlPanel);
+    using CommandPanelAfterRender = void (*)(void* controlPanel);
+    bool RegisterCommandPanelRenderScope(CommandPanelBeforeRender before, CommandPanelAfterRender after);
+
     // Passive observer on the stock weapon-list backdrop submit
     // (HudFadeWeaponPlate). It shares the WeaponPlate adapter the fade uses,
     // so installing it here and from Install() is idempotent, and with fading

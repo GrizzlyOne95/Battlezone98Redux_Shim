@@ -407,6 +407,12 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # scrap/pilot gauge. Writes nothing the game reads. Default on by design.
     "Gameplay/GroupStrip",
 
+    # Group member list: a second F-key press lists the group in the stock
+    # unit menu, and Ctrl relabels the categories "All ...". Nothing happens
+    # until the player presses a group key twice; it adds no unit and no
+    # order, and is hard-disabled in network games. Default on by design.
+    "Gameplay/GroupMemberMenu",
+
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
     "Fixes/AiMultiProducerMakers",
@@ -596,6 +602,8 @@ $shippingPolicyChecks = @{
     "SinglePlayer/TurretAttackOrders" = "1"
     "Gameplay/ProducerRallyPoints" = "1"
     "Gameplay/AutoGroupNewUnits" = "0"
+    "Gameplay/ExtendedUnitCap" = "0"
+    "Gameplay/GroupMemberMenu" = "1"
     "Gameplay/GroupStrip" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"

@@ -46,6 +46,8 @@ namespace BZROpenShim::ContextualHud
         // g_commandsReady additionally means the command fade samples input.
         std::atomic<bool> g_commandSlotReady{false};
         std::atomic<CommandPanelPostDraw> g_commandPostDraw{nullptr};
+        std::atomic<CommandPanelBeforeRender> g_commandBefore{nullptr};
+        std::atomic<CommandPanelAfterRender> g_commandAfter{nullptr};
         std::atomic<bool> g_keepCompass{false};
         std::atomic<uint32_t> g_externalOwner{0};
         std::atomic<float> g_opacity[kGroups] = {1,1,1,1,1,1,1};
@@ -454,9 +456,28 @@ namespace BZROpenShim::ContextualHud
             __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
 
+        // The render-scope consumer's halves; a fault in either must not
+        // reach the engine. A faulting `before` counts as no change.
+        bool CallCommandBefore(CommandPanelBeforeRender before, void* self) noexcept
+        {
+            __try { return before(self); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        void CallCommandAfter(CommandPanelAfterRender after, void* self) noexcept
+        {
+            __try { after(self); }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+
         void __fastcall CommandDraw(void* self, void*)
         {
             if (g_commandsReady.load(std::memory_order_acquire)) UpdateCommandOpacity(self);
+            // Outside the fade scope: the render scope changes engine state
+            // the stock render reads, it draws nothing itself.
+            const auto before = g_commandBefore.load(std::memory_order_acquire);
+            const auto after = g_commandAfter.load(std::memory_order_acquire);
+            const bool scoped = before && after && CallCommandBefore(before,self);
             const float previous = BeginDraw(Group::Commands);
             // Rendering also processes native command input, selection and
             // menu sounds. Always execute it, including when alpha is zero.
@@ -469,7 +490,12 @@ namespace BZROpenShim::ContextualHud
                 const auto post = g_commandPostDraw.load(std::memory_order_acquire);
                 if (post && !ExternallyOwned(Group::Commands)) CallCommandPostDraw(post,self,g_drawOpacity);
             }
-            __finally { EndDraw(previous); }
+            __finally
+            {
+                EndDraw(previous);
+                // Also on a fault unwinding through the stock render.
+                if (scoped) CallCommandAfter(after,self);
+            }
         }
 
         bool BindCommand()
@@ -790,6 +816,21 @@ namespace BZROpenShim::ContextualHud
         if (InstallCommandSlot()) return true;
         g_commandPostDraw.store(nullptr,std::memory_order_release);
         Log(L"[HUDFADE] Command panel post-draw not installed: render slot unavailable\n");
+        return false;
+    }
+    bool RegisterCommandPanelRenderScope(CommandPanelBeforeRender before, CommandPanelAfterRender after)
+    {
+        if (!before || !after || !IsCompatibleGameVersion()) return false;
+        CommandPanelBeforeRender expected = nullptr;
+        if (!g_commandBefore.compare_exchange_strong(expected,before,std::memory_order_acq_rel) &&
+            expected != before)
+            return false;
+        // The wrapper runs `before` only once `after` is set too.
+        g_commandAfter.store(after,std::memory_order_release);
+        HookEngine::FrameThreadSitesScope frameSites;
+        if (InstallCommandSlot()) return true;
+        g_commandBefore.store(nullptr,std::memory_order_release);
+        Log(L"[HUDFADE] Command panel render scope not installed: render slot unavailable\n");
         return false;
     }
     bool WantsProductionDamage() noexcept { return g_productionWatch.load(std::memory_order_acquire); }

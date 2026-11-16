@@ -1452,6 +1452,24 @@ namespace BZROpenShim
         void ResetAutoGroupNewUnits();
         // Called by the shared FinishBuild hook after the stock call.
         void AutoGroupOnUnitBuilt(void* producer, void* built);
+        // True when a unit of `odf` built now would join or start a keyed
+        // group (the AutoGroupOnUnitBuilt rule, membership aside); false while
+        // auto-group is not installed. Game thread.
+        bool AutoGroupCanPlace(const char* odf);
+        // True once auto-group's hooks are installed (ExtendedUnitCap needs it).
+        bool AutoGroupNewUnitsReady();
+
+        // --- Extended unit cap / group member list (offense_overflow.cpp) -------
+        void InstallOffenseOverflowIfPossible();
+        void ReloadOffenseOverflowConfig();
+        void RefreshOffenseOverflowState();
+        void ResetOffenseOverflow();
+        // Frame thread, beside TickGroupStrip.
+        void TickOffenseOverflow();
+        // ExtendedUnitCap on, installed and single player: auto-group runs too.
+        bool OffenseOverflowExtendsAutoGroup();
+        // The keyed group (0-6) whose member list is open, -1 none.
+        int OffenseOverflowMemberGroup();
 
         // --- HUD group strip (group_strip.cpp) ---------------------------------
         // Read-only F1-F7 group row on the HUD. Tick: the world render tick

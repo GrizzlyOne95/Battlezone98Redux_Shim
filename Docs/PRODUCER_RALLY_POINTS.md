@@ -433,7 +433,9 @@ on live. Install runs once per process.
 Log tag `[AUTOGROUP]`. Ported from BZCC's `SetBestGroup`
 (`SetBestGroup-004da8b0.c` lines 19-26, `FirstMatchGroup-005a4e03.c` lines
 14-18, `FirstEmptyGroup-005a4dd6.c` lines 14-16). Single player only
-(FeatureTier::SinglePlayer). **UNVERIFIED at runtime.**
+(FeatureTier::SinglePlayer). `ExtendedUnitCap` (below) turns it on as well
+and asks `AutoGroupCanPlace` (the same rule, membership aside) before it
+opens a build. **UNVERIFIED at runtime.**
 
 ## Behaviour
 
@@ -533,6 +535,15 @@ row next to the scrap/pilot gauge, for example
   taken from the world render tick and is not drawn once older than 1 s).
 - Multiplayer: shown. It only reads the local ControlPanel's groups and
   draws on the local HUD; nothing is written or sent.
+- A group that gained live members shows ` +N` for 2 s (more additions
+  inside that time add up and restart it; deaths do not flash; nothing
+  flashes on the first snapshot after a load).
+- The group whose member list is open (`GroupMemberMenu`) shows as `F1>`.
+- While units are selected and no member list is open, every keyed group is
+  listed (`F2 -` when empty) and a dim, unbacked `Ctrl+F1-F7: assign` hint
+  (`openshim_ui:groupstrip_assign_hint`) is drawn right of the strip, else
+  under it, else not at all. Selection count: ControlPanel `+0x188`
+  (`FUN_004a6a50.c` line 21).
 
 Threads: the world render tick (`LegacyWorldUpdateRenderQueueHook`, frame and
 game thread) takes a snapshot at 4 Hz: group counts, names, mixed flags and
@@ -567,3 +578,108 @@ are attached from that tick, which is the thread `Ensure()` requires.
   painter runs whenever the gauge draw function is called, including when
   that function skips its own drawing (`FUN_005c6f70` line 26).
 - Shown in multiplayer; nothing in the session log changes.
+
+# Extended unit cap
+
+`[Gameplay] ExtendedUnitCap`, default OFF; Options page Controls, row
+"Extended Unit Cap". Code: `src/patches/offense_overflow.cpp`; rules:
+`include/offense_overflow_policy.h` (tests:
+`tests/offense_overflow_policy_tests.cpp`). Log tag `[OVERFLOW]`. Single
+player only (FeatureTier::SinglePlayer). BZCC model: units past the slot
+limit live in F1-F7 groups (max 10 per group, one ODF). **UNVERIFIED at
+runtime.**
+
+## Behaviour
+
+- Stock: a Recycler/Factory build entry is enabled only when
+  `Team::FirstEmptySlot(class min, class max)` finds a free team slot; every
+  offensive class uses slots 5-14 (the Offense menu), so the 11th offensive
+  unit cannot be built.
+- With the option on, when that call returns -1 for the **user's** team and
+  the range is exactly 5-14, the entry is enabled anyway if
+  `AutoGroupCanPlace(odf)` is true: a keyed group (0-6) whose live members
+  all have the class's ODF with fewer than 10 live members, or an empty keyed
+  group (the auto-group rule without the membership check).
+- The option turns auto-group on as well (`RefreshAutoGroupNewUnitsState`
+  ORs it in), so the built unit joins that group.
+- `TeamHasFreeSlot` (both call sites) answers true for a craft of the user's
+  team that sits in any ControlPanel group, where stock would say false.
+- Ctrl+Offense (with `GroupMemberMenu` on) also selects the user's grouped
+  offense craft (class min slot 5, Craft RTTI, commandable), up to the 91
+  selection entries.
+
+## Addresses and evidence (GOG 2.2.301)
+
+| Row | Address | Evidence |
+|---|---|---|
+| `ProducerModeListFirstEmptySlotCall` | 0x005AE90C (call at 0x005AE982) | `FUN_005ae660.c` lines 69-74: class = `[[ebp-0x10] + [ebp-0xC]*4]`, min/max = class `+0x13C`/`+0x140`, `call 0x005E0F90`, `cmp eax,-1`. The only FirstEmptySlot call in the function. Redirected (REL32) to a thunk that reads the class from the same frame. |
+| `TeamFirstEmptySlot` | 0x005E0F90 | `FUN_005e0f90.c`: first `i` in min..max with `team[i] == 0`, else -1; thiscall `ret 8`. The redirected call must target it. |
+| `TeamGetSlot` | 0x005E0F70 | Returns `[this + slot*4]`: team slots start at Team `+0`. Guard only. |
+| `TeamHasFreeSlot` | 0x00464140 | `FUN_00464140.c` lines 9-23: not the user team -> true; already slotted -> true; else FirstEmptySlot over the class range. cdecl, bool in AL. |
+| `TeamHasFreeSlotGetEmptyVehicleCall` | 0x00464310 (call at 0x0046431D) | Caller 1 (`FUN_004641c0`), `add esp,8; movzx ecx,al` after the call. |
+| `TeamHasFreeSlotCountCall` | 0x00479B22 (call at 0x00479B30) | Caller 2 (`FUN_004798d0`); the only two E8 calls to 0x00464140 in the image. |
+| `ControlPanelSelectType` | 0x004A6A50 | `FUN_004a6a50.c` lines 10-23: SelectNone, then each MENU_ITEM slot: vtable `+0x38` test, SetSelected(1), handle appended to selectList `+0x1C`, selectNum `+0x188`. |
+| `ControlPanelSelectTypeCall` | 0x004A637B (call at 0x004A6388) | `FUN_004a08e0.c` line 1551, the only SelectType call (Ctrl+category key). |
+| `GameObjectSetSelected` | 0x0049F3C0 | thiscall `ret 4`; flips `+0x18A`; called by SelectType at 0x004A6AB9. |
+| `ControlPanelMenuItems` | 0x008E7990 (data) | `{name, min, max}` x 9: Offense 5-14, Defense 15-24, Utility 25-34, Nav Beacons 35-44 (`FUN_004a08e0.c` lines 1538-1539). Guard only. |
+
+Every row is exact GOG 2.2.301 bytes; a mismatch leaves the option
+unavailable (MarkOptionHookFailed) and stock behaviour in place. The rows
+bind per part: the build gate and both free-slot sites must all go in.
+
+## Known limits
+
+- **UNVERIFIED:** a unit built with no free team slot. Stock never builds one
+  for the user team; whether it later takes a slot that frees up, and whether
+  every engine path copes with a slotless craft, needs the live test.
+- Two producers finishing on the same frame can both pass the gate for the
+  last place in a group; the second unit then finds no group and stays
+  ungrouped and slotless, selectable only by clicking it.
+- Only the user team and only the Offense range (5-14) are extended.
+
+# Group member list
+
+`[Gameplay] GroupMemberMenu`, default ON; Options page Controls, row "Group
+Member Menu". Same source files as "Extended unit cap". Single player only.
+**UNVERIFIED at runtime.**
+
+## Behaviour
+
+- Pressing an F1-F7 key while the selection is exactly that group's live,
+  commandable members (the first press selected it) opens the member list:
+  the stock Offense unit list (keys 1-0) shows the group's first ten live
+  members. The press is consumed, the selection cleared and the panel put on
+  item 0 before the stock render.
+- For that render only the user team's slots 5-14 hold the members; the
+  render scope's after-call puts back each slot that still holds the injected
+  value (a slot the engine changed meanwhile is kept and logged).
+- The list closes when the panel leaves item 0 (a unit was picked: stock
+  SelectOne resets it), on any F-key press, when the command menu would show,
+  or when no member is alive.
+- With Ctrl (`cmd_multi`) held, nothing selected and no item open, the
+  category labels Offense, Defense and Utility read "All <name>" (localized
+  key `openshim_ui:overflow_all_category`). Nav Beacons is left as stock: the
+  brief asked for items 0-3, but a "select all nav beacons" label adds
+  nothing.
+
+## Addresses and evidence (GOG 2.2.301)
+
+| Row | Address | Evidence |
+|---|---|---|
+| `HudFadeCommandRender` (existing) | slot 6, 0x004A08E0 | ControlPanel render; `this` at `[ebp-0x244]`, loop item at `[ebp-0x248]`. Owned by `contextual_hud.cpp`; the member list uses its new `RegisterCommandPanelRenderScope` (before/after the stock call, after-call in the wrapper's `__finally`). |
+| `ControlPanelGroupKeyLoop` | 0x004A1D03 | `FUN_004a08e0.c` lines 528-540: `group_select_0..9` at 0x00919890, `cmd_multi` at 0x00919875; SelectGroup without, BindGroup with; first set byte only. Guard only. |
+| `ControlPanelSelectNone` | 0x004A6D50 | Sets selectNum 0, currentItem `+0x117C` = -1 (0x004A6DAB), itemSelected `+0x1188` = 0 (0x004A6DB8); plain `ret`. |
+| `ControlPanelCategoryLabelLocalizeCall` | 0x004A6976 (call at 0x004A6989) | `FUN_004a08e0.c` line 1653: `UiLocalize("names", MENU_ITEM[item].name)` for the category label. Redirected (REL32); the unit-list title (line 1667) is a different call. |
+| Menu choice | - | `FUN_004a08e0.c`: currentItem 10/9/3 own menus; `cmd_multi == 0 && selectNum > 0` command menu; currentItem < 0 or > 8 category menu; else the unit list over `MENU_ITEM[currentItem]` slots (line 1661 on). |
+
+## Live test checklist (UNVERIFIED)
+
+- ExtendedUnitCap on: build 10 tanks (one group), the 11th builds and joins
+  a new group; F1/F2 select them; an 11th of a new ODF needs a free group.
+- With all 7 keyed groups unusable the Factory entry stays greyed.
+- Save/load with more than 10 offensive units; kill one slotted tank and
+  check a slotless one takes its slot.
+- F1 twice opens the list (strip shows `F1>`); a number key selects that
+  unit; F1 again reselects the group; Ctrl relabels the categories.
+- Ctrl+1 selects slotted and grouped tanks (ExtendedUnitCap on).
+- Nothing changes in multiplayer.

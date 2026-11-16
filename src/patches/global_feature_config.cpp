@@ -491,6 +491,8 @@ namespace BZROpenShim
             ReloadProducerRallyPointsConfig();
             // [Gameplay] AutoGroupNewUnits, likewise.
             ReloadAutoGroupNewUnitsConfig();
+            // [Gameplay] ExtendedUnitCap and GroupMemberMenu, likewise.
+            ReloadOffenseOverflowConfig();
             // [Gameplay] GroupStrip, likewise.
             ReloadGroupStripConfig();
 
@@ -708,6 +710,11 @@ namespace BZROpenShim
             // F1-F7 group. No state of its own to revert.
             { "AutoGroupNewUnits", FeatureTier::SinglePlayer,
               &ResetAutoGroupNewUnits, &RefreshAutoGroupNewUnitsState },
+            // [Gameplay] ExtendedUnitCap (and GroupMemberMenu, same refresh):
+            // grouped offense units past the 10 team slots, group member
+            // lists. Reset closes an open member list.
+            { "ExtendedUnitCap", FeatureTier::SinglePlayer,
+              &ResetOffenseOverflow, &RefreshOffenseOverflowState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config

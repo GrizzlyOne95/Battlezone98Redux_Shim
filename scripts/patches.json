@@ -3002,6 +3002,84 @@
       "identity": "Code guard, never patched or called: the GameObjectClass constructor FUN_004e0450 line 89 reads ODF key \"unitName\" (hash 0x45A8BC04 in section 0xD3DD9CEC, the same pair BZ 1.5's GameObjectClass ctor passes ParameterDB::Get for this->unitName, 1.5 all_decompiled.c line 189463) through FUN_004cbc10, which calls FUN_00589a10 with size 0x20. These bytes are `mov edx,[ebp-0x74]` (the new class), `add edx,0x64`, `push edx`, `push 0x45A8BC04`, `push 0xD3DD9CEC`, so unitName is char[0x20] at GameObjectClass +0x64 (the next key, 0x98D7239C, goes to +0x84). The group strip (group_strip.cpp) reads that field read-only and stays down when these bytes do not match."
     },
     {
+      "name": "ProducerModeListFirstEmptySlotCall",
+      "address": "0x005AE90C",
+      "expected": "8B 45 F4 8B 4D F0 8B 14 81 8B 82 3C 01 00 00 89 45 DC 8B 4D F4 8B 55 F0 8B 04 8A 8B 88 40 01 00 00 89 4D E0 8B 4D F8 E8 98 3A EC FF 0F B6 D0 85 D2 75 56 8B 45 F8 8B 88 7C 01 00 00 E8 63 27 03 00 39 45 D0 7F 43 8B 4D F8 8B 89 7C 01 00 00 E8 C0 28 03 00 39 45 CC 7F 30 83 7D DC FF 74 21 83 7D E0 FF 74 1B 8B 55 E0 52 8B 45 DC 50 8B 4D F8 8B 89 7C 01 00 00 E8 09 26 03 00 83 F8 FF 74 09",
+      "identity": "Producer::UpdateModeList 0x005AE660, the state-2 build-entry gate (FUN_005ae660.c lines 69-74): class = [[ebp-0x10] + [ebp-0xC]*4] (the producer class's build list at +0x608, line 59), min = class+0x13C to [ebp-0x24], max = class+0x140 to [ebp-0x20], the scrap/power checks, then `push max; push min; mov ecx,[producer+0x17C]` (the team) and `call 0x005E0F90` (TeamFirstEmptySlot) at +0x76 = 0x005AE982; `cmp eax,-1` enables the entry. This is the function's only FirstEmptySlot call. OffenseOverflow (ExtendedUnitCap) redirects that call (REL32) to a thunk that reads the class from the same frame slots and returns a slot for a full user offense range only when auto-group has a keyed group for the class's ODF. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "TeamFirstEmptySlot",
+      "address": "0x005E0F90",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 08 89 45 FC EB 09 8B 4D FC 83 C1 01 89 4D FC 8B 55 FC 3B 55 0C",
+      "identity": "Team::FirstEmptySlot(min, max), thiscall ret 8 (0x005E0FCB): the first i in min..max with team[i] == 0, else -1 (FUN_005e0f90.c). Called by OffenseOverflow's build-gate thunk for the stock answer; the redirected call at 0x005AE982 must target it. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "TeamGetSlot",
+      "address": "0x005E0F70",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 08 8B 4D FC 8B 04 81 8B E5 5D C2 04 00",
+      "identity": "Team::GetSlot(slot), thiscall ret 4: returns [this + slot*4], so the team slot array starts at Team +0. Code guard only: OffenseOverflow (GroupMemberMenu) swaps team slots 5-14 around the ControlPanel render with that layout and puts them back after. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "TeamHasFreeSlot",
+      "address": "0x00464140",
+      "expected": "55 8B EC E8 28 E2 FF FF 3B 45 08 74 04 B0 01 EB 5F 8B 4D 0C E8 37 E4 FF FF 3B 45 08 75 11 8B 4D",
+      "identity": "TeamHasFreeSlot(Team* team, GameObject* obj), cdecl, bool in AL (callers `add esp,8; movzx ecx,al`). Not the user team (FUN_00462370) -> true; obj already slotted on that team -> true; else FirstEmptySlot over obj's class +0x13C/+0x140 != -1 (FUN_00464140.c lines 9-23). OffenseOverflow calls it as the original from its two redirected call sites. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "TeamHasFreeSlotGetEmptyVehicleCall",
+      "address": "0x00464310",
+      "expected": "8B 45 D4 50 8B 4D 08 E8 74 E2 FF FF 50 E8 1E FE FF FF 83 C4 08 0F B6 C8 85 C9 75 05",
+      "identity": "Caller 1 of TeamHasFreeSlot, inside FUN_004641C0 (GetEmptyVehicle): push obj [ebp-0x2C], team = FUN_00462590(ecx=[ebp+8]), `call 0x00464140` at +0xD = 0x0046431D, add esp,8, movzx ecx,al. OffenseOverflow (ExtendedUnitCap) redirects that call (REL32): a false answer becomes true for a craft of the user team that sits in a ControlPanel group. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "TeamHasFreeSlotCountCall",
+      "address": "0x00479B22",
+      "expected": "8B 4D D0 51 8B 55 D4 8B 82 7C 01 00 00 50 E8 0B A6 FE FF 83 C4 08 0F B6 C8 85 C9 74",
+      "identity": "Caller 2 of TeamHasFreeSlot, inside FUN_004798D0: push obj [ebp-0x30], push [[ebp-0x2C]+0x17C] (the team), `call 0x00464140` at +0xE = 0x00479B30, add esp,8, movzx ecx,al. Redirected (REL32) by OffenseOverflow like TeamHasFreeSlotGetEmptyVehicleCall. These are the only two E8 calls to 0x00464140 in the image. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelSelectType",
+      "address": "0x004A6A50",
+      "expected": "55 8B EC 83 EC 10 89 4D F8 8B 4D F8 E8 EF 02 00 00 E8 0A B9 FB FF 89 45 F0 6B 45 08 0C 8B 88 94 79 8E 00 89 4D F4 EB 09 8B 55 F4 83",
+      "identity": "ControlPanel::SelectType(int item), thiscall ret 4 (0x004A6AF5): SelectNone, then for slot = MENU_ITEM[item].min..max (0x008E7994/0x008E7998) GetSlot on the user team, vtable +0x38 (no arguments) as the selectable test, SetSelected(1) 0x0049F3C0 and the handle (0x00462380) appended to selectList [this+0x1C+4*selectNum], selectNum +0x188 (FUN_004a6a50.c lines 10-23). OffenseOverflow calls it as the original from the redirected ControlPanelSelectTypeCall. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelSelectTypeCall",
+      "address": "0x004A637B",
+      "expected": "8B 95 B8 FD FF FF 52 8B 8D BC FD FF FF E8 C3 06 00 00",
+      "identity": "ControlPanel::Render 0x004A08E0, category menu with cmd_multi held (FUN_004a08e0.c line 1551): push item [ebp-0x248], ecx = this [ebp-0x244], `call 0x004A6A50` at +0xD = 0x004A6388, the only call to SelectType. OffenseOverflow (GroupMemberMenu + ExtendedUnitCap) redirects it (REL32): after the stock call, Ctrl+Offense also selects the user's grouped offense craft that hold no team slot. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelSelectNone",
+      "address": "0x004A6D50",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC C7 45 F8 00 00 00 00 EB 09 8B 45 F8 83 C0 01 89 45 F8 8B 4D FC 8B 55",
+      "identity": "ControlPanel::SelectNone(), thiscall, plain ret (0x004A6DC5): SetSelected(0) on every selected object, selectNum = 0, currentItem +0x117C = -1 (0x004A6DAB), itemSelected +0x1188 = 0 (0x004A6DB8). Called by OffenseOverflow when a second F-key press opens a group's member list. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectSetSelected",
+      "address": "0x0049F3C0",
+      "expected": "55 8B EC 51 89 4D FC 0F B6 45 08 85 C0 74 1D 8B 4D FC 0F B6 91 8A 01 00 00 85 D2 75 0F 8B 45 FC",
+      "identity": "GameObject::SetSelected(bool), thiscall ret 4 (0x0049F41E): flips the selected byte at +0x18A and calls the object's select/deselect virtuals (0x0049F3E8, 0x0049F40D). SelectType calls it with 1 before appending a handle (0x004A6AB9); OffenseOverflow does the same for the overflow craft it appends. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelCategoryLabelLocalizeCall",
+      "address": "0x004A6976",
+      "expected": "6B 95 B8 FD FF FF 0C 8B 82 90 79 8E 00 50 68 6C 73 87 00 E8 B2 61 37 00 83 C4 08",
+      "identity": "ControlPanel::Render 0x004A08E0, category menu label (FUN_004a08e0.c line 1653): `imul edx,[ebp-0x248],0xC` (item), push MENU_ITEM[item].name (0x008E7990), push \"names\" (0x0087736C), `call 0x0081CB40` (UiLocalize) at +0x13 = 0x004A6989, add esp,8; the result is measured and drawn (lines 1654-1657). The unit-list title (line 1667) is a different call. OffenseOverflow (GroupMemberMenu) redirects this call (REL32) so that with cmd_multi held and nothing selected Offense/Defense/Utility read \"All ...\". Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelMenuItems",
+      "address": "0x008E7990",
+      "expected": "74 80 87 00 05 00 00 00 0E 00 00 00 6C 80 87 00 0F 00 00 00 18 00 00 00 40 80 87 00 19 00 00 00 22 00 00 00 34 80 87 00 23 00 00 00 2C 00 00 00",
+      "identity": "MENU_ITEM table, 9 x {const char* name, int minSlot, int maxSlot}: Offense (0x00878074) 5-14, Defense 15-24, Utility 25-34, Nav Beacons 35-44 (the four checked here), then single slots 1-4 and an empty item (FUN_004a08e0.c lines 1538-1539, FUN_004a6a50.c lines 10-11). Guard only: OffenseOverflow relies on item 0 being slots 5-14. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelGroupKeyLoop",
+      "address": "0x004A1D03",
+      "expected": "0F BE 91 90 98 91 00 85 D2 74 59 0F BE 05 75 98 91 00 85 C0 74 27",
+      "identity": "ControlPanel::Render 0x004A08E0, the F-key loop (FUN_004a08e0.c lines 528-540): `movsx edx,byte [ecx+0x919890]` (group_select_0..9) then `movsx eax,byte [0x919875]` (cmd_multi): SelectGroup 0x004A6DD0 without it, BindGroup 0x004A6F00 with it, first set byte only. Guard only: OffenseOverflow (GroupMemberMenu) reads those bytes before the render and clears the one press it turns into the member list; this loop is their only code reader. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
       "name": "InputEditModeFlag",
       "address": "0x009181B8",
       "kind": "data",

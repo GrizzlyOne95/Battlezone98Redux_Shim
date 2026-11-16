@@ -654,6 +654,21 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Units your Recycler or Factory builds join a group on F1-F7: the first group where "
       "every unit is the same type and there are fewer than 10, else the first empty group. "
       "Scavengers, constructors and pilots are left out. Single player only." },
+    // [Gameplay], Controls page next to Auto Group. Ships OFF: default "Off" (1).
+    { "Extended Unit Cap", "Gameplay", "ExtendedUnitCap", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Build more than 10 offensive units. Past the 10 slots of the Offense menu, a new "
+      "unit is built only when it can join an F1-F7 group of its type with fewer than 10, "
+      "or an empty group; turns Auto Group on as well. Single player only." },
+    // [Gameplay], Controls page next to Extended Unit Cap. Ships ON: default "On" (0).
+    { "Group Member Menu", "Gameplay", "GroupMemberMenu", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Press a group's F-key a second time to list its units on keys 1-0 in the unit menu. "
+      "With Ctrl held, the Offense, Defense and Utility labels read \"All ...\"; with "
+      "Extended Unit Cap on, Ctrl+Offense also selects grouped units past the 10 slots. "
+      "Single player only." },
     // [Gameplay], Controls page next to Auto Group. Ships ON: default "On" (0).
     { "Group Strip", "Gameplay", "GroupStrip", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -983,7 +998,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
-    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "GroupStrip", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
