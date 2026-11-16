@@ -724,5 +724,5 @@ openshim_ui:prelobby_lan_button~LAN (no sign-in)~LAN (sans connexion)~LAN (ohne 
 openshim_ui:prelobby_local_tools_button~Local host tools~Outils hфte local~Lokale Host-Tools~Herram. anfitriуn local~Strumenti host locale~Локальный хост~Ferram. de host local
 openshim_ui:prelobby_hint~Press Continue to apply a new name or server.~Appuyez sur Continuer pour appliquer un nouveau nom ou serveur.~Mit Weiter einen neuen Namen oder Server ьbernehmen.~Pulsa Continuar para aplicar un nuevo nombre o servidor.~Premi Continua per applicare un nuovo nome o server.~Нажмите «Продолжить», чтобы применить новое имя или сервер.~Pressione Continuar para aplicar novo nome ou servidor.
 openshim_ui:prelobby_continue~Continue~Continuer~Weiter~Continuar~Continua~Продолжить~Continuar
-openshim_ui:rts_build_at_nav_label~Build at Nav~Construire а nav.~Am Nav. bauen~Edificar en punto~Costruisci a nav~Строить у маяка~Construir na naveguia
+openshim_ui:rts_build_at_nav_label~Build at Nav~Construire au nav~Am Nav. bauen~Edificar en punto~Costruisci a nav~Строить у маяка~Construir no nav
 openshim_ui:rts_hold_label~Hold~Tenir~Halten~Mantener~Mantieni~Стоять~Manter

@@ -115,8 +115,10 @@ namespace BZROpenShim::Hooks
         constexpr uint32_t kLabelCallOffset = 0x13;
         constexpr uint32_t kNavPickCallOffset = 0x11;       // BroadcastCommand, 0x004A4A75
         constexpr uint32_t kNavPickSelectNoneOffset = 0x1C; // SelectNone, 0x004A4A80
-        // DistributedObject +0x68: 2 for a remote replica (FUN_004b9830).
-        constexpr size_t kOwnershipOffset = 0x68;
+        // DistributedObject +0x68: 2 for a remote replica (FUN_004b9830). The
+        // DistributedObject base sits at GameObject +0x18, so GameObject +0x80
+        // (as kGoObjectTypeOffset in producer_rally_points.cpp).
+        constexpr size_t kOwnershipOffset = 0x18 + 0x68;
         // ConstructionRig: +0x228 must be 0 for GetCommand (0x0049D251);
         // +0x370 the drop class SetActiveMode stores (FUN_0049d0e0 line 13).
         constexpr size_t kRigBusyOffset = 0x228;

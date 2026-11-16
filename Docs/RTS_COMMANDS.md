@@ -167,8 +167,10 @@ copies).
 these hold (`PickedBuildClass`):
 
 - its vtable is `ConstructionRigVtable` 0x00877994 (RTTI checked at install);
-- it is on the player's team and is not a remote replica (`+0x68` byte != 2,
-  FUN_004b9830.c line 4);
+- it is on the player's team and is not a remote replica (GameObject
+  `+0x80` byte != 2, i.e. DistributedObject `+0x68` with that base at
+  GameObject `+0x18`; FUN_004b9830.c line 4, and `kGoObjectTypeOffset` in
+  `producer_rally_points.cpp`);
 - `+0x228 == 0` and the active ModeList mode is above 0x1A: the stock hover
   test (FUN_0049d230.c line 36; disasm 0x0049D251, 0x0049D28D);
 - the drop class `+0x370` equals that active mode. ConstructionRig
@@ -347,3 +349,7 @@ broadcast pings. An order without a target object (Hunt) gets no ping.
 19. Multiplayer, host and client: each player's rig builds at a nav; the
     building appears on both machines in the same place, with the same
     facing.
+20. After a refused and an accepted Build at Nav, look around the player:
+    does the stock placement quad stay drawn at the nav (the hover query
+    moves it there) until the next hover? Also check that a refused query
+    does not move the rig's later stock drop.

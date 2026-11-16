@@ -378,8 +378,8 @@ namespace
 
     // A Construction Rig's ModeList while a building is picked: HoverCraft's
     // slots 0-2 (Go, Follow Me, Go To Nav, as in the Wingman fixture), the
-    // class pointer in a build slot (3..9, ConstructionRig::UpdateModeList
-    // 0x0049D550) and active.
+    // class pointer in a build slot (3..9; the 0x0049D550 UpdateModeList
+    // address is UNVERIFIED) and active.
     RigPick PickedRig(uint32_t cls)
     {
         RigPick rig;
@@ -404,6 +404,9 @@ namespace
         RigPick r = rig;
         r.modes.active = -1;
         Check(PickedBuildClass(r) == 0, "no active slot: nothing picked");
+        r = rig;
+        r.modes.active = kModeSlots;
+        Check(PickedBuildClass(r) == 0, "out-of-range active slot: nothing picked");
         r = rig;
         r.modes.active = 0;
         Check(PickedBuildClass(r) == 0, "Go (mode 1) is not a building");

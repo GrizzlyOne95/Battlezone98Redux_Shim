@@ -631,7 +631,7 @@ namespace BZROpenShim
         {
             bool isRig = false;   // vtable is ConstructionRig's
             bool ownTeam = false; // the player's team
-            bool replica = true;  // +0x68 == kReplicaOwnership
+            bool replica = true;  // GameObject +0x80 (DistributedObject +0x68) == kReplicaOwnership
             int32_t busy = 1;     // +0x228; GetCommand refuses unless 0
             ModeList modes;       // +0x1A4
             uint32_t dropClass = 0; // +0x370, written with the active mode
