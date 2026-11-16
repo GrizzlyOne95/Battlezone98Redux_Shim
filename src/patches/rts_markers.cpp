@@ -403,7 +403,6 @@ namespace BZROpenShim
 
             // ---- Command pings -----------------------------------------------
             RM::PingQueue<RM::kMaxPings> g_Pings;
-            std::atomic<bool> g_ObjectHookInstalled{false};
             FnObjectBroadcast g_OrigObjectBroadcast = nullptr;
             volatile long g_PingLogBudget = 16;
 
@@ -765,10 +764,10 @@ namespace BZROpenShim
             bool DrawRing(const OgreApi& api, void* sceneManager, RingSlot& slot, const RingRequest& request,
                           const Vec3& origin)
             {
+                if (g_PoolFailed)
+                    return false;
                 if (!slot.manual)
                 {
-                    if (g_PoolFailed)
-                        return false;
                     // The material lives in the chunk payload group.
                     if (!EnsureSkinnedGibResourceLocations() || !CreateSlotSeh(api, sceneManager, slot))
                     {
@@ -786,8 +785,15 @@ namespace BZROpenShim
                     const unsigned count = BuildStrip(request, vertices);
                     if (!EmitStripSeh(api, slot, vertices, count, request.colour))
                     {
+                        // The ManualObject may be left mid-section (an AV skips
+                        // end()), and a missing material would fail every frame:
+                        // hide everything and stop for this scene. ForgetSlots on
+                        // the next scene change starts a fresh pool.
                         slot.keyValid = false;
-                        HideSlot(slot);
+                        g_PoolFailed = true;
+                        HideAll();
+                        LogShimA(LogLevel::Warn, kComponent,
+                                 "[RTSMARKERS] ring update failed; rings off for this scene");
                         return false;
                     }
                     std::memcpy(slot.key, key, sizeof(key));
@@ -1024,7 +1030,6 @@ namespace BZROpenShim
 
         void NoteRtsMarkersObjectCommandHookInstalled()
         {
-            g_ObjectHookInstalled.store(true, std::memory_order_release);
             LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] %s installed", kHookName);
         }
 

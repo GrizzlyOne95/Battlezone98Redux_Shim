@@ -2,11 +2,11 @@
 
 Ground rings that show RTS-style feedback for the local player. There are two features, and each has its own option:
 
-- **Command pings** (`[Gameplay] RtsCommandPings`, Options > Controls > Command Pings, default on). Each order the local ControlPanel issues draws one short ring:
+- **Command pings** (`[Gameplay] RtsCommandPings`, Options > HUD > Command Pings, default on). Each order the local ControlPanel issues draws one short ring:
   - **Go to a point:** a green ring that shrinks onto the point and fades over 0.9 s.
   - **Attack on an object:** a red ring around the target that follows it and fades over 1.0 s.
   - **Any other order on a point or object:** a yellow ring that fades over 0.9 s.
-- **Artillery range** (`[Gameplay] RtsArtilleryRange`, Options > Controls > Artillery Range, default on). It draws:
+- **Artillery range** (`[Gameplay] RtsArtilleryRange`, Options > HUD > Artillery Range, default on). It draws:
   - a blue max-range ring around every selected own-team howitzer (Howitzer vtables) that carries a gravity-ordnance cannon slot (at most 16 units); never around the piloted vehicle, whose mortar arc the laser sight already draws;
   - a 3 m ring at the aim point, green when at least one of those units can reach it and red when none can.
 
