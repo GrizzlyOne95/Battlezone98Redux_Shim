@@ -116,6 +116,43 @@ explicit `muzzleRenderOffset` on the weapon wins. A malformed value logs one
 keys change nothing. The effective offset is shown in the `presentation bound`
 log line (`flashOffset=x,y,z`).
 
+### Cockpit-view flash offset
+
+In cockpit view the player sees a separate cockpit model, whose gun barrel is
+usually somewhere other than the hull's. A flash placed by `flashOffset<N>`
+then sits inside or behind the cockpit gun. A craft ODF may give the cockpit
+barrel tip separately:
+
+```ini
+[CraftClass]
+flashOffset1 = "0.04 0.00 0.00"   ; bvtank (Campaign Reimagined)
+cockpitFlashOffset1 = "-0.63 -0.52 0.29"
+```
+
+`cockpitFlashOffset<N>` takes the same `"right up forward"` metres in the same
+hardpoint frame as `flashOffset<N>`, each within -20..20. It is used instead of
+`flashOffset<N>` only when the firing object is the local player's and the
+current view is the cockpit view; AI craft, other players and the
+third-person views keep `flashOffset<N>`. It moves the mesh flash and the
+`muzzleRender` layer the same way `flashOffset<N>` does (an explicit
+`muzzleRenderOffset` wins). The choice is made per shot and holds for that
+flash's life, so switching view while a flash is alive does not move it.
+
+It does not enable a flash on its own: a vehicle still needs `flashOffset<N>`
+for the slot (next section). A malformed value logs one
+`cockpitFlashOffset<N> rejected` warning per craft and slot, and
+`flashOffset<N>` is then used in cockpit view as well. If the view mode cannot
+be read, `flashOffset<N>` is used. When a slot has one, the bind logs a second
+`presentation bound handle=... slot N cockpitFlashOffset mesh=... render=...`
+line. The offset is measured per cockpit model, like `flashOffset<N>`. Like the
+other per-slot craft keys, it is read from the `[GameObjectClass] baseName` ODF
+for a slot that has no presentation key of its own and names the same
+`weaponHard<N>` (so `player.odf` picks up `avtank.odf`'s value).
+
+`cockpitFlashOffset<N>` counts as a presentation key for that rule: adding only
+`cockpitFlashOffset1` to `player.odf` stops it inheriting `flashOffset1` too, and the
+vehicle flash turns off. Copy `flashOffset<N>` alongside it.
+
 ### Vehicles opt in with a craft offset
 
 Mesh flash is a two-sided opt-in. A weapon that names `flashMesh` (or

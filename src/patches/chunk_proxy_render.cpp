@@ -2612,6 +2612,115 @@ namespace BZROpenShim
             TryDestroyShimObjectSeh(sceneManager, node, entity, destroyEntity, destroySceneNode);
         }
 
+        using FnOgreDestroyManualObjectPtr = void(__thiscall*)(void*, void*);
+
+        // Two guards, so a throw from the object destroy still frees the node.
+        static bool TryDestroyGenericChunkBatchSeh(
+            void* sceneManager,
+            FnOgreDestroyManualObjectPtr destroyManualObject,
+            FnOgreDestroySceneNodePtr destroySceneNode)
+        {
+            bool objectOk = true;
+            bool nodeOk = true;
+            __try
+            {
+                objectOk = CatchOgreThrow("destroyChunkBatchObject", [&] {
+                    if (g_GenericChunkBatchManualObject &&
+                        IsLikelyLiveOgreObject(g_GenericChunkBatchManualObject))
+                        destroyManualObject(sceneManager, g_GenericChunkBatchManualObject);
+                });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                objectOk = false;
+            }
+            __try
+            {
+                nodeOk = CatchOgreThrow("destroyChunkBatchNode", [&] {
+                    if (g_GenericChunkBatchSceneNode &&
+                        IsLikelyLiveOgreObject(g_GenericChunkBatchSceneNode))
+                        destroySceneNode(sceneManager, g_GenericChunkBatchSceneNode);
+                });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                nodeOk = false;
+            }
+            return objectOk && nodeOk;
+        }
+
+        static void ReleaseChunkProxySlotSeh(ChunkProxySlot& slot)
+        {
+            __try
+            {
+                ReleaseChunkProxySlot(slot);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                ForgetChunkProxySlotOgreRefs(slot);
+            }
+        }
+
+        // Mission end (and save load, and replay) runs destroyAllEntities, not
+        // clearScene, so ForgetAllChunkProxySceneResources never ran there and
+        // the generic chunk batch outlived its mission: the next mission's
+        // first debris refilled the old ManualObject (old section, old
+        // material binding, old bounds) and the device hung about two seconds
+        // later (DXGI_ERROR_DEVICE_HUNG on the second CR mission of a session).
+        // Destroy the batch object and every slot's proxy Entity while they are
+        // still valid, then forget the rest, so the next mission builds fresh.
+        void DestroyChunkProxySceneObjects(void* sceneManager, const wchar_t* reason)
+        {
+            static FnOgreDestroyManualObjectPtr destroyManualObject =
+                ResolveOgreProc<FnOgreDestroyManualObjectPtr>(
+                    "?destroyManualObject@SceneManager@Ogre@@UAEXPAVManualObject@2@@Z");
+            static FnOgreDestroySceneNodePtr destroySceneNode =
+                ResolveOgreProc<FnOgreDestroySceneNodePtr>(
+                    "?destroySceneNode@SceneManager@Ogre@@UAEXPAVSceneNode@2@@Z");
+            // Another scene's teardown must not orphan this scene's objects.
+            if (!sceneManager || sceneManager != GetOgreSceneManagerRuntime())
+                return;
+
+            size_t destroyedSlots = 0;
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.sceneManager == sceneManager && (slot.entity || slot.sceneNode))
+                {
+                    DestroyShimOwnedMeshObject(sceneManager, slot.sceneNode, slot.entity);
+                    ++destroyedSlots;
+                }
+                // The Entity is gone (destroyed here or freed by the stock
+                // call), so Release must not touch it; it still hides the
+                // slot's billboard, which destroyAllEntities leaves alive.
+                slot.entity = nullptr;
+                slot.sceneNode = nullptr;
+                slot.meshAssigned = false;
+                ReleaseChunkProxySlotSeh(slot);
+            }
+            g_ChunkMeshProxyCreateRequests.Clear();
+
+            const bool hadBatch = g_GenericChunkBatchManualObject != nullptr;
+            bool batchDestroyed = false;
+            if (hadBatch && g_GenericChunkBatchSceneManager == sceneManager &&
+                destroyManualObject && destroySceneNode)
+            {
+                batchDestroyed = TryDestroyGenericChunkBatchSeh(
+                    sceneManager, destroyManualObject, destroySceneNode);
+            }
+            g_GenericChunkBatchManualObject = nullptr;
+            g_GenericChunkBatchVisible = false;
+            g_GenericChunkBatchSceneNode = nullptr;
+            g_GenericChunkBatchBuiltVersion = ChunkBatchInvalidation::kUnbuiltVersion;
+            g_GenericChunkBatchBuiltMaterial.clear();
+            g_GenericChunkBatchSceneManager = nullptr;
+            g_GenericChunkBatchSectionCreated = false;
+
+            Log(L"[CHUNKPROXY] scene teardown (%ls): destroyed %zu slot proxy(s), batch=%ls\n",
+                reason ? reason : L"<none>",
+                destroyedSlots,
+                !hadBatch ? L"none" : (batchDestroyed ? L"destroyed" : L"forgotten"));
+        }
+
         static bool TryCreateDetachedShimEntitySeh(
             void* sceneManager,
             FnOgreCreateEntity createEntity,

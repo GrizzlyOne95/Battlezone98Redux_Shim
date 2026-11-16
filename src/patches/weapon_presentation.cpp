@@ -36,6 +36,17 @@ namespace BZROpenShim::WeaponPresentation
             std::fabs(offset.x) <= 20 && std::fabs(offset.y) <= 20 && std::fabs(offset.z) <= 20;
     }
 
+    static bool ValidOffset(const WeaponConvergence::Vec3& offset) noexcept
+    {
+        return std::isfinite(offset.x) && std::isfinite(offset.y) && std::isfinite(offset.z) &&
+            std::fabs(offset.x) <= 20 && std::fabs(offset.y) <= 20 && std::fabs(offset.z) <= 20;
+    }
+
+    bool FlashOffsets::Valid() const noexcept
+    {
+        return ValidOffset(mesh) && ValidOffset(render);
+    }
+
     bool FlashConfig::Valid() const noexcept
     {
         if (IsMesh())
@@ -159,6 +170,11 @@ namespace BZROpenShim::WeaponPresentation
             Identity owner;
             Identity identity;
             FlashConfig config;
+            std::optional<FlashOffsets> cockpitFlash;
+            // Offsets chosen when the live mesh/render flash started; refreshes
+            // keep them so a view switch cannot move a flash mid-life.
+            WeaponConvergence::Vec3 meshOffset = {};
+            WeaponConvergence::Vec3 renderOffset = {};
             std::optional<RecoilKey> recoil;
             std::optional<AnimationKey> animation;
             Matrix muzzle = WeaponConvergence::Identity();
@@ -365,6 +381,10 @@ namespace BZROpenShim::WeaponPresentation
         weapon->owner = request.owner;
         weapon->identity = request.weapon;
         weapon->config = request.flash.Valid() ? request.flash : FlashConfig{};
+        if (request.cockpitFlash && request.cockpitFlash->Valid() && weapon->config.Valid())
+            weapon->cockpitFlash = request.cockpitFlash;
+        weapon->meshOffset = weapon->config.offset;
+        weapon->renderOffset = weapon->config.muzzleRender.offset;
         const uint64_t serial = impl_->nextBinding;
         weapon->token = { impl_->epoch, serial };
 
@@ -440,7 +460,7 @@ namespace BZROpenShim::WeaponPresentation
     }
 
     ShotResult Runtime::Fire(BindingToken token, uint64_t shotSerial,
-        const Matrix& committedPose) noexcept
+        const Matrix& committedPose, bool cockpitPlacement) noexcept
     {
         if (!impl_->Active() || shotSerial == 0 || !ValidPose(committedPose))
             return {};
@@ -451,12 +471,14 @@ namespace BZROpenShim::WeaponPresentation
         ShotResult result = { true, false, false };
         if (impl_->settings.muzzleFlash && weapon->config.Valid())
         {
+            const bool cockpit = cockpitPlacement && weapon->cockpitFlash;
             if (weapon->config.IsMesh() && weapon->remaining <= 0.0f && !weapon->meshFlash)
             {
                 weapon->remaining = weapon->config.duration;
+                weapon->meshOffset = cockpit ? weapon->cockpitFlash->mesh : weapon->config.offset;
                 weapon->muzzle = committedPose;
                 if (weapon->config.IsMesh())
-                    weapon->muzzle = MeshFlashPose(committedPose, weapon->config.offset);
+                    weapon->muzzle = MeshFlashPose(committedPose, weapon->meshOffset);
                 weapon->muzzleDirty = true;
                 weapon->createAttempted = false;
                 result.flashStarted = true;
@@ -468,7 +490,8 @@ namespace BZROpenShim::WeaponPresentation
             if ((render.Valid() || legacy) && weapon->renderRemaining <= 0 && !weapon->renderer)
             {
                 weapon->renderRemaining = render.Valid() ? render.duration : weapon->config.duration;
-                weapon->renderMuzzle = render.Valid() ? MeshFlashPose(committedPose, render.offset) : committedPose;
+                weapon->renderOffset = cockpit ? weapon->cockpitFlash->render : render.offset;
+                weapon->renderMuzzle = render.Valid() ? MeshFlashPose(committedPose, weapon->renderOffset) : committedPose;
                 weapon->muzzleDirty = true;
                 weapon->renderCreateAttempted = false;
                 result.flashStarted = true;
@@ -506,9 +529,9 @@ namespace BZROpenShim::WeaponPresentation
         Impl::Weapon* weapon = impl_->Find(token);
         if (!weapon)
             return false;
-        weapon->muzzle = weapon->config.IsMesh() ? MeshFlashPose(worldPose, weapon->config.offset) : worldPose;
+        weapon->muzzle = weapon->config.IsMesh() ? MeshFlashPose(worldPose, weapon->meshOffset) : worldPose;
         weapon->renderMuzzle = weapon->config.muzzleRender.Valid()
-            ? MeshFlashPose(worldPose, weapon->config.muzzleRender.offset) : worldPose;
+            ? MeshFlashPose(worldPose, weapon->renderOffset) : worldPose;
         weapon->muzzleDirty = true;
         return true;
     }
