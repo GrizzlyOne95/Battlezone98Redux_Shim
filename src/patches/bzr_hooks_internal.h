@@ -1472,6 +1472,22 @@ namespace BZROpenShim
         // The keyed group (0-6) whose member list is open, -1 none.
         int OffenseOverflowMemberGroup();
 
+        // --- RTS command extras (rts_commands.cpp) -----------------------------
+        // Remote target, building cycle, smart command menu, smart
+        // Repair/Reload, area select and Hold (Docs/RTS_COMMANDS.md).
+        void InstallRtsCommandsIfPossible();
+        void ReloadRtsCommandsConfig();
+        void RefreshRtsCommandsState();
+        void ResetRtsCommands();
+        // Frame thread, beside TickOffenseOverflow: key filters and actions.
+        void TickRtsCommands();
+        // Options > Input > RTS Actions (main thread). Index = KeyId in
+        // rts_commands_policy.h. Set returns nullptr on success, else the
+        // reason the key was refused; the caller persists it.
+        int RtsCommandKeyCount();
+        const char* RtsCommandKeyText(int index);
+        const char* SetRtsCommandKeyText(int index, const char* text);
+
         // --- HUD group strip (group_strip.cpp) ---------------------------------
         // Read-only F1-F7 group row on the HUD. Tick: the world render tick
         // (frame/game thread), throttled to 4 Hz internally.

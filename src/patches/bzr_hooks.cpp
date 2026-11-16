@@ -1860,6 +1860,8 @@ namespace BZROpenShim
         TickGroupStrip();
         // Group member list: attaches its command-panel render scope once.
         TickOffenseOverflow();
+        // RTS command extras: key filters and queued key actions.
+        TickRtsCommands();
 
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.

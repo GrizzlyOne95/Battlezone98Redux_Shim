@@ -493,6 +493,8 @@ namespace BZROpenShim
             ReloadAutoGroupNewUnitsConfig();
             // [Gameplay] ExtendedUnitCap and GroupMemberMenu, likewise.
             ReloadOffenseOverflowConfig();
+            // [Gameplay] Rts* (RTS command extras), likewise.
+            ReloadRtsCommandsConfig();
             // [Gameplay] GroupStrip, likewise.
             ReloadGroupStripConfig();
             // [Gameplay] RtsCommandPings / RtsArtilleryRange, likewise.
@@ -717,6 +719,11 @@ namespace BZROpenShim
             // lists. Reset closes an open member list.
             { "ExtendedUnitCap", FeatureTier::SinglePlayer,
               &ResetOffenseOverflow, &RefreshOffenseOverflowState },
+            // [Gameplay] Rts*: the menu, target and area parts pick which
+            // selected units get a stock order and run online too; the refresh
+            // stands Hold (native hold, single player only) down online.
+            { "RtsCommands", FeatureTier::SinglePlayer,
+              &ResetRtsCommands, &RefreshRtsCommandsState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config

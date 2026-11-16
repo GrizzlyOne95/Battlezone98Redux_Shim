@@ -28,6 +28,7 @@
 #include "patcher.h"
 #include "quicksave.h"
 #include "quicksave_key_policy.h"
+#include "rts_commands_policy.h"
 #include "render_profile_runtime.h"
 #include "shim_log.h"
 #include "steam_launcher_skip.h"
@@ -1573,6 +1574,18 @@ namespace BZROpenShim
                 row.matchingBlockCount = 1;
                 gameKeyRows.push_back(std::move(row));
             }
+            for (int index = 0; index < Hooks::RtsCommandKeyCount(); ++index)
+            {
+                const auto& def = RtsCommandsPolicy::GetKeyDef(static_cast<RtsCommandsPolicy::KeyId>(index));
+                InputBindingUiRow row = {};
+                row.family = InputBindingMapFamily::GameKey;
+                row.command = def.rowCommand;
+                row.displayText = def.displayText;
+                row.currentBindingText = Hooks::RtsCommandKeyText(index);
+                row.foundInMap = true;
+                row.matchingBlockCount = 1;
+                gameKeyRows.push_back(std::move(row));
+            }
 
             g_InputBindingUiRows = std::move(inputRows);
             g_InputBindingUiRows.insert(
@@ -3007,6 +3020,7 @@ namespace BZROpenShim
         constexpr size_t kShimPseudoRowMenuTheme = kShimSettingsRegistryCount + 8;
         constexpr size_t kShimPseudoRowEffects = kShimSettingsRegistryCount + 9;
         constexpr size_t kShimPseudoRowBans = kShimSettingsRegistryCount + 10;
+        constexpr size_t kShimPseudoRowRtsCommands = kShimSettingsRegistryCount + 11;
         constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
@@ -3016,17 +3030,19 @@ namespace BZROpenShim
 
         constexpr size_t kShimSettingsCategoryCount =
             sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
-        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 7;
-        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 7;
-        constexpr size_t kShimPaletteCategory = kShimSettingsCategoryCount - 6;
-        constexpr size_t kShimDamageCategory = kShimSettingsCategoryCount - 5;
-        constexpr size_t kShimFadingCategory = kShimSettingsCategoryCount - 4;
-        constexpr size_t kShimMetersCategory = kShimSettingsCategoryCount - 3;
-        constexpr size_t kShimRadarCategory = kShimSettingsCategoryCount - 2;
-        constexpr size_t kShimEffectsCategory = kShimSettingsCategoryCount - 1;
+        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 8;
+        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 8;
+        constexpr size_t kShimPaletteCategory = kShimSettingsCategoryCount - 7;
+        constexpr size_t kShimDamageCategory = kShimSettingsCategoryCount - 6;
+        constexpr size_t kShimFadingCategory = kShimSettingsCategoryCount - 5;
+        constexpr size_t kShimMetersCategory = kShimSettingsCategoryCount - 4;
+        constexpr size_t kShimRadarCategory = kShimSettingsCategoryCount - 3;
+        constexpr size_t kShimEffectsCategory = kShimSettingsCategoryCount - 2;
+        constexpr size_t kShimRtsCommandsCategory = kShimSettingsCategoryCount - 1;
         // Category screen ids are kOptionsCategoryScreenIdBase + index, and src/engine/shell_screens.cpp
-        // only treats 16 consecutive ids as category screens.
-        static_assert(kShimSettingsCategoryCount <= 16, "shell_screens.cpp recognises only 16 category screen ids");
+        // only treats kOptionsCategoryScreenIdCount consecutive ids as category screens.
+        static_assert(kShimSettingsCategoryCount <= Shell::kOptionsCategoryScreenIdCount,
+                      "shell_screens.cpp recognises only kOptionsCategoryScreenIdCount category screen ids");
         static_assert(sizeof(kShimCategoryGameplay) / sizeof(kShimCategoryGameplay[0]) <= kShimCategoryMaxRows,
                       "a category screen shows at most 16 rows");
         static_assert(sizeof(kShimCategoryHud) / sizeof(kShimCategoryHud[0]) <= kShimCategoryMaxRows,
@@ -3141,6 +3157,8 @@ namespace BZROpenShim
                 return kShimPseudoRowEffects;
             if (std::strcmp(label, kShimRowBans) == 0)
                 return kShimPseudoRowBans;
+            if (std::strcmp(label, kShimRowRtsCommands) == 0)
+                return kShimPseudoRowRtsCommands;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
                 if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
@@ -3400,7 +3418,8 @@ namespace BZROpenShim
             }
             if (row == kShimPseudoRowKeyBindings)
                 return ShimText("openshim_ui:value_edit", "Edit");
-            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme || row == kShimPseudoRowEffects || row == kShimPseudoRowBans)
+            if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme || row == kShimPseudoRowEffects || row == kShimPseudoRowBans ||
+                row == kShimPseudoRowRtsCommands)
                 return ShimText("openshim_ui:value_open", "Open");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
@@ -3477,6 +3496,8 @@ namespace BZROpenShim
                 return ShimPseudoRowLabel(kShimRowEffects);
             if (row == kShimPseudoRowBans)
                 return ShimPseudoRowLabel(kShimRowBans);
+            if (row == kShimPseudoRowRtsCommands)
+                return ShimPseudoRowLabel(kShimRowRtsCommands);
             return ShimSettingLabel(g_ShimSettingsRegistry[row]);
         }
 
@@ -3504,6 +3525,8 @@ namespace BZROpenShim
                 return ShimText("openshim_ui:row:VisualEffects:desc", "Jet flames, emissive pulse, star twinkle, death chunks, muzzle flashes and recoil, shell casings and skinned gibs.");
             if (row == kShimPseudoRowBans)
                 return ShimText("openshim_ui:row:BannedPlayers:desc", "Lists the players you have banned as host; Unban removes one immediately.");
+            if (row == kShimPseudoRowRtsCommands)
+                return ShimText("openshim_ui:row:RTSCommands:desc", "Target your own units and buildings, mixed-selection command menus, area select and Hold.");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
@@ -3794,6 +3817,12 @@ namespace BZROpenShim
             {
                 DisarmShimSettingsAction();
                 Shell::RequestScreen(ui.screen, Shell::kBansScreenId);
+                return;
+            }
+            if (row == kShimPseudoRowRtsCommands)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimRtsCommandsCategory));
                 return;
             }
             if (row == kShimPseudoRowEffects)
@@ -4835,6 +4864,60 @@ namespace BZROpenShim
                     "Press a non-modifier key for " + g_InputBindingUiPendingDisplayText + ".";
                 Log(L"[INPUTUI] Capture rejected for gamekey command=%hs because chord build failed\n",
                     command.c_str());
+                RefreshInputBindingUiControls();
+                return true;
+            }
+
+            for (int index = 0; index < Hooks::RtsCommandKeyCount(); ++index)
+            {
+                const auto id = static_cast<RtsCommandsPolicy::KeyId>(index);
+                const auto& def = RtsCommandsPolicy::GetKeyDef(id);
+                if (command != def.rowCommand)
+                    continue;
+                const std::string previousKey = Hooks::RtsCommandKeyText(index);
+                if (const char* refusal = Hooks::SetRtsCommandKeyText(index, chord.c_str()))
+                {
+                    g_InputBindingUiStatusText = "Cannot use " + chord + " for " + displayText + ": " + refusal + ".";
+                    Log(L"[INPUTUI] Capture rejected for %hs key=%hs: %hs\n",
+                        command.c_str(), chord.c_str(), refusal);
+                    RefreshInputBindingUiControls();
+                    return true;
+                }
+
+                std::string writeError;
+                if (!WriteUserConfigValueLossless("Gameplay", def.iniKey, nullptr, 0, chord.c_str(), writeError))
+                {
+                    // Roll back, as for the Rally Point row.
+                    if (!previousKey.empty())
+                        Hooks::SetRtsCommandKeyText(index, previousKey.c_str());
+                    g_InputBindingUiStatusText = "Could not save " + displayText + " to openshim.ini; kept " +
+                                                 previousKey + ".";
+                    Log(L"[INPUTUI] openshim.ini write failed for %hs key=%hs error=%hs; kept %hs\n",
+                        command.c_str(), chord.c_str(), writeError.c_str(), previousKey.c_str());
+                    RefreshInputBindingUiControls();
+                    return true;
+                }
+
+                std::string status = "Bound " + displayText + " to " + (def.needsShift ? "Shift+" : "") + chord;
+                status += def.shiftVariant ? " (Shift+" + chord + " for the wider variant)." : ".";
+                BZROpenShim::QuickSaveKeyPolicy::Chord parsed;
+                if (BZROpenShim::QuickSaveKeyPolicy::ParseChord(chord.c_str(), parsed))
+                {
+                    if (def.needsShift)
+                        parsed.shift = true;
+                    if (const GameKeyBindingAction* clash = FindGameKeyActionWithChord(parsed))
+                    {
+                        status += " Also used by " + HumanizeInputBindingCommand(clash->action) + "; in a mission " +
+                                  displayText + " takes it.";
+                        Log(L"[INPUTUI] Conflict: %hs key=%hs is also gamekey action=%hs\n",
+                            command.c_str(), chord.c_str(), clash->action.c_str());
+                    }
+                }
+                ReloadInputBindingUiInventory(true);
+                g_InputBindingUiPendingCommand.clear();
+                g_InputBindingUiPendingDisplayText.clear();
+                g_InputBindingUiStatusText = status;
+                Log(L"[INPUTUI] Bound OpenShim action=%hs key=%hs\n", command.c_str(), chord.c_str());
                 RefreshInputBindingUiControls();
                 return true;
             }

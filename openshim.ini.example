@@ -2629,6 +2629,69 @@ RtsCommandPings = 1
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Artillery Range".
 RtsArtilleryRange = 1
+; RTS command extras (rts_commands.cpp; Docs/RTS_COMMANDS.md). All five rows
+; are on the OpenShim Settings page under Controls > RTS Commands. Orders go
+; through the stock per-unit calls the unit menu itself uses.
+;
+; Remote target. Shift+T (RtsRemoteTargetKey) sets your target to one of
+; your selected units without changing the selection; each press moves on
+; to the next one. Plain T stays the stock frontal target. B
+; (RtsBuildingCycleKey) cycles the target through your buildings (Recycler,
+; Factory and Armory included), newest first. Works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Remote Target".
+RtsRemoteTarget = 1
+
+; Mixed-selection command menu. Stock keeps only the entries every selected
+; unit shares, so a Ctrl+1 group of wingmen, walkers, APCs and howitzers
+; loses Hunt, Follow Close (Formation) and Defend. With this on those stay,
+; and each goes only to the units whose own menu has it; the others keep
+; their current orders. Works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Smart Command Menu".
+RtsSmartCommandMenu = 1
+
+; Get Repair and Get Reload show when any selected unit needs them (stock:
+; only when every unit does) and go only to the units that need them.
+; Works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Smart Repair/Reload".
+RtsSmartRepairReload = 1
+
+; Area select. X (RtsAreaSelectKey) adds your units of the same type as the
+; unit under the reticle (else the first selected unit) within 100 m of it
+; to the selection; Shift+X within 200 m. Works in satellite view (centred
+; on the first selected unit there). Works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Area Select".
+RtsAreaSelect = 1
+
+; Hold. Z (RtsHoldKey) gives the selected units that have a Defend entry
+; Defend with no target plus the native hold, so they stay put. With 2,
+; holding Shift also makes the unit menu's Defend entry read "Hold" and
+; choosing it (mouse or number key) does the same. If another mod binds
+; Shift+number (BZP's line-up Go does), choose 1 to keep only the key.
+; Single player only: the native hold is not saved and peers never see it.
+;
+; Accepted: 2 (key and Shift menu), 1 (key only), 0 (off). Default: 2.
+; Exposed on the OpenShim Settings page as "Hold".
+RtsHold = 2
+
+; The RTS action keys. One key each, no modifier; rebind them in Options >
+; Input > RTS Actions, which writes these lines. The remote-target key is
+; used with Shift (Shift+T). Refused, with a log line and a fall back to the
+; default: any modifier, digits, F1-F10, Space, Tab, Alt, Enter, Esc, the
+; Rally Point key, another RTS action's key, and (for the Shift actions) a
+; key that is a Shift-only QuickSave chord.
+; Defaults: T, B, X, Z.
+RtsRemoteTargetKey = T
+RtsBuildingCycleKey = B
+RtsAreaSelectKey = X
+RtsHoldKey = Z
 
 
 [Updater]
