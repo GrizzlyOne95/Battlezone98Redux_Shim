@@ -108,6 +108,32 @@ foreach ($link in $chain) {
 }
 Write-Host ("load chain verified: winmm.dll -> bzloader.dll -> plugins\openshim.dll")
 
+# Keep each deployed DLL's PDB, keyed by the DLL's hash, outside the build
+# tree: a worktree removed after a deploy took the only PDB with it, and a
+# crash address in that DLL could not be named. scripts\Resolve-CrashAddress.ps1
+# finds the PDB again from the deployed DLL. PDBs are never deployed.
+# Archiving never fails a deploy: the DLLs are already in place by now.
+try {
+$symbolRoot = if ($env:BZR_SYMBOL_STORE) { $env:BZR_SYMBOL_STORE } else { Join-Path $env:LOCALAPPDATA 'BZRSymbols' }
+foreach ($pair in $pairs | Where-Object { $_.Project }) {
+    $pdb = [IO.Path]::ChangeExtension($pair.Source, '.pdb')
+    if (-not (Test-Path -LiteralPath $pdb)) {
+        Write-Warning "No PDB next to $($pair.Source); crashes in this build cannot be symbolized."
+        continue
+    }
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $pair.Source).Hash
+    $dir = Join-Path $symbolRoot ("{0}\{1}" -f [IO.Path]::GetFileNameWithoutExtension($pair.Source), $hash)
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    Copy-Item -LiteralPath $pair.Source, $pdb -Destination $dir -Force
+    $commit = (& git -C $repoRoot rev-parse HEAD 2>$null)
+    if (& git -C $repoRoot status --porcelain --untracked-files=no 2>$null) { $commit = "$commit (dirty tree)" }
+    Set-Content -LiteralPath (Join-Path $dir 'commit.txt') -Value $commit
+}
+Write-Host ("symbols archived under {0}" -f $symbolRoot)
+} catch {
+    Write-Warning "Symbol archive skipped: $($_.Exception.Message)"
+}
+
 # Verify rather than trust: every patch name the repo declares must be present
 # in the deployed json, or the DLL will resolve it to address 0.
 $repoJson = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts\patches.json') | ConvertFrom-Json
