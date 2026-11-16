@@ -133,7 +133,7 @@ namespace BZROpenShim
             }
 
             Shell::SetLabelText(g_EmptyLabel, g_Bans.empty()
-                ? ShimText("openshim_ui:bans_empty", "No banned players. Use the lobby Ban button or /ban while hosting.") : "");
+                ? ShimText("openshim_ui:bans_empty", "No banned players. Ban from the lobby or with /ban.") : "");
 
             const bool paged = PageCount() > 1;
             SetShown(g_PrevButton, paged);

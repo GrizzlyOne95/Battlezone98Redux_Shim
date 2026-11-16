@@ -189,8 +189,8 @@ namespace BZROpenShim
                 boxes[2].title = ShimText("openshim_ui:career_multiplayer", "MULTIPLAYER");
                 boxes[3].title = ShimText("openshim_ui:career_kills_by_type", "KILLS BY TYPE");
                 boxes[0].rows[0] = { ShimText("openshim_ui:career_tracking_off", "Stats tracking is off."), "" };
-                boxes[0].rows[2] = { ShimText("openshim_ui:career_tracking_off_how1", "Turn it on: OpenShim Settings,"), "" };
-                boxes[0].rows[3] = { ShimText("openshim_ui:career_tracking_off_how2", "Career Stats (restart needed)."), "" };
+                boxes[0].rows[2] = { ShimText("openshim_ui:career_tracking_off_how1", "Turn it on: OpenShim Options,"), "" };
+                boxes[0].rows[3] = { ShimText("openshim_ui:career_tracking_off_how2", "System, Career Stats (restart)."), "" };
                 return;
             }
 
@@ -224,7 +224,7 @@ namespace BZROpenShim
                 boxes[3].rows[0] = { ShimText("openshim_ui:career_no_record", "No record yet."), "" };
                 boxes[3].rows[1] = { ShimText("openshim_ui:career_no_record2", "Kills, deaths and missions"), "" };
                 boxes[3].rows[2] = { ShimText("openshim_ui:career_no_record3", "are recorded as you play."), "" };
-                boxes[3].rows[4] = { ShimText("openshim_ui:career_off_switch", "Off switch: OpenShim Settings."), "" };
+                boxes[3].rows[4] = { ShimText("openshim_ui:career_off_switch", "Off switch: OpenShim Options, System."), "" };
                 return;
             }
             boxes[0].rows[3] = { ShimText("openshim_ui:career_distinct_missions", "Distinct missions"), num(t.missionsRecorded) };

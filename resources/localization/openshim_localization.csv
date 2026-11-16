@@ -543,7 +543,7 @@ openshim_cat:Effects:blurb~Faction color jets, destruction chunks, muzzle effect
 openshim_ui:bans_unnamed~(unnamed)~(sans nom)~(unbenannt)~(sin nombre)~(senza nome)~(без имени)~(sem nome)
 openshim_ui:bans_confirm~Confirm~Confirmer~Bestдtigen~Confirmar~Conferma~Подтвердить~Confirmar
 openshim_ui:bans_unban~Unban~Dйbannir~Entbannen~Quitar veto~Sbanna~Разбанить~Desbanir
-openshim_ui:bans_empty~No banned players. Use the lobby Ban button or /ban while hosting.~Aucun joueur banni. Utilisez le bouton Bannir du lobby ou /ban en hйbergeant.~Keine gebannten Spieler. Nutze den Bann-Knopf in der Lobby oder /ban als Host.~No hay jugadores vetados. Usa el botуn de veto de la sala o /ban si eres anfitriуn.~Nessun giocatore bannato. Usa il pulsante Ban della lobby o /ban se sei host.~Нет забаненных игроков. Используйте кнопку бана в лобби или /ban при размещении игры.~Nenhum jogador banido. Use o botгo Banir da sala ou /ban ao hospedar.
+openshim_ui:bans_empty~No banned players. Ban from the lobby or with /ban.~Aucun joueur banni. Bannissez via le lobby ou /ban.~Keine gebannten Spieler. Bannen in der Lobby oder mit /ban.~No hay jugadores vetados. Veta desde la sala o con /ban.~Nessun giocatore bannato. Banna dalla lobby o con /ban.~Нет забаненных игроков. Бан: кнопка в лобби или /ban.~Nenhum jogador banido. Bana pela sala ou com /ban.
 openshim_ui:bans_prev~Prev~Prйc.~Zurьck~Ant.~Prec.~Назад~Ant.
 openshim_ui:bans_next~Next~Suiv.~Weiter~Sig.~Succ.~Далее~Prуx.
 openshim_ui:bans_page~Page %s~~Seite %s~Pбgina %s~Pagina %s~Страница %s~Pбgina %s
@@ -613,8 +613,8 @@ openshim_ui:career_single_player~SINGLE PLAYER~UN JOUEUR~EINZELSPIELER~UN JUGADO
 openshim_ui:career_multiplayer~MULTIPLAYER~MULTIJOUEUR~MEHRSPIELER~MULTIJUGADOR~~МУЛЬТИПЛЕЕР~MULTIJOGADOR
 openshim_ui:career_kills_by_type~KILLS BY TYPE~TUЙS PAR TYPE~ABSCHЬSSE NACH TYP~BAJAS POR TIPO~UCCISIONI PER TIPO~УБИЙСТВА ПО ТИПАМ~ABATES POR TIPO
 openshim_ui:career_tracking_off~Stats tracking is off.~Le suivi des stats est dйsactivй.~Statistikerfassung ist aus.~El registro de estadнsticas estб desactivado.~Il tracciamento delle statistiche и disattivato.~Учёт статистики выключен.~O registro de estatнsticas estб desligado.
-openshim_ui:career_tracking_off_how1~Turn it on: OpenShim Settings,~Activez-le : Paramиtres OpenShim,~Aktivieren: OpenShim-Einstellungen,~Actнvalo: Ajustes de OpenShim,~Attivalo: Impostazioni OpenShim,~Включить: настройки OpenShim,~Ative em: Configuraзхes do OpenShim,
-openshim_ui:career_tracking_off_how2~Career Stats (restart needed).~Stats de carriиre (redйmarrage requis).~Karrierestatistik (Neustart nцtig).~Estadнsticas (requiere reiniciar).~Stat. Carriera (serve riavvio).~Статистика (нужен перезапуск).~Estat. Carreira (requer reinнcio).
+openshim_ui:career_tracking_off_how1~Turn it on: OpenShim Options,~Activez-le : Options OpenShim,~Aktivieren: OpenShim-Optionen,~Actнvalo: Opciones OpenShim,~Attivalo: Opzioni OpenShim,~Включить: Параметры OpenShim,~Ative em: Opзхes do OpenShim,
+openshim_ui:career_tracking_off_how2~System, Career Stats (restart).~Systиme, Stats de carriиre (redйmarrer).~System, Karrierestatistik (Neustart).~Sistema, Estadнsticas (reiniciar).~Sistema, Stat. Carriera (riavvio).~Система, Статистика (перезапуск).~Sistema, Estat. Carreira (reiniciar).
 openshim_ui:career_kills~Kills~Tuйs~Abschьsse~Bajas~Uccisioni~Убийств~Abates
 openshim_ui:career_deaths~Deaths~Morts~Tode~Muertes~Morti~Смертей~Mortes
 openshim_ui:career_kill_death~Kill / death~Tuйs / morts~Abschuss / Tod~Bajas / muertes~Uccisioni / morti~Убийства / смерти~Abates / mortes
@@ -623,17 +623,17 @@ openshim_ui:career_matches_played~Matches played~Parties jouйes~Gespielte Matche
 openshim_ui:career_no_record~No record yet.~Aucun enregistrement.~Noch keine Daten.~Aъn no hay registros.~Ancora nessun dato.~Записей пока нет.~Ainda sem registros.
 openshim_ui:career_no_record2~Kills, deaths and missions~Tuйs, morts et missions~Abschьsse, Tode und Missionen~Bajas, muertes y misiones~Uccisioni, morti e missioni~Убийства, смерти и миссии~Mortes, baixas e missхes
 openshim_ui:career_no_record3~are recorded as you play.~sont enregistrйs pendant le jeu.~werden beim Spielen erfasst.~se registran mientras juegas.~vengono registrati mentre giochi.~записываются во время игры.~sгo registrados enquanto vocк joga.
-openshim_ui:career_off_switch~Off switch: OpenShim Settings.~Dйsactivation : Paramиtres OpenShim.~Ausschalten: OpenShim-Einstellungen.~Para desactivar: Ajustes de OpenShim.~Per disattivare: Impostazioni OpenShim.~Отключить: настройки OpenShim.~Para desligar: Configuraзхes do OpenShim.
-openshim_ui:career_distinct_missions~Distinct missions~Missions distinctes~Verschiedene Missionen~Misiones distintas~Missioni distinte~Разных миссий~Missхes distintas
+openshim_ui:career_off_switch~Off switch: OpenShim Options, System.~Dйsactivation : Options OpenShim, Systиme.~Ausschalten: OpenShim-Optionen, System.~Para desactivar: Opciones OpenShim, Sistema.~Per disattivare: Opzioni OpenShim, Sistema.~Отключить: Параметры OpenShim, Система.~Para desligar: Opзхes do OpenShim, Sistema.
+openshim_ui:career_distinct_missions~Distinct missions~Missions distinctes~Versch. Missionen~Misiones distintas~Missioni distinte~Разных миссий~Missхes distintas
 openshim_ui:career_profiles_combined~Profiles combined~Profils combinйs~Profile kombiniert~Perfiles combinados~Profili combinati~Профили объединены~Perfis combinados
 openshim_ui:career_class_pilots~Pilots~Pilotes~Piloten~Pilotos~Piloti~Пилоты~Pilotos
 openshim_ui:career_class_tanks~Tanks~Chars~Panzer~Tanques~Carri armati~Танки~Tanques
-openshim_ui:career_class_fighters~Fighters~Combattants~Jдger~Luchadores~Caccia~Истребители~Caзas
+openshim_ui:career_class_fighters~Fighters~Chasseurs~Jдger~Cazas~Caccia~Истреб.~Caзas
 openshim_ui:career_class_scouts~Scouts~Йclaireurs~Aufklдrer~Exploradores~Ricognitori~Разведчики~Exploradores
-openshim_ui:career_class_bombers~Bombers~Bombardiers~Bomber~Bombarderos~Bombardieri~Бомбардировщики~Bombardeiros
+openshim_ui:career_class_bombers~Bombers~Bombard.~Bomber~Bombard.~Bombard.~Бомбард.~Bombard.
 openshim_ui:career_class_turrets~Turrets~Tourelles~Kanonen~Torretas~Torrette~Башенки~Torres
 openshim_ui:career_class_artillery~Artillery~Artillerie~Artillerie~Artillerнa~Artiglieria~Артиллерия~Artilharia
-openshim_ui:career_class_support~Support~Soutien~Unterstьtzung~Apoyo~Supporto~Поддержка~Apoio
+openshim_ui:career_class_support~Support~Soutien~Support~Apoyo~Supporto~Поддержка~Apoio
 openshim_ui:career_class_buildings~Buildings~Bвtiments~Gebдude~Edificaciones~Edifici~Здания~Construзхes
 openshim_ui:career_class_other~Other~Autres~Andere~Otros~Altro~Другое~Outros
 openshim_ui:career_title~CAREER~CARRIИRE~KARRIERE~CARRERA~CARRIERA~КАРЬЕРА~CARREIRA
@@ -658,12 +658,12 @@ openshim_ui:lan_hdr_games~GAMES ON THIS NETWORK~PARTIES SUR CE RЙSEAU~SPIELE IN 
 openshim_ui:lan_hdr_join~JOIN BY ADDRESS~REJOINDRE PAR ADRESSE~PER ADRESSE BEITRETEN~UNIRSE POR DIRECCIУN~UNISCITI PER INDIRIZZO~ВХОД ПО АДРЕСУ~ENTRAR POR ENDEREЗO
 openshim_ui:lan_start_host~Start host~Lancer l'hфte~Host starten~Iniciar anfitriуn~Avvia host~Запустить хост~Iniciar host
 openshim_ui:lan_stop_host~Stop host~Arrкter l'hфte~Host stoppen~Detener anfitriуn~Ferma host~Остановить хост~Parar host
-openshim_ui:lan_signin_noauth~Hosted by this game. No accounts or helper. Stop host disconnects players.~Hйbergй par ce jeu. Sans compte ni assistant. Arrкter l'hфte dйconnecte les joueurs.~Vom Spiel selbst gehostet. Keine Konten, kein Helfer. Host stoppen trennt die Spieler.~Alojado por este juego. Sin cuentas ni ayudante. Detener el anfitriуn desconecta a los jugadores.~Ospitato da questo gioco. Nessun account nй helper. Fermare l'host disconnette i giocatori.~Хостится этой игрой. Без аккаунтов и помощника. Остановка хоста отключает игроков.~Hospedado por este jogo. Sem contas nem auxiliar. Parar o host desconecta os jogadores.
-openshim_ui:lan_signin_required~Steam/Galaxy sign-in is still required. Stop host disconnects its players.~La connexion Steam/Galaxy reste requise. Arrкter l'hфte dйconnecte ses joueurs.~Steam/Galaxy-Anmeldung ist weiterhin nцtig. Host stoppen trennt seine Spieler.~Sigue siendo necesario iniciar sesiуn en Steam/Galaxy. Detener el anfitriуn desconecta a sus jugadores.~L'accesso a Steam/Galaxy и ancora richiesto. Fermare l'host disconnette i suoi giocatori.~Вход в Steam/Galaxy по-прежнему нужен. Остановка хоста отключает его игроков.~O login do Steam/Galaxy ainda й necessбrio. Parar o host desconecta seus jogadores.
-openshim_ui:lan_refresh~Refresh~Actualiser~Aktualisieren~Actualizar~Aggiorna~Обновить~Atualizar
-openshim_ui:lan_next_page~Next page~Page suivante~Nдchste Seite~Pбgina siguiente~Pagina succ.~След. страница~Prуx. pбgina
+openshim_ui:lan_signin_noauth~Hosted by this game. No accounts or helper. Stop host disconnects players.~Hйbergй par ce jeu, sans compte. L'arrкt dйconnecte les joueurs.~Vom Spiel gehostet, ohne Konten. Host stoppen trennt Spieler.~Alojado por este juego, sin cuentas. Detenerlo desconecta a todos.~Ospitato da questo gioco, senza account. Fermarlo disconnette tutti.~Хост в этой игре, без аккаунтов. Остановка отключает игроков.~Hospedado por este jogo, sem contas. Parб-lo desconecta todos.
+openshim_ui:lan_signin_required~Steam/Galaxy sign-in is still required. Stop host disconnects its players.~Connexion Steam/Galaxy requise. L'arrкt dйconnecte les joueurs.~Steam/Galaxy-Anmeldung nцtig. Host stoppen trennt Spieler.~Requiere sesiуn en Steam/Galaxy. Detenerlo desconecta a todos.~Serve l'accesso a Steam/Galaxy. Fermarlo disconnette tutti.~Нужен вход в Steam/Galaxy. Остановка отключает игроков.~Requer login no Steam/Galaxy. Parб-lo desconecta todos.
+openshim_ui:lan_refresh~Refresh~Actualiser~Neu laden~Actualizar~Aggiorna~Обновить~Atualizar
+openshim_ui:lan_next_page~Next page~Suivante~Weiter~Siguiente~Pagina succ.~Далее~Prуx. pбgina
 openshim_ui:lan_address_label~Address:~Adresse :~Adresse:~Direcciуn:~Indirizzo:~Адрес:~Endereзo:
-openshim_ui:lan_use_address~Use address~Utiliser l'adresse~Adresse nutzen~Usar direcciуn~Usa indirizzo~Исп. адрес~Usar endereзo
+openshim_ui:lan_use_address~Use address~Utiliser~Nutzen~Usar~Usa~Исп. адрес~Usar
 openshim_ui:mapfilter_5plus_players~5+ Players~5+ joueurs~5+ Spieler~5+ jugadores~5+ giocatori~5+ игроков~5+ jogadores
 openshim_ui:mapfilter_stock_maps~Stock Maps~Cartes d'origine~Standardkarten~Mapas originales~Mappe originali~Стандартные карты~Mapas originais
 openshim_ui:mapfilter_search_placeholder~Search: click here~Recherche : cliquez ici~Suche: hier klicken~Buscar: haz clic aquн~Cerca: clicca qui~Поиск: нажмите здесь~Buscar: clique aqui
