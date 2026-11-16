@@ -106,3 +106,42 @@ Rules and risks:
   `ConstructionRig::UpdateModeList` (`:154056`), `PowerUp::Init` (`:214304`),
   plus the Producer, `Dispenser` and `ObjectLobber` paths.
 - Ship it for single player first; multiplayer needs its own test.
+
+## How BZ2/BZCC does it, and the recommended design (D)
+
+Source: the PDB-less BZCC decompile in `Battlezone_Source/BZ2/_analysis/
+global_decompile/bzcc_battlezone2_20190509/`. Its function names come from
+the BZ2 1.3 PDB by call-graph matching, so they are strong inference, not
+proof.
+
+BZCC has no per-category cap on owned units. The cap is the F-group panel:
+- 10 groups per team, each holding at most 10 units, built plus queued
+  (`Init-005a40e7.c:33-34`; `FirstMatchGroup-005a4e03.c`).
+- A new unit joins the first group of the same class with room, otherwise
+  the first empty group (`SetBestGroup-004da8b0.c:19-23`). The group is
+  chosen when the build is queued and applied when it finishes
+  (`QueueBuild-0054d683.c:67`, `FinishBuild-0054c610.c:42`).
+- When no group can take the unit, the factory refuses the build for a
+  human team. AI teams build ungrouped (`QueueBuild-0054d683.c:66-72`).
+- The HUD shows each group's icon and 10 lights coloured by unit health,
+  with grey lights for queued builds (`UpdateStatus-005a356a.c`).
+
+D: the same model on top of BZR's existing pieces (~1-2 days):
+1. Lift the offense build gate (option A) up to a configurable total.
+   Overflow units get `teamSlot = -1`.
+2. Use the BZCC rule for the gate: a build is allowed while
+   `AutoGroupNewUnits` can place it (same-ODF group with room, else an empty
+   group). The cap then follows from groups x group size, so no separate
+   number is needed.
+3. Turn `AutoGroupNewUnits` on whenever the cap is lifted. `GroupStrip`
+   already draws the groups.
+4. Keep the stock key-2 menu as "first 10". `Craft::Simulate` re-claims free
+   slots every tick (option B), so when a listed unit dies an overflow unit
+   takes its place with no OpenShim code, and stock "units left" checks keep
+   working.
+
+Single player first. The build gate runs in the sim, so multiplayer needs
+every machine to run the same rule.
+
+UNVERIFIED: what BZCC's class key `objClass+0x61c` is (ODF identity or
+category); BZCC hop-in grouping.
