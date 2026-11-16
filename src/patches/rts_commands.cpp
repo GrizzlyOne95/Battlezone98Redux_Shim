@@ -23,6 +23,12 @@
 //       Defend(0) plus the native hold. With Shift held the Defend entry
 //       reads "Hold" and choosing it does the same. Single player only, like
 //       the native hold it uses (ai_native_orders.cpp SetAiHold).
+//   [Gameplay] RtsBuildAtNav (default ON)
+//     * With a building picked on a selected Construction Rig, the Go To
+//       Nav entry reads "Build at Nav"; picking a nav validates the spot
+//       with the rig's own GetCommand and gives BUILD there (refused rigs
+//       buzz, and an all-refused pick keeps the selection). Other selected
+//       units get the stock GO. Local rigs only.
 // Rules: include/rts_commands_policy.h. Evidence and limits:
 // Docs/RTS_COMMANDS.md. Every address is a scripts/patches.json row; each
 // part binds its own rows and stays stock (option marked unavailable) when
@@ -74,6 +80,9 @@ namespace BZROpenShim::Hooks
         using FnLocalize = const char*(__cdecl*)(const char* section, const char* key);
         using FnPlaySound = int(__cdecl*)(const char* filename, uint32_t, uint32_t, uint32_t);
         using FnGetPosition = const float*(__thiscall*)(void* entity);
+        using FnRigGetCommand = int(__thiscall*)(void* rig, const float* pos);
+        using FnSetCommandWhere = void(__thiscall*)(void* obj, int what, const float* where, uint32_t paramLow,
+                                                    uint32_t paramHigh);
 
         // ControlPanel fields (FUN_004a7140, FUN_004a6c70; ControlPanelGlobal row).
         constexpr size_t kSelectListOffset = 0x1C;
@@ -104,10 +113,21 @@ namespace BZROpenShim::Hooks
         constexpr uint32_t kDefendClickResumeOffset = 0x9C; // the row's `jmp` target, 0x004A5141
         constexpr uint32_t kBroadcastCallOffset = 0xF;
         constexpr uint32_t kLabelCallOffset = 0x13;
+        constexpr uint32_t kNavPickCallOffset = 0x11;       // BroadcastCommand, 0x004A4A75
+        constexpr uint32_t kNavPickSelectNoneOffset = 0x1C; // SelectNone, 0x004A4A80
+        // DistributedObject +0x68: 2 for a remote replica (FUN_004b9830).
+        constexpr size_t kOwnershipOffset = 0x68;
+        // ConstructionRig: +0x228 must be 0 for GetCommand (0x0049D251);
+        // +0x370 the drop class SetActiveMode stores (FUN_0049d0e0 line 13).
+        constexpr size_t kRigBusyOffset = 0x228;
+        constexpr size_t kRigDropClassOffset = 0x370;
         constexpr int kMaxInstallAttempts = 40;
         constexpr size_t kMaxObjects = 4096;
         constexpr ULONGLONG kTickFreshMs = 500;
         constexpr const char* kClickSound = "mnu_clik.wav";
+        // The stock "cannot build here" click (FUN_004a08e0.c line 564, a
+        // CMD_NO_DROPOFF hover; push at 0x004A1E6F).
+        constexpr const char* kRefuseSound = "mnu_buzz.wav";
 
         // Shared rows.
         uint32_t g_ControlPanelAddr = 0;
@@ -136,6 +156,14 @@ namespace BZROpenShim::Hooks
         // Read by the naked thunks.
         uint32_t g_PlaySoundAddr = 0;
         uint32_t g_DefendClickResumeAddr = 0;
+        // Build at Nav (its own copies: a failed bind zeroes every out).
+        uint32_t g_NavPickRowAddr = 0;
+        uint32_t g_NavBroadcastObjAddr = 0;
+        uint32_t g_NavSetCommandObjAddr = 0;
+        uint32_t g_NavSetCommandWhereAddr = 0;
+        uint32_t g_NavSelectNoneAddr = 0;
+        uint32_t g_RigVtableAddr = 0;
+        uint32_t g_RigGetCommandAddr = 0;
 
         FnGetObj g_FnGetObj = nullptr;
         FnIntersect g_FnIntersect = nullptr;
@@ -148,6 +176,11 @@ namespace BZROpenShim::Hooks
         FnSelectNone g_FnSelectNone = nullptr;
         FnLocalize g_FnLocalize = nullptr;
         FnPlaySound g_FnPlaySound = nullptr;
+        FnBroadcastObj g_FnNavBroadcastObj = nullptr;
+        FnSetCommandObj g_FnNavSetCommandObj = nullptr;
+        FnSetCommandWhere g_FnNavSetCommandWhere = nullptr;
+        FnSelectNone g_FnNavSelectNone = nullptr;
+        FnRigGetCommand g_FnRigGetCommand = nullptr;
 
         // Config ([Gameplay]); main thread.
         bool g_ConfigRead = false;
@@ -156,6 +189,7 @@ namespace BZROpenShim::Hooks
         bool g_SmartRepairEnabled = true;
         bool g_AreaEnabled = true;
         int g_HoldMode = Policy::kHoldKeyAndShiftMenu;
+        bool g_BuildNavEnabled = true;
 
         // Part readiness (patch thread, then read-only).
         bool g_SharedReady = false;
@@ -167,6 +201,8 @@ namespace BZROpenShim::Hooks
         bool g_HoldKeyReady = false;
         bool g_HoldClickReady = false;
         bool g_LabelReady = false;
+        bool g_NavSelectNoneReady = false;
+        bool g_NavPickReady = false;
 
         // Live state.
         std::atomic<unsigned> g_SmartMask{ 0 }; // Policy::SmartSet bits in force
@@ -174,6 +210,10 @@ namespace BZROpenShim::Hooks
         std::atomic<bool> g_AreaActive{ false };
         std::atomic<bool> g_HoldKeyActive{ false };
         std::atomic<bool> g_HoldMenuActive{ false };
+        std::atomic<bool> g_BuildNavActive{ false };
+        // Set by the nav-pick hook for the SelectNone call that follows it
+        // (same Render frame, game thread).
+        bool g_SkipNavSelectNone = false;
         std::atomic<ULONGLONG> g_LastTickMs{ 0 };
         // Actions queued by the key filter (main thread) for the tick.
         std::atomic<bool> g_PendingRemoteTarget{ false };
@@ -409,17 +449,22 @@ namespace BZROpenShim::Hooks
             }
         }
 
-        void SafePlayClick()
+        void SafePlaySound(const char* name)
         {
             if (!g_FnPlaySound)
                 return;
             __try
             {
-                g_FnPlaySound(kClickSound, 0, 0, 0);
+                g_FnPlaySound(name, 0, 0, 0);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
             }
+        }
+
+        void SafePlayClick()
+        {
+            SafePlaySound(kClickSound);
         }
 
         bool SafeGetPosition(void* obj, float (&out)[3])
@@ -703,6 +748,216 @@ namespace BZROpenShim::Hooks
                 NotifyRtsMarkersCommand(what, target);
         }
 
+        // ---- Build at Nav ----------------------------------------------------
+
+        bool BuildNavPartsReady()
+        {
+            return g_SharedReady && g_LabelReady && g_NavSelectNoneReady && g_NavPickReady;
+        }
+
+        // Reads what PickedBuildClass needs; false when the object is gone.
+        bool ReadRigPick(void* obj, Policy::RigPick& out)
+        {
+            out = Policy::RigPick{};
+            if (!obj || g_RigVtableAddr == 0)
+                return false;
+            const uintptr_t base = reinterpret_cast<uintptr_t>(obj);
+            const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(base));
+            if (!vtable)
+                return false;
+            out.isRig = vtable == g_RigVtableAddr;
+            if (!out.isRig)
+                return true;
+            uint8_t ownership = Policy::kReplicaOwnership;
+            int busy = 1;
+            int dropClass = 0;
+            if (!ReadBytes(base + kOwnershipOffset, &ownership, sizeof(ownership)) ||
+                !ReadInt(base + kRigBusyOffset, busy) || !ReadInt(base + kRigDropClassOffset, dropClass) ||
+                !ReadModeList(obj, out.modes))
+                return false;
+            out.ownTeam = IsPlayerTeam(obj);
+            out.replica = ownership == Policy::kReplicaOwnership;
+            out.busy = busy;
+            out.dropClass = static_cast<uint32_t>(dropClass);
+            return true;
+        }
+
+        bool SelectionHasPickedRig()
+        {
+            uint32_t handles[Policy::kSelectCapacity];
+            const int n = ReadSelection(handles);
+            for (int i = 0; i < n; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                Policy::RigPick pick;
+                if (obj && SafeCanCommand(obj) && ReadRigPick(obj, pick) && Policy::PickedBuildClass(pick) != 0)
+                    return true;
+            }
+            return false;
+        }
+
+        bool SafeRigGetCommand(void* rig, const float (&pos)[3], int& result)
+        {
+            if (!g_FnRigGetCommand || !rig)
+                return false;
+            __try
+            {
+                result = g_FnRigGetCommand(rig, pos);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool SafeSetCommandWhere(void* obj, int what, const float (&pos)[3], uint32_t param)
+        {
+            if (!g_FnNavSetCommandWhere || !obj)
+                return false;
+            __try
+            {
+                // SetCommand(what, where, param) builds the AiPath from the
+                // unit to `where` itself (FUN_004dbe70 lines 26-37), so the
+                // BUILD has a destination (RigProcess drops a where-less
+                // BUILD, FUN_0049dc90 lines 64-74).
+                g_FnNavSetCommandWhere(obj, what, pos, param, 0u);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool SafeNavSetCommandObj(void* obj, int what, void* target)
+        {
+            if (!g_FnNavSetCommandObj)
+                return false;
+            __try
+            {
+                g_FnNavSetCommandObj(obj, what, target);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        bool SafeNavSelectNone(void* panel)
+        {
+            if (!g_FnNavSelectNone)
+                return false;
+            __try
+            {
+                g_FnNavSelectNone(panel);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Entered in place of `call ControlPanel::BroadcastCommand(obj)` at
+        // 0x004A4A75, the Go To Nav submenu's nav pick (CMD_GO, the nav;
+        // FUN_004a08e0.c lines 1270-1271).
+        // With no picked rig selected it is the stock call. Otherwise each
+        // commandable selected unit is ordered as BroadcastCommand would
+        // (FUN_004a7050 lines 11-13), except picked rigs: GetCommand at the
+        // nav's position (validates the spot, sets the drop matrix with the
+        // player's facing) and, on CMD_DROPOFF, BUILD there.
+        void __fastcall NavPickHook(void* panel, void*, int what, void* nav)
+        {
+            g_SkipNavSelectNone = false;
+            if (!g_BuildNavActive.load(std::memory_order_acquire) || what != Policy::kCmdGo || !nav ||
+                reinterpret_cast<uintptr_t>(panel) != g_ControlPanelAddr)
+            {
+                g_FnNavBroadcastObj(panel, what, nav);
+                return;
+            }
+            uint32_t handles[Policy::kSelectCapacity];
+            const int n = ReadSelection(handles);
+            uint32_t classes[Policy::kSelectCapacity] = {};
+            bool enabled[Policy::kSelectCapacity] = {};
+            bool anyRig = false;
+            for (int i = 0; i < n; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                Policy::RigPick pick;
+                if (!obj || !SafeCanCommand(obj) || !ReadRigPick(obj, pick))
+                    continue;
+                classes[i] = Policy::PickedBuildClass(pick);
+                enabled[i] = Policy::PickedSlotEnabled(pick);
+                anyRig = anyRig || classes[i] != 0;
+            }
+            if (!anyRig)
+            {
+                g_FnNavBroadcastObj(panel, what, nav);
+                return;
+            }
+            float pos[3] = {};
+            const bool havePos = SafeGetPosition(nav, pos);
+            int built = 0;
+            int ordered = 0;
+            int refused = 0;
+            bool ownOrdered = false;
+            for (int i = 0; i < n; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                if (!obj || !SafeCanCommand(obj))
+                    continue;
+                if (classes[i] == 0)
+                {
+                    if (SafeNavSetCommandObj(obj, what, nav))
+                    {
+                        ++ordered;
+                        ownOrdered = ownOrdered || IsPlayerTeam(obj);
+                    }
+                    continue;
+                }
+                int result = 0;
+                const bool queried = enabled[i] && havePos && SafeRigGetCommand(obj, pos, result);
+                const Policy::BuildAtNavVerdict verdict =
+                    Policy::DecideBuildAtNav(enabled[i], havePos, queried, result);
+                if (verdict == Policy::BuildAtNavVerdict::Build &&
+                    SafeSetCommandWhere(obj, Policy::kCmdBuild, pos, classes[i]))
+                {
+                    ++built;
+                    continue;
+                }
+                ++refused;
+                LogBudgeted(L"[RTS] Build at Nav: rig 0x%08X refused (%hs, GetCommand %d)\n", handles[i],
+                            verdict == Policy::BuildAtNavVerdict::Build ? "order failed"
+                                                                        : Policy::BuildAtNavVerdictName(verdict),
+                            queried ? result : -1);
+            }
+            if (refused > 0)
+                SafePlaySound(kRefuseSound);
+            g_SkipNavSelectNone = Policy::KeepSelectionAfterNavPick(built, ordered, refused);
+            // The stock BroadcastCommand this replaces is where rts_markers
+            // pings an object order; one ping for the pick.
+            if (built > 0)
+                NotifyRtsMarkersCommand(Policy::kCmdBuild, nav);
+            else if (ownOrdered)
+                NotifyRtsMarkersCommand(what, nav);
+            LogBudgeted(L"[RTS] Build at Nav: %d rig(s) building, %d unit(s) sent to the nav, %d refused%hs\n", built,
+                        ordered, refused, g_SkipNavSelectNone ? "; selection kept" : "");
+        }
+
+        // Entered in place of `call ControlPanel::SelectNone` at 0x004A4A80,
+        // right after the nav pick above.
+        void __fastcall NavPickSelectNoneHook(void* panel, void*)
+        {
+            if (g_SkipNavSelectNone)
+            {
+                g_SkipNavSelectNone = false;
+                return;
+            }
+            SafeNavSelectNone(panel);
+        }
+
         // ---- Hold ------------------------------------------------------------
 
         bool HoldHooksReady()
@@ -783,6 +1038,21 @@ namespace BZROpenShim::Hooks
         const char* __cdecl ModeLabelDecide(const char* section, const char* key, int mode)
         {
             const char* const stock = g_FnLocalize(section, key);
+            if (mode == Policy::kModeGoToNav)
+            {
+                if (!Policy::ShowBuildAtNavLabel(g_BuildNavActive.load(std::memory_order_acquire), mode,
+                                                 SelectionHasPickedRig()))
+                    return stock;
+                try
+                {
+                    const char* const build = ShimText("openshim_ui:rts_build_at_nav_label", "Build at Nav");
+                    return build && build[0] ? build : stock;
+                }
+                catch (...)
+                {
+                    return stock;
+                }
+            }
             if (!Policy::ShowHoldLabel(g_HoldMenuActive.load(std::memory_order_acquire),
                                        GetKeyState(VK_SHIFT) < 0, mode) ||
                 !HoldAvailableNow())
@@ -1313,6 +1583,7 @@ namespace BZROpenShim::Hooks
             static bool s_dispatchBound = false;
             static bool s_broadcastBound = false;
             static bool s_holdMenuBound = false;
+            static bool s_buildNavBound = false;
             if (!s_mergeBound)
             {
                 const HookEngine::EngineRow rows[] = {
@@ -1429,6 +1700,50 @@ namespace BZROpenShim::Hooks
                                                     reinterpret_cast<const void*>(&DefendClickThunk),
                                                     g_PlaySoundAddr, "ControlPanel::Render/Defend click (rts)") != 0;
             }
+            if (!s_buildNavBound)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "ControlPanelNavPickBroadcastCall", &g_NavPickRowAddr },
+                    { "ControlPanelBroadcastCommandObj", &g_NavBroadcastObjAddr },
+                    { "GameObjectSetCommandObj", &g_NavSetCommandObjAddr },
+                    { "GameObjectSetCommandWhere", &g_NavSetCommandWhereAddr },
+                    { "ControlPanelSelectNone", &g_NavSelectNoneAddr },
+                    { "ConstructionRigVtable", &g_RigVtableAddr },
+                    { "ConstructionRigGetCommandPos", &g_RigGetCommandAddr },
+                };
+                if (HookEngine::BindEngineRows("RTS Build at Nav", rows))
+                {
+                    if (VtableTypeNameMatches(g_RigVtableAddr, ".?AVConstructionRig@@"))
+                    {
+                        s_buildNavBound = true;
+                        g_FnNavBroadcastObj = reinterpret_cast<FnBroadcastObj>(g_NavBroadcastObjAddr);
+                        g_FnNavSetCommandObj = reinterpret_cast<FnSetCommandObj>(g_NavSetCommandObjAddr);
+                        g_FnNavSetCommandWhere = reinterpret_cast<FnSetCommandWhere>(g_NavSetCommandWhereAddr);
+                        g_FnNavSelectNone = reinterpret_cast<FnSelectNone>(g_NavSelectNoneAddr);
+                        g_FnRigGetCommand = reinterpret_cast<FnRigGetCommand>(g_RigGetCommandAddr);
+                    }
+                    else
+                    {
+                        g_RigVtableAddr = 0;
+                        LogBudgeted(L"[RTS] ConstructionRigVtable RTTI mismatch; Build at Nav not installed\n");
+                    }
+                }
+            }
+            // The label (above) is the visible half; without it the click
+            // would build under a "Go To Nav" entry. SelectNone goes in
+            // before the pick so a refused pick can always keep the selection.
+            if (s_buildNavBound && g_LabelReady)
+            {
+                if (!g_NavSelectNoneReady)
+                    g_NavSelectNoneReady =
+                        RedirectCall(g_NavPickRowAddr + kNavPickSelectNoneOffset,
+                                     reinterpret_cast<const void*>(&NavPickSelectNoneHook), g_NavSelectNoneAddr,
+                                     "ControlPanel::Render/nav pick SelectNone (rts)") != 0;
+                if (g_NavSelectNoneReady && !g_NavPickReady)
+                    g_NavPickReady = RedirectCall(g_NavPickRowAddr + kNavPickCallOffset,
+                                                  reinterpret_cast<const void*>(&NavPickHook), g_NavBroadcastObjAddr,
+                                                  "ControlPanel::Render/nav pick (rts)") != 0;
+            }
 #endif
         }
 
@@ -1461,6 +1776,8 @@ namespace BZROpenShim::Hooks
                   "Unavailable: Area Select did not hook on this game build (see openshim.log)." },
                 { "RtsHold", HoldHooksReady(),
                   "Unavailable: Hold did not hook on this game build (see openshim.log)." },
+                { "RtsBuildAtNav", BuildNavPartsReady(),
+                  "Unavailable: Build at Nav did not hook on this game build (see openshim.log)." },
             };
             for (const Mark& m : marks)
             {
@@ -1484,6 +1801,7 @@ namespace BZROpenShim::Hooks
         g_SmartMenuEnabled = ReadBoolOption("RtsSmartCommandMenu", true);
         g_SmartRepairEnabled = ReadBoolOption("RtsSmartRepairReload", true);
         g_AreaEnabled = ReadBoolOption("RtsAreaSelect", true);
+        g_BuildNavEnabled = ReadBoolOption("RtsBuildAtNav", true);
         std::string hold;
         g_HoldMode = Policy::kHoldKeyAndShiftMenu;
         if (TryGetUserConfigString("Gameplay", "RtsHold", hold) && !hold.empty())
@@ -1491,9 +1809,9 @@ namespace BZROpenShim::Hooks
         ResolveKeysFromConfig();
         if (!g_ConfigRead)
             Log(L"[RTS] Baseline RtsRemoteTarget=%hs RtsSmartCommandMenu=%hs RtsSmartRepairReload=%hs "
-                L"RtsAreaSelect=%hs RtsHold=%d\n",
+                L"RtsAreaSelect=%hs RtsHold=%d RtsBuildAtNav=%hs\n",
                 g_TargetEnabled ? "yes" : "no", g_SmartMenuEnabled ? "yes" : "no", g_SmartRepairEnabled ? "yes" : "no",
-                g_AreaEnabled ? "yes" : "no", g_HoldMode);
+                g_AreaEnabled ? "yes" : "no", g_HoldMode, g_BuildNavEnabled ? "yes" : "no");
         g_ConfigRead = true;
         RefreshRtsCommandsState();
     }
@@ -1513,21 +1831,24 @@ namespace BZROpenShim::Hooks
             InstallParts();
         MarkParts();
         const bool all = SmartMenuPartsReady() && g_TargetReady && g_AreaReady && HoldHooksReady() &&
-                         g_HoldClickReady && g_LabelReady;
+                         g_HoldClickReady && g_LabelReady && BuildNavPartsReady();
         if (all || s_attempts >= kMaxInstallAttempts)
         {
             s_done = true;
             Log(L"[RTS] install %hs after %d attempt(s): merge %hs, dispatch %hs, Defend target %hs, target %hs, "
-                L"area %hs, hold %hs, Shift+Defend click %hs, label %hs\n",
+                L"area %hs, hold %hs, Shift+Defend click %hs, label %hs, Build at Nav %hs\n",
                 all ? "complete" : "gave up", s_attempts, g_MergeReady ? "yes" : "no", g_DispatchReady ? "yes" : "no",
                 g_BroadcastReady ? "yes" : "no", g_TargetReady ? "yes" : "no", g_AreaReady ? "yes" : "no",
-                HoldHooksReady() ? "yes" : "no", g_HoldClickReady ? "yes" : "no", g_LabelReady ? "yes" : "no");
+                HoldHooksReady() ? "yes" : "no", g_HoldClickReady ? "yes" : "no", g_LabelReady ? "yes" : "no",
+                BuildNavPartsReady() ? "yes" : "no");
         }
         RefreshRtsCommandsState();
     }
 
     // The menu, target and area parts run in every session: they only pick
     // which selected units receive a stock order, through the stock calls.
+    // Build at Nav too: it orders only local rigs, with the stock BUILD call
+    // the human drop uses (multiplayer UNVERIFIED live, Docs/RTS_COMMANDS.md).
     // Hold uses the single-player native hold, so its parts stand down online.
     void RefreshRtsCommandsState()
     {
@@ -1539,6 +1860,7 @@ namespace BZROpenShim::Hooks
         g_SmartMask.store(smart, std::memory_order_release);
         g_TargetActive.store(g_TargetEnabled && g_SharedReady && g_TargetReady, std::memory_order_release);
         g_AreaActive.store(g_AreaEnabled && g_SharedReady && g_AreaReady, std::memory_order_release);
+        g_BuildNavActive.store(g_BuildNavEnabled && BuildNavPartsReady(), std::memory_order_release);
         const bool sp = IsSinglePlayerSession();
         const bool holdKey = Policy::HoldAvailable(g_HoldMode != Policy::kHoldOff, HoldHooksReady(), sp);
         g_HoldKeyActive.store(holdKey, std::memory_order_release);

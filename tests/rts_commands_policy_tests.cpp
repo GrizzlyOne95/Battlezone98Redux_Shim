@@ -375,6 +375,81 @@ namespace
         d = ClassifyKey(Down('Z'), KeyId::BuildingCycle, b, true, latch);
         Check(!d.swallow, "another key is not ours");
     }
+
+    // A Construction Rig's ModeList while a building is picked: HoverCraft's
+    // slots 0-2 (Go, Follow Me, Go To Nav, as in the Wingman fixture), the
+    // class pointer in a build slot (3..9, ConstructionRig::UpdateModeList
+    // 0x0049D550) and active.
+    RigPick PickedRig(uint32_t cls)
+    {
+        RigPick rig;
+        rig.isRig = true;
+        rig.ownTeam = true;
+        rig.replica = false;
+        rig.busy = 0;
+        const int modes[kModeSlots] = { 1, 2, kModeGoToNav, static_cast<int>(cls), 0, 0, 0, 0, 0, 0, 0 };
+        rig.modes = MakeList(modes, Bits({ 0, 1, 2, 3 }));
+        rig.modes.active = 3;
+        rig.dropClass = cls;
+        return rig;
+    }
+
+    void TestBuildAtNav()
+    {
+        const uint32_t cls = 0x0A1B2C30u;
+        RigPick rig = PickedRig(cls);
+        Check(PickedBuildClass(rig) == cls, "a picked building is the active class mode");
+        Check(PickedSlotEnabled(rig), "the picked entry is enabled");
+
+        RigPick r = rig;
+        r.modes.active = -1;
+        Check(PickedBuildClass(r) == 0, "no active slot: nothing picked");
+        r = rig;
+        r.modes.active = 0;
+        Check(PickedBuildClass(r) == 0, "Go (mode 1) is not a building");
+        r = rig;
+        r.modes.modes[3] = static_cast<int>(kLastFixedMode);
+        r.dropClass = kLastFixedMode;
+        Check(PickedBuildClass(r) == 0, "0x1A is a fixed mode, not a class");
+        r = rig;
+        r.dropClass = 0x0B000000u;
+        Check(PickedBuildClass(r) == 0, "a stale drop class (or a PRODMENU stub) does not count");
+        r = rig;
+        r.busy = 1;
+        Check(PickedBuildClass(r) == 0, "+0x228 set: GetCommand refuses, so not picked");
+        r = rig;
+        r.isRig = false;
+        Check(PickedBuildClass(r) == 0, "only Construction Rigs");
+        r = rig;
+        r.ownTeam = false;
+        Check(PickedBuildClass(r) == 0, "only the player's team");
+        r = rig;
+        r.replica = true;
+        Check(PickedBuildClass(r) == 0, "a remote replica is never ordered here");
+        r = rig;
+        r.modes.enabled &= ~(1u << 3);
+        Check(PickedBuildClass(r) == cls && !PickedSlotEnabled(r), "a disabled pick still labels, but is refused");
+
+        Check(ShowBuildAtNavLabel(true, kModeGoToNav, true), "Go To Nav reads Build at Nav");
+        Check(!ShowBuildAtNavLabel(false, kModeGoToNav, true), "option off: stock label");
+        Check(!ShowBuildAtNavLabel(true, kModeGoToNav, false), "no picked rig: stock label");
+        Check(!ShowBuildAtNavLabel(true, kModeDefend, true), "only the Go To Nav entry");
+
+        Check(DecideBuildAtNav(true, true, true, kCmdDropoff) == BuildAtNavVerdict::Build, "8: build");
+        Check(DecideBuildAtNav(true, true, true, 9) == BuildAtNavVerdict::BadSpot, "9 (no dropoff): refused");
+        Check(DecideBuildAtNav(true, true, true, 0) == BuildAtNavVerdict::BadSpot, "0: refused");
+        Check(DecideBuildAtNav(true, true, false, kCmdDropoff) == BuildAtNavVerdict::BadSpot,
+              "a faulted query is refused");
+        Check(DecideBuildAtNav(true, false, true, kCmdDropoff) == BuildAtNavVerdict::NoPosition,
+              "no nav position: refused");
+        Check(DecideBuildAtNav(false, true, true, kCmdDropoff) == BuildAtNavVerdict::NotAffordable,
+              "a disabled entry is refused first");
+
+        Check(KeepSelectionAfterNavPick(0, 0, 1), "all refused: selection kept");
+        Check(!KeepSelectionAfterNavPick(1, 0, 1), "one rig built: stock deselect");
+        Check(!KeepSelectionAfterNavPick(0, 2, 1), "others went: stock deselect");
+        Check(!KeepSelectionAfterNavPick(0, 0, 0), "nothing refused: stock deselect");
+    }
 }
 
 int main()
@@ -389,6 +464,7 @@ int main()
     TestKeys();
     TestChordClashes();
     TestKeyMessages();
+    TestBuildAtNav();
     if (OpenShimTest::FailureCount() != 0)
     {
         std::fprintf(stderr, "rts_commands_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());

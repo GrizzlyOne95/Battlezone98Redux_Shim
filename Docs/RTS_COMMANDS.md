@@ -13,6 +13,7 @@ RTS Commands. Keys: Options > Input > RTS Actions (written to
 | Repair/Reload for the units that need it | `RtsSmartRepairReload` (on) | stock menu keys | Runs (UNVERIFIED live) |
 | Area select | `RtsAreaSelect` (on) | `RtsAreaSelectKey` (X), Shift+X wide | Runs (UNVERIFIED live) |
 | Hold | `RtsHold` (2) | `RtsHoldKey` (Z); Shift on the Defend entry | Off (single player only) |
+| Build at Nav | `RtsBuildAtNav` (on) | stock menu keys (Go To Nav, then the nav) | Runs for local rigs (UNVERIFIED live) |
 
 Every address is a `scripts/patches.json` `engine_addresses` row. Each part
 binds its own rows (`HookEngine::BindEngineRows`), and each redirected call
@@ -151,6 +152,107 @@ places:
   plus the Defend entry's number can fire both. Set `RtsHold = 1` (Options:
   Hold = Key Only) to keep only the Z key.
 
+## Build at Nav
+
+With a building picked on a selected Construction Rig, the unit menu's Go To
+Nav entry (mode 10) reads "Build at Nav". It still opens the stock nav
+submenu, and picking a nav there gives the rig BUILD at that nav. Rows:
+`ControlPanelNavPickBroadcastCall` and `ConstructionRigGetCommandPos` (new),
+plus `ControlPanelBroadcastCommandObj`, `GameObjectSetCommandObj`,
+`GameObjectSetCommandWhere`, `ControlPanelSelectNone` and
+`ConstructionRigVtable` (existing rows, bound again into this part's own
+copies).
+
+**Picked.** A selected, commandable object counts as a picked rig when all of
+these hold (`PickedBuildClass`):
+
+- its vtable is `ConstructionRigVtable` 0x00877994 (RTTI checked at install);
+- it is on the player's team and is not a remote replica (`+0x68` byte != 2,
+  FUN_004b9830.c line 4);
+- `+0x228 == 0` and the active ModeList mode is above 0x1A: the stock hover
+  test (FUN_0049d230.c line 36; disasm 0x0049D251, 0x0049D28D);
+- the drop class `+0x370` equals that active mode. ConstructionRig
+  SetActiveMode writes both together (FUN_0049d0e0.c lines 12-13). Nothing
+  found clears `+0x370` on cancel, so it alone is not enough, and a PRODMENU
+  submenu stub never reaches the stock SetActiveMode
+  (`producer_build_menu.cpp` `TryHandleProducerMenuMode`).
+
+**Label.** The existing label redirect at 0x004A57BE (`ModeLabelThunk`, see
+Hold) returns `ShimText("openshim_ui:rts_build_at_nav_label", "Build at Nav")`
+for mode 10 while the option is active and the selection holds a picked rig.
+That redirect is installed by the Hold part, so Build at Nav also needs that
+part's rows (`GameObjectSetCommand`, `PlayGlobalSound`,
+`ControlPanelDefendClickSoundCall`, `UiLocalize`), whatever `RtsHold` is set
+to.
+
+**Opening the submenu is stock.** The mode-10 click (`cmp [ebp-0x28C],0xA` at
+0x004A502A) only plays a sound and sets `+0x117C` to the nav submenu
+(FUN_004a08e0.c lines 1359-1362). It issues no order and never reaches
+DispatchMode, so the rig keeps its pick.
+
+**The pick.** The nav slots 0x23..0x2C (FUN_004a08e0.c line 1255) end in
+`BroadcastCommand(3, nav)` and `SelectNone` (lines 1270-1271; 0x004A4A75 and
+0x004A4A80). The row checks all 35 bytes from 0x004A4A64 (a single match in
+the image), and each redirect checks its E8 target (0x004A7050, 0x004A6D50).
+SelectNone is redirected first and the pick only after it; the option is
+available only when both are in. `NavPickHook`:
+
+1. Not CMD_GO, the option off, or no picked rig in the selection: the stock
+   BroadcastCommand.
+2. Otherwise, for each commandable selected unit (the stock gate, vtable
+   +0x38; FUN_004a7050.c lines 11-13):
+   - not a picked rig: the stock per-unit `GameObject::SetCommand(3, nav)`
+     0x004DBD60;
+   - a picked rig whose picked entry is disabled: refused (the build menu
+     disables what the team cannot afford);
+   - otherwise `ConstructionRig::GetCommand(&navPos)` 0x0049D230 (thiscall,
+     ret 4). It sets the drop matrix `+0x378` with the player's facing
+     (`SetConstructionMatrix` 0x0049CF90, FUN_0049d230.c line 39; the height
+     comes from the terrain), runs CanBuildHere 0x00466E50 (line 48: blocked
+     cells, slope variance, overlap with buildings and turrets) and, for
+     COMM/TURR/SHLD, requires a friendly power plant in range (lines 56-81).
+     8 (CMD_DROPOFF, 0x0049D4E2) means valid; anything else is refused.
+   - On 8: `GameObject::SetCommand(0x15 CMD_BUILD, &navPos, class, 0)`
+     0x004DBE70. It builds the AiPath from the rig to the nav itself
+     (FUN_004dbe70.c lines 26-37), so `where` is never 0. RigProcess drops a
+     BUILD without one (FUN_0049dc90.c lines 64-74, `case 0x15`). This is
+     the call the AI and Lua BuildAt use (1.5 `Units_SOrderConstruct`).
+3. Any refusal plays `mnu_buzz.wav`, the stock "cannot drop here" click
+   (FUN_004a08e0.c line 564), and logs (budgeted) the rig and the reason.
+4. When rigs were refused and nothing else was ordered
+   (`KeepSelectionAfterNavPick`), the SelectNone that follows is skipped, so
+   the selection, pick included, survives and the player can pick another
+   nav. Otherwise SelectNone runs as in stock.
+5. Ping: a build pings the nav once as CMD_BUILD (yellow). With no build, the
+   GO to the other units pings green, as the stock broadcast would.
+
+**Facing.** The player's, as the stock hover quad shows it (GetCommand line
+39). Navs carry an arbitrary yaw, so their own facing is not used.
+
+**After the build.** SelectNone calls the rig's Deselect, which PRODMENU
+forwards to ConstructionRig::Deselect 0x0049CCD0 (clears the ModeList active
+slot), so the pick should be gone when the rig is selected again
+(UNVERIFIED live). A rig that is reselected and given a new pick before it
+starts building gets a new drop matrix from the hover query, as with a
+stock drop (UNVERIFIED which placement wins).
+
+**Affordability.** Refused while the picked entry is disabled. Whether the
+rig's UpdateModeList refreshes the enabled bit while the rig stays selected,
+and how Producer start handles a team that cannot pay when the rig arrives,
+are UNVERIFIED.
+
+**BZP caveat.** BZP's SBPAi.lua (lines 772-790) notes that a BUILD issued
+while the rig was on GO "will not stop at its destination", and forces STOP
+within 80 m. The cause is UNVERIFIED (BuildGoto 0x0049E3D0 stage logic, or a
+stale current order); see checklist item 16.
+
+**Multiplayer (UNVERIFIED live).** Only local rigs are ordered (never a
+replica), and the stock human drop gives the same `SetCommand(where)` on the
+owner, so no new packet is sent: 0x004DBE70 forwards to the network only
+for a replica (FUN_004dbe70.c lines 40-42). Whether the drop matrix and
+class reach the other machines before the building replicates is
+UNVERIFIED; live-test host and client.
+
 ## Command pings for unit-menu orders
 
 `rts_markers.cpp` pings orders where `ControlPanel::BroadcastCommand` runs.
@@ -218,3 +320,30 @@ broadcast pings. An order without a target object (Hunt) gets no ping.
     the stock submenu (review N8).
 11. Rebinding: the rally key refuses B; QuickSave refuses Shift+X; binding a
     stock action to X saves with the RTS clash warning.
+
+### Build at Nav (not yet run)
+
+12. Select a rig and pick a building: Go To Nav reads "Build at Nav". With
+    no pick, or with the option off, it reads "Go To Nav". The submenu opens
+    as in stock.
+13. Valid nav (flat, clear, in power range for a gun tower): the rig drives
+    to the nav and builds there, facing the way the player faced when
+    picking; the menu deselects; one yellow ping on the nav. Repeat with the
+    number keys instead of the mouse.
+14. Invalid navs, each refused with the buzz while the selection (and the
+    pick) stays, and `openshim.log` names the reason: a steep slope; a nav on
+    top of an existing building; a gun tower, Comm Bunker or shield away
+    from any power plant.
+15. Mixed selection (a rig with a pick plus two wingmen): the wingmen go to
+    the nav and the rig builds. With an invalid nav the wingmen still go,
+    the rig buzzes, and the selection clears (stock).
+16. BZP caveat: order the rig on a long Go, then Build at Nav while it is
+    still moving. Does it stop and build at the nav, or overshoot?
+17. After the build, reselect the rig: which build-menu entry is active?
+    Pick a building and Build at Nav again before the first one finishes.
+18. Affordability: pick a building, spend the scrap elsewhere until its
+    entry greys out, then Build at Nav: refused. Also check what happens
+    when the scrap drops after the order but before the rig arrives.
+19. Multiplayer, host and client: each player's rig builds at a nav; the
+    building appears on both machines in the same place, with the same
+    facing.

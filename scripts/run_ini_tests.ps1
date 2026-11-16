@@ -425,6 +425,7 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Gameplay/RtsSmartCommandMenu",
     "Gameplay/RtsSmartRepairReload",
     "Gameplay/RtsAreaSelect",
+    "Gameplay/RtsBuildAtNav",
 
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
@@ -625,6 +626,7 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsSmartRepairReload" = "1"
     "Gameplay/RtsAreaSelect" = "1"
     "Gameplay/RtsHold" = "2"
+    "Gameplay/RtsBuildAtNav" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }
