@@ -1027,6 +1027,8 @@ namespace BZROpenShim
 
         // --- AutoSave load button and restart mission (autosave_restart.cpp) ---
         void ForgetAllChunkProxySceneResources(const wchar_t* reason);
+        // destroyAllEntities is about to run: destroy the chunk batch and slot proxies.
+        void DestroyChunkProxySceneObjects(void* sceneManager, const wchar_t* reason);
 
         // --- MPAUTH diagnostic (diag_mpauth_trace.cpp) -------------------------
         inline constexpr size_t kOrdnanceObjOffset = 0x14;
