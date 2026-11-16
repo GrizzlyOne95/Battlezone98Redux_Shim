@@ -108,6 +108,57 @@ Acceptance:
   (`Docs/Archive/2026/ROADMAP_CODE_VALIDATION_20261007.md`, item 300), not a new regression. It does not fail
   the gate (the run stops there with `Known300Stop` set, so run the remaining cycles on a relaunched game if needed), but any change in its behavior from the previous candidate needs explaining
 
+### Mode-transition stress (unattended)
+
+Run once per candidate, on DX9 and DX11, with Campaign Reimagined and the "Legacy Instant Action" addon
+installed. It needs no input and can run while Windows is locked. One game process works through a plan of
+CR missions, Instant Action maps, hosted one-player multiplayer games and main-menu idles, returning to the
+main menu between loads, to catch stale pointers and use-after-free across mode transitions:
+
+```powershell
+powershell -File reverse_engineering\Run-BZRModeStress.ps1 -Renderer DX11
+powershell -File reverse_engineering\Run-BZRModeStress.ps1 -Renderer DX9 -FrameCapture
+```
+
+The script takes `bzr_livetest.lock` (it refuses if the lock exists), runs `Assert-BZRSafeToLaunch`, and
+launches the game windowed with `OPENSHIM_MODE_STRESS_PLAN`, `OPENSHIM_NEVER_ACTIVATE=1` and
+`OPENSHIM_SOAK_TELEMETRY=1`. The native driver (`src/patches/mode_stress_driver.cpp`) replays the stock shell
+button handlers from a frame listener and logs `[MODESTRESS] step i/n <kind> <arg> begin|launched|ready|end`.
+It exits through the main-menu exit button after `[MODESTRESS] done`. On a timeout the script closes the game
+with WM_CLOSE (`Stop-BZRGame`) and never force-kills it. The default plan is
+`reverse_engineering/mode_stress_default.plan` (grammar in `include/mode_stress_plan.h`); pass `-PlanPath`
+for another one.
+
+An `mp_host <map.bzn> <seconds>` step hosts a multiplayer game in the same process, through the stock path:
+it starts OpenShim's in-process no-sign-in LAN host, selects it as the server, waits for the network, calls
+the stock Multiplayer button into the lobby, creates a game with the lobby Create button's direct branch,
+picks the map in the game room, presses launch, holds for `<seconds>` after the sim loop runs, leaves the game
+like the abort button, backs out of the room and lobby with their Back buttons, and stops the host. Each
+stage fails as `[MODESTRESS] FAIL mp_host:<stage>` (`rows`, `no-auth-lan`, `host-start`, `select`,
+`network`, `lobby`, `create`, `map`, `launch`, then the shared `load`/`leave` stages). Stock refuses a
+one-player launch while Sync Join is on (CanLaunchGame `FUN_00573d00`) and ends a one-player game, so for a
+plan with `mp_host` the script sets `OPENSHIM_DISABLE_SYNC_JOIN_DEFAULT_ON=1`, `multi.ini` `syncJoin=0` and
+`openshim.ini` `[Network] NoAuthLan=1`, and restores both files afterwards. It does not cover a second
+client joining; that stays with the two-client checks below.
+
+Every log the game writes (`logs\*.log`/`*.txt` including `openshim.log`, `BZLogger.txt`,
+`BZOgreLogfile.log`, `exu.log` and `openshim_crash.log`, plus the root `BZLogger.txt`) is snapshotted
+before launch, and only the new content is scanned. Error, exception, fail, assert, crash, first-chance and
+notable warning lines are de-duplicated, counted, and attributed to the step they happened in by
+`[MODESTRESS]` markers and timestamps. Lines matched by `reverse_engineering/mode_stress_known_log_noise.txt`
+are still printed with counts under "Allowlisted". Every rule there must say why its line is benign. The
+report is `openshim_test_results\modestress_<renderer>_<stamp>\mode_stress_report.json`, with the new log
+segments copied next to it. After you edit the allowlist, re-score a run without relaunching:
+`Run-BZRModeStress.ps1 -AnalyzeOnly <report dir>`.
+
+Acceptance:
+
+- every step is PASS, the log has `[MODESTRESS] done`, and the game exits on its own
+- no FAIL-CRASH (new `.dmp`, process exit or first-chance AV), FAIL-STALL (heartbeat gap or main-loop stall
+  over `-StallFailSeconds`) or driver `[MODESTRESS] FAIL`
+- no FAIL-LOG: every flagged line is either fixed or added to the allowlist with a written reason, never a
+  blanket pattern; review any change in allowlisted counts against the previous candidate
+
 ## Steam 2.2.301
 
 Test the exact same release candidate files on the supported Steam executable.

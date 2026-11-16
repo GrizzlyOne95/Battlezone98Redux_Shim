@@ -200,6 +200,8 @@
     <ClInclude Include="include\perf_telemetry.h" />
     <ClInclude Include="include\soak_telemetry.h" />
     <ClInclude Include="include\soak_telemetry_policy.h" />
+    <ClInclude Include="include\mode_stress_driver.h" />
+    <ClInclude Include="include\mode_stress_plan.h" />
     <ClInclude Include="include\music_single_fill.h" />
     <ClInclude Include="include\precise_timestep.h" />
     <ClInclude Include="include\remote_object_smoothing.h" />

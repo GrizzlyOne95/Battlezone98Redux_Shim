@@ -726,6 +726,11 @@ openshim_add_test(soak_telemetry_policy_tests STD 17 SOURCES
     soak_telemetry_policy_tests.cpp
 )
 
+# The mode-transition stress driver's plan-file parser (header-only).
+openshim_add_test(mode_stress_plan_tests STD 17 SOURCES
+    mode_stress_plan_tests.cpp
+)
+
 openshim_add_test(producer_rally_policy_tests STD 20 SOURCES
     producer_rally_policy_tests.cpp
 )

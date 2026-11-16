@@ -6490,6 +6490,102 @@
       "address": "0x007CB540",
       "expected": "55 8B EC 51 56 89 4D FC 8B 4D FC 81 C1 68 01 00 00 E8 FA FB E9 FF 8B F0 8B 4D FC 81 C1 5C 01 00",
       "identity": "Released GOG 2.2.301 cUI_Selectlist scroll down thiscall(this): increments +0x150 while below item count (vector +0x168, 0x1C-byte elements) minus visible rows (vector +0x15C), then calls the refresh 0x007CB400."
+    },
+    {
+      "name": "SimLoopRunning",
+      "address": "0x009183DC",
+      "kind": "data",
+      "identity": "uint32 1 while the mission sim loop runs: FUN_006185f0 stores 1 just before its frame loop (0x0061894B, guarded by ModeStressSimLoopSet) and teardown FUN_00618970 stores 0. Read by the mode stress driver as its mission 'ready' signal."
+    },
+    {
+      "name": "MissionStatus",
+      "address": "0x0091830C",
+      "kind": "data",
+      "identity": "uint32 nMissionStatus (saved under that name by FUN_004fd7e0): do_smain FUN_005d42e0 opens the result or campaign screens when it is non-zero and the main menu when it is 0. The failure screen sets 1 and the success screen 2; the in-game abort button FUN_00788fa0 clears it (guarded by ModeStressAbortButton)."
+    },
+    {
+      "name": "MainScreenExitButton",
+      "address": "0x0078C850",
+      "expected": "55 8B EC 51 89 4D FC 68 E0 DE 89 00 E8 5F 18 09 00 83 C4 04 6A 09 E8 05 79 CA FF 83 C4 04 C7 05 28 83 91 00 00 00 00 00 6A 01 8B 45 FC 8B 88 38 01 00 00 E8 E8 C8 03 00 8B E5 5D C3",
+      "identity": "Main menu exit button handler FUN_0078c850, void __thiscall(mainMenuScreen): logs 'Exiting Game from main screen exit button', SetShellState(9 EXITED) 0x00434170, clears the screen type 0x00918328 and calls End(1) 0x007C9170 on the screen's wrapper at +0x138. Whole body, GOG 2.2.301; the mode stress driver calls it to close the game after its plan."
+    },
+    {
+      "name": "ModeStressSimLoopSet",
+      "address": "0x0061894B",
+      "expected": "C7 05 DC 83 91 00 01 00 00 00",
+      "identity": "Guard for SimLoopRunning: the mov dword [0x009183DC],1 FUN_006185f0 executes just before the mission frame loop of the main loop FUN_00618a40. Not patched."
+    },
+    {
+      "name": "ModeStressAbortButton",
+      "address": "0x00788FA0",
+      "expected": "55 8B EC 51 89 4D FC 6A 00 8B 45 FC 8B 88 38 01 00 00 E8 B9 01 04 00 68 3C D9 89 00 E8 FF 50 09 00 83 C4 04 6A 02 E8 A5 B1 CA FF 83 C4 04 C7 05 28 83 91 00 00 00 00 00 C7 05 0C 83 91 00 00 00 00 00 8B E5 5D C3",
+      "identity": "Guard: the in-game abort button FUN_00788fa0 (logs 'Game stopped due to abort button'): End(0) on screen+0x138, SetShellState(2 QUIT), screen type 0x00918328 = 0, nMissionStatus 0x0091830C = 0. The mode stress driver replays this sequence to leave a mission. Whole body; not patched."
+    },
+    {
+      "name": "ModeStressIaLaunchSequence",
+      "address": "0x00789BCA",
+      "expected": "6A 05 E8 9F A5 CA FF 83 C4 04 C7 05 28 83 91 00 00 00 00 00 6A 00 8B 4D CC 8B 89 38 01 00 00 E8 82 F5 03 00 E8 0D 1F 00 00 6A 17",
+      "identity": "Guard: the tail of the Instant Action launch FUN_00789b00 after the map name is copied to 0x00915540 and 0x00482860 sets 'instant_action': SetShellState(5), screen type 0x00918328 = 0, End(0) 0x007C9170 on screen+0x138, LoadScreenPrep 0x0078BB00, then push 0x17 for Request 0x007C7930. The mode stress driver replays it. Not patched."
+    },
+    {
+      "name": "ModeStressCampaignLaunch",
+      "address": "0x00790C60",
+      "expected": "55 8B EC 83 EC 24 89 4D F4 C7 05 14 83 91 00 01 00 00 00",
+      "identity": "Guard: custom campaign launch FUN_00790c60 opens with mov dword [0x00918314],1 (OldMissionMode), then copies the campaign mission name to 0x00915540 and runs the same SetShellState(5) / End(0) / LoadScreenPrep / Request(0x17) tail. The mode stress driver's mission step replays it. Not patched."
+    },
+    {
+      "name": "ModeStressLobbyScreenSlot",
+      "address": "0x00945564",
+      "kind": "data",
+      "identity": "Pointer to the live multiplayer lobby screen (stock shell screen 0xE): its constructor FUN_0079ea90 stores this (line 114), its destructor FUN_007a0fb0 clears it (line 16); every lobby button callback loads its 'this' from here (ModeStressLobbyBackButton). Read by the mode stress driver's mp_host step."
+    },
+    {
+      "name": "ModeStressLobbyState",
+      "address": "0x006CC050",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 40 50 8B E5 5D",
+      "identity": "Guard: lobby connection state getter FUN_006cc050, int __thiscall(lobby) returning lobby+0x50 (4 = in a chat room; the lobby Create button acts only then). The mode stress driver reads +0x50 of the lobby screen's lobby object (screen+0x1C4). Not patched."
+    },
+    {
+      "name": "ModeStressLobbyCreateButton",
+      "address": "0x0079E4F0",
+      "expected": "55 8B EC 83 EC 10 89 4D FC 8B 45 FC 8B 88 C4 01 00 00 E8 49 DB F2 FF 83 F8 04 0F 85 1B 01 00 00 8B 4D FC C6 81 FC 01 00 00 01 8B 55 FC C6 82 FD 01 00 00 01 6A 01 8B 45 FC 8B 88 C0 01 00 00 E8 8C 20 03 00 E8 67 5F C9 FF 83 F8 02 75 49 8B 4D FC 8B 89 C4 01 00 00 E8 C4 D7 F9 FF 89 45 F8 83 7D F8 00 74 2D 8B 55 FC 8B 8A C0 01 00 00 E8 FD 1E 03 00 8B 45 F8 83 C0 2C 83 EC 18 8B CC 89 65 F4 50 E8 E9 10 C8 FF 89 45 F0 8B 4D FC E8 2E F5 FF FF",
+      "identity": "Guard: lobby Create Game button handler FUN_0079e4f0 (__thiscall lobby screen) up to its direct-create call: lobby state (screen+0x1C4, FUN_006cc050) must be 4, sets screen+0x1FC and +0x1FD, popup (screen+0x1C0) FUN_007d05c0(1), then on the no-name-prompt branch popup FUN_007d0460 and FUN_0079dab0(name by value). The mode stress driver replays that branch with its own game name. Not patched."
+    },
+    {
+      "name": "ModeStressLobbyCreateGame",
+      "address": "0x0079DAB0",
+      "expected": "55 8B EC 6A FF 68 B0 FB 85 00 64 A1 00 00 00 00 50 83 EC 20 A1 00 70 8E 00 33 C5 89 45 F0 50 8D",
+      "identity": "FUN_0079dab0, void __thiscall(lobbyScreen, std::string name by value; ret 0x18): with screen+0x1FD set and the popup password box clear it leaves the chat room, marks the create pending (+0x1FF, FUN_0079e920(1)) and stores the game name at +0x200. Called by the mode stress driver as FUN_0079e4f0 calls it."
+    },
+    {
+      "name": "ModeStressPopupEnable",
+      "address": "0x007D05C0",
+      "expected": "55 8B EC 51 89 4D FC 0F B6 45 08 50 8B 4D FC 8B 91 54 01 00",
+      "identity": "FUN_007d05c0, void __thiscall(popup, bool): calls SetEnabled-style slot +0x24 on the popup's child at +0x154. The lobby Create button calls it with 1 before creating; the mode stress driver does the same."
+    },
+    {
+      "name": "ModeStressPopupReset",
+      "address": "0x007D0460",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 50 01 00 00",
+      "identity": "FUN_007d0460, void __thiscall(popup): resets the lobby popup (FUN_007cf9f0, list +0x150 selection -1, FUN_007c3c10(0) clears the password box). FUN_0079e4f0 calls it before FUN_0079dab0; so does the mode stress driver."
+    },
+    {
+      "name": "ModeStressRoomLaunchButton",
+      "address": "0x00795C10",
+      "expected": "55 8B EC 83 3D 5C 55 94 00 00 74 0B 8B 0D 5C 55 94 00 E8 79 3E 00 00 5D C3",
+      "identity": "Game room (create screen) launch/ready button callback FUN_00795c10: if MultiCreateScreenSlot is set, FUN_00799aa0(screen) publishes the host's 'ready' metadata; the room refresh then launches when CanLaunchGame FUN_00573d00 returns 4. Whole body; called by the mode stress driver."
+    },
+    {
+      "name": "ModeStressRoomBackButton",
+      "address": "0x00795BF0",
+      "expected": "55 8B EC 83 3D 5C 55 94 00 00 74 0B 8B 0D 5C 55 94 00 E8 29 3E 00 00 5D C3",
+      "identity": "Game room Back button callback FUN_00795bf0: if MultiCreateScreenSlot is set, FUN_00799a30(screen) ('Exiting Create Because Back button is pressed'). Whole body; called by the mode stress driver to leave the room."
+    },
+    {
+      "name": "ModeStressLobbyBackButton",
+      "address": "0x0079D670",
+      "expected": "55 8B EC 8B 0D 64 55 94 00 E8 E2 06 00 00 5D C3",
+      "identity": "Lobby Back button callback FUN_0079d670: FUN_0079dd60 with ecx = ModeStressLobbyScreenSlot (pops the shell history; re-seeds [main, lobby] when it is the last entry). Whole body; called by the mode stress driver to return to the main menu."
     }
   ],
   "module_addresses": [

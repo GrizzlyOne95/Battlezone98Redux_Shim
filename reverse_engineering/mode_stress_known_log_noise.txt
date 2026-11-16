@@ -1,0 +1,120 @@
+# Known benign log lines for Run-BZRModeStress.ps1 (Docs/RELEASE_QUALIFICATION.md,
+# "Mode-transition stress (unattended)").
+#
+# A line the harness flags (error / exception / fail / assert / warning patterns,
+# OpenShim [WARN] and [ERROR]) fails its step as FAIL-LOG unless a rule here
+# matches it. Matches are still counted and printed under "Allowlisted log
+# lines", so nothing is hidden. Keep every rule narrow and say WHY it is benign;
+# never add a rule just to turn a run green. Re-score a run after editing this
+# file with:  Run-BZRModeStress.ps1 -AnalyzeOnly <report dir>
+#
+# Format: <log glob> :: <regex>
+#   <log glob>  matches the report's log label: the path under the game root
+#               with separators turned into "_" (logs_BZLogger.txt,
+#               logs_openshim.log, logs_BZOgreLogfile.log, logs_exu.log,
+#               logs_openshim_crash.log, BZLogger.txt, ...). "*" = any log.
+#   <regex>     .NET regex, case-insensitive, matched anywhere in the line.
+
+# Stock GOG build started without GOG Galaxy running: the Galaxy SDK cannot
+# find GalaxyPeer and the game continues offline. Seen on every launch of an
+# unattended run; not related to mode transitions.
+*BZLogger.txt :: cGogInterface::preinitGoGInterface, try/catch failure error no: GalaxyRuntimeError : 3 : Could not retrieve GalaxyPeer library location
+
+# Stock matchmaking websocket retrying while no lobby server is reachable (the
+# run is offline and starts no server). Retries every few seconds for the
+# whole run.
+*BZLogger.txt :: BZRNetInterface reset active_con due to websocket connection setup failure: Underlying Transport Error
+
+# Same stock websocket retry as above, reported with a different transport
+# reason when the connect attempt times out instead of being refused.
+*BZLogger.txt :: BZRNetInterface reset active_con due to websocket connection setup failure: Timer Expired
+
+# Stock log line written when a mission is left through the pause-menu abort
+# path. The driver's leave step uses exactly that path, so one is expected per
+# load step. A missing or extra one is visible in the per-step counts.
+*BZLogger.txt :: ^\S+ \S+ Game stopped due to abort button$
+
+# Addon .ini files with mapType NONE (or stray desktop.ini files in addon
+# folders) are skipped by the map-list scan at startup. Content issue in the
+# installed mods, not a mode-transition fault.
+*BZLogger.txt :: WARNING: unknown mapType 'NONE' in '
+
+# Ogre notice that a mesh uses the older v1.8 serializer. Stock and OpenShim
+# generated meshes load fine in that format; informational only.
+*BZOgreLogfile.log :: WARNING: \S+\.mesh is an older format \(\[MeshSerializer_v1\.8\]\); you should upgrade it
+
+# Ogre D3D11 render-system option dump at startup. "Exceptions" here is the
+# option name, not an error.
+*BZOgreLogfile.log :: D3D11: RenderSystem Option: Information Queue Exceptions Bottom Level
+
+# OpenShim address resolver success lines (one match, scan and fallback
+# agree). They are INFO; the identity prose describes the engine function's
+# own failure paths ("on failure", "fails"), which trips the word filter.
+*openshim.log :: \[INFO\] \[resolve\] \[RESOLVE\] name="[^"]+" matches=1 scan=0x[0-9A-F]+ fallback=0x[0-9A-F]+ used=0x[0-9A-F]+ source=scan agree=yes identity=
+
+# net_optimizer writing the configured [Net] values ("asserting" them), not an
+# assertion.
+*openshim.log :: \[INFO\] \[net\] \[OpenShimNet\] net_globals: version confirmed; asserting MinBandwidth=
+
+# Per-mission counters that report zero failures.
+*openshim.log :: \[INFO\] \[skinnedgibs\] \[SKINNEDGIBS\] fracture prewarm pass=\d+ objects=\d+ models=\d+ pieces=\d+ failed=0 
+*openshim.log :: \[INFO\] \[gpu-skinning\] \[GPUINST\] twin summary: twins=\d+ passes=\d+ refused_passes=\d+ failed=0$
+
+# BZN loader advisory printed for missions that share a terrain with another
+# mission (the CR missions do). It explains what to check "if the mission
+# fails to load"; the mission loaded (the step reached ready).
+*openshim.log :: \[INFO\] \[patcher\] \[BZNLOAD\] note: (TerrainName selects the terrain resource identity; verify that terrain payload if the mission fails to load\.|this can be intentional when a mission reuses existing terrain; it is not a structural BZN error and is never auto-fixed\.)$
+
+# DX11 compatibility layer, once per material: a material it cannot remap or
+# whose custom programs it does not handle keeps the stock render path
+# (action=stock-fallback / action=skip). Expected on every DX11 load.
+*openshim.log :: \[WARN\] \[RENDER\] \[DX11COMPAT\] (instantiation failed material=.+ path=family-remap action=stock-fallback|material=.+ unsupported custom programs vs=\S+ ps=\S+ action=skip)$
+
+# ODF loader fix-up for gsplint.odf, whose class header reads [SprayBomb]
+# instead of [SprayBombClass]; the remap is the fix and is logged each load.
+*openshim.log :: \[WARN\] \[odf\] remap gsplint\.odf:\d+ \[SprayBomb\] -> \[SprayBombClass\]$
+
+# HD terrain tiles exist only for maps in the paint pack; other maps use the
+# stock terrain, as intended.
+*openshim.log :: \[WARN\] \[terrain-hd\] \[TERRAIN-HD\] native tiles declined: paint pack has no map entry for this mission:
+
+# Campaign Reimagined's PersistentConfig asks Steam for an id; the GOG build
+# has none and the script falls back to polling. Once per CR mission load.
+*BZLogger.txt :: PersistentConfig: Initial Steam ID retrieval failed\. Starting background polling\.\.\.
+
+# A Lua table dump with a field named "failed" whose value is false (BZLogger
+# splices its timestamp into every fragment of the line).
+*BZLogger.txt :: "failed"\S* \S+ \]=\S* \S+ false\S*
+
+# Startup and shutdown status lines whose wording contains a filter word but
+# that report success: the crash logger's install line, the socket-buffer
+# floor being re-applied ("reasserted"), the engine-address summary with
+# failed=0, two patches whose names contain "Exception"/"Failure", the render
+# scheme takeover ("settings reassert loop"), the MP-ready explainer install,
+# and the D3D11 exit-teardown skip bindings (their identity prose describes
+# the driver exit crash they avoid).
+*openshim.log :: \[INFO\] \[crash\] Crash logger installed log=
+*openshim.log :: \[INFO\] \[net\] \[OpenShimNet\] sid=\d+ reasserted SO_SNDBUF floor on sock=
+*openshim.log :: \[INFO\] \[resolve\] \[ADDR\] engine addresses: verified=\d+ data=\d+ failed=0 of \d+$
+*openshim.log :: \[INFO\] \[patcher\] \[OK\]\s+(UI Render Exception Fail-Soft|Restart Mission Hook Failure) wrote \d+ bytes to 0x
+*openshim.log :: \[INFO\] \[RENDER\] scheme takeover installed at 0x[0-9A-F]+ \(settings reassert loop over all viewports\)$
+*openshim.log :: \[INFO\] \[patcher\] \[MPREADY\] Explainer installed: MPStatus now names the failing term under the multiplayer entry$
+*openshim.log :: \[INFO\] \[resolve\] \[ADDR\] D3D11 exit teardown skip bound D3D11\w+ at RenderSystem_Direct3D11\.dll\+0x
+
+# Weapon presentation start-up notice (weapon_presentation_native.cpp:1419):
+# printed at Warn whenever MuzzleFlash or MeshRecoil is on, to say only the
+# authored-ODF path runs. Its real failures are separate lines
+# ("native candidate inactive", "installation failed"), which stay unlisted.
+*openshim.log :: \[WARN\] \[WEAPONFX\] authored ODF presentation requested; GOG/SP cannon\+machinegun, MuzzleFlash=\d MeshRecoil=\d; assets/config required$
+
+# The netveh call-site scan runs after "Vehicle List Mod Fix 4/4" has written
+# its 5-byte jump at 0x00798BD9, inside the scan window (the unpatched exe
+# matches the pattern at 0x00798BD1), so the scan finds nothing and the
+# resolver uses the fallback, which is the same address. mp_faction_restrict
+# confirms the site at install ("[FACTION] installed ... sites=0x00798BE1").
+# Only this row; any other matches=0 resolve stays a finding.
+*openshim.log :: \[INFO\] \[resolve\] \[RESOLVE\] name="MPVehicleList::LoadCallSiteNetveh" matches=0 scan=0x00000000 fallback=0x00798BE1 used=0x00798BE1 source=fallback agree=n/a 
+
+# Per-destruction fracture record with zero failed pieces (a unit died and
+# broke into gib pieces as designed).
+*openshim.log :: \[INFO\] \[skinnedgibs\] \[FRACTURE\] mesh=\S+ pieces=\d+ spawned=\d+ failed=0 
