@@ -436,7 +436,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # until the player presses the chord: plain and other-modifier presses
     # of the key are left alone, it never touches game1-10.sav or auto.sav,
     # and saving uses the AutoSave gate (single player, no pause/shell UI).
-    "QuickSave/QuickSaveEnabled"
+    "QuickSave/QuickSaveEnabled",
+
+    # The stock player headlight, back on at the user's request on 2026-11-13.
+    # This key is an override, so 0 forced a stock feature off; 1 is stock.
+    "SinglePlayer/Headlights"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(
