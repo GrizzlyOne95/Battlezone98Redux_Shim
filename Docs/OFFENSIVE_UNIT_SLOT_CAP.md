@@ -145,3 +145,29 @@ every machine to run the same rule.
 
 UNVERIFIED: what BZCC's class key `objClass+0x61c` is (ODF identity or
 category); BZCC hop-in grouping.
+
+### Stock panel keys D must keep (1.5 `004c4998_ControlPanel_Render.c`; GOG `input.map`)
+
+| Input | Stock behaviour | Evidence |
+|---|---|---|
+| F1-F7 | `SelectGroup`: select every live member, then the panel shows the command menu, so 1-0 issue commands. | `:383-389`, `:650`; `004c4642_ControlPanel_SelectGroup.c` |
+| Ctrl+F1-F7 | `BindGroup`: assign the selection to that group (`cmd_multi` = Control). | `:390-392`; `input.map` `cmd_multi` |
+| Ctrl+category key (e.g. Ctrl+2) | `SelectType`: select every unit in that category's slot range. | `:828-829`; `004c47c0_ControlPanel_SelectType.c` |
+| Ctrl+1-0 in a unit list | `SelectAdd`: add that unit to the selection. | `:820-824`, `:929-934` |
+| Hold LeftShift | Menu cycle: mouse vertical movement or the arrow keys move the highlight; left click presses it. | `:89-131`; `input.map` `menu_cycle`, `menu_pos`, `menu_next` |
+| Shift+F-key | Not available: each `group_select_N` binding is cancelled while LeftShift is held. | `input.map` `group_select_0..6` |
+
+Design A for group members: a second F-key press, while the selection is still
+that group, puts the group's members in the unit list on 1-0. If the member
+list reuses the stock unit-list path, Ctrl+number (add) and Shift cycling work
+there with no extra code.
+
+Points to settle when implementing:
+- Ctrl+2 (`SelectType`) only reaches slotted offense. Hook it so it selects
+  every offensive unit when the cap is lifted (`selectList` holds 91).
+- Ctrl+F-key assign already exists, so only "add group to selection" is new,
+  and Shift+F-key is blocked by the stock bindings. Drop it unless a free key
+  is found.
+- A hand-bound group can exceed 10. The member list shows its first 10.
+- `TeamHasFreeSlot` must also be lifted, or pilots cannot board overflow
+  vehicles.
