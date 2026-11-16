@@ -431,10 +431,24 @@ namespace BZROpenShim::Hooks
             if (stock != -1 || !g_ExtendedActive.load(std::memory_order_acquire) ||
                 minSlot != Policy::kOffenseMinSlot || maxSlot != Policy::kOffenseMaxSlot)
                 return stock;
-            const bool userTeam = team != nullptr && team == SafeUserTeam();
-            char odf[AutoGroupPolicy::kOdfBufferSize];
-            const bool canPlace = userTeam && ReadClassOdf(cls, odf) && AutoGroupCanPlace(odf);
-            if (!Policy::BuildGateOpens(stock, minSlot, maxSlot, true, userTeam, canPlace))
+            void* const userTeamPtr = SafeUserTeam();
+            const bool userTeam = team != nullptr && team == userTeamPtr;
+            char odf[AutoGroupPolicy::kOdfBufferSize] = {};
+            const bool odfRead = userTeam && ReadClassOdf(cls, odf);
+            const bool canPlace = odfRead && AutoGroupCanPlace(odf);
+            const bool opens = Policy::BuildGateOpens(stock, minSlot, maxSlot, true, userTeam, canPlace);
+            // One line per change of outcome (UpdateModeList runs every
+            // frame), so a refused gate says which check refused it.
+            static int s_lastOutcome = -1;
+            const int outcome = (userTeam ? 1 : 0) | (odfRead ? 2 : 0) | (canPlace ? 4 : 0);
+            if (outcome != s_lastOutcome)
+            {
+                s_lastOutcome = outcome;
+                LogBudgeted(L"[OVERFLOW] build gate %ls: userTeam=%d (team %p, user %p) odf='%hs' canPlace=%d\n",
+                            opens ? L"open" : L"refused", userTeam ? 1 : 0, team, userTeamPtr, odf,
+                            canPlace ? 1 : 0);
+            }
+            if (!opens)
                 return stock;
             return minSlot; // the caller only compares with -1
         }
