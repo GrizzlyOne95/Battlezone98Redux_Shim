@@ -22,6 +22,7 @@
 #include "openshim_assets.h"
 #include "openshim_ini.h"
 #include "openshim_updater.h"
+#include "openshim_l10n_text.h"
 #include "options_ui_l10n.h"
 #include "options_ui_l10n_resources.h"
 #include "patcher.h"
@@ -6482,5 +6483,21 @@ namespace BZROpenShim
     bool AreInputBindingUiHooksInstalled()
     {
         return g_InputBindingUiPopulateHookInstalled && g_InputBindingUiKeyReleasedHookInstalled;
+    }
+
+    // Public face of the file-local lookup above, for OpenShim's other screens.
+    // A nested namespace keeps these from clashing with the statics; the
+    // qualified calls reach the anonymous-namespace functions.
+    namespace L10n
+    {
+        const char* ShimText(const char* key, const char* english)
+        {
+            return BZROpenShim::ShimText(key, english);
+        }
+
+        std::string ShimFormat(const char* key, const char* english, const std::string& arg)
+        {
+            return BZROpenShim::ShimFormat(key, english, arg);
+        }
     }
 }

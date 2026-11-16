@@ -60,6 +60,7 @@
 #include "hook_engine.h"
 #include "map_filter_extras.h"
 #include "map_letter_jump_policy.h"
+#include "openshim_l10n_text.h"
 #include "shell_screens.h"
 #include "shim_log.h"
 
@@ -69,6 +70,8 @@
 #include <cstdio>
 #include <cstring>
 #include <new>
+
+using BZROpenShim::L10n::ShimText;
 
 namespace BZROpenShim
 {
@@ -141,7 +144,6 @@ namespace BZROpenShim
             // glyph, see the nickname field in lobby_ui.cpp), not an input limit.
             constexpr int kSearchVisibleCharacters = 19;
             constexpr int kSearchInputLimit = 31;
-            constexpr char kSearchPlaceholder[] = "Search: click here";
 
             constexpr uint8_t kPredicatePrologue[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
             constexpr uint8_t kKeysBuiltBytes[] = { 0x8B, 0x85, 0x3C, 0xFE, 0xFF, 0xFF };
@@ -392,6 +394,20 @@ namespace BZROpenShim
                 }
             }
 
+            // info.label is the English identity (logs); the list shows this.
+            const char* ExtraFilterLabel(const ExtraFilterInfo& info)
+            {
+                switch (info.extra)
+                {
+                case Extra::FivePlusPlayers:
+                    return ShimText("openshim_ui:mapfilter_5plus_players", "5+ Players");
+                case Extra::StockOnly:
+                    return ShimText("openshim_ui:mapfilter_stock_maps", "Stock Maps");
+                default:
+                    return info.label;
+                }
+            }
+
             void __cdecl AppendExtraFilterKeys(uint8_t* component)
             {
                 if (!component || !g_VectorStringPushBack ||
@@ -407,7 +423,7 @@ namespace BZROpenShim
                         LogShimA(LogLevel::Info, kComponent, "[MAPFILTER] '%s' not offered: no map matches", info.label);
                         continue;
                     }
-                    const bool pushed = TryPushKeyAndLabel(component, info.key, info.label);
+                    const bool pushed = TryPushKeyAndLabel(component, info.key, ExtraFilterLabel(info));
                     LogShimA(LogLevel::Info, kComponent, "[MAPFILTER] '%s' %s (%u maps)",
                         info.label, pushed ? "offered" : "push failed", matches);
                 }
@@ -601,6 +617,11 @@ namespace BZROpenShim
             // AppendChar redraws from the backing string. Only while focused
             // the text carries a blinking trailing caret; idle shows the text
             // or the placeholder, never a caret.
+            const char* SearchPlaceholder()
+            {
+                return ShimText("openshim_ui:mapfilter_search_placeholder", "Search: click here");
+            }
+
             void ShowSearchText()
             {
                 if (!g_BzrFn_SetTooltip || !SearchEntryLive())
@@ -609,7 +630,7 @@ namespace BZROpenShim
                 if (g_SearchEditing)
                     std::snprintf(shown, sizeof(shown), g_SearchCaretOn ? "%s_" : "%s ", g_SearchText);
                 else
-                    CopyText(shown, sizeof(shown), g_SearchText[0] ? g_SearchText : kSearchPlaceholder);
+                    CopyText(shown, sizeof(shown), g_SearchText[0] ? g_SearchText : SearchPlaceholder());
                 __try
                 {
                     g_BzrFn_SetTooltip(g_SearchEntry, shown);
@@ -988,7 +1009,7 @@ namespace BZROpenShim
                         return false;
                     if (g_BzrFn_TextEntrySetInputLimit)
                         g_BzrFn_TextEntrySetInputLimit(entry, kSearchInputLimit);
-                    g_BzrFn_SetTooltip(entry, kSearchPlaceholder);
+                    g_BzrFn_SetTooltip(entry, SearchPlaceholder());
                     g_BzrFn_AddChild(parent, entry, 0);
 
                     // The entry has no click path of its own that reaches

@@ -26,6 +26,7 @@
 #include "lan_session.h"
 #include "lan_no_auth.h"
 #include "net_optimizer.h"
+#include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "shell_screens.h"
 
@@ -34,6 +35,9 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+
+using BZROpenShim::L10n::ShimText;
+using BZROpenShim::L10n::ShimFormat;
 
 namespace BZROpenShim
 {
@@ -130,8 +134,10 @@ namespace BZROpenShim
         bool g_AwaitDrop = false;
         bool g_InContinue = false;
         ULONGLONG g_PendingSince = 0;
-        char g_Note[64] = {};
-        char g_NetworkShown[128] = {};
+        // Translated text can be longer than the English; Note holds the text
+        // as it was translated when set (it does not follow a live language change).
+        char g_Note[192] = {};
+        char g_NetworkShown[256] = {};
 
         // The Server selector. g_ServerSelector is false while a test redirect
         // owns the endpoint: the row is then a read-only label.
@@ -157,8 +163,15 @@ namespace BZROpenShim
 
         namespace MS = MatchmakingServer;
 
-        constexpr const char* kCustomServerNote = "Custom servers never receive your sign-in ticket.";
-        constexpr const char* kLocalServerNote = "Start the dedicated server on this PC first.";
+        const char* CustomServerNote()
+        {
+            return ShimText("openshim_ui:prelobby_custom_note", "Custom servers never receive your sign-in ticket.");
+        }
+
+        const char* LocalServerNote()
+        {
+            return ShimText("openshim_ui:prelobby_local_note", "Start the dedicated server on this PC first.");
+        }
 
         bool IsLocalHost(const std::string& host)
         {
@@ -203,14 +216,14 @@ namespace BZROpenShim
             }
         }
 
-        const char* ServerCaption(ServerChoice which)
+        // "Rebellion" and "LAN" are names, not words, and stay as they are.
+        std::string ServerCaption(ServerChoice which)
         {
             const bool selected = g_Choice == which;
-            if (which == ServerChoice::Rebellion)
-                return selected ? "> Rebellion <" : "Rebellion";
-            if (which == ServerChoice::Local)
-                return selected ? "> Local <" : "Local";
-            return selected ? "> Custom <" : "Custom";
+            std::string name = which == ServerChoice::Rebellion ? "Rebellion"
+                             : which == ServerChoice::Local ? std::string(ShimText("openshim_ui:prelobby_server_local", "Local"))
+                             : std::string(ShimText("openshim_ui:prelobby_server_custom", "Custom"));
+            return selected ? "> " + name + " <" : name;
         }
 
         // Captions mark the selected button; the host entry exists only while
@@ -223,17 +236,17 @@ namespace BZROpenShim
             if (g_BzrFn_SetButtonLabel)
             {
                 if (g_RebellionButton)
-                    g_BzrFn_SetButtonLabel(g_RebellionButton, ServerCaption(ServerChoice::Rebellion));
+                    g_BzrFn_SetButtonLabel(g_RebellionButton, ServerCaption(ServerChoice::Rebellion).c_str());
                 if (g_CustomButton)
-                    g_BzrFn_SetButtonLabel(g_CustomButton, g_Choice == ServerChoice::Lan ? "> LAN <" : ServerCaption(ServerChoice::Custom));
+                    g_BzrFn_SetButtonLabel(g_CustomButton, (g_Choice == ServerChoice::Lan ? std::string("> LAN <") : ServerCaption(ServerChoice::Custom)).c_str());
                 if (g_LocalButton)
-                    g_BzrFn_SetButtonLabel(g_LocalButton, ServerCaption(ServerChoice::Local));
+                    g_BzrFn_SetButtonLabel(g_LocalButton, ServerCaption(ServerChoice::Local).c_str());
             }
             PreLobbySetServerEntryVisible(custom);
             Shell::SetLabelText(g_ServerNoteLabel,
-                                g_Choice == ServerChoice::Lan ? (LanNoAuth::Enabled() ? "LAN host selected; no platform sign-in." : "LAN host selected; Local host tools changes the address.")
-                                  : custom ? kCustomServerNote
-                                : g_Choice == ServerChoice::Local ? kLocalServerNote : "");
+                                g_Choice == ServerChoice::Lan ? (LanNoAuth::Enabled() ? ShimText("openshim_ui:prelobby_lan_note_noauth", "LAN host selected; no platform sign-in.") : ShimText("openshim_ui:prelobby_lan_note_tools", "LAN host selected; Local host tools changes the address."))
+                                  : custom ? CustomServerNote()
+                                : g_Choice == ServerChoice::Local ? LocalServerNote() : "");
         }
 
         void __cdecl OnRebellionClicked()
@@ -282,13 +295,13 @@ namespace BZROpenShim
             case MS::HostStatus::Ok:
                 return true;
             case MS::HostStatus::UnsupportedPort:
-                SetNote("Port must be 1 to 65534");
+                SetNote(ShimText("openshim_ui:prelobby_err_port", "Port must be 1 to 65534"));
                 break;
             case MS::HostStatus::Invalid:
-                SetNote("Enter a host name or IP address only");
+                SetNote(ShimText("openshim_ui:prelobby_err_host", "Enter a host name or IP address only"));
                 break;
             default:
-                SetNote("Enter a server address");
+                SetNote(ShimText("openshim_ui:prelobby_err_address", "Enter a server address"));
                 break;
             }
             return false;
@@ -318,7 +331,7 @@ namespace BZROpenShim
             if (!WriteShimUserConfigValue("Network", "Server", MS::ModeName(mode)) ||
                 (custom && !WriteShimUserConfigValue("Network", "CustomServer", desired.c_str())))
             {
-                SetNote("Server not saved");
+                SetNote(ShimText("openshim_ui:prelobby_err_server_not_saved", "Server not saved"));
                 Log(L"[PRELOBBY] server selection could not be persisted\n");
                 return false;
             }
@@ -340,17 +353,16 @@ namespace BZROpenShim
             if (!network[0])
             {
                 const int ready = QueryStockIsNetworkInit();
-                network = ready > 0 ? "Ready"
-                        : ready == 0 ? "Connecting..."
-                        : "Status unknown";
+                network = ready > 0 ? ShimText("openshim_ui:prelobby_status_ready", "Ready")
+                        : ready == 0 ? ShimText("openshim_ui:prelobby_connecting", "Connecting...")
+                        : ShimText("openshim_ui:prelobby_status_unknown", "Status unknown");
             }
 
-            char text[sizeof(g_NetworkShown)] = {};
-            _snprintf_s(text, _TRUNCATE, "Network: %s", network);
-            if (!force && std::strcmp(text, g_NetworkShown) == 0)
+            const std::string text = ShimFormat("openshim_ui:prelobby_network", "Network: %s", network);
+            if (!force && text == g_NetworkShown)
                 return;
-            std::memcpy(g_NetworkShown, text, sizeof(text));
-            Shell::SetLabelText(g_NetworkLabel, text);
+            _snprintf_s(g_NetworkShown, _TRUNCATE, "%s", text.c_str());
+            Shell::SetLabelText(g_NetworkLabel, text.c_str());
         }
 
         void ClearPageState()
@@ -421,7 +433,7 @@ namespace BZROpenShim
                     // The server change still has to take effect.
                     if (serverChanged)
                         RecycleBzrNetWebSocket();
-                    SetNote("Nickname not saved");
+                    SetNote(ShimText("openshim_ui:prelobby_err_nickname_not_saved", "Nickname not saved"));
                     Log(L"[PRELOBBY] nickname apply failed (result=%u)\n",
                         static_cast<uint32_t>(result));
                     RefreshStatus(true);
@@ -438,7 +450,7 @@ namespace BZROpenShim
                 Log(L"[PRELOBBY] server change recycle %hs\n", recycled ? "done" : "found no socket");
                 if (!recycled && QueryStockIsNetworkInit() > 0)
                 {
-                    SetNote("Server saved; restart to connect to it");
+                    SetNote(ShimText("openshim_ui:prelobby_server_saved_restart", "Server saved; restart to connect to it"));
                     RefreshStatus(true);
                     return;
                 }
@@ -457,7 +469,7 @@ namespace BZROpenShim
             g_PendingSince = GetTickCount64();
             // No socket to recycle: the new server is used on the engine's
             // next retry ([Network] ReconnectDelaySeconds, stock 30 s).
-            SetNote(serverChanged && !recycled ? "Switching server, retrying..." : "Connecting...");
+            SetNote(serverChanged && !recycled ? ShimText("openshim_ui:prelobby_switching_server", "Switching server, retrying...") : ShimText("openshim_ui:prelobby_connecting", "Connecting..."));
             Log(L"[PRELOBBY] continue pending (recycled=%d)\n", recycled ? 1 : 0);
             RefreshStatus(true);
         }
@@ -508,7 +520,7 @@ namespace BZROpenShim
                 {
                     g_Pending = false;
                     g_AwaitDrop = false;
-                    SetNote("Still not ready (check sign-in or network)");
+                    SetNote(ShimText("openshim_ui:prelobby_err_not_ready", "Still not ready (check sign-in or network)"));
                     Log(L"[PRELOBBY] continue timed out after %llu ms\n", elapsed);
                 }
             }
@@ -589,7 +601,7 @@ namespace BZROpenShim
             if (!panel)
                 return false;
 
-            Shell::AddLabel(panel, panel, "OpenShimPreLobby_Title", kTitleRect, "MULTIPLAYER",
+            Shell::AddLabel(panel, panel, "OpenShimPreLobby_Title", kTitleRect, ShimText("openshim_ui:prelobby_title", "MULTIPLAYER"),
                             Shell::kTitleLabelFlags);
 
             const struct
@@ -598,10 +610,10 @@ namespace BZROpenShim
                 const Shell::Rect& box;
                 const char* title;
             } headers[] = {
-                { "OpenShimPreLobby_FlagHdr", kFlagBox, "FLAG" },
-                { "OpenShimPreLobby_PilotHdr", kPilotBox, "PILOT" },
-                { "OpenShimPreLobby_ServerHdr", kServerBox, "SERVER" },
-                { "OpenShimPreLobby_StatusHdr", kStatusBox, "STATUS" },
+                { "OpenShimPreLobby_FlagHdr", kFlagBox, ShimText("openshim_ui:prelobby_hdr_flag", "FLAG") },
+                { "OpenShimPreLobby_PilotHdr", kPilotBox, ShimText("openshim_ui:prelobby_hdr_pilot", "PILOT") },
+                { "OpenShimPreLobby_ServerHdr", kServerBox, ShimText("openshim_ui:prelobby_hdr_server", "SERVER") },
+                { "OpenShimPreLobby_StatusHdr", kStatusBox, ShimText("openshim_ui:prelobby_hdr_status", "STATUS") },
             };
             for (const auto& header : headers)
             {
@@ -616,9 +628,8 @@ namespace BZROpenShim
             if (GetMatchmakingRedirectTarget(redirect, sizeof(redirect)) && redirect[0])
             {
                 // The test redirect owns the endpoint: show it, build no toggle.
-                char text[128] = {};
-                _snprintf_s(text, _TRUNCATE, "Server: %s (test redirect)", redirect);
-                Shell::AddLabel(panel, panel, "OpenShimPreLobby_Server", kNoteRect, text);
+                const std::string text = ShimFormat("openshim_ui:prelobby_test_redirect", "Server: %s (test redirect)", redirect);
+                Shell::AddLabel(panel, panel, "OpenShimPreLobby_Server", kNoteRect, text.c_str());
             }
             else
             {
@@ -638,30 +649,31 @@ namespace BZROpenShim
                 g_ServerSelector = true;
                 g_RebellionButton = Shell::AddButton(
                     panel, panel, "OpenShimPreLobby_ServerRebellion", ServerSlot(0, 0),
-                    ServerCaption(ServerChoice::Rebellion), slotSkin, 1.0f, 0.0f, &OnRebellionClicked);
+                    ServerCaption(ServerChoice::Rebellion).c_str(), slotSkin, 1.0f, 0.0f, &OnRebellionClicked);
                 g_CustomButton = Shell::AddButton(
                     panel, panel, "OpenShimPreLobby_ServerCustom", ServerSlot(1, 0),
-                    ServerCaption(ServerChoice::Custom), slotSkin, 1.0f, 0.0f, &OnCustomClicked);
+                    ServerCaption(ServerChoice::Custom).c_str(), slotSkin, 1.0f, 0.0f, &OnCustomClicked);
                 g_LocalButton = Shell::AddButton(
                     panel, panel, "OpenShimPreLobby_ServerLocal", ServerSlot(0, 1),
-                    ServerCaption(ServerChoice::Local), slotSkin, 1.0f, 0.0f, &OnLocalClicked);
+                    ServerCaption(ServerChoice::Local).c_str(), slotSkin, 1.0f, 0.0f, &OnLocalClicked);
                 Shell::AddButton(panel, panel, "OpenShimPreLobby_LocalTools", ServerSlot(1, 1),
-                                 LanNoAuth::Enabled() ? "LAN (no sign-in)" : "Local host tools",
+                                 LanNoAuth::Enabled() ? ShimText("openshim_ui:prelobby_lan_button", "LAN (no sign-in)")
+                                                         : ShimText("openshim_ui:prelobby_local_tools_button", "Local host tools"),
                                  slotSkin, 0.72f, 0.0f, &OnLocalToolsClicked);
                 g_ServerNoteLabel = Shell::AddLabel(panel, panel, "OpenShimPreLobby_ServerNote", kNoteRect, "");
             }
             Shell::AddLabel(panel, panel, "OpenShimPreLobby_Hint", kHintRect,
-                            "Press Continue to apply a new name or server.");
+                            ShimText("openshim_ui:prelobby_hint", "Press Continue to apply a new name or server."));
             RefreshStatus(true);
 
             const bool back = Shell::AddButton(panel, nullptr, "OpenShimPreLobby_Back", kBackRect,
-                                               "Back", Shell::kSkinTopCorner, 1.0f, kBackTextOffset,
+                                               ShimText("openshim_ui:back", "Back"), Shell::kSkinTopCorner, 1.0f, kBackTextOffset,
                                                &OnBackClicked) != nullptr;
             // Laid out against the panel so it centres with the content; the
             // top-corner Back keeps a null layout parent because it sits on
             // the window corner.
             const bool cont = Shell::AddButton(panel, panel, "OpenShimPreLobby_Continue",
-                                               kContinueRect, "Continue", Shell::kSkinToMainMenu,
+                                               kContinueRect, ShimText("openshim_ui:prelobby_continue", "Continue"), Shell::kSkinToMainMenu,
                                                1.0f, 0.0f, &OnContinueClicked) != nullptr;
 
             // Created last so they draw above the panel art.

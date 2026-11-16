@@ -7,6 +7,7 @@
 #include "lan_discovery.h"
 #include "matchmaking_server.h"
 #include "net_optimizer.h"
+#include "openshim_l10n_text.h"
 #include "shell_screens.h"
 #include "socket_tunnel.h"
 #include "steam_public_listing.h"
@@ -17,6 +18,9 @@
 #include <atomic>
 #include <filesystem>
 #include <string>
+
+using BZROpenShim::L10n::ShimText;
+using BZROpenShim::L10n::ShimFormat;
 
 namespace BZROpenShim
 {
@@ -48,10 +52,10 @@ namespace BZROpenShim
         size_t g_Page = 0;
         bool g_JoinHostedWhenReady = false;
         std::string g_Note;
-        constexpr const char* kFirewallHint = "Hosting opens LAN listeners; Windows may ask for firewall access.";
+        const char* FirewallHint() { return ShimText("openshim_ui:lan_firewall_hint", "Hosting opens LAN listeners; Windows may ask for firewall access."); }
         // Matches the bridge docs: kept apart from the agent's 127.0.0.1 ports.
         constexpr const char* kSteamHostAddress = "127.0.0.2";
-        std::string SwitchNote() { return "Stop and start the host to switch between LAN and Steam hosting."; }
+        std::string SwitchNote() { return ShimText("openshim_ui:lan_switch_note", "Stop and start the host to switch between LAN and Steam hosting."); }
         // This game's SteamID64, cached on the game thread when the Steam host starts.
         std::atomic<uint64_t> g_HostSteamId{0};
         // Steam host admission, on the host's worker thread. A bridged peer's
@@ -89,17 +93,17 @@ namespace BZROpenShim
             g_JoinHostedWhenReady = false;
             char redirect[256]{};
             if (GetMatchmakingRedirectTarget(redirect, sizeof(redirect)))
-            { g_Note = "A test redirect owns the server address."; return; }
+            { g_Note = ShimText("openshim_ui:lan_err_redirect", "A test redirect owns the server address."); return; }
             // Persist the explicit LAN selection. Its readiness policy still
             // requires a real admission; discovery alone never enables it.
             std::string canonical;
             if (LanNoAuth::Enabled() && !LanNoAuth::PrivateEndpoint(endpoint,canonical))
-            { g_Note = "Enter a private numeric LAN IPv4 address (optional :port)."; return; }
+            { g_Note = ShimText("openshim_ui:lan_err_private_ip", "Enter a private numeric LAN IPv4 address (optional :port)."); return; }
             if (MatchmakingServer::ValidateCustomHost(endpoint, canonical) != MatchmakingServer::HostStatus::Ok)
-            { g_Note = "Enter an IPv4 address or host name, optionally with :port."; return; }
+            { g_Note = ShimText("openshim_ui:lan_err_address", "Enter an IPv4 address or host name, optionally with :port."); return; }
             if (!WriteShimUserConfigValue("Network", "CustomServer", canonical.c_str()) ||
                 !WriteShimUserConfigValue("Network", "Server", "LAN"))
-            { g_Note = "Could not save the LAN host address."; return; }
+            { g_Note = ShimText("openshim_ui:lan_err_save", "Could not save the LAN host address."); return; }
             SetMatchmakingServerOverride(canonical.c_str(), false);
             RecycleBzrNetWebSocket();
             Shell::Back(Shell::LiveScreen(Shell::kLanScreenId));
@@ -123,9 +127,9 @@ namespace BZROpenShim
             // A Steam join moved the tunnel; the bridge never runs while it is moved.
             std::string note;
             if (forSteam && !SteamTunnelJoin::RestoreStartup(note))
-            { g_Note = "Cannot host for Steam: " + note + "."; return; }
+            { g_Note = ShimFormat("openshim_ui:lan_cannot_host_steam", "Cannot host for Steam: %s.", note); return; }
             if (forSteam && !(g_HostSteamId = SteamPublicListing::LocalSteamId()))
-            { g_Note = "Cannot host for Steam: Steam is not ready yet; try again."; return; }
+            { g_Note = ShimText("openshim_ui:lan_err_steam_not_ready", "Cannot host for Steam: Steam is not ready yet; try again."); return; }
             g_JoinHostedWhenReady = LanSession::StartHost(GameRoot(), LanNoAuth::Enabled(),
                 forSteam ? std::string(kSteamHostAddress) : std::string(), forSteam ? SteamAdmission : nullptr);
             const auto status = LanSession::Status();
@@ -169,14 +173,14 @@ namespace BZROpenShim
                 if (SteamTunnelJoin::JoinBridge(target.bridge, note))
                     Shell::Back(Shell::LiveScreen(Shell::kLanScreenId));
                 else
-                    g_Note = "Cannot join " + target.name + ": " + note + ".";
+                    g_Note = ShimFormat("openshim_ui:lan_cannot_join", "Cannot join %s", target.name) + ": " + note + ".";
                 return;
             }
             if (target.endpoint.empty()) return;
             // A Steam join moved the tunnel; a LAN row must not go through it.
             std::string note;
             if (!SteamTunnelJoin::RestoreStartup(note))
-            { g_Note = "Cannot join " + target.endpoint + ": " + note + "."; return; }
+            { g_Note = ShimFormat("openshim_ui:lan_cannot_join", "Cannot join %s", target.endpoint) + ": " + note + "."; return; }
             Join(target.endpoint);
         }
         void __cdecl Next()
@@ -184,6 +188,11 @@ namespace BZROpenShim
             const size_t count = GameCount(LanSession::Status());
             const size_t rows = g_Rows.size();
             g_Page = count ? (g_Page + 1) % ((count + rows - 1) / rows) : 0;
+        }
+        std::string SteamListCaption()
+        {
+            return ShimFormat("openshim_ui:lan_steam_list", "Steam list: %s", SteamPublicListing::HostListingOn()
+                ? std::string(ShimText("openshim_ui:lan_on", "On")) : std::string(ShimText("openshim_ui:lan_off", "Off")));
         }
         void Tick(void*)
         {
@@ -202,14 +211,14 @@ namespace BZROpenShim
             { Shell::SetLabelText(g_Status, statusText.c_str()); g_StatusText = statusText; }
             // The count only matters with hosts; the label must end before Refresh.
             auto search = status.hosts.empty() ? status.scanMessage
-                : status.scanMessage + " (" + std::to_string(status.hosts.size()) + " found)";
+                : status.scanMessage + " (" + ShimFormat("openshim_ui:lan_found", "%s found", std::to_string(status.hosts.size())) + ")";
             const bool steam = SteamPublicListing::Available();
             if (steam && !SteamPublicListing::BrowseText().empty())
                 search += "; " + SteamPublicListing::BrowseText();
-            const auto hint = steam ? SteamPublicListing::HostListingText() : std::string(kFirewallHint);
+            const auto hint = steam ? SteamPublicListing::HostListingText() : std::string(FirewallHint());
             if (hint != g_HintText)
             { Shell::SetLabelText(g_Hint, hint.c_str()); g_HintText = hint; }
-            const std::string steamButton = SteamPublicListing::HostListingOn() ? "Steam list: On" : "Steam list: Off";
+            const std::string steamButton = SteamListCaption();
             if (g_SteamButton && g_BzrFn_SetButtonLabel && steamButton != g_SteamButtonText)
             { g_BzrFn_SetButtonLabel(g_SteamButton, steamButton.c_str()); g_SteamButtonText = steamButton; }
             if (search != g_SearchText)
@@ -253,11 +262,12 @@ namespace BZROpenShim
             void* panel = Shell::AddPanel(screen, nullptr, "OpenShimLAN", {0, 0, 1440, 1080}, texture);
             if (!panel) return false;
             const bool noAuth = LanNoAuth::Enabled();
-            Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {470, 132, 500, 56}, noAuth ? "LAN (NO SIGN-IN)" : "LOCAL HOST TOOLS", Shell::kTitleLabelFlags);
+            Shell::AddLabel(panel, panel, "OpenShimLAN_Title", {470, 132, 500, 56}, noAuth ? ShimText("openshim_ui:lan_title_noauth", "LAN (NO SIGN-IN)") : ShimText("openshim_ui:lan_title_tools", "LOCAL HOST TOOLS"), Shell::kTitleLabelFlags);
             const struct { const char* name; const Shell::Rect& box; const char* title; } headers[] = {
-                {"OpenShimLAN_HostHdr", kHostBox, "HOST"},
-                {"OpenShimLAN_GamesHdr", kGamesBox, steam ? "GAMES ON THIS NETWORK AND STEAM" : "GAMES ON THIS NETWORK"},
-                {"OpenShimLAN_JoinHdr", kJoinBox, "JOIN BY ADDRESS"},
+                {"OpenShimLAN_HostHdr", kHostBox, ShimText("openshim_ui:lan_hdr_host", "HOST")},
+                {"OpenShimLAN_GamesHdr", kGamesBox, steam ? ShimText("openshim_ui:lan_hdr_games_steam", "GAMES ON THIS NETWORK AND STEAM")
+                    : ShimText("openshim_ui:lan_hdr_games", "GAMES ON THIS NETWORK")},
+                {"OpenShimLAN_JoinHdr", kJoinBox, ShimText("openshim_ui:lan_hdr_join", "JOIN BY ADDRESS")},
             };
             for (const auto& h : headers)
                 Shell::AddLabel(panel, panel, h.name, {h.box.x + kPadX, h.box.y + 4, h.box.w - 2 * kPadX, 38}, h.title);
@@ -267,17 +277,18 @@ namespace BZROpenShim
             Shell::ButtonSkin slot{"optionhv.png", "optionhv.png", "optionck.png"};
             if (texture && Shell::IsTextureDeployed("osh_value_hv.png") && Shell::IsTextureDeployed("osh_value_ck.png"))
                 slot = {nullptr, "osh_value_hv.png", "osh_value_ck.png"};
-            Shell::AddButton(panel, panel, "OpenShimLAN_Host", {272, 294, 220, 42}, "Start host", slot, 1.0f, 0, &Start);
-            Shell::AddButton(panel, panel, "OpenShimLAN_Stop", {508, 294, 220, 42}, "Stop host", slot, 1.0f, 0, &Stop);
+            Shell::AddButton(panel, panel, "OpenShimLAN_Host", {272, 294, 220, 42}, ShimText("openshim_ui:lan_start_host", "Start host"), slot, 1.0f, 0, &Start);
+            Shell::AddButton(panel, panel, "OpenShimLAN_Stop", {508, 294, 220, 42}, ShimText("openshim_ui:lan_stop_host", "Stop host"), slot, 1.0f, 0, &Stop);
             g_SteamButton = steam ? Shell::AddButton(panel, panel, "OpenShimLAN_SteamList", {744, 294, 220, 42},
-                SteamPublicListing::HostListingOn() ? "Steam list: On" : "Steam list: Off", slot, 1.0f, 0, &ToggleSteamListing) : nullptr;
+                SteamListCaption().c_str(), slot, 1.0f, 0, &ToggleSteamListing) : nullptr;
             g_Status = Shell::AddLabel(panel, panel, "OpenShimLAN_Status", {kTextX, 346, kTextW, 28}, "");
-            g_Hint = Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {kTextX, 374, kTextW, 28}, kFirewallHint);
-            Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {kTextX, 402, kTextW, 28}, noAuth ? "Hosted by this game. No accounts or helper. Stop host disconnects players." : "Steam/Galaxy sign-in is still required. Stop host disconnects its players.");
+            g_Hint = Shell::AddLabel(panel, panel, "OpenShimLAN_Hint", {kTextX, 374, kTextW, 28}, FirewallHint());
+            Shell::AddLabel(panel, panel, "OpenShimLAN_SignIn", {kTextX, 402, kTextW, 28}, noAuth ? ShimText("openshim_ui:lan_signin_noauth", "Hosted by this game. No accounts or helper. Stop host disconnects players.")
+                : ShimText("openshim_ui:lan_signin_required", "Steam/Galaxy sign-in is still required. Stop host disconnects its players."));
 
             g_Search = Shell::AddLabel(panel, panel, "OpenShimLAN_Search", {kTextX, 504 + kCaptionDrop - 2, 540, 32}, "");
-            Shell::AddButton(panel, panel, "OpenShimLAN_Refresh", {832, 504, 160, 40}, "Refresh", slot, 1.0f, 0, &Refresh);
-            Shell::AddButton(panel, panel, "OpenShimLAN_Next", {1008, 504, 160, 40}, "Next page", slot, 1.0f, 0, &Next);
+            Shell::AddButton(panel, panel, "OpenShimLAN_Refresh", {832, 504, 160, 40}, ShimText("openshim_ui:lan_refresh", "Refresh"), slot, 1.0f, 0, &Refresh);
+            Shell::AddButton(panel, panel, "OpenShimLAN_Next", {1008, 504, 160, 40}, ShimText("openshim_ui:lan_next_page", "Next page"), slot, 1.0f, 0, &Next);
             const std::array<void(__cdecl*)(), 4> callbacks = {&Select<0>, &Select<1>, &Select<2>, &Select<3>};
             Shell::ButtonSkin rowSkin{nullptr, "optionhv.png", "optionck.png"};
             for (size_t row = 0; row < g_Rows.size(); ++row)
@@ -287,9 +298,9 @@ namespace BZROpenShim
                     {kTextX, kRowY + kRowPitch * row, kTextW, kRowH}, "", rowSkin, 0.9f, 0, callbacks[row]);
             }
 
-            Shell::AddLabel(panel, panel, "OpenShimLAN_ManualLabel", {kTextX, 792 + kCaptionDrop, 130, 42}, "Address:");
-            Shell::AddButton(panel, panel, "OpenShimLAN_Manual", {1008, 792, 160, 42}, "Use address", slot, 1.0f, 0, &ManualJoin);
-            const bool back = Shell::AddButton(panel, nullptr, "OpenShimLAN_Back", {0, 0, 342, 77}, "Back", Shell::kSkinTopCorner, 1, 28, &Back) != nullptr;
+            Shell::AddLabel(panel, panel, "OpenShimLAN_ManualLabel", {kTextX, 792 + kCaptionDrop, 130, 42}, ShimText("openshim_ui:lan_address_label", "Address:"));
+            Shell::AddButton(panel, panel, "OpenShimLAN_Manual", {1008, 792, 160, 42}, ShimText("openshim_ui:lan_use_address", "Use address"), slot, 1.0f, 0, &ManualJoin);
+            const bool back = Shell::AddButton(panel, nullptr, "OpenShimLAN_Back", {0, 0, 342, 77}, ShimText("openshim_ui:back", "Back"), Shell::kSkinTopCorner, 1, 28, &Back) != nullptr;
             // Borrowed entry uses the same ownership/char routing as setup.
             CreatePreLobbyServerEntry(panel, 420, 792, 564, 42, "");
             PreLobbySetServerEntryVisible(true);

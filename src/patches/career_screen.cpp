@@ -13,6 +13,7 @@
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "career_kill_class.h"
+#include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "shell_screens.h"
 
@@ -21,6 +22,8 @@
 #include <fstream>
 #include <string>
 #include <unordered_set>
+
+using BZROpenShim::L10n::ShimText;
 
 namespace BZROpenShim
 {
@@ -149,7 +152,7 @@ namespace BZROpenShim
         std::string FormatRatio(long long kills, long long deaths)
         {
             if (deaths <= 0)
-                return kills > 0 ? "perfect" : "-";
+                return kills > 0 ? ShimText("openshim_ui:career_perfect", "perfect") : "-";
             char buffer[32] = {};
             _snprintf_s(buffer, _TRUNCATE, "%.2f",
                         static_cast<double>(kills) / static_cast<double>(deaths));
@@ -181,13 +184,13 @@ namespace BZROpenShim
             // hold old data; it is neither read nor shown.
             if (!Hooks::IsCareerStatsTrackingEnabled())
             {
-                boxes[0].title = "OVERALL";
-                boxes[1].title = "SINGLE PLAYER";
-                boxes[2].title = "MULTIPLAYER";
-                boxes[3].title = "KILLS BY TYPE";
-                boxes[0].rows[0] = { "Stats tracking is off.", "" };
-                boxes[0].rows[2] = { "Turn it on: OpenShim Settings,", "" };
-                boxes[0].rows[3] = { "Career Stats (restart needed).", "" };
+                boxes[0].title = ShimText("openshim_ui:career_overall", "OVERALL");
+                boxes[1].title = ShimText("openshim_ui:career_single_player", "SINGLE PLAYER");
+                boxes[2].title = ShimText("openshim_ui:career_multiplayer", "MULTIPLAYER");
+                boxes[3].title = ShimText("openshim_ui:career_kills_by_type", "KILLS BY TYPE");
+                boxes[0].rows[0] = { ShimText("openshim_ui:career_tracking_off", "Stats tracking is off."), "" };
+                boxes[0].rows[2] = { ShimText("openshim_ui:career_tracking_off_how1", "Turn it on: OpenShim Settings,"), "" };
+                boxes[0].rows[3] = { ShimText("openshim_ui:career_tracking_off_how2", "Career Stats (restart needed)."), "" };
                 return;
             }
 
@@ -195,38 +198,38 @@ namespace BZROpenShim
             ReadCareerTotals(t);
             const auto num = [](long long v) { return std::to_string(v); };
 
-            boxes[0].title = "OVERALL";
-            boxes[0].rows[0] = { "Kills", num(t.totalKills) };
-            boxes[0].rows[1] = { "Deaths", num(t.totalDeaths) };
-            boxes[0].rows[2] = { "Kill / death", FormatRatio(t.totalKills, t.totalDeaths) };
+            boxes[0].title = ShimText("openshim_ui:career_overall", "OVERALL");
+            boxes[0].rows[0] = { ShimText("openshim_ui:career_kills", "Kills"), num(t.totalKills) };
+            boxes[0].rows[1] = { ShimText("openshim_ui:career_deaths", "Deaths"), num(t.totalDeaths) };
+            boxes[0].rows[2] = { ShimText("openshim_ui:career_kill_death", "Kill / death"), FormatRatio(t.totalKills, t.totalDeaths) };
 
-            boxes[1].title = "SINGLE PLAYER";
-            boxes[1].rows[0] = { "Kills", num(t.spKills) };
-            boxes[1].rows[1] = { "Deaths", num(t.spDeaths) };
+            boxes[1].title = ShimText("openshim_ui:career_single_player", "SINGLE PLAYER");
+            boxes[1].rows[0] = { ShimText("openshim_ui:career_kills", "Kills"), num(t.spKills) };
+            boxes[1].rows[1] = { ShimText("openshim_ui:career_deaths", "Deaths"), num(t.spDeaths) };
             // career.spMissionsPlayed is written only by the OpenShim career
             // layer; career.missionsPlayed predates it and is what every record
             // written before this feature shipped actually carries. Preferring
             // the specific key and falling back to the general one is why an
             // existing install reads its real total instead of a flat zero.
-            boxes[1].rows[2] = { "Missions played", num(t.spMissions > 0 ? t.spMissions : t.missionsPlayed) };
+            boxes[1].rows[2] = { ShimText("openshim_ui:career_missions_played", "Missions played"), num(t.spMissions > 0 ? t.spMissions : t.missionsPlayed) };
 
-            boxes[2].title = "MULTIPLAYER";
-            boxes[2].rows[0] = { "Kills", num(t.mpKills) };
-            boxes[2].rows[1] = { "Deaths", num(t.mpDeaths) };
-            boxes[2].rows[2] = { "Matches played", num(t.mpMatches) };
+            boxes[2].title = ShimText("openshim_ui:career_multiplayer", "MULTIPLAYER");
+            boxes[2].rows[0] = { ShimText("openshim_ui:career_kills", "Kills"), num(t.mpKills) };
+            boxes[2].rows[1] = { ShimText("openshim_ui:career_deaths", "Deaths"), num(t.mpDeaths) };
+            boxes[2].rows[2] = { ShimText("openshim_ui:career_matches_played", "Matches played"), num(t.mpMatches) };
 
-            boxes[3].title = "KILLS BY TYPE";
+            boxes[3].title = ShimText("openshim_ui:career_kills_by_type", "KILLS BY TYPE");
             if (!t.fileFound)
             {
-                boxes[3].rows[0] = { "No record yet.", "" };
-                boxes[3].rows[1] = { "Kills, deaths and missions", "" };
-                boxes[3].rows[2] = { "are recorded as you play.", "" };
-                boxes[3].rows[4] = { "Off switch: OpenShim Settings.", "" };
+                boxes[3].rows[0] = { ShimText("openshim_ui:career_no_record", "No record yet."), "" };
+                boxes[3].rows[1] = { ShimText("openshim_ui:career_no_record2", "Kills, deaths and missions"), "" };
+                boxes[3].rows[2] = { ShimText("openshim_ui:career_no_record3", "are recorded as you play."), "" };
+                boxes[3].rows[4] = { ShimText("openshim_ui:career_off_switch", "Off switch: OpenShim Settings."), "" };
                 return;
             }
-            boxes[0].rows[3] = { "Distinct missions", num(t.missionsRecorded) };
+            boxes[0].rows[3] = { ShimText("openshim_ui:career_distinct_missions", "Distinct missions"), num(t.missionsRecorded) };
             if (t.profiles > 1)
-                boxes[0].rows[4] = { "Profiles combined", num(t.profiles) };
+                boxes[0].rows[4] = { ShimText("openshim_ui:career_profiles_combined", "Profiles combined"), num(t.profiles) };
 
             // "Other" is whatever the total holds beyond the nine named
             // categories: kills recorded before this feature existed and kills
@@ -236,16 +239,16 @@ namespace BZROpenShim
                 named += v;
             const long long other = t.totalKills > named ? t.totalKills - named : 0;
             boxes[3].columns2 = true;
-            boxes[3].rows[0] = { "Pilots", num(t.killsByClass[0]) };
-            boxes[3].rows[1] = { "Tanks", num(t.killsByClass[1]) };
-            boxes[3].rows[2] = { "Fighters", num(t.killsByClass[2]) };
-            boxes[3].rows[3] = { "Scouts", num(t.killsByClass[3]) };
-            boxes[3].rows[4] = { "Bombers", num(t.killsByClass[4]) };
-            boxes[3].rows2[0] = { "Turrets", num(t.killsByClass[5]) };
-            boxes[3].rows2[1] = { "Artillery", num(t.killsByClass[6]) };
-            boxes[3].rows2[2] = { "Support", num(t.killsByClass[7]) };
-            boxes[3].rows2[3] = { "Buildings", num(t.killsByClass[8]) };
-            boxes[3].rows2[4] = { "Other", num(other) };
+            boxes[3].rows[0] = { ShimText("openshim_ui:career_class_pilots", "Pilots"), num(t.killsByClass[0]) };
+            boxes[3].rows[1] = { ShimText("openshim_ui:career_class_tanks", "Tanks"), num(t.killsByClass[1]) };
+            boxes[3].rows[2] = { ShimText("openshim_ui:career_class_fighters", "Fighters"), num(t.killsByClass[2]) };
+            boxes[3].rows[3] = { ShimText("openshim_ui:career_class_scouts", "Scouts"), num(t.killsByClass[3]) };
+            boxes[3].rows[4] = { ShimText("openshim_ui:career_class_bombers", "Bombers"), num(t.killsByClass[4]) };
+            boxes[3].rows2[0] = { ShimText("openshim_ui:career_class_turrets", "Turrets"), num(t.killsByClass[5]) };
+            boxes[3].rows2[1] = { ShimText("openshim_ui:career_class_artillery", "Artillery"), num(t.killsByClass[6]) };
+            boxes[3].rows2[2] = { ShimText("openshim_ui:career_class_support", "Support"), num(t.killsByClass[7]) };
+            boxes[3].rows2[3] = { ShimText("openshim_ui:career_class_buildings", "Buildings"), num(t.killsByClass[8]) };
+            boxes[3].rows2[4] = { ShimText("openshim_ui:career_class_other", "Other"), num(other) };
         }
 
         void __cdecl OnCareerBackClicked()
@@ -266,7 +269,7 @@ namespace BZROpenShim
             if (!panel)
                 return false;
 
-            Shell::AddLabel(panel, panel, "OpenShimCareer_Title", kTitleRect, "CAREER",
+            Shell::AddLabel(panel, panel, "OpenShimCareer_Title", kTitleRect, ShimText("openshim_ui:career_title", "CAREER"),
                             Shell::kTitleLabelFlags);
 
             CareerBox boxes[4];
@@ -307,7 +310,7 @@ namespace BZROpenShim
                 }
             }
 
-            return Shell::AddButton(panel, nullptr, "OpenShimCareer_Back", kBackRect, "Back",
+            return Shell::AddButton(panel, nullptr, "OpenShimCareer_Back", kBackRect, ShimText("openshim_ui:back", "Back"),
                                     Shell::kSkinTopCorner, 1.0f, kBackTextOffset,
                                     &OnCareerBackClicked) != nullptr;
         }

@@ -28,7 +28,7 @@ namespace MapFilterExtras
     {
         Extra extra;
         const char* key;   // internal key, never shown
-        const char* label; // what the filter list displays
+        const char* label; // English name (logs); the list shows the translated one
     };
 
     // Keys carry a prefix no stock key has, so a stock key can never be taken

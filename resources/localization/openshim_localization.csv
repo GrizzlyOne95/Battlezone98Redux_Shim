@@ -540,9 +540,20 @@ openshim_cat:Effects:name~Effects~~~~~~
 openshim_cat:Effects:title~VISUAL EFFECTS~~~~~~
 openshim_cat:Effects:blurb~Faction color jets, destruction chunks, muzzle effects, shell casings and person gibs.~~~~~~
 ~~~~~~~
+openshim_ui:bans_unnamed~(unnamed)~~~~~~
+openshim_ui:bans_confirm~Confirm~~~~~~
+openshim_ui:bans_unban~Unban~~~~~~
+openshim_ui:bans_empty~No banned players. Use the lobby Ban button or /ban while hosting.~~~~~~
+openshim_ui:bans_prev~Prev~~~~~~
+openshim_ui:bans_next~Next~~~~~~
+openshim_ui:bans_page~Page %s~~~~~~
+openshim_ui:bans_confirm_hint~Click Confirm to unban %s.~~~~~~
+openshim_ui:bans_unbanned~Unbanned %s. They can join your next game.~~~~~~
+openshim_ui:bans_unban_failed~Could not unban %s; see openshim.log ([BAN]).~~~~~~
+openshim_ui:bans_title~BANNED PLAYERS~~~~~~
+openshim_ui:back~Back~~~~~~
 openshim_ui:hub_saved_note~Changes are saved to openshim.ini as you make them. ~~~~~~
 openshim_ui:hub_title~OPENSHIM OPTIONS~~~~~~
-openshim_ui:back~Back~~~~~~
 openshim_ui:value_checking~Checking...~~~~~~
 openshim_ui:value_restart_now~Restart now~~~~~~
 openshim_ui:value_check_now~Check now~~~~~~
@@ -596,3 +607,91 @@ openshim_ui:career_reset_failed~Career reset failed; existing statistics were ke
 openshim_ui:action_unwired~%s: no action is wired up for this row.~~~~~~
 openshim_ui:options_button~OpenShim Options~~~~~~
 openshim_ui:update_notice_title~OpenShim update ready~~~~~~
+openshim_ui:career_perfect~perfect~~~~~~
+openshim_ui:career_overall~OVERALL~~~~~~
+openshim_ui:career_single_player~SINGLE PLAYER~~~~~~
+openshim_ui:career_multiplayer~MULTIPLAYER~~~~~~
+openshim_ui:career_kills_by_type~KILLS BY TYPE~~~~~~
+openshim_ui:career_tracking_off~Stats tracking is off.~~~~~~
+openshim_ui:career_tracking_off_how1~Turn it on: OpenShim Settings,~~~~~~
+openshim_ui:career_tracking_off_how2~Career Stats (restart needed).~~~~~~
+openshim_ui:career_kills~Kills~~~~~~
+openshim_ui:career_deaths~Deaths~~~~~~
+openshim_ui:career_kill_death~Kill / death~~~~~~
+openshim_ui:career_missions_played~Missions played~~~~~~
+openshim_ui:career_matches_played~Matches played~~~~~~
+openshim_ui:career_no_record~No record yet.~~~~~~
+openshim_ui:career_no_record2~Kills, deaths and missions~~~~~~
+openshim_ui:career_no_record3~are recorded as you play.~~~~~~
+openshim_ui:career_off_switch~Off switch: OpenShim Settings.~~~~~~
+openshim_ui:career_distinct_missions~Distinct missions~~~~~~
+openshim_ui:career_profiles_combined~Profiles combined~~~~~~
+openshim_ui:career_class_pilots~Pilots~~~~~~
+openshim_ui:career_class_tanks~Tanks~~~~~~
+openshim_ui:career_class_fighters~Fighters~~~~~~
+openshim_ui:career_class_scouts~Scouts~~~~~~
+openshim_ui:career_class_bombers~Bombers~~~~~~
+openshim_ui:career_class_turrets~Turrets~~~~~~
+openshim_ui:career_class_artillery~Artillery~~~~~~
+openshim_ui:career_class_support~Support~~~~~~
+openshim_ui:career_class_buildings~Buildings~~~~~~
+openshim_ui:career_class_other~Other~~~~~~
+openshim_ui:career_title~CAREER~~~~~~
+openshim_ui:lan_firewall_hint~Hosting opens LAN listeners; Windows may ask for firewall access.~~~~~~
+openshim_ui:lan_switch_note~Stop and start the host to switch between LAN and Steam hosting.~~~~~~
+openshim_ui:lan_err_redirect~A test redirect owns the server address.~~~~~~
+openshim_ui:lan_err_private_ip~Enter a private numeric LAN IPv4 address (optional :port).~~~~~~
+openshim_ui:lan_err_address~Enter an IPv4 address or host name, optionally with :port.~~~~~~
+openshim_ui:lan_err_save~Could not save the LAN host address.~~~~~~
+openshim_ui:lan_cannot_host_steam~Cannot host for Steam: %s.~~~~~~
+openshim_ui:lan_err_steam_not_ready~Cannot host for Steam: Steam is not ready yet; try again.~~~~~~
+openshim_ui:lan_cannot_join~Cannot join %s~~~~~~
+openshim_ui:lan_steam_list~Steam list: %s~~~~~~
+openshim_ui:lan_on~On~~~~~~
+openshim_ui:lan_off~Off~~~~~~
+openshim_ui:lan_found~%s found~~~~~~
+openshim_ui:lan_title_noauth~LAN (NO SIGN-IN)~~~~~~
+openshim_ui:lan_title_tools~LOCAL HOST TOOLS~~~~~~
+openshim_ui:lan_hdr_host~HOST~~~~~~
+openshim_ui:lan_hdr_games_steam~GAMES ON THIS NETWORK AND STEAM~~~~~~
+openshim_ui:lan_hdr_games~GAMES ON THIS NETWORK~~~~~~
+openshim_ui:lan_hdr_join~JOIN BY ADDRESS~~~~~~
+openshim_ui:lan_start_host~Start host~~~~~~
+openshim_ui:lan_stop_host~Stop host~~~~~~
+openshim_ui:lan_signin_noauth~Hosted by this game. No accounts or helper. Stop host disconnects players.~~~~~~
+openshim_ui:lan_signin_required~Steam/Galaxy sign-in is still required. Stop host disconnects its players.~~~~~~
+openshim_ui:lan_refresh~Refresh~~~~~~
+openshim_ui:lan_next_page~Next page~~~~~~
+openshim_ui:lan_address_label~Address:~~~~~~
+openshim_ui:lan_use_address~Use address~~~~~~
+openshim_ui:mapfilter_5plus_players~5+ Players~~~~~~
+openshim_ui:mapfilter_stock_maps~Stock Maps~~~~~~
+openshim_ui:mapfilter_search_placeholder~Search: click here~~~~~~
+openshim_ui:prelobby_custom_note~Custom servers never receive your sign-in ticket.~~~~~~
+openshim_ui:prelobby_local_note~Start the dedicated server on this PC first.~~~~~~
+openshim_ui:prelobby_server_local~Local~~~~~~
+openshim_ui:prelobby_server_custom~Custom~~~~~~
+openshim_ui:prelobby_lan_note_noauth~LAN host selected; no platform sign-in.~~~~~~
+openshim_ui:prelobby_lan_note_tools~LAN host selected; Local host tools changes the address.~~~~~~
+openshim_ui:prelobby_err_port~Port must be 1 to 65534~~~~~~
+openshim_ui:prelobby_err_host~Enter a host name or IP address only~~~~~~
+openshim_ui:prelobby_err_address~Enter a server address~~~~~~
+openshim_ui:prelobby_err_server_not_saved~Server not saved~~~~~~
+openshim_ui:prelobby_status_ready~Ready~~~~~~
+openshim_ui:prelobby_connecting~Connecting...~~~~~~
+openshim_ui:prelobby_status_unknown~Status unknown~~~~~~
+openshim_ui:prelobby_network~Network: %s~~~~~~
+openshim_ui:prelobby_err_nickname_not_saved~Nickname not saved~~~~~~
+openshim_ui:prelobby_server_saved_restart~Server saved; restart to connect to it~~~~~~
+openshim_ui:prelobby_switching_server~Switching server, retrying...~~~~~~
+openshim_ui:prelobby_err_not_ready~Still not ready (check sign-in or network)~~~~~~
+openshim_ui:prelobby_title~MULTIPLAYER~~~~~~
+openshim_ui:prelobby_hdr_flag~FLAG~~~~~~
+openshim_ui:prelobby_hdr_pilot~PILOT~~~~~~
+openshim_ui:prelobby_hdr_server~SERVER~~~~~~
+openshim_ui:prelobby_hdr_status~STATUS~~~~~~
+openshim_ui:prelobby_test_redirect~Server: %s (test redirect)~~~~~~
+openshim_ui:prelobby_lan_button~LAN (no sign-in)~~~~~~
+openshim_ui:prelobby_local_tools_button~Local host tools~~~~~~
+openshim_ui:prelobby_hint~Press Continue to apply a new name or server.~~~~~~
+openshim_ui:prelobby_continue~Continue~~~~~~
