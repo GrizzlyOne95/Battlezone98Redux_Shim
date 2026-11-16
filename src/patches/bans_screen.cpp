@@ -13,6 +13,7 @@
 
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
+#include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "shell_screens.h"
 
@@ -21,6 +22,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+
+using BZROpenShim::L10n::ShimText;
+using BZROpenShim::L10n::ShimFormat;
 
 namespace BZROpenShim
 {
@@ -119,25 +123,28 @@ namespace BZROpenShim
                 const Hooks::BanRecord* ban = used ? &g_Bans[index] : nullptr;
 
                 Shell::SetLabelText(g_NameLabels[row],
-                    ban ? CutText(ban->name.empty() ? "(unnamed)" : ban->name, kMaxNameChars).c_str() : "");
+                    ban ? CutText(ban->name.empty() ? ShimText("openshim_ui:bans_unnamed", "(unnamed)") : ban->name, kMaxNameChars).c_str() : "");
                 Shell::SetLabelText(g_IdLabels[row],
                     ban ? CutText(ban->id, kMaxIdChars).c_str() : "");
                 SetShown(g_UnbanButtons[row], used);
-                SetCaption(g_UnbanButtons[row], !used ? "" : ban->id == g_ArmedId ? "Confirm" : "Unban");
+                SetCaption(g_UnbanButtons[row], !used ? "" : ban->id == g_ArmedId
+                    ? ShimText("openshim_ui:bans_confirm", "Confirm")
+                    : ShimText("openshim_ui:bans_unban", "Unban"));
             }
 
             Shell::SetLabelText(g_EmptyLabel, g_Bans.empty()
-                ? "No banned players. Use the lobby Ban button or /ban while hosting." : "");
+                ? ShimText("openshim_ui:bans_empty", "No banned players. Ban from the lobby or with /ban.") : "");
 
             const bool paged = PageCount() > 1;
             SetShown(g_PrevButton, paged);
             SetShown(g_NextButton, paged);
-            SetCaption(g_PrevButton, paged ? "Prev" : "");
-            SetCaption(g_NextButton, paged ? "Next" : "");
-            char page[32] = {};
+            SetCaption(g_PrevButton, paged ? ShimText("openshim_ui:bans_prev", "Prev") : "");
+            SetCaption(g_NextButton, paged ? ShimText("openshim_ui:bans_next", "Next") : "");
+            std::string page;
             if (paged)
-                _snprintf_s(page, _TRUNCATE, "Page %zu/%zu", g_Page + 1, PageCount());
-            Shell::SetLabelText(g_PageLabel, page);
+                page = ShimFormat("openshim_ui:bans_page", "Page %s",
+                                  std::to_string(g_Page + 1) + "/" + std::to_string(PageCount()));
+            Shell::SetLabelText(g_PageLabel, page.c_str());
         }
 
         template <size_t Row>
@@ -153,16 +160,16 @@ namespace BZROpenShim
             if (ban.id != g_ArmedId)
             {
                 g_ArmedId = ban.id;
-                SetStatus("Click Confirm to unban " + CutText(label, kMaxNameChars) + ".");
+                SetStatus(ShimFormat("openshim_ui:bans_confirm_hint", "Click Confirm to unban %s.", CutText(label, kMaxNameChars)));
                 RefreshRows();
                 return;
             }
 
             g_ArmedId.clear();
             if (Hooks::RemoveBanConfigEntry(ban.id.c_str(), "ban screen"))
-                SetStatus("Unbanned " + CutText(label, kMaxNameChars) + ". They can join your next game.");
+                SetStatus(ShimFormat("openshim_ui:bans_unbanned", "Unbanned %s. They can join your next game.", CutText(label, kMaxNameChars)));
             else
-                SetStatus("Could not unban " + CutText(label, kMaxNameChars) + "; see openshim.log ([BAN]).");
+                SetStatus(ShimFormat("openshim_ui:bans_unban_failed", "Could not unban %s; see openshim.log ([BAN]).", CutText(label, kMaxNameChars)));
             RefreshRows();
         }
 
@@ -203,7 +210,7 @@ namespace BZROpenShim
                     { kIdX, y, kIdW, kRowH }, "");
                 _snprintf_s(name, _TRUNCATE, "OpenShimBans_Unban%zu", row);
                 g_UnbanButtons[row] = Shell::AddButton(panel, panel, name,
-                    { kUnbanRect.x, y, kUnbanRect.w, kUnbanRect.h }, "Unban", skin, 1.0f, 0.0f, callbacks[row]);
+                    { kUnbanRect.x, y, kUnbanRect.w, kUnbanRect.h }, ShimText("openshim_ui:bans_unban", "Unban"), skin, 1.0f, 0.0f, callbacks[row]);
             }
         }
 
@@ -224,7 +231,8 @@ namespace BZROpenShim
             if (!panel)
                 return false;
 
-            Shell::AddLabel(panel, panel, "OpenShimBans_Title", kTitleRect, "BANNED PLAYERS",
+            Shell::AddLabel(panel, panel, "OpenShimBans_Title", kTitleRect,
+                            ShimText("openshim_ui:bans_title", "BANNED PLAYERS"),
                             Shell::kTitleLabelFlags);
 
             Shell::ButtonSkin slot{ "optionhv.png", "optionhv.png", "optionck.png" };
@@ -238,12 +246,13 @@ namespace BZROpenShim
             g_StatusLabel = Shell::AddLabel(panel, panel, "OpenShimBans_Status", kStatusRect, "");
             g_PageLabel = Shell::AddLabel(panel, panel, "OpenShimBans_Page", kPageRect, "");
             g_PrevButton = Shell::AddButton(panel, panel, "OpenShimBans_Prev", kPrevRect,
-                                            "Prev", slot, 1.0f, 0.0f, &OnPrevClicked);
+                                            ShimText("openshim_ui:bans_prev", "Prev"), slot, 1.0f, 0.0f, &OnPrevClicked);
             g_NextButton = Shell::AddButton(panel, panel, "OpenShimBans_Next", kNextRect,
-                                            "Next", slot, 1.0f, 0.0f, &OnNextClicked);
+                                            ShimText("openshim_ui:bans_next", "Next"), slot, 1.0f, 0.0f, &OnNextClicked);
             RefreshRows();
 
-            return Shell::AddButton(panel, nullptr, "OpenShimBans_Back", kBackRect, "Back",
+            return Shell::AddButton(panel, nullptr, "OpenShimBans_Back", kBackRect,
+                                    ShimText("openshim_ui:back", "Back"),
                                     Shell::kSkinTopCorner, 1.0f, kBackTextOffset,
                                     &OnBansBackClicked) != nullptr;
         }

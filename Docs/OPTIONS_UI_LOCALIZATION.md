@@ -1,6 +1,8 @@
 # Options UI localization
 
-The OpenShim options screens follow the game's selected language, the same
+The OpenShim options screens, and the Career, Multiplayer pre-lobby, Banned
+Players and LAN / Local host tools screens, plus the Create Game map-filter
+labels and search placeholder, follow the game's selected language, the same
 way the stock menus do. The text is in
 `resources/localization/openshim_localization.csv`. That file is built into
 the plugin DLL. English always comes from the C++ source, and any missing
@@ -48,7 +50,8 @@ The C++ code names every string; translators never invent keys.
 | `openshim_opt:<IniKey>:value:<iniValue>` | Optional: one row's own wording for one value, named by the ini value it writes. It overrides the shared key for that row only. Add it by hand when a language needs different wording in one place; the sync script keeps it. |
 | `openshim_cat:<Name>:name` / `:title` / `:blurb` | A category tile name, its page title and its hub description. |
 | `openshim_ui:row:<Label>:label` / `:desc` | Rows that open a sub-page, such as Key Bindings or HUD Colors. |
-| `openshim_ui:<name>` | Every other string on the screens: Back, status messages, preview captions and the OpenShim Options button. |
+| `openshim_ui:<name>` | Every other string on the options screens: Back, status messages, preview captions and the OpenShim Options button. |
+| `openshim_ui:<screen>_<name>` | The other screens' text, with the prefixes `career_`, `prelobby_`, `bans_`, `lan_` and `mapfilter_`. |
 
 ## For developers
 
@@ -58,6 +61,12 @@ The C++ code names every string; translators never invent keys.
   - `src/patches/bzr_options_categories.inc`: categories and sub-page rows.
   - `ShimText("openshim_ui:<name>", "English")` and
     `ShimFormat(...)` calls in `bzr_options_ui.cpp`: other strings.
+  - The other screens (`career_screen.cpp`, `prelobby_screen.cpp`,
+    `bans_screen.cpp`, `lan_screen.cpp`, `mp_map_filter_extras.cpp`) call the
+    same lookup through `include/openshim_l10n_text.h`
+    (`BZROpenShim::L10n::ShimText` / `ShimFormat`; add a `using` line after
+    the includes). Call it on the main thread only. The sync script scans
+    `src/patches/*.cpp`, so keep such calls in that folder.
 - After changing any of that, run `python scripts/sync_options_localization.py`.
   It rewrites the English column, keeps every translation whose key still
   exists, and drops keys that no longer exist (it prints each one it drops).
@@ -83,6 +92,12 @@ The C++ code names every string; translators never invent keys.
   title-cased from `input.map`).
 - "Unavailable" reasons reported by other modules (HUD feedback, contextual
   HUD, palette, assets).
+- Text that the LAN, pre-lobby and bans screens get from other modules: the
+  host and scan messages (`LanSession`), the Steam listing text
+  (`SteamPublicListing`) and the reasons inside "Cannot join ...: <reason>."
+  The pre-lobby nickname and server entry widgets, and the lobby help-line
+  replies of `/team`, `/swap` and `/host` (they are logged as well), stay
+  English.
 - Updater status text and the runtime summary line.
 - CR's `PersistentConfig.lua` pages.
 
