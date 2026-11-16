@@ -43,13 +43,43 @@ namespace BZROpenShim::ContextualHud
         uint64_t owner = 0;
         std::array<Activity, kGroups> groups{};
         void Reset() { *this = {}; }
-        void Observe(uint64_t identity, const std::array<uint64_t, kGroups>& values, uint64_t now, size_t count = kGroups)
+        // pinned: bit per Group; a set bit counts as interaction this sample.
+        void Observe(uint64_t identity, const std::array<uint64_t, kGroups>& values, uint64_t now, size_t count = kGroups,
+            uint32_t pinned = 0)
         {
             if (!identity) { Reset(); return; }
             if (identity != owner) { Reset(); owner = identity; }
-            for (size_t i = 0; i < std::min(count, kGroups); ++i) groups[i].Observe(values[i], now);
+            for (size_t i = 0; i < std::min(count, kGroups); ++i) groups[i].Observe(values[i], now, (pinned >> i) & 1u);
         }
     };
+    constexpr uint32_t Bit(Group group) { return 1u << static_cast<size_t>(group); }
+    // Radar pin. Classify by the contact's perceived team only, so a
+    // disguised/hidden team is never revealed by the HUD staying solid.
+    // enemyTeams: bit t set when the native relation calls team t an enemy.
+    inline bool EnemyContact(int perceivedTeam, uint32_t enemyTeams)
+    {
+        return perceivedTeam > 0 && perceivedTeam < 16 && ((enemyTeams >> perceivedTeam) & 1u) != 0;
+    }
+    // The command panel shows a build list only while every selected unit
+    // is a producer (Recycler/Factory/Armory/Constructor). isProducer(i)
+    // classifies selection slot i; doubt answers false (not pinned).
+    constexpr int kMaxSelected = 91;
+    template<class IsProducer>
+    bool ProductionMenuOpen(int selected, IsProducer&& isProducer)
+    {
+        if (selected <= 0 || selected > kMaxSelected) return false;
+        for (int i = 0; i < selected; ++i)
+            if (!isProducer(i)) return false;
+        return true;
+    }
+    // Producer identity by exact primary vtable. Zero entries never match.
+    inline bool IsProducerVtable(uintptr_t vtable, const std::array<uintptr_t, 4>& producers)
+    {
+        if (!vtable) return false;
+        for (const auto candidate : producers)
+            if (candidate && candidate == vtable) return true;
+        return false;
+    }
     struct RadarContacts
     {
         static constexpr size_t Capacity = 256;

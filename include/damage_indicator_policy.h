@@ -1,5 +1,6 @@
 #pragma once
 #include "hud_feedback_policy.h"
+#include <vector>
 
 namespace BZROpenShim::HudFeedback
 {
@@ -151,6 +152,118 @@ namespace BZROpenShim::HudFeedback
         return result;
     }
 
+    namespace DamageShape
+    {
+        inline bool Overlaps(const Rect& a, const Rect& b)
+        {
+            return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+        }
+
+        // Appends `r` minus everything already in `all`, as disjoint pieces.
+        inline void AddDisjoint(std::vector<Rect>& all, const Rect& r)
+        {
+            if (r.left > r.right || r.top > r.bottom) return;
+            std::vector<Rect> pieces{r};
+            for (const Rect& cut : all)
+            {
+                for (size_t i = 0; i < pieces.size();)
+                {
+                    const Rect p = pieces[i];
+                    if (!Overlaps(p, cut)) { ++i; continue; }
+                    pieces[i] = pieces.back();
+                    pieces.pop_back();
+                    if (p.top < cut.top) pieces.push_back({p.left, p.top, p.right, cut.top - 1, p.color});
+                    if (p.bottom > cut.bottom) pieces.push_back({p.left, cut.bottom + 1, p.right, p.bottom, p.color});
+                    const int top = std::max(p.top, cut.top), bottom = std::min(p.bottom, cut.bottom);
+                    if (p.left < cut.left) pieces.push_back({p.left, top, cut.left - 1, bottom, p.color});
+                    if (p.right > cut.right) pieces.push_back({cut.right + 1, top, p.right, bottom, p.color});
+                }
+                if (pieces.empty()) return;
+            }
+            all.insert(all.end(), pieces.begin(), pieces.end());
+        }
+
+        // A path of n (2..16) pixel-space centres drawn as abutting strips:
+        // each strip spans halfway to its neighbours along the axis the path
+        // mostly moves in, and the cross-axis thickness (tw wide, th tall) is
+        // one whole-pixel size for the entire path, so it cannot shimmer.
+        inline void AddStrips(std::vector<Rect>& all, const Rect& clip, const float* cx, const float* cy,
+                              int n, float tw, float th, uint32_t color)
+        {
+            if (n < 2 || n > 16) return;
+            float ex[17], ey[17];
+            ex[0] = cx[0] - (cx[1] - cx[0]) * 0.5f;
+            ey[0] = cy[0] - (cy[1] - cy[0]) * 0.5f;
+            for (int i = 1; i < n; ++i)
+            {
+                ex[i] = (cx[i - 1] + cx[i]) * 0.5f;
+                ey[i] = (cy[i - 1] + cy[i]) * 0.5f;
+            }
+            ex[n] = cx[n - 1] + (cx[n - 1] - cx[n - 2]) * 0.5f;
+            ey[n] = cy[n - 1] + (cy[n - 1] - cy[n - 2]) * 0.5f;
+            const int width = std::max(1, static_cast<int>(std::lround(tw)));
+            const int height = std::max(1, static_cast<int>(std::lround(th)));
+            for (int i = 0; i < n; ++i)
+            {
+                const int x0 = static_cast<int>(std::lround(ex[i])), x1 = static_cast<int>(std::lround(ex[i + 1]));
+                const int y0 = static_cast<int>(std::lround(ey[i])), y1 = static_cast<int>(std::lround(ey[i + 1]));
+                Rect r;
+                r.color = color;
+                if (std::abs(ex[i + 1] - ex[i]) >= std::abs(ey[i + 1] - ey[i]))
+                {
+                    r.left = std::min(x0, x1);
+                    r.right = std::max(x0, x1) - 1;
+                    r.top = static_cast<int>(std::lround(cy[i] - height * 0.5f));
+                    r.bottom = r.top + height - 1;
+                }
+                else
+                {
+                    r.top = std::min(y0, y1);
+                    r.bottom = std::max(y0, y1) - 1;
+                    r.left = static_cast<int>(std::lround(cx[i] - width * 0.5f));
+                    r.right = r.left + width - 1;
+                }
+                r.left = std::max(r.left, clip.left);
+                r.top = std::max(r.top, clip.top);
+                r.right = std::min(r.right, clip.right - 1);
+                r.bottom = std::min(r.bottom, clip.bottom - 1);
+                AddDisjoint(all, r);
+            }
+        }
+
+        // Joins same-colour rectangles that share a full edge; the union is
+        // unchanged, only the rectangle count drops.
+        inline void MergeRects(std::vector<Rect>& v)
+        {
+            for (bool changed = true; changed;)
+            {
+                changed = false;
+                for (size_t i = 0; i < v.size(); ++i)
+                    for (size_t j = i + 1; j < v.size();)
+                    {
+                        Rect& a = v[i];
+                        const Rect b = v[j];
+                        const bool sameRows = a.top == b.top && a.bottom == b.bottom &&
+                            (a.right + 1 == b.left || b.right + 1 == a.left);
+                        const bool sameColumns = a.left == b.left && a.right == b.right &&
+                            (a.bottom + 1 == b.top || b.bottom + 1 == a.top);
+                        if (a.color == b.color && (sameRows || sameColumns))
+                        {
+                            a.left = std::min(a.left, b.left);
+                            a.top = std::min(a.top, b.top);
+                            a.right = std::max(a.right, b.right);
+                            a.bottom = std::max(a.bottom, b.bottom);
+                            v.erase(v.begin() + static_cast<std::ptrdiff_t>(j));
+                            changed = true;
+                            j = i + 1;
+                        }
+                        else
+                            ++j;
+                    }
+            }
+        }
+    }
+
     inline DrawPlan MakeDamageIndicatorPlan(const DamageIndicatorSettings& settings, int x, int y,
         float sx, float sy, Rect clip, float angle, float strength, float severity, const OwnerTicks& owners = {},
         float kick = 0, size_t attackers = 1)
@@ -174,40 +287,27 @@ namespace BZROpenShim::HudFeedback
         // Each new hit kicks the arc outward and thicker, then it settles.
         const float radius = 34 * scale * (1.0f + 0.12f * kick);
         const float thickness = (2 + 2 * weight) * scale * pressure * (1.0f + 0.6f * kick);
-        // Sixteen small quads approximate a 48-degree arc, with a black edge.
-        for (int step = 0; step < 16; ++step)
+        // The arc is a chain of abutting strips and each tick a short chain of
+        // strips, all snapped to whole pixels. Every rectangle in the plan is
+        // disjoint from every other one, so translucent alpha never stacks
+        // where pieces meet, and the black edge is only the ring outside the
+        // fill (never underneath it, which would darken the fill colour).
+        std::vector<Rect> all;
+        all.reserve(128);
+        const uint32_t fillRgb = settings.color & 0xFFFFFFu;
+        const uint32_t arcAlpha = static_cast<uint32_t>(alpha);
         {
-            const float a = angle + (step - 7.5f) * 0.055f;
-            const float px = std::sin(a) * radius;
-            const float py = -std::cos(a) * radius;
-            const int l = x + static_cast<int>(std::lround((px - thickness / 2) * sx));
-            const int t = y + static_cast<int>(std::lround((py - thickness / 2) * sy));
-            const int r = x + static_cast<int>(std::lround((px + thickness / 2) * sx));
-            const int b = y + static_cast<int>(std::lround((py + thickness / 2) * sy));
-            const auto add = [&](int left, int top, int right, int bottom, uint32_t color) {
-                left = std::max(left, clip.left); top = std::max(top, clip.top);
-                right = std::min(right, clip.right - 1); bottom = std::min(bottom, clip.bottom - 1);
-                if (left <= right && top <= bottom && plan.count < plan.rects.size())
-                    plan.rects[plan.count++] = {left, top, right, bottom, color};
-            };
-            // Put outlines first so adjacent quads do not erase their color.
-            add(l - 1, t - 1, r + 1, b + 1, static_cast<uint32_t>(alpha) << 24);
+            float cx[16], cy[16];
+            for (int step = 0; step < 16; ++step)
+            {
+                const float a = angle + (step - 7.5f) * 0.055f;
+                cx[step] = static_cast<float>(x) + std::sin(a) * radius * sx;
+                cy[step] = static_cast<float>(y) - std::cos(a) * radius * sy;
+            }
+            DamageShape::AddStrips(all, clip, cx, cy, 16, thickness * sx, thickness * sy, (arcAlpha << 24) | fillRgb);
         }
-        for (int step = 0; step < 16; ++step)
-        {
-            // Recompute the fill separately: clipping an outline must not
-            // shrink the fill at the pane boundary.
-            const float a = angle + (step - 7.5f) * 0.055f;
-            const float px = std::sin(a) * radius, py = -std::cos(a) * radius;
-            const int l = std::max(clip.left, x + static_cast<int>(std::lround((px - thickness / 2) * sx)));
-            const int t = std::max(clip.top, y + static_cast<int>(std::lround((py - thickness / 2) * sy)));
-            const int r = std::min(clip.right - 1, x + static_cast<int>(std::lround((px + thickness / 2) * sx)));
-            const int b = std::min(clip.bottom - 1, y + static_cast<int>(std::lround((py + thickness / 2) * sy)));
-            if (l <= r && t <= b) plan.rects[plan.count++] = {l,t,r,b,(static_cast<uint32_t>(alpha) << 24) | (settings.color & 0xFFFFFFu)};
-        }
+
         const size_t ownerCount = std::min(owners.count, owners.strengths.size());
-        // Draw all tick edges before their fills so dense ticks remain clear.
-        for (int pass = 0; pass < 2; ++pass)
         for (size_t owner = 0; owner < ownerCount; ++owner)
         {
             const float fade = owners.strengths[owner];
@@ -220,23 +320,36 @@ namespace BZROpenShim::HudFeedback
             const float offset = ownerCount == 1 ? 0 :
                 -0.28f + 0.56f * static_cast<float>(owner) / static_cast<float>(ownerCount - 1);
             const float a = angle + offset;
+            float cx[4], cy[4];
             for (int step = 0; step < 4; ++step)
             {
                 const float r = radius + (-2.0f + 2.0f * step) * scale;
-                const float px = std::sin(a) * r, py = -std::cos(a) * r;
-                const int l = x + static_cast<int>(std::lround((px - 0.75f * scale) * sx));
-                const int t = y + static_cast<int>(std::lround((py - 0.75f * scale) * sy));
-                const int right = x + static_cast<int>(std::lround((px + 0.75f * scale) * sx));
-                const int b = y + static_cast<int>(std::lround((py + 0.75f * scale) * sy));
-                const auto add = [&](int left, int top, int rr, int bottom, uint32_t color) {
-                    left = std::max(left, clip.left); top = std::max(top, clip.top);
-                    rr = std::min(rr, clip.right - 1); bottom = std::min(bottom, clip.bottom - 1);
-                    if (left <= rr && top <= bottom && plan.count < plan.rects.size())
-                        plan.rects[plan.count++] = {left,top,rr,bottom,color};
-                };
-                if (pass == 0) add(l-1,t-1,right+1,b+1,tickAlpha << 24);
-                else add(l,t,right,b,(tickAlpha << 24) | (settings.color & 0xFFFFFFu));
+                cx[step] = static_cast<float>(x) + std::sin(a) * r * sx;
+                cy[step] = static_cast<float>(y) - std::cos(a) * r * sy;
             }
+            DamageShape::AddStrips(all, clip, cx, cy, 4, 1.5f * scale * sx, 1.5f * scale * sy,
+                                   (tickAlpha << 24) | fillRgb);
+        }
+
+        // Edges last: each is the one-pixel ring around a fill, minus anything
+        // already drawn. Fills come first in the plan so a full plan loses
+        // edges before it loses any fill.
+        const size_t fillEnd = all.size();
+        for (size_t i = 0; i < fillEnd; ++i)
+        {
+            Rect edge = all[i];
+            edge.left = std::max(edge.left - 1, clip.left);
+            edge.top = std::max(edge.top - 1, clip.top);
+            edge.right = std::min(edge.right + 1, clip.right - 1);
+            edge.bottom = std::min(edge.bottom + 1, clip.bottom - 1);
+            edge.color &= 0xFF000000u;
+            DamageShape::AddDisjoint(all, edge);
+        }
+        DamageShape::MergeRects(all);
+        for (const Rect& r : all)
+        {
+            if (plan.count == plan.rects.size()) break;
+            plan.rects[plan.count++] = r;
         }
         return plan;
     }

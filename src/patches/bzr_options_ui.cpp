@@ -2711,7 +2711,8 @@ namespace BZROpenShim
                                                  const char* const* altKeys,
                                                  size_t altKeyCount,
                                                  const char* value,
-                                                 std::string& outError)
+                                                 std::string& outError,
+                                                 const char* pairedKey = nullptr)
         {
             outError.clear();
             const auto path = GetUserConfigPath();
@@ -2731,8 +2732,8 @@ namespace BZROpenShim
                 outError = "openshim.ini could not be read";
                 return false;
             }
-            UpdateIniDocumentValueLossless(document.lines, section, key,
-                                           altKeys, altKeyCount, value);
+            UpdateIniDocumentPairedValueLossless(document.lines, section, key,
+                                                 altKeys, altKeyCount, pairedKey, value);
 
             if (!WriteInputBindingDocumentAtomic(path, document, outError))
                 return false;
@@ -2744,6 +2745,7 @@ namespace BZROpenShim
 
 
 #include "bzr_options_registry.inc"
+#include "bzr_options_index.inc"
 
         // The screens list registry rows by category (kShimSettingsCategories).
         constexpr size_t kShimSettingsRegistryCount =
@@ -2797,44 +2799,21 @@ namespace BZROpenShim
             bool found = TryGetUserConfigString(setting.section, setting.key, value);
             for (size_t alt = 0; !found && alt < setting.altKeyCount; ++alt)
                 found = TryGetUserConfigString(setting.section, setting.altKeys[alt], value);
-            if (!found)
-                return setting.defaultIndex;
+            const size_t index = found ? ShimSettingIndexFromText(setting, value) : setting.defaultIndex;
+            if (!setting.pairedKey)
+                return index;
 
-            // Normalize like the feature parsers: case-insensitive, ignore
-            // spaces/underscores/hyphens so NeutralOnly == neutral-only.
-            std::string normalized;
-            normalized.reserve(value.size());
-            for (char ch : value)
-            {
-                if (ch == ' ' || ch == '\t' || ch == '_' || ch == '-')
-                    continue;
-                normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
-            }
-
-            for (size_t index = 0; index < setting.valueCount; ++index)
-            {
-                std::string candidate;
-                for (const char* cursor = setting.values[index]; *cursor; ++cursor)
-                {
-                    if (*cursor == ' ' || *cursor == '_' || *cursor == '-')
-                        continue;
-                    candidate.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(*cursor))));
-                }
-                if (normalized == candidate)
-                    return index;
-            }
-
-            // Boolean rows also accept the parser's synonym set.
-            bool token = false;
-            if (setting.values == kShimSettingsOnOffValues && BZROpenShim::BoolToken::TryParse(normalized, token))
-                return token ? 0 : 1;
-            if (setting.values == kShimSettingsUnitVoValues && BZROpenShim::BoolToken::TryParse(normalized, token))
-                return token ? 0 : 2;
-            // LegacyTankAi was a bool: old true/false values read as All teams/Off.
-            if (setting.values == kShimSettingsLegacyTankAiValues && BZROpenShim::BoolToken::TryParse(normalized, token))
-                return token ? 1 : 0;
-
-            return setting.defaultIndex;
+            // A paired row reads On only when both keys agree; a missing or
+            // different paired key shows the "0" (Off) entry, so one click
+            // writes both keys into the shown state.
+            std::string paired;
+            if (TryGetUserConfigString(setting.section, setting.pairedKey, paired) &&
+                ShimSettingIndexFromText(setting, paired) == index)
+                return index;
+            for (size_t i = 0; i < setting.valueCount; ++i)
+                if (std::strcmp(setting.values[i], "0") == 0)
+                    return i;
+            return index;
         }
 
 
@@ -3720,8 +3699,9 @@ namespace BZROpenShim
                 }
                 if (!setting)
                     continue;
-                UpdateIniDocumentValueLossless(document.lines, setting->section, setting->key,
-                                               setting->altKeys, setting->altKeyCount, stock.value);
+                UpdateIniDocumentPairedValueLossless(document.lines, setting->section, setting->key,
+                                                     setting->altKeys, setting->altKeyCount,
+                                                     setting->pairedKey, stock.value);
                 ++written;
                 restartNeeded |= setting->applyGroup == ShimSettingApplyGroup::RestartRequired;
                 if (std::find(groups.begin(), groups.end(), setting->applyGroup) == groups.end())
@@ -3776,7 +3756,8 @@ namespace BZROpenShim
             const size_t nextIndex = (GetShimSettingCurrentIndex(setting) + 1) % setting.valueCount;
             std::string error;
             if (!WriteUserConfigValueLossless(setting.section, setting.key, setting.altKeys,
-                                              setting.altKeyCount, setting.values[nextIndex], error))
+                                              setting.altKeyCount, setting.values[nextIndex], error,
+                                              setting.pairedKey))
             {
                 status = ShimFormat("openshim_ui:save_failed", "Save failed: %s", error);
                 Log(L"[SETTINGSUI] Save failed for %hs: %hs\n", setting.key, error.c_str());

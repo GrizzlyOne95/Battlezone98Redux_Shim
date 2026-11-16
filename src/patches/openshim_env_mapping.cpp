@@ -509,8 +509,6 @@ namespace
         if (Equals(name, "OPENSHIM_TERRAIN_HD_MANIFEST"))
             return ini(IniFile::Main, "Terrain", "TerrainHdManifest", out);
 
-        if (Equals(name, "OPENSHIM_MP_FLAG_SHOW_OWN") || Equals(name, "BZR_MP_FLAG_SHOW_OWN"))
-            return ini(IniFile::Main, "Display", "MultiplayerFlagShowOwnCraft", out);
         if (Equals(name, "OPENSHIM_FACTION_JET_FLAMES") || Equals(name, "BZR_FACTION_JET_FLAMES"))
             return TryReadMappedBool(ini, "Display", "JetFlames", false, out);
         if (Equals(name, "OPENSHIM_DISABLE_FACTION_JET_FLAMES") ||
@@ -595,11 +593,6 @@ namespace
         {
             return TryReadMappedBool(ini, "Network", "PersistentPlayerMute", false, out);
         }
-        if (Equals(name, "OPENSHIM_DISABLE_BZRNET_REAUTH") || Equals(name, "BZR_DISABLE_BZRNET_REAUTH"))
-            return TryReadMappedBool(ini, "Network", "ReauthOnNicknameChange", true, out);
-        if (Equals(name, "OPENSHIM_ENABLE_BZRNET_REAUTH") || Equals(name, "BZR_ENABLE_BZRNET_REAUTH") ||
-            Equals(name, "OPENSHIM_BZRNET_REAUTH") || Equals(name, "BZR_BZRNET_REAUTH"))
-            return TryReadMappedBool(ini, "Network", "ReauthOnNicknameChange", false, out);
         // Multiplayer starting-vehicle list: restore the 1.5 "Any Nation = OFF"
         // restricted pool. Positive key, default OFF, so absence is stock.
         // Terrain detail-atlas rect repair. Positive key, default ON (the

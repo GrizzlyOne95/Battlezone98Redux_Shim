@@ -5,6 +5,7 @@
 // split out of bzr_hooks.cpp.
 #include "native_hud_runtime.h"
 #include "hud_feedback.h"
+#include "hud_visibility.h"
 #include "unit_damage.h"
 #include "bzr_hooks.h"
 #include "bzr_object_layout.h"
@@ -618,6 +619,8 @@ namespace BZROpenShim
                 NotifyExuMissionSimulationState(false);
                 NativeHud::Runtime::ResetMission();
                 HudFeedback::ResetMission();
+                // A Ctrl+= hidden HUD does not outlive its mission.
+                HudVisibility::ResetMission();
                 UnitDamage::ResetMissionState();
                 // Rallies belong to the world being left; without this a load
                 // that restores the same producer handle would inherit them.
@@ -629,6 +632,7 @@ namespace BZROpenShim
             {
                 HeadlightNotifyMissionRunStateChanged(true);
                 WeaponPresentationMissionRunStateChanged(true);
+                HudVisibility::ResetMission();
                 FogWakeNotifyMissionRunStateChanged(true);
                 // GPU skinning is not started here. On an in-mission load the
                 // state flips back to RUN_STARTED before the old world is torn

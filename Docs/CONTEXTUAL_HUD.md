@@ -36,8 +36,11 @@ toward its own idle opacity. Relevant changes restore full opacity immediately:
 
 - Weapons: selected mask, available/linkable mask, hardpoint loadout, or ammo.
   Firing, spending or replenishing ammo therefore keeps/reveals the list.
-- Scrap: current scrap or maximum capacity.
-- Pilots: current available pilots or maximum capacity.
+- Scrap: current scrap or maximum capacity. Stays fully visible while a
+  producer build menu is open (every unit selected on the command panel is a
+  Recycler, Factory, Armory or Constructor; exact primary-vtable rows and the
+  `ControlPanelGlobal` selection, read in the safe-frame driver).
+- Pilots: same as Scrap, for current available pilots or maximum capacity.
 - Hull: current health or maximum health changes. Health below the native
   strict 25% threshold stays visible; repairs start a fresh hold.
 - Ammo: spending/refill, capacity, weapon selection/loadout or ammo-cost changes.
@@ -47,11 +50,20 @@ toward its own idle opacity. Relevant changes restore full opacity immediately:
 - Radar: native range/compact-mode and target changes, active command contexts,
   ping animation, newly native-visible contacts, and recent-hit alerts on native
   visible contacts. Contact movement and draw order do not refresh the hold.
+  Any drawn enemy contact, buildings included, keeps the radar solid until
+  none remain (a standing enemy base can keep it solid all mission). Enemy
+  means the contact's perceived team (`+0x180`) is an enemy of the player per
+  native `GameObject::EnemyP` (`HudPaletteEnemyTeam`), so a disguised unit is
+  judged as the player sees it and no hidden team is read. Without that row
+  the pin alone stands down.
 - Commands: the native row/group actions, command-menu activation, or a native
   pointer action hitting a command row. An active unit selection, category,
   menu navigation or nested build page stays fully visible until it closes.
   The idle hold begins again after the final interaction. Walking, aiming and
-  firing alone do not count as command activity.
+  firing alone do not count as command activity. Damage to one of the
+  player's own producers (Recycler, Factory, Armory, Constructor) wakes the
+  panel. With the command fade on, the existing HUD-feedback damage adapters
+  install even when hit markers, damage arcs and the kill ticker are off.
 
 Unchanged readings do not restart the hold, and changing one group does not
 reveal the others. A player/team change, mission reset or config apply starts
@@ -350,3 +362,45 @@ Interactive appearance and Radar Fading fit/navigation/apply/save remain pending
 under the user's earlier interactive-validation deferral, as do command/meter
 visual checks and the broader renderer, store, lifecycle and multiplayer matrix.
 Local probes/fixtures/logs are ignored under `bin/radar-fade/`.
+
+## Hide all HUD (Ctrl+=)
+
+Ctrl+= hides the whole HUD for screenshots; Ctrl+= again shows it. There is
+no setting: the chord is always available during live gameplay, on GOG and
+Steam alike. Plain `=` stays the stock zoom (`input.map` `zoom_factor_plus`
+`Equal`); the Ctrl+= press, its repeats and its key-up are swallowed, so it
+does not zoom. The key is matched by scan code 0x0D (the key `input.map`
+calls `Equal`), so it is the zoom key on any keyboard layout. Ctrl+= is left
+to the game while the shell, pause or options screen is up, while an
+in-mission chat or ally prompt has keyboard focus, and while no world is
+updating. The HUD comes back by itself whenever the mission run state
+changes (mission start, quit, load).
+
+How it hides (`src/patches/hud_visibility.cpp`, rules in
+`include/hud_visibility_policy.h`):
+
+- Stock HUD: the stock show-HUD switch `0x008EAAB0` (catalog
+  `HudDisplayInterfaceFlag`; the Shift+F5 `NO_HUD_VIEW` view and the Options
+  HUD on/off box write the same global) is held at 0 while hidden and put
+  back to its previous value afterwards. With it at 0 the HUD pass
+  `0x00617600` skips the HUD element list (scrap/pilot gauge, cockpit radar,
+  tactical MapRadar, command panel and the other vtable-slot-6 elements;
+  guard row `HudDisplayInterfaceGate`), and Reticle, TargetCam and
+  SniperInterface skip their own draws. The camera and cockpit are not
+  changed. Shift+F1/F2 while hidden set the switch back to 1; the next frame
+  returns it to 0.
+- OpenShim: one shared flag, `HudVisibility::IsHidden()`. The shared gauge
+  overlay skips every painter (autosave notice, kill ticker, rally marker,
+  group strip); HUD feedback draws no reticle, hit marker or damage arc; the
+  3D rally beacon hides. Contextual HUD fades, HUD palette, the legacy
+  scrap/pilot plates and the command-panel rally row draw inside stock HUD
+  elements and disappear with them.
+- Typing check: the stock focused-editor lookup `0x00823CE0` (catalog
+  `LegacyTextEditorFocusLookup`; see
+  `reverse_engineering/coopflow/TEXT_ENTRY_STATE.md`).
+
+Still visible while hidden (not gated by the stock switch in `0x00617600`):
+the FPS counter (Ctrl+R), the legacy text list drawn by `0x008216C0`
+(identity of its contents UNVERIFIED: likely mission messages/objectives),
+an open chat line, shell and pause screens, and EXU-drawn HUD. No live
+visual check has been run yet.

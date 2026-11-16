@@ -2,9 +2,11 @@
 // row, value label, category and pseudo row has its key, the English column
 // matches the compiled text, and lookups fall back to English instead of
 // blank. Docs/OPTIONS_UI_LOCALIZATION.md.
+#include "bool_token.h"
 #include "options_ui_l10n.h"
 #include "test_check.h"
 
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <fstream>
@@ -35,6 +37,7 @@ namespace Registry
     };
 
 #include "../src/patches/bzr_options_registry.inc"
+#include "../src/patches/bzr_options_index.inc"
 #include "../src/patches/bzr_options_categories.inc"
 }
 
@@ -238,8 +241,57 @@ static void CheckCategoryCoverage()
         Check(listed.count(label) != 0, label + " is in a category");
 }
 
+static const Registry::ShimSettingDescriptor* FindRow(const char* label)
+{
+    for (const auto& setting : Registry::g_ShimSettingsRegistry)
+        if (std::strcmp(setting.label, label) == 0)
+            return &setting;
+    return nullptr;
+}
+
+static void CheckTweakedRows()
+{
+    // Removed rows are gone; the keys stay readable from the ini only.
+    for (const char* gone : { "Empty Craft Glow", "Emissive Pulse", "Star Twinkle", "Show Own MP Flag",
+                              "Live Nickname", "Mesh Chunks", "Fracture Debris", "No Smoothing" })
+        Check(FindRow(gone) == nullptr, std::string(gone) + " is no longer a row");
+
+    // Input Smoothing: DisableControlSmoothing is inverted. On writes 0.
+    const auto* smooth = FindRow("Input Smoothing");
+    OpenShimTest::Require(smooth != nullptr, "Input Smoothing row exists");
+    Check(std::strcmp(smooth->key, "DisableControlSmoothing") == 0, "Input Smoothing key");
+    Check(std::strcmp(smooth->values[0], "0") == 0 && std::strcmp(smooth->values[1], "1") == 0,
+          "Input Smoothing On writes 0, Off writes 1");
+    Check(Registry::ShimSettingIndexFromText(*smooth, "0") == 0, "smoothing 0 reads On");
+    Check(Registry::ShimSettingIndexFromText(*smooth, "1") == 1, "smoothing 1 reads Off");
+    Check(Registry::ShimSettingIndexFromText(*smooth, "false") == 0, "smoothing false reads On");
+    Check(Registry::ShimSettingIndexFromText(*smooth, "True") == 1, "smoothing true reads Off");
+    Check(Registry::ShimSettingIndexFromText(*smooth, "no") == 0, "smoothing no reads On");
+    Check(Registry::ShimSettingIndexFromText(*smooth, "garbage") == 0, "smoothing garbage reads default On");
+    Check(smooth->defaultIndex == 0, "smoothing absent key shows On");
+
+    // Plain on/off rows keep their synonyms.
+    const auto* raw = FindRow("Raw Mouse Input");
+    OpenShimTest::Require(raw != nullptr, "Raw Mouse Input row exists");
+    Check(Registry::ShimSettingIndexFromText(*raw, "true") == 0, "on/off true reads On");
+    Check(Registry::ShimSettingIndexFromText(*raw, "off") == 1, "on/off off reads Off");
+
+    // Destruction Chunks: one row, primary FractureOnePiece, paired ChunkMeshes, default On.
+    const auto* chunks = FindRow("Destruction Chunks");
+    OpenShimTest::Require(chunks != nullptr, "Destruction Chunks row exists");
+    Check(std::strcmp(chunks->key, "FractureOnePiece") == 0, "Destruction Chunks primary key");
+    Check(chunks->pairedKey && std::strcmp(chunks->pairedKey, "ChunkMeshes") == 0,
+          "Destruction Chunks pairs ChunkMeshes");
+    Check(chunks->defaultIndex == 0 && std::strcmp(chunks->values[0], "1") == 0,
+          "Destruction Chunks defaults On");
+    for (const auto& setting : Registry::g_ShimSettingsRegistry)
+        if (setting.pairedKey)
+            Check(std::strcmp(setting.pairedKey, setting.key) != 0, "paired key differs from primary");
+}
+
 int main()
 {
+    CheckTweakedRows();
     CheckFallback();
     CheckShippedTable();
     CheckStockClassification();

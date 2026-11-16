@@ -36,6 +36,7 @@
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "contextual_hud.h"
+#include "hud_visibility.h"
 #include "engine_globals.h"
 #include "game_state.h"
 #include "hook_engine.h"
@@ -1038,7 +1039,8 @@ namespace BZROpenShim::Hooks
             bool amber[kMeshPoolSize] = {};
             float positions[kMeshPoolSize][3] = {};
             size_t wanted = 0;
-            if (g_Active.load(std::memory_order_acquire) && TableSize() != 0)
+            // Ctrl+= hidden HUD: the beacon is a HUD marker, so it hides too.
+            if (g_Active.load(std::memory_order_acquire) && TableSize() != 0 && !HudVisibility::IsHidden())
             {
                 ForEachSelectedProducer([&](void* producer, uint32_t) {
                     if (wanted >= kMeshPoolSize)

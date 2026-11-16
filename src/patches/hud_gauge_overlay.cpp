@@ -27,6 +27,7 @@
 #include "hud_gauge_overlay.h"
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
+#include "hud_visibility.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -86,6 +87,9 @@ namespace BZROpenShim::HudGaugeOverlay
             if (!original)
                 return;
             original(self, edx);
+            // Ctrl+= hides every painter (notice, kill ticker, rally, groups).
+            if (HudVisibility::IsHidden())
+                return;
 
             Frame frame;
             bool frameRead = false;

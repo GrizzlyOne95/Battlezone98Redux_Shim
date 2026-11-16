@@ -440,7 +440,12 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
 
     # The stock player headlight, back on at the user's request on 2026-11-13.
     # This key is an override, so 0 forced a stock feature off; 1 is stock.
-    "SinglePlayer/Headlights"
+    "SinglePlayer/Headlights",
+
+    # Destruction Chunks, on at the user's request on 2026-11-16: one Options
+    # row writes both keys. Visual only.
+    "General/ChunkMeshes",
+    "General/FractureOnePiece"
 ) | ForEach-Object { [void]$allowedEnabledLookingValues.Add($_) }
 
 $enabledLookingTokens = [System.Collections.Generic.HashSet[string]]::new(
@@ -580,7 +585,6 @@ $shippingPolicyChecks = @{
     "Graphics/ResolutionListFilter" = "1"
     "Graphics/ResolutionDropdown" = "1"
     "Graphics/RenderProfile" = "Enhanced"
-    "Network/ReauthOnNicknameChange" = "0"
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"
     "Network/PreLobby" = "1"

@@ -237,6 +237,32 @@ int main()
         }, "repeated cycling never duplicates lines");
     }
 
+    // --- paired write: one row drives two keys ----------------------------------
+    {
+        std::vector<std::string> doc = {
+            "[General]",
+            "FractureOnePiece = 0",
+            "Other = 5",
+        };
+        BZROpenShim::UpdateIniDocumentPairedValueLossless(doc, "General", "FractureOnePiece", nullptr, 0, "ChunkMeshes", "1");
+        CheckEq(doc, {
+            "[General]",
+            "FractureOnePiece = 1",
+            "Other = 5",
+            "ChunkMeshes = 1",
+        }, "paired key is appended with the same value");
+        BZROpenShim::UpdateIniDocumentPairedValueLossless(doc, "General", "FractureOnePiece", nullptr, 0, "ChunkMeshes", "0");
+        CheckEq(doc, {
+            "[General]",
+            "FractureOnePiece = 0",
+            "Other = 5",
+            "ChunkMeshes = 0",
+        }, "paired key follows the primary on the next write");
+        std::vector<std::string> single = { "[General]" };
+        BZROpenShim::UpdateIniDocumentPairedValueLossless(single, "General", "A", nullptr, 0, nullptr, "1");
+        CheckEq(single, { "[General]", "A = 1" }, "null paired key writes only the primary");
+    }
+
     std::printf("%d checks, %d failures\n", OpenShimTest::CheckCount(), OpenShimTest::FailureCount());
     return OpenShimTest::ExitCode();
 }

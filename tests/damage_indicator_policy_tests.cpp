@@ -4,6 +4,67 @@
 using namespace BZROpenShim::HudFeedback;
 using OpenShimTest::Check;
 
+namespace
+{
+    bool Overlaps(const Rect& a, const Rect& b)
+    {
+        return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+    }
+    // No pixel is covered twice, so translucent alpha can never stack.
+    bool AllDisjoint(const DrawPlan& p)
+    {
+        for (size_t i = 0; i < p.count; ++i)
+            for (size_t j = i + 1; j < p.count; ++j)
+                if (Overlaps(p.rects[i], p.rects[j])) return false;
+        return true;
+    }
+    bool IsFill(const Rect& r) { return (r.color & 0xFFFFFFu) != 0; }
+    int MaxFillAlpha(const DrawPlan& p)
+    {
+        int best = 0;
+        for (size_t i = 0; i < p.count; ++i)
+            if (IsFill(p.rects[i])) best = std::max(best, static_cast<int>(p.rects[i].color >> 24));
+        return best;
+    }
+    int MaxFillHeight(const DrawPlan& p)
+    {
+        int best = 0;
+        for (size_t i = 0; i < p.count; ++i)
+            if (IsFill(p.rects[i])) best = std::max(best, p.rects[i].bottom - p.rects[i].top + 1);
+        return best;
+    }
+    int MinFillTop(const DrawPlan& p)
+    {
+        int best = 1 << 30;
+        for (size_t i = 0; i < p.count; ++i)
+            if (IsFill(p.rects[i])) best = std::min(best, p.rects[i].top);
+        return best;
+    }
+    bool HasFillAlpha(const DrawPlan& p, int alpha)
+    {
+        for (size_t i = 0; i < p.count; ++i)
+            if (IsFill(p.rects[i]) && static_cast<int>(p.rects[i].color >> 24) == alpha) return true;
+        return false;
+    }
+    // Every fill piece touches another one (within a pixel): no gaps in the arc.
+    bool FillsConnected(const DrawPlan& p)
+    {
+        size_t fills = 0;
+        for (size_t i = 0; i < p.count; ++i) fills += IsFill(p.rects[i]) ? 1 : 0;
+        for (size_t i = 0; i < p.count; ++i)
+        {
+            if (!IsFill(p.rects[i])) continue;
+            bool touches = false;
+            Rect grown = p.rects[i];
+            --grown.left; --grown.top; ++grown.right; ++grown.bottom;
+            for (size_t j = 0; j < p.count && !touches; ++j)
+                touches = j != i && IsFill(p.rects[j]) && Overlaps(grown, p.rects[j]);
+            if (!touches && fills > 1) return false;
+        }
+        return fills > 0;
+    }
+}
+
 int main()
 {
     DamageSample sample{1,2,1.0f,0.9f,true,false,true,true};
@@ -96,23 +157,33 @@ int main()
     Check(!settings.enabled, "default is disabled");
     const Rect clip{100,50,900,650,0};
     auto plan = MakeDamageIndicatorPlan(settings,500,350,1,1,clip,0,1,1);
-    Check(plan.count == 32 && !plan.replacesStock, "arc preserves native reticle");
+    Check(plan.count > 0 && plan.count <= 96 && !plan.replacesStock, "arc preserves native reticle");
     for (size_t i = 0; i < plan.count; ++i)
         Check(plan.rects[i].bottom < 350, "front arc stays above aim point");
+    Check(AllDisjoint(plan), "arc fill and edge never overlap, so alpha never stacks");
+    Check(FillsConnected(plan), "arc strips abut with no gaps");
     const auto light = MakeDamageIndicatorPlan(settings,500,350,1,1,clip,0,1,0);
-    Check((light.rects[light.count-1].color >> 24) < (plan.rects[plan.count-1].color >> 24), "severity affects alpha");
+    Check(MaxFillAlpha(light) < MaxFillAlpha(plan), "severity affects alpha");
     auto counted = MakeDamageIndicatorPlan(settings,500,350,1,1,clip,0,1,1,fullGroups.entries[0].owners);
-    Check(counted.count == 96 && !counted.replacesStock, "eight owner ticks and the arc fit bounded drawing storage");
+    Check(counted.count > plan.count && counted.count <= 96 && !counted.replacesStock,
+        "eight owner ticks and the arc fit bounded drawing storage");
+    Check(AllDisjoint(counted), "ticks never overlap the arc or each other");
     OwnerTicks fading; fading.count=2; fading.strengths[0]=1; fading.strengths[1]=0.25f;
     counted = MakeDamageIndicatorPlan(settings,500,350,1,1,clip,0,1,1,fading);
-    Check(counted.count == 48 && (counted.rects[40].color >> 24) > (counted.rects[44].color >> 24),
-        "each owner's stroke fades independently");
+    Check(HasFillAlpha(counted, 47) && AllDisjoint(counted), "each owner's stroke fades independently");
+    for (float a : {0.0f, 0.7f, 1.57f, 2.4f, 3.14f, -2.4f, -1.57f, -0.7f})
+        for (float scale : {0.5f, 1.0f, 2.0f})
+        {
+            const auto arc = MakeDamageIndicatorPlan(settings,500,350,scale,scale,clip,a,1,0.5f,fading);
+            Check(AllDisjoint(arc) && FillsConnected(arc), "every bearing draws clean, gapless, non-overlapping arcs");
+        }
     for (float scale : {0.1f,0.5f,1.0f,2.0f,8.0f})
         for (float a : {0.0f,1.57f,3.14f,-1.57f})
             for (const auto point : {std::array<int,2>{100,50},{899,649},{500,350}})
             {
                 plan = MakeDamageIndicatorPlan(settings,point[0],point[1],scale,scale,clip,a,1,0.5f,fullGroups.entries[0].owners);
                 Check(plan.count <= 96, "geometry and eight ticks remain bounded even when clipped");
+                Check(AllDisjoint(plan), "clipping never makes pieces overlap");
                 for (size_t i = 0; i < plan.count; ++i)
                 {
                     const auto& r = plan.rects[i];
@@ -127,14 +198,14 @@ int main()
         const auto kicked = MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},1,1);
         const auto pressed = MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},0,4);
         const auto mobbed = MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},0,99);
-        const auto height = [](const DrawPlan& p) { return p.rects[16].bottom - p.rects[16].top; };
-        Check(calm.count == 32 && kicked.count == 32 && pressed.count == 32, "kick and pressure add no geometry");
-        Check(kicked.rects[16].top < calm.rects[16].top, "kick pushes the arc outward");
+        const auto height = [](const DrawPlan& p) { return MaxFillHeight(p); };
+        Check(AllDisjoint(kicked) && AllDisjoint(pressed), "kick and pressure stay overlap-free");
+        Check(MinFillTop(kicked) < MinFillTop(calm), "kick pushes the arc outward");
         Check(height(kicked) > height(calm) && height(pressed) > height(calm), "kick and pressure thicken the arc");
-        Check((pressed.rects[16].color >> 24) > (calm.rects[16].color >> 24), "pressure brightens the arc");
+        Check(MaxFillAlpha(pressed) > MaxFillAlpha(calm), "pressure brightens the arc");
         Check(height(mobbed) == height(pressed), "pressure caps at four attackers");
-        Check(MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},
-              std::numeric_limits<float>::quiet_NaN(),1).rects[16].top == calm.rects[16].top, "bad kick is ignored");
+        Check(MinFillTop(MakeDamageIndicatorPlan(dim,500,350,1,1,clip,0,1,0.5f,{},
+              std::numeric_limits<float>::quiet_NaN(),1)) == MinFillTop(calm), "bad kick is ignored");
         IncomingPulses two;
         two.Add(5000,600,1,2,{0,0,1},0.1f);
         two.Add(5300,600,1,3,{1,0,0},0.1f);

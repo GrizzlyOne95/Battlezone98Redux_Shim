@@ -10,6 +10,7 @@
 // so the fourth box (KILLS BY TYPE, two columns of five rows) sits in the same
 // painted rectangle as the others and the art is unchanged.
 
+#include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "career_kill_class.h"
 #include "patcher.h"
@@ -176,6 +177,20 @@ namespace BZROpenShim
 
         void BuildCareerBoxes(CareerBox (&boxes)[4])
         {
+            // Tracking off: show no recorded totals, only a notice. The file may
+            // hold old data; it is neither read nor shown.
+            if (!Hooks::IsCareerStatsTrackingEnabled())
+            {
+                boxes[0].title = "OVERALL";
+                boxes[1].title = "SINGLE PLAYER";
+                boxes[2].title = "MULTIPLAYER";
+                boxes[3].title = "KILLS BY TYPE";
+                boxes[0].rows[0] = { "Stats tracking is off.", "" };
+                boxes[0].rows[2] = { "Turn it on: OpenShim Settings,", "" };
+                boxes[0].rows[3] = { "Career Stats (restart needed).", "" };
+                return;
+            }
+
             CareerTotals t;
             ReadCareerTotals(t);
             const auto num = [](long long v) { return std::to_string(v); };

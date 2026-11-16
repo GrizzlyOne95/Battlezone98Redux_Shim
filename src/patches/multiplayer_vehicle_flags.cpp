@@ -156,7 +156,7 @@ namespace BZROpenShim
 
         constexpr float kMultiplayerFlagMinimumLift = 1.5f;
 
-        // The player's own flag (MultiplayerFlagShowOwnCraft) sat 1.5 m above
+        // The player's own flag (always drawn, as in 1.5) sat 1.5 m above
         // a pilot's origin: at eye level, so it covered the first-person view.
         // Lift only the own flag further so its 1 m billboard clears the head.
         constexpr float kMultiplayerFlagOwnExtraLift = 2.0f;
@@ -788,34 +788,6 @@ namespace BZROpenShim
                 userFoundIndex, eligibleCount, teams);
         }
 
-        // Opt-in (default off): also draw the local player's own flag over
-        // their own craft. Legacy Submit and our renderer skip userObject, so
-        // solo hosts see nothing; this lets a single player verify rendering
-        // without a second human. [Display] MultiplayerFlagShowOwnCraft in
-        // openshim.ini, or the OPENSHIM_MP_FLAG_SHOW_OWN env override.
-        static bool ShouldShowOwnMultiplayerFlag()
-        {
-            static int s_cached = -1;
-            if (s_cached < 0)
-            {
-                bool enabled = false;
-                if (EnvFlagEnabled("OPENSHIM_MP_FLAG_SHOW_OWN") ||
-                    EnvFlagEnabled("BZR_MP_FLAG_SHOW_OWN"))
-                {
-                    enabled = true;
-                }
-                else
-                {
-                    bool iniValue = false;
-                    if (TryGetUserConfigBool(kUserConfigDisplaySection, "MultiplayerFlagShowOwnCraft", iniValue))
-                        enabled = iniValue;
-                }
-                s_cached = enabled ? 1 : 0;
-                Log(L"[FLAG] show-own-craft flag: %hs\n", enabled ? "enabled" : "disabled");
-            }
-            return s_cached != 0;
-        }
-
         // The pending flag upload was historically driven only from the flag-
         // selection UI callback (UpdateFlagSelectionUiLabel), so once the local
         // player left that screen for the match, the deferred apply only fired
@@ -991,9 +963,7 @@ namespace BZROpenShim
             {
                 void* gameObject = s_renderObjects[i];
                 const bool isOwnCraft = (gameObject == userObject);
-                if (!gameObject ||
-                    (isOwnCraft && !ShouldShowOwnMultiplayerFlag()) ||
-                    !IsMultiplayerFlagEligibleObject(gameObject))
+                if (!gameObject || !IsMultiplayerFlagEligibleObject(gameObject))
                     continue;
                 const int team = GetGameObjectTeamForLog(gameObject);
                 if (team <= 0 || team >= 16 || teamHashes[team] == 0)

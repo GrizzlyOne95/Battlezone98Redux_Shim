@@ -5,8 +5,10 @@
 #include "bzr_hooks_internal.h"
 #include "bzr_object_layout.h"
 #include "bzr_options_ui.h"
+#include "contextual_hud.h"
 #include "game_state.h"
 #include "hook_engine.h"
+#include "hud_visibility.h"
 #include "kill_ticker.h"
 #include "openshim_events.h"
 #include "patcher.h"
@@ -161,6 +163,11 @@ namespace BZROpenShim::HudFeedback
         {
             const int stockX = x, stockY = y;
             const auto original = reinterpret_cast<Sprite>(g_sprite);
+            // Ctrl+= hidden: no reticle, hit marker or damage arc. The stock
+            // switch already skips this draw; this covers a frame where it
+            // was set back (a view key) before HudVisibility::Tick ran.
+            if (HudVisibility::IsHidden())
+                return;
             Pulse pulse;
             const Settings settings = ReadSettings(&pulse);
             DamageIndicatorSettings incomingSettings;
@@ -442,6 +449,9 @@ namespace BZROpenShim::HudFeedback
             auto address = g_originalDamage[Index].load(std::memory_order_acquire);
             while (!address) { YieldProcessor(); address = g_originalDamage[Index].load(std::memory_order_acquire); }
             const auto original = reinterpret_cast<Damage>(address);
+            // Command-fade wake on producer damage; receiver is the
+            // distributedObject subobject, complete object at -0x18.
+            if (receiver) ContextualHud::NoteDamage(static_cast<const uint8_t*>(receiver) - 0x18);
             const DamageContext context = BeforeDamage(receiver, damage, static_cast<KillTicker::DamageKind>(Index));
             const uint32_t result = original(receiver, damage, argument);
             AfterDamage(context);
@@ -581,7 +591,10 @@ namespace BZROpenShim::HudFeedback
         const bool kills = g_killsEnabled.load(std::memory_order_relaxed);
         if (kills) KillTicker::Tick();
         const bool needsReticle = g_needsDraw.load(std::memory_order_relaxed);
-        if (!needsReticle && !kills) return;
+        // The command fade's producer-damage wake needs the damage adapters
+        // alone (no event subscription, no reticle draw).
+        const bool production = ContextualHud::WantsProductionDamage();
+        if (!needsReticle && !kills && !production) return;
         const Settings settings = ReadSettings();
         if (!IsCompatibleGameVersion()) return;
         if (g_incomingEnabled.load(std::memory_order_relaxed))
@@ -598,7 +611,7 @@ namespace BZROpenShim::HudFeedback
             }
         }
         if ((!needsReticle || (g_drawReady && (!g_incomingEnabled.load(std::memory_order_relaxed) || g_cameraReady))) &&
-            (!NeedsDamage(settings) || g_damageReady.load(std::memory_order_acquire))) return;
+            (!(NeedsDamage(settings) || production) || g_damageReady.load(std::memory_order_acquire))) return;
         const uint64_t now = GetTickCount64();
         if (now < g_nextInstall) return;
         g_nextInstall = now + 1000;
@@ -607,7 +620,7 @@ namespace BZROpenShim::HudFeedback
             if (g_incomingEnabled.load(std::memory_order_relaxed) && !InstallCamera()) return;
             if (!InstallDraw()) return;
         }
-        if (NeedsDamage(settings) && g_subscribed) InstallDamage();
+        if ((NeedsDamage(settings) && g_subscribed) || production) InstallDamage();
     }
 
     void ResetMission() noexcept

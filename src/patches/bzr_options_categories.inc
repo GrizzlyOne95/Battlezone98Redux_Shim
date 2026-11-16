@@ -23,19 +23,18 @@ static const char* const kShimCategoryVideo[] = {
     "Primary Monitor Fix", "Resolution Filter", "Resolution List",
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
-    "Faction Color Jets", "Emissive Pulse", "Star Twinkle", "Mesh Chunks",
-    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs",
-    "Fracture Debris" };
+    "Faction Color Jets", "Destruction Chunks",
+    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
-    "Explosion Flash", "Sun Glare", "Empty Craft Glow", "Fog Culling", "Scrap Shadows",
+    "Explosion Flash", "Sun Glare", "Fog Culling", "Scrap Shadows",
     "Scrap Glow", "Scrap Draw Distance" };
 static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
 static const char* const kShimCategoryHud[] = {
     "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
-    "MP Vehicle Flags", "Show Own MP Flag", "Kill Ticker", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
+    "MP Vehicle Flags", "Kill Ticker", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
 static const char* const kShimCategoryRadar[] = {
     "Radar Fade", "Radar Idle", "Radar Delay", "Radar Speed", "Keep Compass" };
 static const char* const kShimCategoryMeters[] = {
@@ -58,7 +57,7 @@ static const char* const kShimCategoryPalette[] = {
     "Hull Healthy", "Hull Damaged", "Hull Critical", "Cockpit Ammo", "Unit Healthy", "Unit Damaged",
     "Unit Critical", "Unit Ammo", "Empty Bars" };
 static const char* const kShimCategoryControls[] = {
-    kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "No Smoothing", "Per-Frame Mouse",
+    kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Input Smoothing", "Per-Frame Mouse",
     "Satellite Zoom", "Satellite Pan", "Editor Placement", "Background Mouse",
     "Run in Background", "Rally Points", "Auto Group", "Group Strip" };
 static const char* const kShimCategoryGameplay[] = {
@@ -73,7 +72,7 @@ static const char* const kShimCategoryFixes[] = {
     "Effect Sort", "Map List Fixes" };
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions",
-    "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes", "Live Nickname",
+    "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes",
     "MP Setup Screen", "Map Letter Jump", "Block Free Camera", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install", "Skip Launcher", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
@@ -95,13 +94,13 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     BZR_SHIM_CATEGORY("Video", "VIDEO",
         "Renderer, render profile, the DX11 Enhanced passes, shadows and terrain; visual effects open from here.", kShimCategoryVideo),
     BZR_SHIM_CATEGORY("Lighting", "LIGHTING",
-        "Headlights, the pilot flashlight, explosion and sun flashes, and empty-craft lights.", kShimCategoryLighting),
+        "Headlights, the pilot flashlight, and explosion and sun flashes.", kShimCategoryLighting),
     BZR_SHIM_CATEGORY("Audio", "AUDIO",
         "Sound channels, background music, unit voices and alerts.", kShimCategoryAudio),
     BZR_SHIM_CATEGORY("HUD", "HUD",
         "Scrap and pilot readout, radar size, target popup, vehicle flags and the kill ticker.", kShimCategoryHud),
     BZR_SHIM_CATEGORY("Controls", "CONTROLS",
-        "Key bindings, raw mouse input, control smoothing and the satellite view.",
+        "Key bindings, raw mouse input, input smoothing and the satellite view.",
         kShimCategoryControls),
     BZR_SHIM_CATEGORY("Gameplay", "GAMEPLAY",
         "Single-player aiming, AI behaviour and turbo.", kShimCategoryGameplay),
@@ -127,7 +126,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     BZR_SHIM_CATEGORY("Radar Fading", "RADAR FADING",
         "Cockpit radar opacity and timing, with an independent compass exception.", kShimCategoryRadar),
     BZR_SHIM_CATEGORY("Effects", "VISUAL EFFECTS",
-        "Faction color jets, emissive pulse, star twinkle, death chunks, muzzle effects, shell casings and person gibs.",
+        "Faction color jets, destruction chunks, muzzle effects, shell casings and person gibs.",
         kShimCategoryEffects),
 };
 #undef BZR_SHIM_CATEGORY
