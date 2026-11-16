@@ -174,6 +174,7 @@ openshim_add_test(camera_fov_policy_tests STD 17 SOURCES camera_fov_policy_tests
 openshim_add_test(scrap_render_policy_tests STD 17 SOURCES scrap_render_policy_tests.cpp)
 openshim_add_test(pool_draw_distance_policy_tests STD 17 SOURCES pool_draw_distance_policy_tests.cpp)
 openshim_add_test(ordnance_entity_leak_policy_tests STD 17 SOURCES ordnance_entity_leak_policy_tests.cpp)
+openshim_add_test(live_object_gate_tests STD 14 SOURCES live_object_gate_tests.cpp)
 openshim_add_test(briefing_pages_policy_tests STD 17 SOURCES briefing_pages_policy_tests.cpp)
 openshim_add_test(lan_discovery_tests STD 17 SOURCES lan_discovery_tests.cpp)
 openshim_add_test(lan_no_auth_policy_tests STD 17 SOURCES lan_no_auth_policy_tests.cpp)

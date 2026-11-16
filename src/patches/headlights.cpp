@@ -10,6 +10,7 @@
 #include "bzr_options_ui.h"
 #include "engine_globals.h"
 #include "headlight_falloff.h"
+#include "live_object_gate.h"
 #include "patcher.h"
 #include "shim_log.h"
 
@@ -701,12 +702,17 @@ namespace BZROpenShim
                 return false;
             __try
             {
-                const uintptr_t vtable = *reinterpret_cast<const uintptr_t*>(gameObject);
-                const uintptr_t mainBase = GetMainModuleBase();
+                const auto* const bytes = static_cast<const uint8_t*>(gameObject);
+                const uintptr_t vtable = *reinterpret_cast<const uintptr_t*>(bytes);
+                const uint32_t sequence = *reinterpret_cast<const uint32_t*>(
+                    bytes + LiveObjectGate::kGameObjectSequenceOffset);
                 // Live GameObject primary vtables are in the exe's compact
-                // code/rdata region (observed around 0x0088xxxx). Empty handle
-                // slots are zero; this also rejects stale heap-looking values.
-                return vtable >= mainBase && vtable < mainBase + 0x00600000;
+                // code/rdata region (observed around 0x0088xxxx); never-used
+                // slots are zero. A freed slot keeps GameObject::vftable and
+                // its freed OBJ76 pointer, so the sequence number the pool
+                // free zeroes is what proves the slot is in use
+                // (live_object_gate.h).
+                return LiveObjectGate::IsArenaSlotLive(vtable, GetMainModuleBase(), sequence);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
