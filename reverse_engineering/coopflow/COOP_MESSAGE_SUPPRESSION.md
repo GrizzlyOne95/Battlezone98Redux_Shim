@@ -293,7 +293,7 @@ Use `Invoke-CRFlowStep` for named checks and screenshots, `Invoke-CRFlow` / `Wai
 
 For the test build, capture source classifications/drop counts and actual common append events for control `0x00920168` (including originating caller and text). Correlate with both clients' `flow-shots` and chat logs. `BZChatLog.txt` alone is insufficient: it can contain history while HUD state differs, and chat text matching a stock sentence must remain. Use isolated stimuli so the native append stream distinguishes the typed-chat positive case from the stock-source negative case. A Lua sentinel verifies the native path, not just that Lua was called.
 
-Keep full win/loss/result and world/presentation parity checks from the harness after the narrow checks. Evidence belongs under `C:\BZRCoop\runs\<run>\`: `flow-summary.md`, `flow-steps.jsonl`, `flow-shots\`, both `BZLogger.txt` files and the server log. Normal harness launches are serialized through `BZRHarness.ps1`; do not dot-source it again inside a scenario. Use `BZR_FORCE_WINDOWED=1` and close through `Stop-BZRGame -Id <pid> -NoForce`; never force-kill Redux.
+Keep full win/loss/result and world/presentation parity checks from the harness after the narrow checks. Evidence belongs under `C:\BZRCoop\runs\<run>\`: `flow-summary.md`, `flow-steps.jsonl`, `flow-shots\`, both `BZLogger.txt` files and the server log. Normal harness launches are serialized through `BZRHarness.ps1`; do not dot-source it again inside a scenario. Use `BZR_FORCE_WINDOWED=1` and close through `Stop-BZRGame -Id <pid>`; only if that fails, `-Force` on your own windowed test PID (AGENTS.md).
 
 ## Outstanding verification before implementation is considered complete
 

@@ -24,6 +24,30 @@ using BZROpenShim::L10n::ShimFormat;
 
 namespace BZROpenShim
 {
+    // The LAN screen's selection of a host (Join below; also the mode-stress
+    // driver's mp_host step). False, with `note` set, when it is refused.
+    // `recycled` tells whether a live BZRNet socket was dropped to reconnect.
+    bool SelectLanHost(const std::string& endpoint, std::string& note, bool& recycled)
+    {
+        recycled = false;
+        char redirect[256]{};
+        if (GetMatchmakingRedirectTarget(redirect, sizeof(redirect)))
+        { note = ShimText("openshim_ui:lan_err_redirect", "A test redirect owns the server address."); return false; }
+        // Persist the explicit LAN selection. Its readiness policy still
+        // requires a real admission; discovery alone never enables it.
+        std::string canonical;
+        if (LanNoAuth::Enabled() && !LanNoAuth::PrivateEndpoint(endpoint,canonical))
+        { note = ShimText("openshim_ui:lan_err_private_ip", "Enter a private numeric LAN IPv4 address (optional :port)."); return false; }
+        if (MatchmakingServer::ValidateCustomHost(endpoint, canonical) != MatchmakingServer::HostStatus::Ok)
+        { note = ShimText("openshim_ui:lan_err_address", "Enter an IPv4 address or host name, optionally with :port."); return false; }
+        if (!WriteShimUserConfigValue("Network", "CustomServer", canonical.c_str()) ||
+            !WriteShimUserConfigValue("Network", "Server", "LAN"))
+        { note = ShimText("openshim_ui:lan_err_save", "Could not save the LAN host address."); return false; }
+        SetMatchmakingServerOverride(canonical.c_str(), false);
+        recycled = RecycleBzrNetWebSocket();
+        return true;
+    }
+
     namespace
     {
         namespace Shell = ShellScreens;
@@ -91,21 +115,8 @@ namespace BZROpenShim
         void Join(const std::string& endpoint)
         {
             g_JoinHostedWhenReady = false;
-            char redirect[256]{};
-            if (GetMatchmakingRedirectTarget(redirect, sizeof(redirect)))
-            { g_Note = ShimText("openshim_ui:lan_err_redirect", "A test redirect owns the server address."); return; }
-            // Persist the explicit LAN selection. Its readiness policy still
-            // requires a real admission; discovery alone never enables it.
-            std::string canonical;
-            if (LanNoAuth::Enabled() && !LanNoAuth::PrivateEndpoint(endpoint,canonical))
-            { g_Note = ShimText("openshim_ui:lan_err_private_ip", "Enter a private numeric LAN IPv4 address (optional :port)."); return; }
-            if (MatchmakingServer::ValidateCustomHost(endpoint, canonical) != MatchmakingServer::HostStatus::Ok)
-            { g_Note = ShimText("openshim_ui:lan_err_address", "Enter an IPv4 address or host name, optionally with :port."); return; }
-            if (!WriteShimUserConfigValue("Network", "CustomServer", canonical.c_str()) ||
-                !WriteShimUserConfigValue("Network", "Server", "LAN"))
-            { g_Note = ShimText("openshim_ui:lan_err_save", "Could not save the LAN host address."); return; }
-            SetMatchmakingServerOverride(canonical.c_str(), false);
-            RecycleBzrNetWebSocket();
+            bool recycled = false;
+            if (!SelectLanHost(endpoint, g_Note, recycled)) return;
             Shell::Back(Shell::LiveScreen(Shell::kLanScreenId));
         }
         void __cdecl Back()

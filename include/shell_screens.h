@@ -71,6 +71,11 @@ namespace BZROpenShim::ShellScreens
 
     // The live screen built for `id`, or null when it is not on screen.
     void* LiveScreen(uint32_t id);
+    // The id the shell factory built `screen` with, when it is the screen the
+    // factory built last (stock or OpenShim); 0 otherwise. The shell's
+    // current-type global names the loop's entry screen, not a screen a Back
+    // button reached by popping the history.
+    uint32_t BuiltScreenId(void* screen);
 
     // ---- widget kit -------------------------------------------------------
     // Coordinates are the shell's 1440x1080 design space, as in the stock

@@ -778,6 +778,17 @@ namespace BZROpenShim
         }
     }
 
+    // Mode-stress driver (mode_stress_driver.cpp): the stock Click_MultiPlayer
+    // (prechecks, then the lobby push), as Continue runs it, without the
+    // pre-lobby. False when the click hook is not installed.
+    bool CallStockClickMultiPlayer(void* mainScreen)
+    {
+        if (!g_ClickHookInstalled || !g_ClickOriginal || !mainScreen || g_InContinue)
+            return false;
+        CompleteContinue(mainScreen);
+        return true;
+    }
+
     // The lobby moves its pickers here only when this screen can actually
     // open: with the key on by default, an unbound click hook must not leave
     // the player with no nickname or flag picker anywhere.

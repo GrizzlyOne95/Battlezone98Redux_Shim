@@ -47,6 +47,7 @@
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
 #include "soak_telemetry.h"
+#include "mode_stress_driver.h"
 #include "music_single_fill.h"
 #include "p2p_reliable_send_fix.h"
 #include "precise_timestep.h"
@@ -298,6 +299,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     // Opt-in soak telemetry ([Diagnostics] SoakTelemetry): GPU-stall
     // watchdog, heartbeat and lighting-change lines. Dormant unless asked.
     PATCH_STAGE(BZROpenShim::InitializeSoakTelemetry());
+    // Release-qualification mode-transition stress driver. Dormant unless
+    // OPENSHIM_MODE_STRESS_PLAN names a plan file.
+    PATCH_STAGE(BZROpenShim::InitializeModeStressDriver());
     // Opt-in QPC-precise simulation step ([Experimental] PreciseTimestep).
     PATCH_STAGE(BZROpenShim::InitializePreciseTimestep());
     // Guest RKIT repair pick of allied damaged buildings (always on, fail closed).
@@ -393,6 +397,7 @@ namespace BZROpenShim
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownPerfTelemetry();
         BZROpenShim::ShutdownSoakTelemetry();
+        BZROpenShim::ShutdownModeStressDriver();
         BZROpenShim::ShutdownThreadScheduling();
         BZROpenShim::ShutdownOpenShimAssetSync();
         BZROpenShim::ShutdownOpenShimUpdater();

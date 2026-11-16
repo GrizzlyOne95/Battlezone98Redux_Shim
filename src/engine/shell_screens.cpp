@@ -41,6 +41,7 @@
 #include "render_profile_runtime.h"
 #include "terrain_proxy.h"
 #include "soak_telemetry.h"
+#include "mode_stress_driver.h"
 #include "ui_screen_fit.h"
 
 #include "bzr_options_ui.h"
@@ -106,6 +107,8 @@ namespace BZROpenShim::ShellScreens
 
         InlineDetour32 g_FactoryDetour = {};
         FnFactory g_FactoryOriginal = nullptr;
+        void* g_LastBuiltScreen = nullptr;  // main thread only
+        uint32_t g_LastBuiltId = 0;
         FnDeletingDtor g_StockDeletingDtor = nullptr;
         FnStockUpdate g_StockUpdate = nullptr;
         FnStockChar g_StockChar = nullptr;
@@ -304,10 +307,12 @@ namespace BZROpenShim::ShellScreens
             // First main-thread seam with a live Ogre Root on the menus.
             InstallFrameCaptureListener();
             SoakTelemetryRenderTick();
+            ModeStressRenderTick();
             const ScreenDef* def = FindDef(static_cast<uint32_t>(id));
-            if (!def)
-                return g_FactoryOriginal(manager, id);
-            return CreateCustomScreen(manager, *def, id);
+            void* screen = def ? CreateCustomScreen(manager, *def, id) : g_FactoryOriginal(manager, id);
+            g_LastBuiltScreen = screen;
+            g_LastBuiltId = static_cast<uint32_t>(id);
+            return screen;
         }
 
         const ScreenDef* DefForScreen(void* self)
@@ -494,6 +499,11 @@ namespace BZROpenShim::ShellScreens
             if (entry.id == id)
                 return entry.screen;
         return nullptr;
+    }
+
+    uint32_t BuiltScreenId(void* screen)
+    {
+        return screen && screen == g_LastBuiltScreen ? g_LastBuiltId : 0;
     }
 
     void* AddPanel(void* container, void* layoutParent, const char* name, const Rect& r,

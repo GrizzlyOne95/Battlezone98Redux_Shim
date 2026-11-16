@@ -991,6 +991,7 @@ namespace BZROpenShim
         // Ctrl+letter quick jump in the Create Game map list: true (result 1)
         // when the character was a jump and must not reach the chat entry.
         bool TryRouteMapListLetterJump(uint8_t character, uint8_t& result);
+        bool SelectCreateScreenMapByFile(const char* mapFile, char* selected, size_t selectedSize);
         bool IsWidgetLiveChildOfParent(void* parent, void* widget);
         const char* EnsureInvalidThumbnailTextureName();
         void ShowNicknameApplyConfirmation(void* entry, BzrNetNicknameResult result);
