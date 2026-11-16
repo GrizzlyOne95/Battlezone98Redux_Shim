@@ -1582,7 +1582,7 @@ JetFlames = 0
 ;   0 = suppress only that contribution
 ; Inverted spelling DisableSunFlashbang = 1 does the same thing and wins if
 ; both keys are present. Legacy env alias: OPENSHIM_DISABLE_SUN_FLASHBANG.
-; Exposed on the OpenShim Settings page as "Sun Flashbang"; applies live.
+; Exposed on the OpenShim Settings page as "Sun Glare"; applies live.
 ;
 ; This is NOT bloom, the Glow compositor, the sun sprite material, or
 ; atmospheric scattering. LensFlare::Render multiplies

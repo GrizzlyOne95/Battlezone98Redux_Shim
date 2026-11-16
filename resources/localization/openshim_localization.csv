@@ -148,8 +148,8 @@ openshim_opt:TerrainHdEnabled:label~HD Terrain Tiles~~~~~~
 openshim_opt:TerrainHdEnabled:desc~Full-resolution authored terrain tiles, with optional normal/specular maps, from a compatible pack. DX11 Enhanced only; other profiles keep the original atlas. Restart required.~~~~~~
 openshim_opt:TerrainMicroRelief:label~Micro Relief~~~~~~
 openshim_opt:TerrainMicroRelief:desc~Experimental shallow ground relief. Visual only; collision is unchanged. DX11 only. Increases GPU cost. Restart required.~~~~~~
-openshim_opt:SunFlashbang:label~Sun Flashbang~~~~~~
-openshim_opt:SunFlashbang:desc~On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash.~~~~~~
+openshim_opt:SunFlashbang:label~Sun Glare~~~~~~
+openshim_opt:SunFlashbang:desc~Off suppresses the fullscreen white flash when looking near the sun. The sun disc and flare sprites are untouched. On is the stock flash.~~~~~~
 openshim_opt:ExplosionFlash:label~Explosion Flash~~~~~~
 openshim_opt:ExplosionFlash:desc~Stock: a nearby explosion turns the whole screen white for one frame. Soft keeps a faint flicker. Off removes it.~~~~~~
 openshim_opt:DamageFlash:label~Damage Flash~~~~~~
@@ -168,7 +168,7 @@ openshim_opt:SatelliteZoomOut:label~Satellite Zoom~~~~~~
 openshim_opt:SatelliteZoomOut:desc~How much further than stock the satellite view can pull out. Single player only.~~~~~~
 openshim_opt:SatellitePanSpeed:label~Satellite Pan~~~~~~
 openshim_opt:SatellitePanSpeed:desc~Satellite view pan speed, as a multiple of stock. Single player only.~~~~~~
-openshim_opt:JetFlames:label~Jet Flames~~~~~~
+openshim_opt:JetFlames:label~Faction Color Jets~~~~~~
 openshim_opt:JetFlames:desc~Faction-colored engine flames on jets and thrusters.~~~~~~
 openshim_opt:EmptyCraftLights:label~Empty Craft Glow~~~~~~
 openshim_opt:EmptyCraftLights:desc~Keep emissive running lights lit on craft that have no pilot.~~~~~~
@@ -191,7 +191,7 @@ openshim_opt:SoundChannels:desc~Voices that can play at once; Stock keeps Redux'
 openshim_opt:MusicGlobalFocus:label~Background Music~~~~~~
 openshim_opt:MusicGlobalFocus:desc~Keep the soundtrack playing and fed while the game is not the foreground window. Restart required.~~~~~~
 openshim_opt:CustomBindsUi:label~Custom Keybinds~~~~~~
-openshim_opt:CustomBindsUi:desc~Key-binding editor on the Input options page. Restart required.~~~~~~
+openshim_opt:CustomBindsUi:desc~Replaces the stock Input options page with the key-binding editor. Turn Off to get the stock input menu back. Restart required.~~~~~~
 openshim_opt:RawMouseInput:label~Raw Mouse Input~~~~~~
 openshim_opt:RawMouseInput:desc~Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see No Smoothing. Restart required.~~~~~~
 openshim_opt:DisableControlSmoothing:label~No Smoothing~~~~~~
@@ -224,13 +224,13 @@ openshim_opt:ShellCasings:label~Shell Casings~~~~~~
 openshim_opt:ShellCasings:desc~Eject brass casings from cannons, mortars and machine guns (visual only). A weapon ODF's casingType picks the casing or opts out. Restart required.~~~~~~
 openshim_opt:LaserSight:label~Laser Sight~~~~~~
 openshim_opt:LaserSight:desc~A thin beam from your vehicle's selected weapon to whatever it points at, up to 500 m (visual only). Off in multiplayer unless a mod allows it. Applies at once.~~~~~~
-openshim_opt:SkinnedGibs:label~Skinned Gibs~~~~~~
+openshim_opt:SkinnedGibs:label~Person Gibs~~~~~~
 openshim_opt:SkinnedGibs:desc~When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from the posed model (visual only). Restart required.~~~~~~
 openshim_opt:FractureOnePiece:label~Fracture Debris~~~~~~
 openshim_opt:FractureOnePiece:desc~When a craft or building whose model is a single piece is fully fragmented, cut it into several capped pieces and throw them like debris (visual only). Restart required.~~~~~~
 openshim_opt:GpuSkinning:label~GPU Skinning~~~~~~
 openshim_opt:GpuSkinning:desc~DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission.~~~~~~
-openshim_opt:D3D11PrimaryMonitor:label~Primary Monitor~~~~~~
+openshim_opt:D3D11PrimaryMonitor:label~Primary Monitor Fix~~~~~~
 openshim_opt:D3D11PrimaryMonitor:desc~DX11 only: open the game window on the Windows primary monitor instead of a side monitor. DX9 is untouched. Restart required.~~~~~~
 openshim_opt:ResolutionListFilter:label~Resolution Filter~~~~~~
 openshim_opt:ResolutionListFilter:desc~Keep the Video options resolution list short: the current setting, the desktop size and common sizes matching the desktop's aspect. Restart required.~~~~~~
@@ -243,7 +243,7 @@ openshim_opt:SmartReticleRange:desc~Smart-reticle targeting distance; Stock is R
 openshim_opt:SmartScavengerPathing:label~Smart Scavengers~~~~~~
 openshim_opt:SmartScavengerPathing:desc~Smarter scavenger pathing to scrap. Single player only.~~~~~~
 openshim_opt:TurretAimPitch:label~Turret AA Pitch~~~~~~
-openshim_opt:TurretAimPitch:desc~Turrets pitch up to engage air targets. Single player only.~~~~~~
+openshim_opt:TurretAimPitch:desc~Lets turrets aim higher than the stock pitch limit (0.5) so they can engage air targets. Single player only.~~~~~~
 openshim_opt:JumpSnipeCrouch:label~Jump-Snipe Crouch~~~~~~
 openshim_opt:JumpSnipeCrouch:desc~Classic crouch while sniping mid-jump. Single player only.~~~~~~
 openshim_opt:OrdnanceVelocityInheritance:label~Ordnance Velocity~~~~~~
@@ -299,7 +299,7 @@ openshim_opt:ThreadScheduling:desc~Give the frame thread MMCSS Games priority an
 openshim_opt:VehicleGeometryContact:label~Vehicle Geometry~~~~~~
 openshim_opt:VehicleGeometryContact:desc~Experimental vehicle contact against legacy hull geometry. All supported vehicles; single player, GOG only. Restart required.~~~~~~
 openshim_opt:ApcAlliedTargetDeploy:label~APC Allied Deploy~~~~~~
-openshim_opt:ApcAlliedTargetDeploy:desc~Let APC AI accept allied deploy targets. Single player only. Restart required.~~~~~~
+openshim_opt:ApcAlliedTargetDeploy:desc~With an allied unit targeted, an APC still deploys its soldiers near valid enemies instead of ignoring the order. Stock only deploys on an enemy target, where the soldiers attack it. Single player only. Restart required.~~~~~~
 openshim_opt:SplinterUndead:label~Splinter Fix~~~~~~
 openshim_opt:SplinterUndead:desc~Stop a destroyed splinter from spawning payload ordnance. Single player, and multiplayer while Splinter Sync is on. Restart required.~~~~~~
 openshim_opt:HowitzerUndeployedRetaliation:label~Howitzer Fix~~~~~~
@@ -550,7 +550,7 @@ openshim_cat:RadarFading:title~RADAR FADING~~~~~~
 openshim_cat:RadarFading:blurb~Cockpit radar opacity and timing, with an independent compass exception.~~~~~~
 openshim_cat:Effects:name~Effects~~~~~~
 openshim_cat:Effects:title~VISUAL EFFECTS~~~~~~
-openshim_cat:Effects:blurb~Jet flames, emissive pulse, star twinkle, death chunks, muzzle effects, shell casings and skinned gibs.~~~~~~
+openshim_cat:Effects:blurb~Faction color jets, emissive pulse, star twinkle, death chunks, muzzle effects, shell casings and person gibs.~~~~~~
 ~~~~~~~
 openshim_ui:hub_saved_note~Changes are saved to openshim.ini as you make them. ~~~~~~
 openshim_ui:hub_title~OPENSHIM OPTIONS~~~~~~

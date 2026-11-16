@@ -377,10 +377,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Experimental shallow ground relief. Visual only; collision is unchanged. "
       "DX11 only. Increases GPU cost. Restart required." },
-    { "Sun Flashbang", "Display", "SunFlashbang", nullptr, 0,
+    { "Sun Glare", "Display", "SunFlashbang", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::LiveEngineToggle,
-      "On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash." },
+      "Off suppresses the fullscreen white flash when looking near the sun. The sun disc and flare sprites are untouched. On is the stock flash." },
     { "Explosion Flash", "Display", "ExplosionFlash", nullptr, 0,
       kShimSettingsExplosionFlashValues, kShimSettingsExplosionFlashValues, 3, 0,
       ShimSettingApplyGroup::LiveEngineToggle,
@@ -422,7 +422,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
       ShimSettingApplyGroup::GlobalImprovement,
       "Satellite view pan speed, as a multiple of stock. Single player only." },
-    { "Jet Flames", "Display", "JetFlames", nullptr, 0,
+    { "Faction Color Jets", "Display", "JetFlames", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::JetFlames,
       "Faction-colored engine flames on jets and thrusters." },
@@ -473,7 +473,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsBindsUiAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Key-binding editor on the Input options page. Restart required." },
+      "Replaces the stock Input options page with the key-binding editor. Turn Off to get the stock input menu back. Restart required." },
     { "Raw Mouse Input", "General", "RawMouseInput", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
@@ -545,7 +545,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::LiveEngineToggle,
       "A thin beam from your vehicle's selected weapon to whatever it points at, up to 500 m (visual only). Off in multiplayer unless a mod allows it. Applies at once." },
     // Absent key = on (inverted env mapping OPENSHIM_DISABLE_SKINNED_GIBS), so defaultIndex 0 selects "1" (On).
-    { "Skinned Gibs", "General", "SkinnedGibs", nullptr, 0,
+    { "Person Gibs", "General", "SkinnedGibs", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from "
@@ -563,7 +563,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many "
       "craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission." },
     // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
-    { "Primary Monitor", "Graphics", "D3D11PrimaryMonitor", nullptr, 0,
+    { "Primary Monitor Fix", "Graphics", "D3D11PrimaryMonitor", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "DX11 only: open the game window on the Windows primary monitor instead of a "
@@ -598,7 +598,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Turret AA Pitch", "SinglePlayer", "TurretAimPitch", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Turrets pitch up to engage air targets. Single player only." },
+      "Lets turrets aim higher than the stock pitch limit (0.5) so they can engage air targets. Single player only." },
     { "Jump-Snipe Crouch", "SinglePlayer", "JumpSnipeCrouch", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -755,7 +755,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "APC Allied Deploy", "Fixes", "ApcAlliedTargetDeploy", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Let APC AI accept allied deploy targets. Single player only. Restart required." },
+      "With an allied unit targeted, an APC still deploys its soldiers near valid enemies instead of ignoring the order. Stock only deploys on an enemy target, where the soldiers attack it. Single player only. Restart required." },
     { "Splinter Fix", "Fixes", "SplinterUndead", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,

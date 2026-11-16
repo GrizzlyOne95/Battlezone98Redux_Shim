@@ -20,16 +20,16 @@ constexpr const char* kShimRowBans = "Banned Players";
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
     "Shadow Distance", "HD Terrain Tiles", "Micro Relief", "GPU Skinning",
-    "Primary Monitor", "Resolution Filter", "Resolution List",
+    "Primary Monitor Fix", "Resolution Filter", "Resolution List",
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
-    "Jet Flames", "Emissive Pulse", "Star Twinkle", "Mesh Chunks",
-    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Skinned Gibs",
+    "Faction Color Jets", "Emissive Pulse", "Star Twinkle", "Mesh Chunks",
+    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs",
     "Fracture Debris" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
-    "Explosion Flash", "Sun Flashbang", "Empty Craft Glow", "Fog Culling", "Scrap Shadows",
+    "Explosion Flash", "Sun Glare", "Empty Craft Glow", "Fog Culling", "Scrap Shadows",
     "Scrap Glow", "Scrap Draw Distance" };
 static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
@@ -127,7 +127,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     BZR_SHIM_CATEGORY("Radar Fading", "RADAR FADING",
         "Cockpit radar opacity and timing, with an independent compass exception.", kShimCategoryRadar),
     BZR_SHIM_CATEGORY("Effects", "VISUAL EFFECTS",
-        "Jet flames, emissive pulse, star twinkle, death chunks, muzzle effects, shell casings and skinned gibs.",
+        "Faction color jets, emissive pulse, star twinkle, death chunks, muzzle effects, shell casings and person gibs.",
         kShimCategoryEffects),
 };
 #undef BZR_SHIM_CATEGORY
