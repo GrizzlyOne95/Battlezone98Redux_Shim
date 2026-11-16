@@ -618,14 +618,29 @@ try {
 } finally {
     if ($process -and -not $process.HasExited) {
         Stop-BZRGame -Id $process.Id -ErrorAction Continue
+        $process.Refresh()
     }
-    if ($ogreTouched) { [void](Restore-BZROrphanedOgreConfig -GameRoot $GameRoot) }
-    foreach ($b in $iniBackups) {
-        Copy-Item -LiteralPath $b.backup -Destination $b.file -Force
-        Remove-Item -LiteralPath $b.backup -Force
+    if ($process -and -not $process.HasExited) {
+        # Unattended run: escalate on our own PID only (windowed, so no
+        # exclusive-fullscreen device to hang the desktop).
+        Stop-BZRGame -Id $process.Id -Force -ErrorAction Continue
+        $process.Refresh()
     }
     foreach ($v in @('OPENSHIM_MODE_STRESS_PLAN', 'OPENSHIM_FRAME_CAPTURE', 'OPENSHIM_DISABLE_SYNC_JOIN_DEFAULT_ON')) { Set-Item -Path "env:$v" -Value $null -ErrorAction SilentlyContinue }
-    Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+    if ($process -and -not $process.HasExited) {
+        # Even -Force failed. Restoring configs under a live game would
+        # let its exit save write the test settings back, and dropping the lock
+        # would let another session launch into this folder: keep both.
+        $meta.leftRunning = $true
+        Write-Warning ("Game PID {0} ignored WM_CLOSE. Kept {1} and the *.modestress-bak config backups; close the game, then restore them and remove the lock." -f $process.Id, $lock)
+    } else {
+        if ($ogreTouched) { [void](Restore-BZROrphanedOgreConfig -GameRoot $GameRoot) }
+        foreach ($b in $iniBackups) {
+            Copy-Item -LiteralPath $b.backup -Destination $b.file -Force
+            Remove-Item -LiteralPath $b.backup -Force
+        }
+        Remove-Item -LiteralPath $lock -Force -ErrorAction SilentlyContinue
+    }
     [IO.File]::WriteAllText((Join-Path $ReportDir 'run.json'), ($meta | ConvertTo-Json -Depth 6))
 }
 

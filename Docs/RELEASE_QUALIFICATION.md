@@ -125,7 +125,8 @@ launches the game windowed with `OPENSHIM_MODE_STRESS_PLAN`, `OPENSHIM_NEVER_ACT
 `OPENSHIM_SOAK_TELEMETRY=1`. The native driver (`src/patches/mode_stress_driver.cpp`) replays the stock shell
 button handlers from a frame listener and logs `[MODESTRESS] step i/n <kind> <arg> begin|launched|ready|end`.
 It exits through the main-menu exit button after `[MODESTRESS] done`. On a timeout the script closes the game
-with WM_CLOSE (`Stop-BZRGame`) and never force-kills it. The default plan is
+with WM_CLOSE (`Stop-BZRGame`), then force-kills its own windowed process if that fails; if even that fails it
+keeps the lock and config backups. The default plan is
 `reverse_engineering/mode_stress_default.plan` (grammar in `include/mode_stress_plan.h`); pass `-PlanPath`
 for another one.
 
