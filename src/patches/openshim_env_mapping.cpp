@@ -496,6 +496,8 @@ namespace
             // Off by default since 2026-10-24: ~10 ms/frame at 4K. Opt-in.
             return TryReadMappedBool(ini, "Terrain", "TerrainMicroRelief", false, out);
         }
+        if (Equals(name, "OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING"))
+            return TryReadMappedBool(ini, "Terrain", "TerrainTessellationSmoothing", false, out);
         if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_LIFECYCLE_LOG"))
             return ini(IniFile::Main, "Terrain", "TerrainSemanticLifecycleLog", out);
         if (Equals(name, "OPENSHIM_TERRAIN_SEMANTIC_DEBUG"))
@@ -663,7 +665,8 @@ namespace EnvConfig
                Equals(name, "OPENSHIM_RELAY_LOG_DATAGRAMS") ||
                // Keep relief harness On/Off controls independent of the saved
                // UI choice, including a flat control with a saved On value.
-               Equals(name, "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST");
+               Equals(name, "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST") ||
+               Equals(name, "OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING");
     }
 
     bool TryReadFromIni(const char* name, const IniReader& ini, std::string& out)

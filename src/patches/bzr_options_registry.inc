@@ -375,7 +375,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Full-resolution authored terrain tiles, with optional normal/specular maps, from a compatible "
       "pack. DX11 Enhanced only; other profiles keep the original atlas. Restart required." },
-    { "Micro Relief", "Terrain", "TerrainMicroRelief", nullptr, 0,
+    { "Terrain Tessellation", "Terrain", "TerrainMicroRelief", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Experimental shallow ground relief. Visual only; collision is unchanged. "

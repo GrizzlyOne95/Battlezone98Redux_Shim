@@ -104,6 +104,16 @@ def main():
                                 '/D', 'OPENSHIM_HEIGHT_TEST=1', '/D', 'OPENSHIM_RELIEF_AMPLITUDE=1'])
         for tag in (b'ISGN', b'OSGN'):
             assert signature(height, tag, tag == b'ISGN') == expected, (defines, 'height', tag)
+        # TerrainTessellationSmoothing: PN triangles on top of adaptive relief.
+        smooth = ['/D', 'OPENSHIM_TESS_FACTOR=4', '/D', 'OPENSHIM_RELIEF_TEST=1',
+                  '/D', 'OPENSHIM_RELIEF_AMPLITUDE=1.25', '/D', 'OPENSHIM_TESS_ADAPTIVE=1',
+                  '/D', 'OPENSHIM_TESS_SMOOTH=1', '/D', 'OPENSHIM_PN_LIFT=1.0']
+        for stage, entry in (("hs", "TerrainHull"), ("ds", "TerrainDomain")):
+            smoothed = compile_shader('openshim_terrain_tessellation_test.hlsl', stage + '_5_0', entry,
+                                      f'{index}-smooth-{stage}', smooth)
+            for tag in (b'ISGN', b'OSGN'):
+                assert signature(smoothed, tag, (stage, tag) in (("hs", b"OSGN"), ("ds", b"ISGN"))) == expected, \
+                    (defines, 'smooth', stage, tag)
     print(f"PASS: {compiled} shaders; {len(variants)} terrain permutations; "
           "factors 1/2/4, adaptive, micro-relief and candidate texture-height DS; VS -> HS -> DS signatures and registers match.")
 

@@ -1,10 +1,40 @@
 # Visual terrain micro relief prototype
 
-Experimental, off by default. The OpenShim Options page exposes **Terrain Micro
-Detail** on page 1, beside the DX11 rendering controls. Its On/Off choice saves
-`[Terrain] TerrainMicroRelief = 0/1` in `openshim.ini` and takes effect after a
-game restart. On uses factor 4 and the 0.25-world-unit relief preset. DX11 is
-required; unsupported renderer/build/terrain contracts retain native terrain.
+Experimental, off by default. The OpenShim Options page exposes **Terrain
+Tessellation** (formerly labelled Micro Relief / Micro Detail) on page 1,
+beside the DX11 rendering controls. Its On/Off choice saves
+`[Terrain] TerrainMicroRelief = 0/1` in `openshim.ini` (the key keeps its old
+name) and takes effect after a game restart. On uses factor 4 and the
+0.25-world-unit relief preset. DX11 is required; unsupported
+renderer/build/terrain contracts retain native terrain.
+
+## Tessellation smoothing (PN triangles)
+
+`[Terrain] TerrainTessellationSmoothing = 1` (env
+`OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING`, ini-only, default 0) curves the
+tessellated surface with PN triangles (cubic Bezier positions, quadratic
+normals) built from the stock per-vertex normals. It rounds the faceted ridges
+and conical peaks of the 5 m height lattice. It is ignored unless
+`TerrainMicroRelief = 1`.
+
+- Stock normals are already smooth: the engine averages the six unit face
+  normals around each lattice vertex from global lattice coordinates, so
+  duplicated tile-edge vertices carry identical normals. Smoothing therefore
+  reuses them; no new textures or dirty hooks are added.
+- Only the world-vertical part of the PN offset is applied, clamped to
+  `OPENSHIM_PN_LIFT` (1 world unit), so the surface stays a height field. The
+  relief clamp (`OPENSHIM_RELIEF_AMPLITUDE`) is unchanged; the hull cull sweep
+  and the padded render bounds add the 1-unit lift.
+- The relief slope correction is applied on top of the PN normal.
+- Edge terms are `precise` and symmetric in their endpoints, and the interior
+  term is zero on edges, so two patches sharing an edge produce bit-identical
+  samples. `terrain_smoothing_gpu_tests` checks this on WARP for fixed and
+  adaptive partitioning, plus corner pinning, vertical-only motion and the
+  clamp.
+- Known limit: stock refreshes only heights after a crater (normals stay
+  stale until a full zone rebuild), so a stale and a rebuilt neighbour cluster
+  can disagree on a boundary normal. The crack this could open is bounded by
+  the 1-unit clamp; not observed live.
 
 This extends the native tessellation submission test with shallow procedural
 surface detail. It changes rendered terrain and

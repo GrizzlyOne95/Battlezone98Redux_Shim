@@ -416,6 +416,21 @@ namespace
         Check(Lookup(name, &ini, env) == "<unset>", "invalid relief setting does not opt in");
     }
 
+    void TestTerrainSmoothingUiAndHarnessPrecedence()
+    {
+        FakeIni ini;
+        FakeEnv env;
+        constexpr const char* name = "OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING";
+        Check(Lookup(name, &ini, env) == "<unset>", "absent smoothing setting is not mapped (off)");
+        ini.Set("Terrain", "TerrainTessellationSmoothing", "1");
+        Check(Lookup(name, &ini, env) == "1", "saved smoothing On enables it without launch environment");
+        env.values[name] = "0";
+        Check(Lookup(name, &ini, env) == "0", "harness Off overrides saved smoothing On");
+        env.values.clear();
+        ini.Set("Terrain", "TerrainTessellationSmoothing", "0");
+        Check(Lookup(name, &ini, env) == "0", "saved smoothing Off stays off");
+    }
+
     void TestEmptyNamesPassThrough()
     {
         FakeIni ini;
@@ -468,6 +483,7 @@ int main()
     TestShellCasingsDefaultOff();
     TestCaptureNamesLetTheEnvironmentWin();
     TestTerrainReliefUiAndHarnessPrecedence();
+    TestTerrainSmoothingUiAndHarnessPrecedence();
     TestEmptyNamesPassThrough();
     TestCopyContract();
 

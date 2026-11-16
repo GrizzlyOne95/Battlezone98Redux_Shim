@@ -302,6 +302,16 @@ bool InstallNativeTerrainTessellationTest()
             PrepareTerrainHeightTexture(buffer, hdBinding->heightTexture);
             source = "#define OPENSHIM_HEIGHT_TEST 1\n#define OPENSHIM_HEIGHT_NORMALIZED 1\n" + source;
         }
+        // PN smoothing moves the surface by at most kPnLift on top of the relief.
+        // OPENSHIM_RELIEF_AMPLITUDE keeps clamping the relief alone; the shader
+        // cull sweep adds the lift, and so do the padded render bounds here.
+        if (g_config.tessellationSmoothing && g_activeTerrainReliefAmplitude > 0.0f)
+        {
+            constexpr float kPnLift = 1.0f;
+            source = "#define OPENSHIM_TESS_SMOOTH 1\n#define OPENSHIM_PN_LIFT " +
+                std::to_string(kPnLift) + "\n" + source;
+            g_activeTerrainReliefAmplitude += kPnLift;
+        }
         if (paintHeight)
         {
             PrepareTerrainPaintHeightTexture(g_hdDiffuseNativeTexture);

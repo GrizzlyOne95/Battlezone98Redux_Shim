@@ -19,7 +19,7 @@ constexpr const char* kShimRowBans = "Banned Players";
 
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
-    "Shadow Distance", "HD Terrain Tiles", "Micro Relief", "GPU Skinning",
+    "Shadow Distance", "HD Terrain Tiles", "Terrain Tessellation", "GPU Skinning",
     "Primary Monitor Fix", "Resolution Filter", "Resolution List",
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {

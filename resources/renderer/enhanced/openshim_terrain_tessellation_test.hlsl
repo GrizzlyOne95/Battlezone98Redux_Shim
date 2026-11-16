@@ -20,6 +20,19 @@
 #if defined(OPENSHIM_HEIGHT_TEST) && (!defined(OPENSHIM_RELIEF_TEST) || defined(VERTEX_LIGHTING))
 #error Texture height needs the qualified per-pixel relief interface
 #endif
+// PN-triangle smoothing lifts or drops the flat lattice surface by at most
+// OPENSHIM_PN_LIFT world units. Culling and render bounds sweep both ranges.
+#if defined(OPENSHIM_TESS_SMOOTH) && (!defined(OPENSHIM_RELIEF_TEST) || defined(VERTEX_LIGHTING))
+#error Tessellation smoothing needs the per-pixel relief interface
+#endif
+#ifndef OPENSHIM_PN_LIFT
+#define OPENSHIM_PN_LIFT 1.0
+#endif
+#if defined(OPENSHIM_TESS_SMOOTH)
+#define OPENSHIM_RELIEF_SWEEP (OPENSHIM_RELIEF_AMPLITUDE + OPENSHIM_PN_LIFT)
+#else
+#define OPENSHIM_RELIEF_SWEEP OPENSHIM_RELIEF_AMPLITUDE
+#endif
 #if defined(OPENSHIM_PAINT_HEIGHT) && (!defined(OPENSHIM_RELIEF_TEST) || !defined(OPENSHIM_TERRAIN_HD) || \
     defined(OPENSHIM_HEIGHT_TEST) || defined(VERTEX_LIGHTING))
 #error Paint height needs the paint-mode HD interface and owns the domain texture slot
@@ -383,7 +396,7 @@ struct TerrainTessFactors
 bool TerrainPatchOffscreen(float4 a, float4 b, float4 c)
 {
     if (all(reliefProjection[3] == 0.0)) return false;
-    float4 sweep = mul(reliefProjection, mul(reliefView, float4(0.0, OPENSHIM_RELIEF_AMPLITUDE, 0.0, 0.0)));
+    float4 sweep = mul(reliefProjection, mul(reliefView, float4(0.0, OPENSHIM_RELIEF_SWEEP, 0.0, 0.0)));
     if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(c)) || !all(isfinite(sweep))) return false;
     float4 corner[6] = { a + sweep, a - sweep, b + sweep, b - sweep, c + sweep, c - sweep };
     bool4 sideOut = bool4(true, true, true, true);
@@ -437,6 +450,36 @@ TerrainTessVertex TerrainHull(InputPatch<TerrainTessVertex, 3> p,
     return p[id];
 }
 
+#if defined(OPENSHIM_TESS_SMOOTH)
+// Curved PN triangles (Vlachos et al. 2001) over the stock vertex normals.
+// Stock computes each normal from global lattice samples, so the two patches
+// on a shared edge see the same endpoints and normals. Each edge term reads
+// only its own endpoints, is symmetric in them and is evaluated `precise`
+// (no contraction), and the interior term is exactly zero on an edge, so both
+// patches produce the same bits there. Work in view space (dot products are
+// rotation invariant); only the world-vertical part of the offset is kept.
+float3 TerrainPnEdgeOffset(precise float3 pi, precise float3 ni, precise float3 pj, precise float3 nj,
+                           precise float bi, precise float bj)
+{
+    precise float3 d = pj - pi;
+    precise float wij = dot(d, ni);
+    precise float wji = -dot(d, nj);
+    precise float3 offset = -(bi * bj) * ((bi * wij) * ni + (bj * wji) * nj);
+    return offset;
+}
+
+float3 TerrainPnEdgeNormal(precise float3 pi, precise float3 ni, precise float3 pj, precise float3 nj)
+{
+    precise float3 d = pj - pi;
+    precise float3 s = ni + nj;
+    precise float dd = dot(d, d);
+    precise float v = dd > 1e-12 ? 2.0 * dot(d, s) / dd : 0.0;
+    precise float3 n = s - v * d;
+    precise float len = dot(n, n);
+    return len > 1e-12 ? n * rsqrt(len) : s;
+}
+#endif
+
 #define TERRAIN_INTERPOLATE(field) o.field = p[0].field * b.x + p[1].field * b.y + p[2].field * b.z
 [domain("tri")]
 TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocation,
@@ -473,6 +516,34 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
 // Recover native object position with inverse WORLD-view, which remains
 // valid when Ogre subtracts the camera origin from world/view transforms.
 #if defined(OPENSHIM_RELIEF_TEST)
+    float pnLift = 0.0;
+#if defined(OPENSHIM_TESS_SMOOTH)
+    {
+        float3 P[3] = { p[0].viewPosition, p[1].viewPosition, p[2].viewPosition };
+        float3 N[3] = { normalize(p[0].normal), normalize(p[1].normal), normalize(p[2].normal) };
+        float B[3] = { b.x, b.y, b.z };
+        precise float3 offset = TerrainPnEdgeOffset(P[0], N[0], P[1], N[1], B[0], B[1]) +
+            TerrainPnEdgeOffset(P[1], N[1], P[2], N[2], B[1], B[2]) +
+            TerrainPnEdgeOffset(P[2], N[2], P[0], N[0], B[2], B[0]);
+        // Interior control point b111 = E + (E - V) / 2; zero on every edge.
+        precise float3 inner = 0.0;
+        [unroll] for (int i = 0; i < 3; ++i)
+        {
+            int j = (i + 1) % 3, k = (i + 2) % 3;
+            inner += (dot(P[j] - P[i], N[i]) + dot(P[k] - P[i], N[i])) * N[i];
+        }
+        offset += (-0.5 * B[0] * B[1] * B[2]) * inner;
+        float lift = mul(reliefInverseView, float4(offset, 0.0)).y;
+        pnLift = isfinite(lift) ? clamp(lift, -OPENSHIM_PN_LIFT, OPENSHIM_PN_LIFT) : 0.0;
+        // Quadratic PN normal; the relief slope correction below stacks on it.
+        float3 smoothNormal = N[0] * (B[0] * B[0]) + N[1] * (B[1] * B[1]) + N[2] * (B[2] * B[2]) +
+            TerrainPnEdgeNormal(P[0], N[0], P[1], N[1]) * (B[0] * B[1]) +
+            TerrainPnEdgeNormal(P[1], N[1], P[2], N[2]) * (B[1] * B[2]) +
+            TerrainPnEdgeNormal(P[2], N[2], P[0], N[0]) * (B[2] * B[0]);
+        if (all(isfinite(smoothNormal)) && dot(smoothNormal, smoothNormal) > 1e-12)
+            o.normal = normalize(smoothNormal);
+    }
+#endif
 #if defined(OPENSHIM_PAINT_HEIGHT)
     // hdUV is world XZ and object XZ differs only by translation, so the
     // world-space gradient is already the object-space one.
@@ -497,7 +568,7 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
     worldTangent.y += relief.y * worldTangent.x + relief.z * worldTangent.z;
     o.tangent = mul(reliefView, float4(normalize(worldTangent), 0.0)).xyz;
 #endif
-    float4 vertical = float4(0.0, relief.x, 0.0, 0.0);
+    float4 vertical = float4(0.0, relief.x + pnLift, 0.0, 0.0);
     o.viewPosition += mul(reliefView, vertical).xyz;
     o.position += mul(reliefProjection, mul(reliefView, vertical));
     o.depth = o.position.z;
