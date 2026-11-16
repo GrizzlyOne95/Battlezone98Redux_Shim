@@ -7,7 +7,7 @@ Ground rings that show RTS-style feedback for the local player. There are two fe
   - **Attack on an object:** a red ring around the target that follows it and fades over 1.0 s.
   - **Any other order on a point or object:** a yellow ring that fades over 0.9 s.
 - **Artillery range** (`[Gameplay] RtsArtilleryRange`, Options > Controls > Artillery Range, default on). It draws:
-  - a blue max-range ring around the piloted vehicle and every selected own-team unit that carries a gravity-ordnance cannon or mortar slot (at most 16 units);
+  - a blue max-range ring around every selected own-team howitzer (Howitzer vtables) that carries a gravity-ordnance cannon slot (at most 16 units); never around the piloted vehicle, whose mortar arc the laser sight already draws;
   - a 3 m ring at the aim point, green when at least one of those units can reach it and red when none can.
 
 Both features are local visuals only:
@@ -140,7 +140,6 @@ If any row fails to bind, the feature fails closed:
 
 ## Known limits
 
-- The player's own gravity weapons (for example a mortar) also qualify, so the piloted vehicle shows a range ring when it carries one.
 - The cursor point is only refreshed in the views listed above. In other camera views it can be stale. UNVERIFIED.
 - Pings for per-unit menu orders (Follow, Get repair, Get reload, Rescue, Recycle) are not drawn; see "Order paths".
 - Draw order against terrain and the satellite view are UNVERIFIED in-game.

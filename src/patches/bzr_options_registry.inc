@@ -687,8 +687,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Artillery Range", "Gameplay", "RtsArtilleryRange", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Draws the maximum range on the ground around your vehicle and selected units that "
-      "carry a howitzer-type weapon, and a ring at the aim point: green when one of them "
+      "Draws the maximum range on the ground around selected howitzers (not your own "
+      "vehicle), and a ring at the aim point: green when one of them "
       "can reach it, red when none can. Only you see it, so it also works in multiplayer." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,

@@ -2619,8 +2619,8 @@ GroupStrip = 1
 ; Exposed on the OpenShim Settings page as "Command Pings".
 RtsCommandPings = 1
 
-; Artillery range rings. Around the piloted vehicle and every selected
-; own-team unit carrying a gravity cannon (howitzer, mortar-type ordnance),
+; Artillery range rings. Around every selected own-team howitzer (never
+; the piloted vehicle; the laser sight arc covers that),
 ; a ring at its flat-ground maximum range from the ODF shotSpeed and
 ; lifeSpan, and a ring at the aim point (cockpit reticle or satellite
 ; cursor): green when one of them can reach it allowing for the height

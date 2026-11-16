@@ -7,9 +7,10 @@
 //    Attack on an object: a red ring around the target that follows it; any
 //    other targeted order: a yellow ring.
 //  * [Gameplay] RtsArtilleryRange (default on): a max-range ring around every
-//    selected own-team artillery unit and the piloted vehicle, plus a cursor
-//    ring at the reticle point, green when one of them can reach it and red
-//    when none can.
+//    selected own-team howitzer (HowitzerVtable / HowitzerSecondaryVtable),
+//    plus a cursor ring at the reticle point, green when one of them can
+//    reach it and red when none can. Never on the piloted vehicle: the laser
+//    sight's mortar arc already covers that.
 //
 // Nothing here is sent, saved or written to the engine: the rings are
 // shim-owned Ogre ManualObjects. No network gate (local visuals only).
@@ -816,8 +817,20 @@ namespace BZROpenShim
                 Artillery gun;
             };
 
-            // The piloted vehicle and every selected own-team unit carrying a
-            // gravity cannon/howitzer, at most kMaxArtilleryRings of them.
+            // True for a howitzer craft (complete object, vtable at +0).
+            bool IsHowitzer(void* obj)
+            {
+                static const uint32_t primary = HookEngine::EngineAddress("HowitzerVtable");
+                static const uint32_t secondary = HookEngine::EngineAddress("HowitzerSecondaryVtable");
+                int vtable = 0;
+                if (!primary || !secondary || !ReadInt(reinterpret_cast<uintptr_t>(obj), vtable))
+                    return false;
+                const uint32_t v = static_cast<uint32_t>(vtable);
+                return v == primary || v == secondary;
+            }
+
+            // Every selected own-team howitzer carrying a gravity cannon, at
+            // most kMaxArtilleryRings of them. The piloted vehicle is skipped.
             size_t GatherArtillery(ArtilleryUnit (&units)[RM::kMaxArtilleryRings])
             {
                 if (!g_Api.artillery)
@@ -825,8 +838,8 @@ namespace BZROpenShim
                 void* const player = SafeGetPlayer();
                 if (!player)
                     return 0;
-                void* candidates[1 + kSelectMax] = {player};
-                size_t candidateCount = 1;
+                void* candidates[kSelectMax] = {};
+                size_t candidateCount = 0;
                 int count = 0;
                 if (ReadInt(g_Api.panel + kSelectCountOffset, count) && count > 0)
                 {
@@ -838,7 +851,7 @@ namespace BZROpenShim
                         if (!ReadInt(g_Api.panel + kSelectHandlesOffset + 4 * static_cast<size_t>(i), handle) || !handle)
                             continue;
                         void* obj = SafeGetObj(static_cast<uint32_t>(handle));
-                        if (!obj || obj == player || !SameTeam(obj, player))
+                        if (!obj || obj == player || !SameTeam(obj, player) || !IsHowitzer(obj))
                             continue;
                         candidates[candidateCount++] = obj;
                     }
