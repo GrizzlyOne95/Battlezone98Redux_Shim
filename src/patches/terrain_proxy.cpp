@@ -11,6 +11,7 @@
 #include "render_profile_runtime.h"
 
 #include "bzr_hooks.h"
+#include "d3d11_device_loss_recovery.h"
 #include "dx11_colorspace_diagnostic.h"
 #include "bzr_options_ui.h"
 #include "shim_log.h"
@@ -731,7 +732,15 @@ namespace BZROpenShim
             ProxyLost,
             FramingStale,
             SourceMismatch,
+            DeviceRecreated,
         };
+
+        // D3D11DeviceRecoveryCount() as last seen by the zone seam. The HD,
+        // tessellation and height paths keep raw views and shader identities
+        // from the device they were built on; after a recovery none of them
+        // match, and the terrain draws flat until they are rebuilt.
+        unsigned g_seenDeviceRecoveries = 0;
+        unsigned g_deviceRecreatedForgetCount = 0;
 
         const char* ForgetReasonName(TerrainForgetReason reason)
         {
@@ -743,6 +752,7 @@ namespace BZROpenShim
             case TerrainForgetReason::ProxyLost: return "proxy_lost";
             case TerrainForgetReason::FramingStale: return "framing_stale";
             case TerrainForgetReason::SourceMismatch: return "source_mismatch";
+            case TerrainForgetReason::DeviceRecreated: return "device_recreated";
             default: return "unknown";
             }
         }
@@ -5618,6 +5628,25 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             if (!g_active.load(std::memory_order_acquire) || g_shutdown.load())
                 return;
             std::lock_guard<std::mutex> lock(g_mutex);
+            // A recovered D3D11 device invalidates every raw object the HD,
+            // tessellation and height paths hold. Forget the same way a
+            // mission change does (Ogre and the scene are still alive), and
+            // let ObserveZone below rebuild everything on the new device.
+            const unsigned deviceRecoveries = D3D11DeviceRecoveryCount();
+            if (deviceRecoveries != g_seenDeviceRecoveries)
+            {
+                g_seenDeviceRecoveries = deviceRecoveries;
+                if (!g_proxy.tearingDown && !TerrainProxyStateIsForgotten())
+                {
+                    ++g_deviceRecreatedForgetCount;
+                    LogShimA(LogLevel::Warn, "terrain-proxy",
+                        "[TERRAIN-PROXY] D3D11 device recreated (recovery #%u) proxyGeneration=%u missionGeneration=%u rebuilds=%u; rebuilding terrain on the new device",
+                        deviceRecoveries, g_proxy.generation, g_missionGeneration,
+                        g_deviceRecreatedForgetCount);
+                    selectedZone = false;
+                    ForgetTerrainProxy(TerrainForgetReason::DeviceRecreated, true, true);
+                }
+            }
             RefreshTerrainMicroReliefBounds(zone);
             RefreshNativeTerrainHd(zone, hdDirty);
             // The engine can destroy the proxy Entity at any point during a

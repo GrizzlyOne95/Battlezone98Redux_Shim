@@ -175,6 +175,7 @@ namespace BZROpenShim::Hooks
             float distance = WP::kRecoilKick;
             float returnSpeed = WP::kRecoilReturnSpeed;
             std::optional<WeaponConvergence::Vec3> flashOffset; // craft override, valid only
+            std::optional<WeaponConvergence::Vec3> cockpitFlashOffset; // player cockpit view, valid only
             std::optional<WeaponConvergence::Vec3> casingOffset;
             std::optional<WeaponConvergence::Vec3> casingDirection;
             bool casingPresent = false;
@@ -192,6 +193,7 @@ namespace BZROpenShim::Hooks
             void* root = nullptr;
             void* object = nullptr;
             WP::Matrix correction = WeaponConvergence::Identity();
+            bool cockpitFlash = false; // bound with cockpitFlashOffset placement
         };
         struct NodeState
         {
@@ -205,6 +207,7 @@ namespace BZROpenShim::Hooks
         std::unordered_map<void*, ClassFlash> g_FlashClasses;
         std::unordered_map<void*, CraftConfig> g_CraftClasses;
         std::set<std::pair<uint64_t, int>> g_FlashSkipLogged; // once per craft class and slot
+        std::set<std::pair<uint64_t, size_t>> g_CockpitOffsetRejectLogged; // once per craft class and slot
         std::unordered_map<void*, WeaponState> g_Weapons;
         std::map<NodeKey, NodeState> g_Nodes;
         std::unordered_map<uintptr_t, NodeKey> g_NodeByAddress;
@@ -473,6 +476,15 @@ namespace BZROpenShim::Hooks
                             LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s flashOffset%s rejected; expected \"right up forward\" within -20..20; weapon flashOffset kept", odf, suffix.c_str());
                         }
                     }
+                    if (readKey("cockpitFlashOffset" + suffix, value) != ValueStatus::Missing)
+                    {
+                        slot.cockpitFlashOffset = Policy::Offset(value);
+                        if (!slot.cockpitFlashOffset && g_CockpitOffsetRejectLogged.insert({ result.name, i }).second)
+                        {
+                            char odf[9] = {}; std::memcpy(odf, &result.name, 8);
+                            LogShimA(LogLevel::Warn, "WEAPONFX", "ODF=%s cockpitFlashOffset%s rejected; expected \"right up forward\" within -20..20; flashOffset%s used in cockpit view", odf, suffix.c_str(), suffix.c_str());
+                        }
+                    }
                     if (readKey("recoilKick" + suffix, value) != ValueStatus::Missing)
                     {
                         slot.kick = Policy::Kick(value);
@@ -542,8 +554,27 @@ namespace BZROpenShim::Hooks
             if (auto* runtime = TryGetSingleplayerWeaponPresentationRuntime())
                 runtime->Release(state.token);
             state.token = {};
+            state.cockpitFlash = false;
             state.shot = 0;
             state.node = {};
+        }
+
+        // Per shot: the firing object is the local player's and the view is the
+        // cockpit. A missing CurrentViewMode row or failed read keeps flashOffset.
+        bool CockpitPlacement(const WP::Identity& owner) noexcept
+        {
+            void* user = nullptr;
+            const uintptr_t slot = EngineGlobals::UserObjectSlot();
+            const bool localPlayer = slot && Read(reinterpret_cast<void*>(slot), 0, user) &&
+                user && reinterpret_cast<uintptr_t>(user) == owner.address;
+            std::optional<int> view;
+            if (localPlayer)
+            {
+                int mode = 0;
+                const uint32_t address = HookEngine::EngineAddress("CurrentViewMode");
+                if (address && Read(reinterpret_cast<void*>(static_cast<uintptr_t>(address)), 0, mode)) view = mode;
+            }
+            return Policy::UseCockpitFlashOffset(localPlayer, view, true);
         }
 
         bool ReadObjectClass(void* object, void*& objectClass) noexcept
@@ -574,6 +605,7 @@ namespace BZROpenShim::Hooks
         {
             float kick = 0;
             bool flashAllowed = true;
+            int cockpitSlot = -1; // 0-based slot bound with cockpitFlashOffset placement
         };
 
         void BindRecoil(void* weapon, WeaponState& state, WP::BindRequest& request,
@@ -581,6 +613,8 @@ namespace BZROpenShim::Hooks
         {
             diag.kick = 0;
             diag.flashAllowed = true;
+            diag.cockpitSlot = -1;
+            request.cockpitFlash.reset();
             if (!g_Settings.meshRecoil && !g_Settings.muzzleFlash) return;
             void* owner = reinterpret_cast<void*>(state.owner.address);
             const bool person = IsPersonObject(owner);
@@ -632,6 +666,22 @@ namespace BZROpenShim::Hooks
                             odf, selected + 1, selected + 1);
                     }
                     Policy::StripMeshAndRenderFlash(request.flash);
+                }
+                // Cockpit placement never enables a flash: only an allowed one moves.
+                else if (slotPtr && slotPtr->cockpitFlashOffset &&
+                    (request.flash.IsMesh() || request.flash.muzzleRender.Valid()))
+                {
+                    const auto cockpit = Policy::CockpitFlashOffsets(request.flash, renderOffsetDefaulted,
+                        *slotPtr->cockpitFlashOffset);
+                    // Bind only when it moves something (an explicit muzzleRenderOffset
+                    // on a render-only weapon leaves nothing to move).
+                    const auto& m = cockpit.mesh; const auto& r = cockpit.render;
+                    const auto& m0 = request.flash.offset; const auto& r0 = request.flash.muzzleRender.offset;
+                    if (m.x != m0.x || m.y != m0.y || m.z != m0.z || r.x != r0.x || r.y != r0.y || r.z != r0.z)
+                    {
+                        request.cockpitFlash = cockpit;
+                        diag.cockpitSlot = selected;
+                    }
                 }
             }
             if (!g_Settings.meshRecoil || !slotPtr) return;
@@ -728,11 +778,17 @@ namespace BZROpenShim::Hooks
                     const auto token = runtime->Bind(request);
                     if (!token) return;
                     state.token = *token;
+                    state.cockpitFlash = request.cockpitFlash.has_value();
                     LogShimA(LogLevel::Info, "WEAPONFX", "presentation bound handle=%u recoil=%s clip=%s flashMesh=%s flashOffset=%.2f,%.2f,%.2f kick=%.2f flash=%s",
                         static_cast<unsigned>(state.owner.lifetime), request.animation ? "animation" : request.recoil ? "node" : "none",
                         request.animation ? request.animation->clip.c_str() : "", request.flash.mesh.c_str(),
                         request.flash.offset.x, request.flash.offset.y, request.flash.offset.z,
                         diag.kick, diag.flashAllowed ? "on" : "off(no craft offset)");
+                    if (state.cockpitFlash)
+                        LogShimA(LogLevel::Info, "WEAPONFX", "presentation bound handle=%u slot %d cockpitFlashOffset mesh=%.2f,%.2f,%.2f render=%.2f,%.2f,%.2f (player cockpit view only)",
+                            static_cast<unsigned>(state.owner.lifetime), diag.cockpitSlot + 1,
+                            request.cockpitFlash->mesh.x, request.cockpitFlash->mesh.y, request.cockpitFlash->mesh.z,
+                            request.cockpitFlash->render.x, request.cockpitFlash->render.y, request.cockpitFlash->render.z);
                 }
                 WP::Matrix current;
                 if (!CurrentWeaponPose(weapon, state, current) || state.root != ownerRoot)
@@ -740,7 +796,8 @@ namespace BZROpenShim::Hooks
                 state.correction = WeaponConvergence::Multiply(committed, WeaponConvergence::Invert(current));
                 if (!WP::ValidPose(state.correction) || state.shot == std::numeric_limits<uint64_t>::max())
                 { ReleaseWeapon(state); return; }
-                const auto shot = runtime->Fire(state.token, ++state.shot, committed);
+                const auto shot = runtime->Fire(state.token, ++state.shot, committed,
+                    state.cockpitFlash && CockpitPlacement(state.owner));
                 if (!shot.observed) ReleaseWeapon(state); // session/scene epoch changed
             }
             catch (...) {} // native shot was already built; cosmetics cannot undo it

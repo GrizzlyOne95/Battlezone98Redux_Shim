@@ -212,32 +212,20 @@ std::string FractureInteriorMaterialHeader()
 
 std::string FractureInteriorMaterialScript()
 {
+    // Burnt machinery with ember cracks: the embedded DDS set (colour, normal,
+    // a low specular map and an emissive map of the embers).
     return FractureInteriorMaterialHeader() + "\n" +
            "// Override it with an openshim_fracture_interior.material at the top of a chunk payload\n"
            "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
-           "import * from \"BZBase.material\"\n\n" +
-           stockMaterial(kFractureInteriorMaterialName, kFractureInteriorTextureFile, "0.30 0.28 0.26", "40");
-}
-
-std::vector<uint8_t> FractureInteriorTextureTga()
-{
-    // Near-black scorched metal: tileable mottle with a faint warm scorch.
-    constexpr unsigned Z = 64;
-    std::vector<uint8_t> rgb(static_cast<size_t>(Z) * Z * 3);
-    for (unsigned y = 0; y < Z; ++y)
-        for (unsigned x = 0; x < Z; ++x)
-        {
-            const float u = (static_cast<float>(x) + 0.5f) / Z, v = (static_cast<float>(y) + 0.5f) / Z;
-            const float blob = fbm(u, v, 4, 140);
-            const float grain = vnoise(u * 16.0f, v * 16.0f, 16, 16, 141) - 0.5f;
-            const float level = (0.055f + 0.07f * blob) * (1.0f + grain * 0.35f);
-            const float scorch = clamp01((fbm(u, v, 3, 142) - 0.45f) * 2.0f) * 0.03f;
-            uint8_t *dst = &rgb[(static_cast<size_t>(y) * Z + x) * 3];
-            dst[0] = static_cast<uint8_t>(clamp01(level + scorch) * 255.0f + 0.5f);
-            dst[1] = static_cast<uint8_t>(clamp01(level + scorch * 0.5f) * 255.0f + 0.5f);
-            dst[2] = static_cast<uint8_t>(clamp01(level) * 255.0f + 0.5f);
-        }
-    return tga24(Z, Z, rgb);
+           "// The override must ship its own textures: these generated ones are removed once it exists.\n"
+           "import * from \"BZBase.material\"\n\n"
+           "material " + std::string(kFractureInteriorMaterialName) + " : BZBase\n{\n"
+           "\tset_texture_alias DiffuseMap " + kFractureInteriorTextureFile + "\n"
+           "\tset_texture_alias NormalMap " + kFractureInteriorNormalFile + "\n"
+           "\tset_texture_alias SpecularMap " + kFractureInteriorSpecularFile + "\n"
+           "\tset_texture_alias EmissiveMap " + kFractureInteriorEmissiveFile + "\n\n"
+           "\tset $diffuse \"1 1 1\"\n\tset $ambient \"1 1 1\"\n\tset $specular \"0.30 0.28 0.26\"\n"
+           "\tset $shininess \"40\"\n\tset $bias \"0\"\n}\n";
 }
 
 std::vector<GibFleshTexture> GibFleshTextures()
@@ -377,5 +365,82 @@ bool IsCurrentGibFleshTga(const std::vector<uint8_t> &bytes)
     const std::string id = versionTag();
     return bytes.size() >= 18 + id.size() && bytes[0] == id.size() && bytes[2] == 2 &&
            std::memcmp(bytes.data() + 18, id.data(), id.size()) == 0;
+}
+
+namespace
+{
+constexpr const char *kFractureDustVersion = "v1";
+} // namespace
+
+std::string FractureDustMaterialHeader()
+{
+    return std::string(kFractureDustMaterialMarker) + " " + kFractureDustVersion + " (generated; do not edit).";
+}
+
+std::string FractureDustMaterialScript()
+{
+    // The stock BZSprite/AlphaBlend pass with our texture and a dust tone as
+    // the pass diffuse (Effect_vertex multiplies the vertex colour by it).
+    // Spelled out rather than derived, so this group needs no import of the
+    // stock sprites.material.
+    const auto pass = [](const char *diffuse) {
+        return std::string("\t\t\tcull_hardware none\n\t\t\tcull_software none\n"
+                           "\t\t\tlighting off\n\t\t\tscene_blend alpha_blend\n\t\t\tdepth_write off\n"
+                           "\t\t\tdiffuse ") +
+               diffuse + "\n\t\t\ttexture_unit 0\n\t\t\t{\n\t\t\t\ttexture " + kFractureDustTextureFile +
+               "\n\t\t\t\ttex_address_mode clamp\n\t\t\t}\n";
+    };
+    return FractureDustMaterialHeader() + "\n" +
+           "// Override it with an openshim_fracture_dust.material at the top of a chunk payload\n"
+           "// directory (<mod>/chunkMeshes/ or BZ_ASSETS/common/models/OpenShimChunkPayloads/).\n"
+           "// The override must ship its own texture: the generated one is removed once it exists.\n"
+           "// Billboard colours are grey with the fade in alpha; the dust tone is the diffuse below.\n"
+           "material " + std::string(kFractureDustMaterialName) + "\n{\n"
+           "\treceive_shadows off\n\n"
+           "\ttechnique 0\n\t{\n\t\tpass 0\n\t\t{\n"
+           "\t\t\tvertex_program_ref Effect_vertex\n\t\t\t{\n\t\t\t}\n"
+           "\t\t\tfragment_program_ref Effect_fragment\n\t\t\t{\n\t\t\t}\n" +
+           pass("0.56 0.51 0.44 1") + "\t\t}\n\t}\n\n"
+           "\t// Black in the glow buffer, like the stock sprites: dust hides glow, never adds to it.\n"
+           "\ttechnique glow\n\t{\n\t\tscheme glow\n\t\tpass 0\n\t\t{\n"
+           "\t\t\tvertex_program_ref Effect_vertex\n\t\t\t{\n\t\t\t}\n"
+           "\t\t\tfragment_program_ref Effect_fragment\n\t\t\t{\n\t\t\t\tparam_named fogColour float3 0 0 0\n\t\t\t}\n" +
+           pass("0 0 0 1") + "\t\t}\n\t}\n}\n";
+}
+
+std::vector<uint8_t> FractureDustTextureTga()
+{
+    constexpr unsigned N = kFractureDustTextureSize;
+    const std::string id = std::string("OpenShim fracture dust ") + kFractureDustVersion;
+    std::vector<uint8_t> out;
+    out.reserve(18 + id.size() + static_cast<size_t>(N) * N * 4);
+    // Type 2, 32 bpp, 8 alpha bits, bottom-left origin.
+    const uint8_t header[18] = {static_cast<uint8_t>(id.size()), 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                static_cast<uint8_t>(N & 0xFF), static_cast<uint8_t>(N >> 8),
+                                static_cast<uint8_t>(N & 0xFF), static_cast<uint8_t>(N >> 8), 32, 8};
+    out.insert(out.end(), header, header + sizeof(header));
+    out.insert(out.end(), id.begin(), id.end());
+    for (unsigned row = 0; row < N; ++row)
+        for (unsigned x = 0; x < N; ++x)
+        {
+            const unsigned y = N - 1 - row;
+            const float u = (static_cast<float>(x) + 0.5f) / N, v = (static_cast<float>(y) + 0.5f) / N;
+            const float dx = u * 2.0f - 1.0f, dy = v * 2.0f - 1.0f;
+            const float r = std::sqrt(dx * dx + dy * dy);
+            // Lumpy outline: the radius breathes with low-frequency noise.
+            const float lump = fbm(u, v, 3, 201) - 0.5f;
+            const float body = 1.0f - smooth(clamp01(r / (0.92f + 0.40f * lump)));
+            // Clumps inside the cloud, and a hard zero before the border.
+            const float clumps = 0.55f + 0.9f * (fbm(u, v, 6, 211) - 0.5f);
+            const float edge = 1.0f - smooth(clamp01((r - 0.82f) / 0.16f));
+            const float alpha = clamp01(body * 1.5f * clumps * edge);
+            const float shade = 0.86f + 0.14f * fbm(u, v, 8, 221);
+            const uint8_t c = static_cast<uint8_t>(clamp01(shade) * 255.0f + 0.5f);
+            out.push_back(c); // B
+            out.push_back(c); // G
+            out.push_back(c); // R
+            out.push_back(static_cast<uint8_t>(alpha * 255.0f + 0.5f));
+        }
+    return out;
 }
 } // namespace BZROpenShim::NativeChunks

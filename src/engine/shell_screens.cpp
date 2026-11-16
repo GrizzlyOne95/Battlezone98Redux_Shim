@@ -40,6 +40,7 @@
 #include "BZROpenShim.h"
 #include "render_profile_runtime.h"
 #include "terrain_proxy.h"
+#include "soak_telemetry.h"
 #include "ui_screen_fit.h"
 
 #include "bzr_options_ui.h"
@@ -302,6 +303,7 @@ namespace BZROpenShim::ShellScreens
         {
             // First main-thread seam with a live Ogre Root on the menus.
             InstallFrameCaptureListener();
+            SoakTelemetryRenderTick();
             const ScreenDef* def = FindDef(static_cast<uint32_t>(id));
             if (!def)
                 return g_FactoryOriginal(manager, id);

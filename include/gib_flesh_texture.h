@@ -25,7 +25,7 @@ namespace BZROpenShim::NativeChunks
 // of each generated file's first line / TGA id, which is how the runtime
 // recognises (and replaces) a stale generated copy, while a file without the
 // marker is the user's and is left alone.
-inline constexpr const char *kGibFleshVersion = "v8";
+inline constexpr const char *kGibFleshVersion = "v10";
 inline constexpr const char *kGibFleshMaterialName = "openshim_gib_flesh";
 inline constexpr const char *kGibFleshMaterialFile = "openshim_gib_flesh.material";
 // Skin, fat, bone and marrow live in their own file so a mod can restyle the
@@ -52,11 +52,37 @@ std::vector<GibFleshTexture> GibFleshTextures();
 // to a payload pack's own file of the same name).
 inline constexpr const char *kFractureInteriorMaterialName = "openshim_fracture_interior";
 inline constexpr const char *kFractureInteriorMaterialFile = "openshim_fracture_interior.material";
-inline constexpr const char *kFractureInteriorTextureFile = "openshim_fracture_interior.tga";
+// The cap texture set is embedded in the plugin (fracture_interior_textures.rc)
+// and written beside the material; the .tga is the earlier generated texture,
+// removed when found.
+inline constexpr const char *kFractureInteriorTextureFile = "openshim_fracture_interior.dds";
+inline constexpr const char *kFractureInteriorNormalFile = "openshim_fracture_interior_n.dds";
+inline constexpr const char *kFractureInteriorSpecularFile = "openshim_fracture_interior_s.dds";
+inline constexpr const char *kFractureInteriorEmissiveFile = "openshim_fracture_interior_e.dds";
+inline constexpr const char *kFractureInteriorLegacyTextureFile = "openshim_fracture_interior.tga";
 inline constexpr const char *kFractureInteriorMaterialMarker = "// OpenShim FractureOnePiece default interior material";
 std::string FractureInteriorMaterialHeader();
 std::string FractureInteriorMaterialScript();
-std::vector<uint8_t> FractureInteriorTextureTga();
+
+// The dust a sinking fracture piece kicks up: camera-facing puffs (an Ogre
+// BillboardSet) with a generated soft, clumpy alpha blob. The material mirrors
+// the stock BZSprite/AlphaBlend sprites (Effect_vertex/Effect_fragment, alpha
+// blend, no depth write, black in the glow scheme), so it runs on DX9 and DX11
+// alike. The dust tone is the pass diffuse; the billboard colour is kept grey
+// (R = G = B) because DX11's Effect program swizzles a packed colour .bgra, and
+// its alpha drives the fade. Same override rules as the interior material. The
+// stock smoke.png is a 4x4 frame atlas, and the shipped OgreMain exports no
+// per-billboard texcoord setter, hence the generated single-frame texture.
+inline constexpr const char *kFractureDustMaterialName = "openshim_fracture_dust";
+inline constexpr const char *kFractureDustMaterialFile = "openshim_fracture_dust.material";
+inline constexpr const char *kFractureDustTextureFile = "openshim_fracture_dust.tga";
+inline constexpr const char *kFractureDustMaterialMarker = "// OpenShim FractureOnePiece default sink dust material";
+inline constexpr unsigned kFractureDustTextureSize = 64;
+std::string FractureDustMaterialHeader();
+std::string FractureDustMaterialScript();
+// Uncompressed 32-bit TGA: near-white RGB, alpha a soft clumpy blob that is 0
+// at the border (the material clamps). Deterministic.
+std::vector<uint8_t> FractureDustTextureTga();
 
 // Full first lines of the current generated files, without the newline.
 std::string GibFleshMaterialHeader();

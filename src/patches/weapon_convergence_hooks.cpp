@@ -136,6 +136,17 @@ namespace BZROpenShim
 
         constexpr size_t kReticlePositionOffset = 0xCC; // gPos
 
+        // The crosshair ray. Reticle::Simulate rewrites a MAT_3D at Reticle+0x28
+        // every frame: vehicle matrix (0x005BA6B1-0x005BA6BB), eye position
+        // doubles at +0x50/+0x58/+0x60 (0x005BA6C8-0x005BA6E8), then the
+        // reticle pitch applied in place (0x005BA903-0x005BA946, position
+        // unchanged), all before it looks for an object or the ground. FindGroundPos casts along exactly this
+        // ray: origin = the matrix position (0x005BCCC3 -> 0x00447F73, doubles at
+        // matrix+0x28) and direction = the matrix front (0x005BCD1D -> 0x004560C3,
+        // floats at matrix+0x18), gPos = origin + t * front (0x005BCDA4-0x005BCE02).
+        constexpr size_t kReticleRayFrontOffset = 0x28 + 0x18;   // 3 floats
+        constexpr size_t kReticleRayOriginOffset = 0x28 + 0x28;  // 3 doubles
+
         // SmartReticlePooledRange is NOT a reticle range variable: it is a pooled read-only
         // 200.0f literal in .rdata that 112 unrelated .text sites also load
         // (comparisons, field initializers, arithmetic all over the game).
@@ -186,6 +197,10 @@ namespace BZROpenShim
         constexpr size_t kWeaponObjectOffset = 0x10;
 
         constexpr size_t kWeaponHardpointOffset = 0x14;
+
+        // Muzzle offset (3 floats) in the hardpoint frame; MountWorldMatrix
+        // pushes it through that frame at 0x00611701.
+        constexpr size_t kWeaponMuzzleOffsetOffset = 0x1C;
 
         // The weapon's _OBJ76 carries its MAT_3D at kObj76TransformOffset, not
         // at the object head. Stock pushes obj+0x20 into RefreshWeaponTransform
@@ -485,14 +500,42 @@ namespace BZROpenShim
                     *reinterpret_cast<void* const*>(g_ReticleGlobalAddr + kReticleSelectObjectOffset);
                 if (selectObject)
                 {
+                    // The smart reticle picks an object NEAR the crosshair, not
+                    // under it, so its centre is often off the crosshair line.
+                    // BZ2/BZCC never aim at the object itself: the aim point is
+                    // always reticlePos + reticleFront * |target - reticlePos|
+                    // (BZCC 0x00541B0F-0x00541BCC). Do the same, so shots go
+                    // where the crosshair points and only the range comes from
+                    // the object.
                     float objectPosition[3] = {};
                     if (!TryGetWalkerGameObjectPosition(selectObject, objectPosition))
                         return false;
 
+                    const auto* const rayFront = reinterpret_cast<const float*>(
+                        g_ReticleGlobalAddr + kReticleRayFrontOffset);
+                    const auto* const rayOrigin = reinterpret_cast<const double*>(
+                        g_ReticleGlobalAddr + kReticleRayOriginOffset);
+
+                    const double fx = rayFront[0], fy = rayFront[1], fz = rayFront[2];
+                    const double frontLength = std::sqrt(fx * fx + fy * fy + fz * fz);
+                    const double ox = objectPosition[0] - rayOrigin[0];
+                    const double oy = objectPosition[1] - rayOrigin[1];
+                    const double oz = objectPosition[2] - rayOrigin[2];
+                    const double range = std::sqrt(ox * ox + oy * oy + oz * oz);
+                    if (!std::isfinite(frontLength) || frontLength < 0.5 || frontLength > 1.5 ||
+                        !std::isfinite(range) || !std::isfinite(rayOrigin[0]) ||
+                        !std::isfinite(rayOrigin[1]) || !std::isfinite(rayOrigin[2]))
+                    {
+                        return false;
+                    }
+
+                    const double scale = range / frontLength;
                     return TryBuildConvergenceRangeSample(
                         craft,
-                        { objectPosition[0], objectPosition[1], objectPosition[2] },
-                        "reticle-object",
+                        { static_cast<float>(rayOrigin[0] + fx * scale),
+                          static_cast<float>(rayOrigin[1] + fy * scale),
+                          static_cast<float>(rayOrigin[2] + fz * scale) },
+                        "reticle-object-ray",
                         outSample);
                 }
 
@@ -517,17 +560,14 @@ namespace BZROpenShim
             }
         }
 
-        // Shared exact-Walker hardpoint post-pass.
+        // Hardpoint convergence post-pass shared by both public features.
+        // Stock class-specific UpdateWeaponAim runs before this function.
         //
-        // This is the convergence mechanism for both public features. The only
-        // intended distinction is the provider of ConvergenceRangeSample:
-        //
-        //   Weapon Convergence  -> explicit GameObject target range
-        //   Reticle Convergence -> smart-reticle object/ground range
-        //
-        // Stock class-specific UpdateWeaponAim runs before this function. The
-        // post-pass then reproduces only Walker's proven convergence stage.
-        static int ApplyWalkerConvergencePostPass(
+        //   Target Convergence  -> explicit GameObject target range, applied
+        //                          with Walker's range-only yaw (stock, as-is)
+        //   Reticle Convergence -> each barrel pointed from its muzzle at the
+        //                          point on the crosshair ray (ground hit, or object distance)
+        static int ApplyConvergencePostPass(
             void* craft,
             const ConvergenceRangeSample& sample,
             bool logReticleApplication)
@@ -555,8 +595,7 @@ namespace BZROpenShim
             // reports barrels already rewritten: the caller's fallback must
             // never run the reticle pass on top of a partial target pass.
             volatile int converged = 0;
-            float lastHardpointX = 0.0f;
-            float lastHardpointZ = 0.0f;
+            float lastResidualDegrees = 0.0f;
 
             __try
             {
@@ -601,29 +640,61 @@ namespace BZROpenShim
                         kObj76TransformOffset);
 
                     WeaponConvergence::Solution solution = {};
-                    if (WeaponConvergence::SolveWalkerStyleRange(
+                    WeaponConvergence::SolveResult result;
+                    if (logReticleApplication)
+                    {
+                        // Reticle: turn each barrel so it fires from its
+                        // muzzle through the aim point (minimal arc, stock
+                        // roll kept). Same goal as BZ2's UpdateWeaponAim,
+                        // which aims every hardpoint at one point on the
+                        // reticle ray. Walker's range-only yaw assumes a
+                        // level aim; pitched down at the ground it ignores
+                        // the pitch and the hardpoint's height, and swung
+                        // barrels and laser sights off to the side.
+                        //
+                        // The firing sites spawn from weaponObj->mat * M, and
+                        // M is MountWorldMatrix (0x006116A0):
+                        // obj_rel_parent_matrix(hard, nullptr) with the
+                        // muzzle offset at weapon+0x1C pushed through it
+                        // (0x00611701). Built the same way here so the aim
+                        // origin is the muzzle.
+                        ConvergenceMatrix hardpointWorld = {};
+                        objRelParentMatrix(&hardpointWorld, hardpoint, nullptr);
+                        const auto& muzzleOffset =
+                            *reinterpret_cast<const ConvergenceVec3*>(
+                                reinterpret_cast<const uint8_t*>(weapon) +
+                                kWeaponMuzzleOffsetOffset);
+                        const ConvergenceMatrix mountWorld =
+                            WeaponConvergence::MuzzleWorld(hardpointWorld, muzzleOffset);
+                        result = WeaponConvergence::Solve(
+                            *transform, mountWorld, sample.reference, solution,
+                            /*clampToDeviationLimit*/ true);
+                        if (result == WeaponConvergence::SolveResult::Converged)
+                            lastResidualDegrees = solution.residualDegrees;
+                    }
+                    else
+                    {
+                        // Locked target: stock Walker, unchanged.
+                        result = WeaponConvergence::SolveWalkerStyleRange(
                             *transform,
                             hardpointX,
                             hardpointZ,
                             sample.range,
-                            solution) !=
-                        WeaponConvergence::SolveResult::Converged)
-                    {
-                        continue;
+                            solution);
                     }
+                    if (result != WeaponConvergence::SolveResult::Converged)
+                        continue;
 
                     converged = converged + 1;
                     *transform = solution.mountLocal;
                     refreshWeaponTransform(weaponObject, transform);
-                    lastHardpointX = hardpointX;
-                    lastHardpointZ = hardpointZ;
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 if (!g_PlayerReticleConvergenceLayoutFaultLogged)
                 {
-                    Log(L"[CONVERGE] shared Walker post-pass faulted while reading craft/carrier/weapon layout "
+                    Log(L"[CONVERGE] convergence post-pass faulted while reading craft/carrier/weapon layout "
                         L"(craft=0x%p carrierOffset=0x%X)\n",
                         craft,
                         static_cast<uint32_t>(kCraftCarrierOffset));
@@ -644,17 +715,16 @@ namespace BZROpenShim
                 {
                     g_PlayerReticleConvergenceLastLogTick = now;
                     ++g_PlayerReticleConvergenceLogCount;
-                    Log(L"[CONVERGE] shared exact-Walker post-pass applied to %d hardpoint(s) "
-                        L"rangeSource=%hs rangeReference=(%.1f, %.1f, %.1f) "
-                        L"range=%.1f lastHardpointXZ=(%.3f, %.3f)\n",
+                    Log(L"[CONVERGE] reticle point-at applied to %d hardpoint(s) "
+                        L"source=%hs aimPoint=(%.1f, %.1f, %.1f) "
+                        L"range=%.1f residualDeg=%.3f\n",
                         converged,
                         sample.source,
                         static_cast<double>(sample.reference.x),
                         static_cast<double>(sample.reference.y),
                         static_cast<double>(sample.reference.z),
                         static_cast<double>(sample.range),
-                        static_cast<double>(lastHardpointX),
-                        static_cast<double>(lastHardpointZ));
+                        static_cast<double>(lastResidualDegrees));
                 }
             }
 
@@ -666,7 +736,7 @@ namespace BZROpenShim
             ConvergenceRangeSample sample = {};
             if (!TryGetReticleConvergenceRange(craft, sample))
                 return;
-            ApplyWalkerConvergencePostPass(craft, sample, true);
+            ApplyConvergencePostPass(craft, sample, true);
         }
 
         // One convergence source per frame, never both. Each pass rebuilds the
@@ -687,7 +757,7 @@ namespace BZROpenShim
             {
                 ConvergenceRangeSample sample = {};
                 if (TryGetExplicitTargetConvergenceRange(craft, sample) &&
-                    ApplyWalkerConvergencePostPass(craft, sample, false) > 0)
+                    ApplyConvergencePostPass(craft, sample, false) > 0)
                 {
                     return;
                 }

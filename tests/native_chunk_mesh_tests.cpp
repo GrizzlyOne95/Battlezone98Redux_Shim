@@ -789,6 +789,35 @@ void fleshTextureTests()
                 GibFleshZoneMaterialScript().find(GibOptions{}.capMarrowMaterial) != std::string::npos &&
                 GibFleshZoneMaterialScript().rfind(GibFleshZoneMaterialHeader(), 0) == 0,
             "the default cap materials are the ones the writer generates");
+    {
+        // Fracture sink dust: a soft alpha blob, 0 at the border (clamped),
+        // in a stock-sprite-style alpha blend material with a glow technique.
+        const auto dust = FractureDustTextureTga();
+        constexpr unsigned D = kFractureDustTextureSize;
+        const size_t pixels = 18 + static_cast<size_t>(dust.empty() ? 0 : dust[0]);
+        bool borderClear = dust.size() == pixels + static_cast<size_t>(D) * D * 4;
+        unsigned centreAlpha = 0;
+        if (borderClear)
+        {
+            const auto alphaAt = [&](unsigned x, unsigned y) { return dust[pixels + (static_cast<size_t>(y) * D + x) * 4 + 3]; };
+            for (unsigned i = 0; i < D; ++i)
+                borderClear = borderClear && alphaAt(i, 0) == 0 && alphaAt(i, D - 1) == 0 && alphaAt(0, i) == 0 &&
+                              alphaAt(D - 1, i) == 0;
+            centreAlpha = alphaAt(D / 2, D / 2);
+        }
+        Require(dust.size() > 18 && dust[2] == 2 && dust[16] == 32 && (dust[17] & 0x0F) == 8 && borderClear &&
+                    centreAlpha >= 96 && !IsGeneratedGibFleshTga(dust),
+                "sink dust texture is a 32-bit soft blob, clear at the border, not tagged as flesh");
+        const std::string dustScript = FractureDustMaterialScript();
+        Require(dustScript.rfind(FractureDustMaterialHeader(), 0) == 0 &&
+                    dustScript.find(std::string("material ") + kFractureDustMaterialName + "\n") != std::string::npos &&
+                    dustScript.find(std::string("texture ") + kFractureDustTextureFile) != std::string::npos &&
+                    dustScript.find("vertex_program_ref Effect_vertex") != std::string::npos &&
+                    dustScript.find("scene_blend alpha_blend") != std::string::npos &&
+                    dustScript.find("depth_write off") != std::string::npos &&
+                    dustScript.find("scheme glow") != std::string::npos && dustScript.find("import") == std::string::npos,
+                "sink dust material mirrors the stock alpha-blend sprite, with a black glow technique");
+    }
 }
 // Offline check against a real model: prints the split, like
 // scripts/export_gib_payloads.py does.
@@ -1047,6 +1076,69 @@ bool closedManifold(const FracturedTriangles &t)
     }
     return true;
 }
+// Multi-part pieces are open shells: Extract caps each piece's open boundary loops.
+void multipartCapTests()
+{
+    using namespace BZROpenShim::NativeChunks;
+    const std::string interior = FractureOptions{}.interiorMaterial;
+    const auto skeleton = fixtureSkeleton();
+    std::vector<Piece> pieces;
+    std::string error;
+    ChunkCapStats stats;
+    const auto extract = [&](const FractureSource &src) {
+        const std::vector<uint16_t> bones(src.positions.size(), 0);
+        return Extract(fractureMeshBytes(src, bones, true), skeleton, pieces, error, &stats);
+    };
+
+    // A box with no floor: one loop, capped, and the piece becomes watertight.
+    auto open = fractureBox(2.f, 1.5f, 2.f, 2);
+    const size_t faceIndices = 2 * 2 * 6;
+    open.indices.erase(open.indices.begin() + static_cast<std::ptrdiff_t>(2 * faceIndices),
+                       open.indices.begin() + static_cast<std::ptrdiff_t>(3 * faceIndices)); // -y face
+    Require(extract(open) && pieces.size() == 1, ("extract open box: " + error).c_str());
+    Require(stats.capLoops == 1 && stats.openLoops == 0, "open box has one capped loop");
+    {
+        const auto tris = readFracturePiece(pieces[0].mesh, interior);
+        Require(tris.interior > 0, "the cap uses the fracture interior material");
+        Require(pieces[0].triangles == open.indices.size() / 3 + tris.interior, "cap triangles are counted");
+        Require(closedManifold(tris), "capped open box is watertight");
+        Require(std::abs(signedVolume(tris) - 48.0) < 0.01, "cap faces outward (volume of the box)");
+        Require(!tris.nonFinite, "cap vertices are finite");
+    }
+    const Bytes first = pieces[0].mesh;
+    Require(extract(open) && pieces[0].mesh == first, "capping is deterministic");
+
+    // Capping is skipped with a null stats pointer too.
+    {
+        const std::vector<uint16_t> bones(open.positions.size(), 0);
+        Require(Extract(fractureMeshBytes(open, bones, true), skeleton, pieces, error) && pieces[0].mesh == first,
+                "stats are optional");
+    }
+
+    // A closed box needs nothing.
+    const auto closed = fractureBox(2.f, 1.5f, 2.f, 2);
+    Require(extract(closed) && pieces.size() == 1 && stats.capLoops == 0 && stats.openLoops == 0 &&
+                pieces[0].triangles == closed.indices.size() / 3 &&
+                readFracturePiece(pieces[0].mesh, interior).interior == 0,
+            "a closed box is not capped");
+
+    // A single flat quad is a sheet: capping it would z-fight its own back face.
+    FractureSource sheet;
+    sheet.positions = {{-1, 0, -1}, {1, 0, -1}, {1, 0, 1}, {-1, 0, 1}};
+    sheet.indices = {0, 1, 2, 0, 2, 3};
+    Require(extract(sheet) && pieces.size() == 1 && stats.capLoops == 0 && stats.openLoops == 1 &&
+                pieces[0].triangles == 2 && readFracturePiece(pieces[0].mesh, interior).interior == 0,
+            "a flat sheet is not capped");
+
+    // A fin (a vertical flat quad) sharing the open box's piece stays open
+    // while the box's floor is still capped.
+    auto finned = open;
+    const auto base = static_cast<uint16_t>(finned.positions.size());
+    finned.positions.insert(finned.positions.end(), {{0, 1.5f, -1}, {0, 1.5f, 1}, {0, 3.5f, 1}, {0, 3.5f, -1}});
+    finned.indices.insert(finned.indices.end(), {base, static_cast<uint16_t>(base + 1), static_cast<uint16_t>(base + 2), base, static_cast<uint16_t>(base + 2), static_cast<uint16_t>(base + 3)});
+    Require(extract(finned) && pieces.size() == 1 && stats.capLoops == 1 && stats.openLoops == 1,
+            "a fin in a capped piece stays open");
+}
 void fractureTests()
 {
     using namespace BZROpenShim::NativeChunks;
@@ -1265,6 +1357,7 @@ int main(int argc, char **argv)
     }
     fleshTextureTests();
     fractureTests();
+    multipartCapTests();
     auto mesh = fixtureMesh(), skeleton = fixtureSkeleton();
     Require(StockFallbackKind("chunk1") == 1 && StockFallbackKind("CHUNK2") == 2,
             "stock chunklet names retain their shape");
@@ -1366,7 +1459,7 @@ int main(int argc, char **argv)
                 "beam uses the generated laser material and no skeleton");
         Require(beam.triangles == 8u * 2u, "beam is an open tube: two triangles per side");
         Require(Extract(beam.mesh, skeleton, pieces, error) && pieces.size() == 1 &&
-                    pieces[0].triangles == beam.triangles,
+                    pieces[0].triangles >= beam.triangles, // Extract also caps the tube's open ends
                 "beam mesh reloads through the Ogre mesh parser with every face");
         float bounds[7] = {};
         std::memcpy(bounds, beam.mesh.data() + beam.mesh.size() - sizeof(bounds), sizeof(bounds));
@@ -1384,7 +1477,7 @@ int main(int argc, char **argv)
         Require(!first.mesh.empty() && first.mesh != fourth.mesh && fourth.triangles == beam.triangles,
                 "sections differ and keep the tube's faces");
         Require(Extract(fourth.mesh, skeleton, pieces, error) && pieces.size() == 1 &&
-                    pieces[0].triangles == fourth.triangles,
+                    pieces[0].triangles >= fourth.triangles, // Extract also caps the tube's open ends
                 "a section reloads through the Ogre mesh parser");
         std::memcpy(bounds, fourth.mesh.data() + fourth.mesh.size() - sizeof(bounds), sizeof(bounds));
         Require(std::fabs(bounds[2]) < 1e-5f && std::fabs(bounds[5] - 1.0f) < 1e-5f &&

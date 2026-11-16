@@ -194,6 +194,7 @@
     <ClCompile Include="src\patches\skinned_gibs.cpp" />
     <ClCompile Include="src\patches\shell_casings.cpp" />
     <ClCompile Include="src\patches\laser_sight.cpp" />
+    <ClCompile Include="src\patches\scene_mutation_drain.cpp" />
 
     <ClCompile Include="src\patches\path_block.cpp" />
     <ClCompile Include="src\patches\deferred_modable_rebuild.cpp" />
@@ -317,6 +318,7 @@
     <ClCompile Include="src\patches\mp_vehicle_preview_fix.cpp" />
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\perf_telemetry.cpp" />
+    <ClCompile Include="src\patches\soak_telemetry.cpp" />
     <ClCompile Include="src\patches\music_single_fill.cpp" />
     <ClCompile Include="src\patches\precise_timestep.cpp" />
     <ClCompile Include="src\patches\armory_repair_pick.cpp" />
@@ -396,6 +398,7 @@
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\briefing_pages_policy.h" />
     <ClInclude Include="include\ordnance_entity_leak_policy.h" />
+    <ClInclude Include="include\live_object_gate.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />
     <ClInclude Include="include\deferred_modable_policy.h" />
     <ClInclude Include="include\background_run_policy.h" />
@@ -436,6 +439,8 @@
     <ClInclude Include="include\bzr_hooks.h" />
     <ClInclude Include="include\unit_damage.h" />
     <ClInclude Include="include\unit_damage_policy.h" />
+    <ClInclude Include="include\scene_mutation_drain.h" />
+    <ClInclude Include="include\scene_mutation_drain_policy.h" />
     <ClInclude Include="include\weapon_presentation.h" />
     <ClInclude Include="include\weapon_presentation_hooks.h" />
     <ClInclude Include="include\weapon_presentation_native.h" />
@@ -474,6 +479,7 @@
     <ClInclude Include="include\d3d_compile_cache.h" />
     <ClInclude Include="include\dxbc_cache_policy.h" />
     <ClInclude Include="include\d3d11_device_loss_recovery.h" />
+    <ClInclude Include="include\d3d11_recovery_policy.h" />
     <ClInclude Include="include\d3d11_fullscreen_toggle.h" />
     <ClInclude Include="include\d3d11_primary_monitor.h" />
     <ClInclude Include="include\resolution_list_filter.h" />
@@ -492,6 +498,7 @@
     <ClInclude Include="include\dx11_enhanced_fxaa_resources.h" />
     <ClInclude Include="include\options_ui_l10n.h" />
     <ClInclude Include="include\options_ui_l10n_resources.h" />
+    <ClInclude Include="include\fracture_interior_resources.h" />
     <ClInclude Include="include\ogre_animation_profiler.h" />
     <ClInclude Include="include\pilot_fp_animation_trace.h" />
     <ClInclude Include="include\walker_cockpit_trace.h" />
@@ -517,6 +524,8 @@
     <ClInclude Include="include\diagnostic_output_cap.h" />
     <ClInclude Include="include\native_cpu_sampler.h" />
     <ClInclude Include="include\perf_telemetry.h" />
+    <ClInclude Include="include\soak_telemetry.h" />
+    <ClInclude Include="include\soak_telemetry_policy.h" />
     <ClInclude Include="include\music_single_fill.h" />
     <ClInclude Include="include\precise_timestep.h" />
     <ClInclude Include="include\armory_repair_pick.h" />
@@ -595,6 +604,7 @@
     </ResourceCompile>
     <ResourceCompile Include="dx11_enhanced_fxaa.rc" />
     <ResourceCompile Include="options_ui_l10n.rc" />
+    <ResourceCompile Include="fracture_interior_textures.rc" />
     <ResourceCompile Include="launcher_proxy.rc">
       <AdditionalIncludeDirectories>$(SolutionDir)bin\$(Configuration);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>

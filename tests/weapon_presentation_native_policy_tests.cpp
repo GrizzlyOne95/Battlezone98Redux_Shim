@@ -1,5 +1,6 @@
 #include "weapon_presentation_native_policy.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -100,6 +101,33 @@ int main()
         Require(Policy::BaseOdfName("\"avtank\"", "player") == "avtank", "base name not extracted");
         Require(Policy::BaseOdfName("AVTANK", "avtank").empty(), "self baseName followed");
         Require(Policy::BaseOdfName("", "player").empty() && Policy::BaseOdfName("\"bad", "player").empty(), "bad baseName followed");
+    }
+    {
+        // cockpitFlashOffset<N>: parse, selection rule, baseName inheritance.
+        const auto good = Policy::Offset("\"-0.6 -0.8 3.4\"");
+        Require(good && good->x == -0.6f && good->y == -0.8f && good->z == 3.4f, "cockpitFlashOffset did not parse");
+        const auto malformed = Policy::Offset("\"-0.6 -0.8\"");
+        Require(!malformed && !Policy::Offset("21 0 0"), "malformed cockpitFlashOffset accepted");
+        Require(Policy::UseCockpitFlashOffset(true, 1, good.has_value()), "player in cockpit view ignored the cockpit offset");
+        Require(!Policy::UseCockpitFlashOffset(false, 1, true), "non-player shot used the cockpit offset");
+        Require(!Policy::UseCockpitFlashOffset(true, 0, true) && !Policy::UseCockpitFlashOffset(true, 9, true),
+            "non-cockpit view used the cockpit offset");
+        Require(!Policy::UseCockpitFlashOffset(true, std::nullopt, true), "unreadable view mode used the cockpit offset");
+        Require(!Policy::UseCockpitFlashOffset(true, 1, false), "missing cockpitFlashOffset used one");
+        Require(!Policy::UseCockpitFlashOffset(true, 1, malformed.has_value()), "malformed cockpitFlashOffset used");
+
+        Require(std::find(Policy::kCraftSlotKeys.begin(), Policy::kCraftSlotKeys.end(), "cockpitFlashOffset") !=
+            Policy::kCraftSlotKeys.end(), "cockpitFlashOffset is not a craft presentation key");
+        const auto base = Policy::ParseOdfText(
+            "[GameObjectClass]\nweaponHard1 = gcannon\nweaponHard2 = gmortar\n"
+            "[CraftClass]\nflashOffset1 = \"0 0 2\"\ncockpitFlashOffset1 = \"-0.6 -0.8 3.4\"\n");
+        const auto* inherited = Policy::OdfValue(base, "CraftClass", "cockpitFlashOffset1");
+        Require(inherited && Policy::Offset(*inherited) && Policy::Offset(*inherited)->z == 3.4f,
+            "base cockpitFlashOffset not readable");
+        std::array<std::string, Policy::kCraftSlots> hard{ "gcannon", "gmortar" };
+        Require(Policy::InheritedCraftSlots(0, hard, base) == 0b00011, "slots did not inherit from the base");
+        // An own cockpitFlashOffset2 marks slot 2 as authored, like any presentation key.
+        Require(Policy::InheritedCraftSlots(0b00010, hard, base) == 0b00001, "own cockpit key did not stop inheritance");
     }
     std::puts("weapon_presentation_native_policy_tests: all checks passed");
 }

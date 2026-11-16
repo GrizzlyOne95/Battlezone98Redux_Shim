@@ -419,8 +419,9 @@ namespace BZROpenShim
         // data on the live exe) never produced objects from pointer-array
         // walks. Enumerate the verified GameObject arena instead:
         // the same 0x400-stride pool the GetObjByHandle slot formula indexes
-        // (base 0x0260DB20, 4096 slots), filtered by the live-vtable check
-        // the headlight walker uses.
+        // (base 0x0260DB20, 4096 slots), filtered by IsLiveHeadlightObjectSlot:
+        // an exe vtable and a non-zero sequence number, because a freed slot
+        // keeps its vtable and its freed OBJ76 (live_object_gate.h).
         // Read-only runtime probes (2026-08-18).
         //
         // Static tracing has repeatedly named the wrong function in this

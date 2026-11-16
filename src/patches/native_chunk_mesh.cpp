@@ -1241,10 +1241,19 @@ bool FragmentOriginShift(const float right[3], const float up[3], const float fr
     }
     return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
 }
-bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &pieces, std::string &error)
+namespace
+{
+// Defined with the fracture cap helpers below.
+bool buildOpenLoopCap(const std::vector<V> &tri, Bytes &submesh, uint32_t &capTriangles, V &lo, V &hi,
+                      float &radius, ChunkCapStats &stats);
+} // namespace
+bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &pieces, std::string &error,
+             ChunkCapStats *capStats)
 {
     pieces.clear();
     error.clear();
+    if (capStats)
+        *capStats = {};
     try
     {
         if (bytes.size() > 64 * 1024 * 1024 || skeleton.size() > 16 * 1024 * 1024)
@@ -1333,6 +1342,38 @@ bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &piec
             }
             if (!triangles)
                 continue;
+            {
+                // Parts of a multi-part model are open shells: close each
+                // piece's open boundary loops (a tower with no floor).
+                std::vector<V> corners;
+                for (size_t s = 0; s < m.subs.size(); ++s)
+                {
+                    const auto group = faces[s].find(id);
+                    if (group == faces[s].end())
+                        continue;
+                    const auto &g = m.subs[s].shared ? m.geometry : m.subs[s].geometry;
+                    for (auto index : group->second)
+                        {
+                        V p = toFrame(frame, position(g, index));
+                        for (int i = 0; i < 3; ++i)
+                            p[i] -= frame.center[i];
+                        corners.push_back(p);
+                    }
+                }
+                Bytes capData;
+                uint32_t capTriangles = 0;
+                ChunkCapStats pieceStats;
+                if (buildOpenLoopCap(corners, capData, capTriangles, lo, hi, radius, pieceStats))
+                {
+                    chunk(body, 0x4000, capData);
+                    triangles += capTriangles;
+                }
+                if (capStats)
+                {
+                    capStats->capLoops += pieceStats.capLoops;
+                    capStats->openLoops += pieceStats.openLoops;
+                }
+            }
             Bytes bounds;
             for (float v : lo)
                 put(bounds, v);
@@ -1354,6 +1395,8 @@ bool Extract(const Bytes &bytes, const Bytes &skeleton, std::vector<Piece> &piec
     {
         pieces.clear();
         error = e.what();
+        if (capStats)
+            *capStats = {};
         return false;
     }
 }
@@ -3636,6 +3679,183 @@ void capSide(FracPiece &piece, const std::vector<std::pair<int, int>> &rawEdges,
     }
     appendCapTriangles(piece, cap, options.interiorMaterial);
     compactPiece(piece);
+}
+// Closes the open boundary loops of one multi-part piece (see Extract). `tri`
+// holds three corner positions per triangle in the piece frame. On success
+// `submesh` is a ready 0x4000 body (material, 32-bit indices, geometry) and
+// the bounds are extended by the cap vertices.
+bool buildOpenLoopCap(const std::vector<V> &tri, Bytes &submesh, uint32_t &capTriangles, V &lo, V &hi,
+                      float &radius, ChunkCapStats &stats)
+{
+    submesh.clear();
+    capTriangles = 0;
+    const size_t corners = tri.size() - tri.size() % 3;
+    if (!corners)
+        return false;
+    V blo = tri[0], bhi = tri[0];
+    for (size_t i = 0; i < corners; ++i)
+        for (int k = 0; k < 3; ++k)
+        {
+            blo[k] = std::min(blo[k], tri[i][k]);
+            bhi[k] = std::max(bhi[k], tri[i][k]);
+        }
+    const float diagonal = std::sqrt(dot3(sub3(bhi, blo), sub3(bhi, blo)));
+    if (!std::isfinite(diagonal) || !(diagonal > 1e-6f))
+        return false;
+    // Weld positions on a grid of the tolerance; a point is looked up in its
+    // own cell first and only then in the 26 neighbours.
+    const double tolerance = 1e-5 * static_cast<double>(diagonal);
+    std::map<std::array<int64_t, 3>, std::vector<int>> cells;
+    std::vector<V> weld;
+    const auto weldId = [&](const V &p) {
+        std::array<int64_t, 3> cell;
+        for (int k = 0; k < 3; ++k)
+            cell[static_cast<size_t>(k)] = static_cast<int64_t>(std::floor(static_cast<double>(p[k]) / tolerance));
+        const auto matchIn = [&](const std::vector<int> &ids) {
+            for (const int id : ids)
+            {
+                const V d = sub3(weld[static_cast<size_t>(id)], p);
+                if (static_cast<double>(dot3(d, d)) <= tolerance * tolerance)
+                    return id;
+            }
+            return -1;
+        };
+        const auto own = cells.find(cell);
+        if (own != cells.end())
+        {
+            const int id = matchIn(own->second);
+            if (id >= 0)
+                return id;
+        }
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy)
+                for (int dz = -1; dz <= 1; ++dz)
+                {
+                    if (!dx && !dy && !dz)
+                        continue;
+                    const auto it = cells.find({cell[0] + dx, cell[1] + dy, cell[2] + dz});
+                    if (it == cells.end())
+                        continue;
+                    const int id = matchIn(it->second);
+                    if (id >= 0)
+                        return id;
+                }
+        const int id = static_cast<int>(weld.size());
+        weld.push_back(p);
+        cells[cell].push_back(id);
+        return id;
+    };
+    std::map<std::pair<int, int>, int> directed;
+    std::map<std::pair<int, int>, V> faceNormal; // unit normal of the face owning each directed edge
+    for (size_t t = 0; t < corners; t += 3)
+    {
+        const int a = weldId(tri[t]), b = weldId(tri[t + 1]), c = weldId(tri[t + 2]);
+        if (a == b || b == c || a == c)
+            continue;
+        const V n = cross3(sub3(weld[static_cast<size_t>(b)], weld[static_cast<size_t>(a)]),
+                           sub3(weld[static_cast<size_t>(c)], weld[static_cast<size_t>(a)]));
+        if (!(dot3(n, n) > 0))
+            continue;
+        const V unit = normalize3(n);
+        for (const auto &edge : {std::pair<int, int>{a, b}, std::pair<int, int>{b, c}, std::pair<int, int>{c, a}})
+        {
+            ++directed[edge];
+            faceNormal[edge] = unit;
+        }
+    }
+    // A boundary edge is used once and has no reverse. Reversed, a loop of
+    // them walks in the cap's own winding.
+    std::vector<std::pair<int, int>> edges;
+    for (const auto &[edge, count] : directed)
+        if (count == 1 && directed.find({edge.second, edge.first}) == directed.end())
+            edges.push_back({edge.second, edge.first});
+    if (edges.empty())
+        return false;
+    const std::set<std::pair<int, int>> edgeSet(edges.begin(), edges.end());
+    std::vector<int> scratch(weld.size(), -1);
+    CapMesh cap;
+    for (const auto &loop : boundaryLoops(edges, scratch))
+    {
+        bool isClosed = loop.size() >= 3;
+        for (size_t i = 0; isClosed && i < loop.size(); ++i)
+            isClosed = edgeSet.count({loop[i], loop[i + 1 == loop.size() ? 0 : i + 1]}) != 0;
+        std::vector<int> sorted = loop;
+        std::sort(sorted.begin(), sorted.end());
+        if (!isClosed || loop.size() > 300 || std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end())
+        {
+            ++stats.openLoops; // open chain, pinched loop or too big
+            continue;
+        }
+        std::vector<V> points;
+        V centre{};
+        for (const int w : loop)
+        {
+            points.push_back(weld[static_cast<size_t>(w)]);
+            centre = add(centre, points.back());
+        }
+        centre = scale3(centre, 1.0f / static_cast<float>(points.size()));
+        V newell{};
+        for (size_t i = 0; i < points.size(); ++i)
+        {
+            const V p = points[i], q = points[i + 1 == points.size() ? 0 : i + 1];
+            newell = add(newell, V{(p[1] - q[1]) * (p[2] + q[2]), (p[2] - q[2]) * (p[0] + q[0]),
+                                   (p[0] - q[0]) * (p[1] + q[1])});
+        }
+        const float area = 0.5f * std::sqrt(dot3(newell, newell));
+        if (!(area > 1e-5f * diagonal * diagonal)) // noise
+        {
+            ++stats.openLoops;
+            continue;
+        }
+        const V normal = normalize3(newell);
+        // The outline of a flat sheet (a fin, a panel) would gain a coincident
+        // back face (z-fight): its rim faces lie in the cap plane, where a
+        // real hole's walls stand across it. Judged per loop, so a sheet that
+        // shares a piece with a solid part still stays open.
+        size_t inPlane = 0;
+        for (size_t i = 0; i < loop.size(); ++i)
+        {
+            const auto owner = faceNormal.find({loop[i + 1 == loop.size() ? 0 : i + 1], loop[i]});
+            if (owner != faceNormal.end() && std::abs(dot3(owner->second, normal)) > 0.9f)
+                ++inPlane;
+        }
+        float offPlane = 0;
+        for (const V &p : points)
+            offPlane = std::max(offPlane, std::abs(dot3(sub3(p, centre), normal)));
+        if (inPlane * 2 > loop.size() || offPlane > 0.25f * std::sqrt(area))
+        {
+            ++stats.openLoops;
+            continue;
+        }
+        bool banded = false;
+        const size_t loopFirst = cap.vertices.size();
+        if (addEarCap(cap, points, normal, centre, FractureOptions{}.capUvScale, false, banded))
+            splitDroppedRimPoints(cap, loopFirst);
+        else
+            addFanCap(cap, points, normal, centre, FractureOptions{}.capUvScale);
+        ++stats.capLoops;
+    }
+    if (cap.indices[kZoneMuscle].empty())
+        return false;
+    FracPiece holder;
+    const std::string material = FractureOptions{}.interiorMaterial;
+    appendCapTriangles(holder, cap, material);
+    const FracSub &sub = holder.subs.front();
+    std::vector<uint32_t> vertices(sub.g.count);
+    for (uint32_t i = 0; i < vertices.size(); ++i)
+        vertices[i] = i;
+    line(submesh, material);
+    put(submesh, uint8_t{0});
+    put(submesh, static_cast<uint32_t>(sub.indices.size()));
+    put(submesh, uint8_t{1});
+    for (const uint32_t index : sub.indices)
+        put(submesh, index);
+    Bytes data = emitGeometry(sub.g, vertices, Frame{}, lo, hi, radius);
+    Bytes wrapped;
+    chunk(wrapped, 0x5000, data);
+    submesh.insert(submesh.end(), wrapped.begin(), wrapped.end());
+    capTriangles = static_cast<uint32_t>(sub.indices.size() / 3);
+    return true;
 }
 uint64_t fnv1a64(const Bytes &b)
 {

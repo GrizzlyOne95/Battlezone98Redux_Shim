@@ -27,6 +27,17 @@
 // The restored device then gets its vertex and index buffers back in place
 // instead of through Ogre's mesh reload; see d3d11_buffer_restore.cpp.
 //
+// Fail closed (d3d11_recovery_policy.h): Ogre's restore leaves the window
+// without a swap chain when any step throws, and the next frame dereferenced
+// it (2026-11-15: CreateSwapChain returned DXGI_ERROR_INVALID_CALL after a
+// TDR, then a null read in D3D11RenderWindowHwnd::_beginUpdate). So the game
+// ends with a logged reason, through D3D11RecoveryFailClosed, when a recovery
+// device cannot be created, when only a software device is on offer, when
+// the GPU keeps resetting, or when Ogre's restore throws while the window
+// has no back buffer, i.e. from notifyDeviceLost until notifyDeviceRestored
+// is done (caught around handleDeviceLost in d3d11_buffer_restore.cpp; other
+// throws are rethrown as stock). Recovery is not installed without that guard.
+//
 // Config: [Graphics] D3D11DeviceLossRecovery (default 1);
 // OPENSHIM_DISABLE_D3D11_DEVICE_LOSS_RECOVERY=1 turns it off.
 //
@@ -37,13 +48,17 @@
 // the file is deleted as the loss fires, so each write is one loss), and
 // OPENSHIM_TEST_D3D11_UNSTABLE_MS (default 4000) makes probes fail for that
 // long afterwards, so the settle loop has a reset to wait out.
+// The file injector counts against the fail-closed budget: a fourth loss
+// within 120 s ends the game by design.
 // OPENSHIM_TEST_D3D11_DEBUG_LAYER=1 creates the renderer's devices with the
 // D3D11 debug layer, logs the messages it stores (the first few of each ID)
 // and logs GetDeviceRemovedReason once the device reports itself removed.
 #include "bool_token.h"
 #include "com_vtable_patch.h"
+#include "crash_logger.h"
 #include "d3d11_buffer_restore.h"
 #include "d3d11_device_loss_recovery.h"
+#include "d3d11_recovery_policy.h"
 #include "diagnostic_switch.h"
 #include "iat_patch.h"
 #include "shim_log.h"
@@ -96,7 +111,15 @@ namespace BZROpenShim
         UINT g_BaselineVendor = 0;
         UINT g_BaselineDeviceId = 0;
         unsigned g_Creations = 0;
+        std::atomic<unsigned> g_Recoveries{0};  // devices created to replace a removed one
+        // Set when a removed device is replaced and cleared by the next
+        // successful creation, so a recovery whose first attempt fails still
+        // counts (the retry sees no previous device).
+        std::atomic<bool> g_RecoveryPending{false};
         ID3D11Device* g_LastDevice = nullptr;  // AddRef'd; released at the next creation
+        D3D11RecoveryPolicy::Budget g_Budget;  // under g_Mutex
+        // Process exit code of a fail-closed exit: DXGI_ERROR_DEVICE_REMOVED.
+        constexpr UINT kFailClosedExitCode = 0x887A0005u;
 
         // Test injector state.
         DWORD g_TestLossAfterMs = 0;
@@ -446,6 +469,8 @@ namespace BZROpenShim
             {
                 recovery = g_HaveBaseline && previous->GetDeviceRemovedReason() != S_OK;
                 previous->Release();
+                if (recovery)
+                    g_RecoveryPending.store(true, std::memory_order_relaxed);
             }
 
             IDXGIAdapter1* substitute = nullptr;
@@ -461,6 +486,14 @@ namespace BZROpenShim
                 const bool requestedSoftware = (requestedKnown && IsSoftwareAdapter(requested)) ||
                                                driverType == D3D_DRIVER_TYPE_WARP ||
                                                driverType == D3D_DRIVER_TYPE_REFERENCE;
+                bool admitted;
+                {
+                    std::lock_guard<std::mutex> lock(g_Mutex);
+                    admitted = g_Budget.Admit(GetTickCount());
+                }
+                if (const char* reason = D3D11RecoveryPolicy::BudgetReason(admitted))
+                    D3D11RecoveryFailClosed(reason);
+
                 DWORD waited = 0;
                 unsigned probes = 0;
                 IDXGIAdapter1* settled = SettleHardwareAdapter(waited, probes);
@@ -480,6 +513,8 @@ namespace BZROpenShim
                     LogShimA(LogLevel::Warn, kComponent,
                              "[DX11 Recovery] device recreation #%u: hardware adapter did not settle within %lu ms (%u probes); forwarding Ogre's request unchanged",
                              g_Creations, waited, probes);
+                    if (const char* reason = D3D11RecoveryPolicy::AdapterReason(false, requestedSoftware))
+                        D3D11RecoveryFailClosed(reason);
                 }
             }
 
@@ -536,15 +571,18 @@ namespace BZROpenShim
                     std::lock_guard<std::mutex> lock(g_Mutex);
                     g_LastDevice = *device;
                 }
+                if (g_RecoveryPending.exchange(false, std::memory_order_relaxed))
+                    g_Recoveries.fetch_add(1, std::memory_order_release);
                 // The timer removes the first device once; the file can remove
                 // each device in turn, recovered ones included.
                 if ((!recovery && g_TestLossAfterMs) || g_TestLossFile[0])
                     ArmTestInjector(*device, (*device)->GetFeatureLevel());
             }
-            else if (recovery)
+            else if (recovery && FAILED(hr))
             {
                 LogShimA(LogLevel::Warn, kComponent, "[DX11 Recovery] device recreation #%u failed hr=0x%08lX",
                          g_Creations, static_cast<unsigned long>(hr));
+                D3D11RecoveryFailClosed(D3D11RecoveryPolicy::AfterCreate(false));
             }
             return hr;
         }
@@ -573,7 +611,15 @@ namespace BZROpenShim
                     }
                     // Before the first device, so every buffer is seen from its
                     // constructor on (d3d11_buffer_restore.cpp).
-                    InstallD3D11BufferRestore(renderer);
+                    if (!InstallD3D11BufferRestore(renderer))
+                    {
+                        // Its handleDeviceLost guard is what stops a failed
+                        // restore from crashing the next frame; recreating
+                        // devices without it is the 2026-11-15 crash.
+                        LogShimA(LogLevel::Warn, kComponent,
+                                 "[DX11 Recovery] buffer restore and its device-loss guard are not installed; recovery not installed");
+                        return 0;
+                    }
                     for (unsigned retry = 0; retry < 20; ++retry)
                     {
                         const auto result = IatPatch::PatchImport(
@@ -600,7 +646,7 @@ namespace BZROpenShim
                         Sleep(50);
                     }
                     LogShimA(LogLevel::Warn, kComponent,
-                             "[DX11 Recovery] could not patch the renderer's D3D11CreateDevice import; recovery not installed");
+                             "[DX11 Recovery] could not patch the renderer's D3D11CreateDevice import; recovery not installed (the handleDeviceLost guard stays in)");
                     return 0;
                 }
                 Sleep(kDiscoverySleepMs);
@@ -633,5 +679,27 @@ namespace BZROpenShim
                                                        static_cast<DWORD>(sizeof(debugLayer)));
         g_TestDebugLayer = debugLen > 0 && debugLen < sizeof(debugLayer) && BoolToken::IsTruthy(debugLayer, debugLen);
         g_DiscoveryThread = _beginthreadex(nullptr, 0, DiscoveryThreadProc, nullptr, 0, nullptr);
+    }
+
+    unsigned D3D11DeviceRecoveryCount()
+    {
+        return g_Recoveries.load(std::memory_order_acquire);
+    }
+
+    void D3D11RecoveryFailClosed(const char* reason)
+    {
+        // The shim log flushes every line, so this survives the terminate.
+        LogShimA(LogLevel::Error, kComponent,
+                 "[DX11 Recovery] FAIL-CLOSED: %s; ending the game (exit code 0x%08X) instead of rendering without a working device. Recoveries completed this process: %u",
+                 reason, kFailClosedExitCode, g_Recoveries.load(std::memory_order_acquire));
+        WriteCrashLogFailClosed(kComponent, reason);
+        // TerminateProcess, not ExitProcess: DLL detach and static teardown
+        // would run over the half-restored renderer (lifecycle_seams.cpp
+        // skips D3D11 teardown at exit for the same reason). Exclusive
+        // fullscreen was already left: Ogre's notifyDeviceLost destroys the
+        // swap chain after SetFullscreenState(FALSE).
+        TerminateProcess(GetCurrentProcess(), kFailClosedExitCode);
+        for (;;)
+            Sleep(INFINITE);
     }
 }

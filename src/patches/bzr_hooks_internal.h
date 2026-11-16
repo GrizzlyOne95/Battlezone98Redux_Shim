@@ -1027,6 +1027,8 @@ namespace BZROpenShim
 
         // --- AutoSave load button and restart mission (autosave_restart.cpp) ---
         void ForgetAllChunkProxySceneResources(const wchar_t* reason);
+        // destroyAllEntities is about to run: destroy the chunk batch and slot proxies.
+        void DestroyChunkProxySceneObjects(void* sceneManager, const wchar_t* reason);
 
         // --- MPAUTH diagnostic (diag_mpauth_trace.cpp) -------------------------
         inline constexpr size_t kOrdnanceObjOffset = 0x14;
@@ -1366,6 +1368,7 @@ namespace BZROpenShim
         };
         bool TryParseFloatValue(const char* value, float& out);
         bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName);
+        bool VtableDerivesFrom(uintptr_t vtableAddress, const char* typeName);
         extern bool g_AiOdfGameplayTuningActive;
         extern AiTuningCache g_AiTuningCache;
         extern std::unordered_map<uintptr_t, AiUnitTuningOverride> g_AiUnitTuningOverridesByObject;
@@ -1814,6 +1817,11 @@ namespace BZROpenShim
         // (the auto-created window's viewport 0), in the same Ogre world space
         // as the pool nodes.
         bool TryGetMainViewCamera(float position[3], float* fovYRadians);
+        // The main view's Ogre::Camera, or null; read it once per tick.
+        void* GetMainViewCameraObject();
+        // Camera::isVisible(Sphere) in the pool nodes' Ogre world space. False
+        // when the test could not run (visible is then left as it was).
+        bool IsSphereInCameraView(void* camera, const float center[3], float radius, bool& visible);
         void DestroyShimOwnedMeshObject(void* sceneManager, void* node, void* entity);
         // Creates a detached (no node, never rendered) entity of the mesh in
         // the current scene and destroys it at once, leaving the mesh and its
