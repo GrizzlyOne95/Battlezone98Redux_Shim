@@ -179,6 +179,42 @@ namespace
         Check(c.kind == ChoiceKind::Match && c.group == 1, "summaries: mixed group 0 skipped, tank group 1 joined");
     }
 
+    // ExtendedUnitCap's build gate asks before the unit exists.
+    void TestCanPlace()
+    {
+        GroupSummary groups[kGroupCount] = {};
+        Check(CanPlace(groups), "no groups: an empty keyed group takes it");
+
+        for (int i = 0; i < kKeyedGroupCount; ++i)
+            groups[i] = Other(3);
+        Check(!CanPlace(groups), "every keyed group holds another ODF: refused");
+
+        groups[8] = Same(0);
+        Check(!CanPlace(groups), "an empty unkeyed group does not count");
+        groups[8] = Same(2);
+        Check(!CanPlace(groups), "a matching unkeyed group does not count");
+
+        groups[4] = Same(kMaxLiveMembers);
+        Check(!CanPlace(groups), "a full matching group (10 live) is no room");
+        groups[4] = Same(kMaxLiveMembers - 1);
+        Check(CanPlace(groups), "a matching group with 9 live has room");
+        groups[4].storedCount = kGroupCapacity;
+        Check(!CanPlace(groups), "a matching group with no free stored slot is no room");
+
+        groups[6] = Same(0);
+        groups[6].storedCount = kGroupCapacity;
+        Check(CanPlace(groups), "an empty keyed group is rewritten, so a full store still has room");
+        const GroupChoice c = ChoosePlacement(groups);
+        Check(c.kind == ChoiceKind::Empty && c.group == 6, "placement names the empty group");
+
+        // Membership is ignored: the unit does not exist yet.
+        GroupSummary member[kGroupCount] = {};
+        member[0] = Same(2);
+        member[0].containsUnit = true;
+        Check(CanPlace(member) && ChoosePlacement(member).group == 0, "membership does not affect placement");
+        Check(ChooseGroup(member).kind == ChoiceKind::AlreadyGrouped, "ChooseGroup still honours membership");
+    }
+
     BuiltUnit Eligible()
     {
         BuiltUnit u;
@@ -233,6 +269,7 @@ int main()
 {
     TestSummarize();
     TestChoose();
+    TestCanPlace();
     TestBuiltUnit();
     if (OpenShimTest::FailureCount() != 0)
     {

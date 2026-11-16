@@ -4,7 +4,8 @@
 // finishes a unit, it is added to an F1-F7 group (ported from BZCC's
 // SetBestGroup): the first keyed group (0-6, the ones input.map binds) whose
 // live members all have the same ODF and number fewer than 10, else the first
-// empty keyed group, else none. The entry is appended to the stock ControlPanel group directly, so
+// empty keyed group, else none. [Gameplay] ExtendedUnitCap (offense_overflow.cpp)
+// turns this on too and asks AutoGroupCanPlace before it opens a build. The entry is appended to the stock ControlPanel group directly, so
 // the group keys select it and the stock mission save keeps it.
 // Addresses, evidence and limits: Docs/PRODUCER_RALLY_POINTS.md.
 //
@@ -236,6 +237,35 @@ namespace BZROpenShim::Hooks
             }
         }
 
+        // Every stored group against a unit (handle 0: membership not asked).
+        bool SummarizeGroups(uint32_t handle, const char* unitOdf, Policy::GroupSummary (&groups)[Policy::kGroupCount])
+        {
+            for (int g = 0; g < Policy::kGroupCount; ++g)
+            {
+                int stored = 0;
+                uint32_t handles[Policy::kGroupCapacity] = {};
+                if (!ReadInt(g_ControlPanelAddr + kGroupNumOffset + 4 * static_cast<size_t>(g), stored))
+                    return false;
+                if (stored < 0)
+                    stored = 0;
+                if (stored > Policy::kGroupCapacity)
+                    stored = Policy::kGroupCapacity;
+                if (!ReadHandles(g_ControlPanelAddr + kGroupListOffset + kGroupStride * static_cast<size_t>(g), handles,
+                                 stored))
+                    return false;
+                groups[g] = Policy::SummarizeGroup(handles, stored, handle, unitOdf,
+                                                   [](uint32_t h, char* out, size_t outSize) {
+                                                       void* member = SafeGetObj(h);
+                                                       if (!member)
+                                                           return false;
+                                                       // Unreadable leaves `out` empty: never a match.
+                                                       TryGetCraftOdfName(member, out, outSize);
+                                                       return true;
+                                                   });
+            }
+            return true;
+        }
+
         void MarkFailed()
         {
             MarkOptionHookFailed("AutoGroupNewUnits",
@@ -313,29 +343,8 @@ namespace BZROpenShim::Hooks
         }
 
         Policy::GroupSummary groups[Policy::kGroupCount];
-        for (int g = 0; g < Policy::kGroupCount; ++g)
-        {
-            int stored = 0;
-            uint32_t handles[Policy::kGroupCapacity] = {};
-            if (!ReadInt(g_ControlPanelAddr + kGroupNumOffset + 4 * static_cast<size_t>(g), stored))
-                return;
-            if (stored < 0)
-                stored = 0;
-            if (stored > Policy::kGroupCapacity)
-                stored = Policy::kGroupCapacity;
-            if (!ReadHandles(g_ControlPanelAddr + kGroupListOffset + kGroupStride * static_cast<size_t>(g), handles,
-                             stored))
-                return;
-            groups[g] = Policy::SummarizeGroup(handles, stored, handle, unitOdf,
-                                               [](uint32_t h, char* out, size_t outSize) {
-                                                   void* member = SafeGetObj(h);
-                                                   if (!member)
-                                                       return false;
-                                                   // Unreadable leaves `out` empty: never a match.
-                                                   TryGetCraftOdfName(member, out, outSize);
-                                                   return true;
-                                               });
-        }
+        if (!SummarizeGroups(handle, unitOdf, groups))
+            return;
 
         const Policy::GroupChoice choice = Policy::ChooseGroup(groups);
         bool added = false;
@@ -351,6 +360,22 @@ namespace BZROpenShim::Hooks
         LogBudgeted(L"[AUTOGROUP] unit 0x%08X handle=0x%08X odf=%hs %hs group index %d%hs\n",
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(built)), handle, unitOdf, what, choice.group,
                     (choice.group >= 0 && !added) ? " (write failed)" : "");
+    }
+
+    // ExtendedUnitCap is only available once auto-group has hooked.
+    bool AutoGroupNewUnitsReady()
+    {
+        return g_Ready;
+    }
+
+    // Asked by the ExtendedUnitCap build gate (offense_overflow.cpp) for a
+    // full offense range: would a new `odf` unit get a group?
+    bool AutoGroupCanPlace(const char* odf)
+    {
+        if (!g_Ready || !odf || odf[0] == '\0')
+            return false;
+        Policy::GroupSummary groups[Policy::kGroupCount];
+        return SummarizeGroups(0, odf, groups) && Policy::CanPlace(groups);
     }
 
     void ReloadAutoGroupNewUnitsConfig()
@@ -397,7 +422,8 @@ namespace BZROpenShim::Hooks
 
     void RefreshAutoGroupNewUnitsState()
     {
-        const bool want = g_Enabled && g_Ready && IsSinglePlayerSession();
+        // ExtendedUnitCap needs the grouping, so it switches this on as well.
+        const bool want = (g_Enabled || OffenseOverflowExtendsAutoGroup()) && g_Ready && IsSinglePlayerSession();
         if (want != g_Active.load(std::memory_order_acquire))
         {
             g_Active.store(want, std::memory_order_release);

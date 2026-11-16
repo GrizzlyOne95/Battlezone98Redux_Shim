@@ -97,20 +97,14 @@ namespace BZROpenShim
             int group = -1; // 0..kKeyedGroupCount-1 for Match and Empty
         };
 
-        // A group is empty when nothing in it is alive. A match is appended to,
-        // so it needs a free stored slot; an empty group is rewritten.
-        // Membership is checked in all ten groups; only keyed ones are chosen.
-        inline GroupChoice ChooseGroup(const GroupSummary (&groups)[kGroupCount])
+        // Where a unit of the summarized ODF would go, ignoring membership:
+        // the first keyed group of that ODF with room, else the first empty
+        // keyed group, else None. A group is empty when nothing in it is
+        // alive. A match is appended to, so it needs a free stored slot; an
+        // empty group is rewritten.
+        inline GroupChoice ChoosePlacement(const GroupSummary (&groups)[kGroupCount])
         {
             GroupChoice choice;
-            for (const GroupSummary& g : groups)
-            {
-                if (g.containsUnit)
-                {
-                    choice.kind = ChoiceKind::AlreadyGrouped;
-                    return choice;
-                }
-            }
             for (int i = 0; i < kKeyedGroupCount; ++i)
             {
                 const GroupSummary& g = groups[i];
@@ -135,6 +129,29 @@ namespace BZROpenShim
                 }
             }
             return choice;
+        }
+
+        // [Gameplay] ExtendedUnitCap's build gate: a new unit of this ODF
+        // would get a keyed group.
+        inline bool CanPlace(const GroupSummary (&groups)[kGroupCount])
+        {
+            const ChoiceKind kind = ChoosePlacement(groups).kind;
+            return kind == ChoiceKind::Match || kind == ChoiceKind::Empty;
+        }
+
+        // Membership is checked in all ten groups; only keyed ones are chosen.
+        inline GroupChoice ChooseGroup(const GroupSummary (&groups)[kGroupCount])
+        {
+            for (const GroupSummary& g : groups)
+            {
+                if (g.containsUnit)
+                {
+                    GroupChoice choice;
+                    choice.kind = ChoiceKind::AlreadyGrouped;
+                    return choice;
+                }
+            }
+            return ChoosePlacement(groups);
         }
 
         // The unit a Recycler or Factory has just finished.

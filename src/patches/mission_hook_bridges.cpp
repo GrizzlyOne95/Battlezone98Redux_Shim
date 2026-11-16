@@ -275,6 +275,7 @@ namespace BZROpenShim
         ResetTurretAttackOrders();
         ResetProducerRallyPoints();
         ResetAutoGroupNewUnits();
+        ResetOffenseOverflow();
         ResetGroupStrip();
         // Content render-profile requests are mission/session scoped: the
         // authoritative lifecycle seam clears them so an EXU override from one

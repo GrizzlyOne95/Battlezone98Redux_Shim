@@ -209,6 +209,58 @@ namespace
         Check(ChooseLayout(groups, 0, 1280, 720, gauge, 10, measure, out, sizeof(out)).placement == Placement::None,
               "no groups: nothing placed");
     }
+
+    void TestDiscoverability()
+    {
+        char out[64];
+        StripGroup g = Make(0, 4, "Tank");
+        g.added = 2;
+        FormatEntry(g, kFullNameChars, out, sizeof(out));
+        Check(std::strcmp(out, "F1 4xTank +2") == 0, "a flash appends +N");
+        g.added = 0;
+        g.memberList = true;
+        FormatEntry(g, 0, out, sizeof(out));
+        Check(std::strcmp(out, "F1> 4") == 0, "the open member list marks its key");
+        FormatEntry(Make(4, 0, ""), kFullNameChars, out, sizeof(out));
+        Check(std::strcmp(out, "F5 -") == 0, "an empty group reads F<n> -");
+
+        FlashState s;
+        const uint32_t first[] = { 1, 2 };
+        Check(UpdateFlash(s, first, 2, 1000) == 0, "first snapshot never flashes");
+        const uint32_t more[] = { 1, 2, 3 };
+        Check(UpdateFlash(s, more, 3, 1250) == 1, "a new member flashes +1");
+        const uint32_t evenMore[] = { 1, 2, 3, 4 };
+        Check(UpdateFlash(s, evenMore, 4, 1500) == 2, "a second addition inside the flash adds up");
+        Check(UpdateFlash(s, evenMore, 4, 1500 + kFlashMs - 1) == 2, "flash holds for kFlashMs");
+        Check(UpdateFlash(s, evenMore, 4, 1500 + kFlashMs) == 0, "then clears");
+        const uint32_t fewer[] = { 4 };
+        Check(UpdateFlash(s, fewer, 1, 9000) == 0, "deaths do not flash");
+        const uint32_t swapped[] = { 4, 9 };
+        Check(UpdateFlash(s, swapped, 2, 9250) == 1, "a replacement member flashes");
+
+        Check(HintMode(2, -1), "a selection with no member list shows the hint");
+        Check(!HintMode(0, -1), "nothing selected: no hint");
+        Check(!HintMode(2, 1), "an open member list hides the hint");
+
+        StripGroup all[kKeyedGroupCount];
+        for (int i = 0; i < kKeyedGroupCount; ++i)
+            all[i] = Make(i, i == 2 ? 3 : 0, "Tank");
+        StripGroup shown[kKeyedGroupCount];
+        Check(SelectShown(all, false, shown) == 1 && shown[0].group == 2, "normal mode lists live groups only");
+        Check(SelectShown(all, true, shown) == 7 && shown[6].group == 6, "hint mode lists every keyed group");
+
+        const Spacing sp = SpacingFor(1280, 12);
+        Rect panel{ 700, 4, 900, 22 };
+        int x = 0, y = 0;
+        Check(PlaceHint(panel, 120, 12, 1280, 720, sp, x, y) && x == 900 + sp.gap && y == 4 + sp.pad,
+              "the hint goes right of the strip when it fits");
+        panel = Rect{ 1000, 4, 1270, 22 };
+        Check(PlaceHint(panel, 120, 12, 1280, 720, sp, x, y) && x == 1000 + sp.pad && y == 22 + sp.pad,
+              "else under the strip");
+        panel = Rect{ 1000, 200, 1270, 236 };
+        Check(!PlaceHint(panel, 120, 12, 1280, 720, sp, x, y), "and not below the top third");
+        Check(!PlaceHint(panel, 0, 12, 1280, 720, sp, x, y), "an unmeasured hint is skipped");
+    }
 }
 
 int main()
@@ -219,6 +271,7 @@ int main()
     TestBuild();
     TestFit();
     TestGaugeAndLayout();
+    TestDiscoverability();
     if (OpenShimTest::FailureCount() != 0)
     {
         std::fprintf(stderr, "group_strip_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());

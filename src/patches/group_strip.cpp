@@ -4,7 +4,10 @@
 // BZCC-style row next to the scrap/pilot gauge, e.g.
 // "F1 4xTank  F2 2xBomber  F5 1xTurret+". Read-only: it never writes a group,
 // a game object or anything the simulation reads, so it also runs in
-// multiplayer (the groups are the local ControlPanel's).
+// multiplayer (the groups are the local ControlPanel's). A group that gained
+// members shows " +N" for two seconds; the group whose member list is open
+// (offense_overflow.cpp) shows "F<n>>"; while units are selected it lists
+// every keyed group and a dim "Ctrl+F1-F7: assign" hint.
 // Rules and layout: include/group_strip_policy.h. Evidence and limits:
 // Docs/PRODUCER_RALLY_POINTS.md ("Group strip").
 //
@@ -16,6 +19,7 @@
 //     path); GameObjectClass +0x64 is unitName
 //     char[0x20], guarded by the GroupStripUnitNameRead code row.
 //   * The six ScrapHud*Point rows, the gauge's live draw positions.
+//   * ControlPanel selectNum +0x188 (FUN_004a6a50 line 21), for the hint.
 // Threads: the snapshot is taken at 4 Hz on the frame/game thread from the
 // world render tick; the HUD painter (same thread, inside the HUD pass) only
 // reads the snapshot and the HUD text primitives.
@@ -28,6 +32,7 @@
 #include "group_strip_policy.h"
 #include "hook_engine.h"
 #include "hud_gauge_overlay.h"
+#include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "shim_log.h"
 
@@ -35,6 +40,8 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+
+using BZROpenShim::L10n::ShimText;
 
 namespace BZROpenShim::Hooks
 {
@@ -51,6 +58,8 @@ namespace BZROpenShim::Hooks
         constexpr size_t kGroupStride = 0x16C;
         static_assert(kGroupListOffset + 10 * kGroupStride == kGroupNumOffset, "groupList ends where groupNum starts");
         static_assert(Policy::kGroupCapacity * 4 == static_cast<int>(kGroupStride), "91 handles per group");
+        // ControlPanel selectNum (FUN_004a6a50 SelectType line 21).
+        constexpr size_t kSelectNumOffset = 0x188;
         // GameObjectClass::unitName (FUN_004e0450 line 89; GOG 0x004E064F
         // `mov edx,[ebp-0x74]; add edx,0x64; push edx; push 0x45A8BC04`).
         constexpr size_t kClassUnitNameOffset = 0x64;
@@ -63,6 +72,8 @@ namespace BZROpenShim::Hooks
         constexpr int kMaxInstallAttempts = 40;
         constexpr uint32_t kPanelColor = 0x8C000000u;
         constexpr uint32_t kTextColor = 0xFFD1FFD1u;
+        constexpr uint32_t kHintColor = 0x99D1FFD1u;
+        constexpr size_t kHintChars = 64;
 
         uint32_t g_ControlPanelAddr = 0;
         uint32_t g_ControlPanelVtableAddr = 0;
@@ -87,10 +98,15 @@ namespace BZROpenShim::Hooks
             Policy::StripGroup groups[Policy::kKeyedGroupCount];
             bool gaugeKnown = false;
             int gaugePoints[Policy::kGaugePointCount * 2] = {};
+            bool hint = false;
+            char hintText[kHintChars] = {};
         };
 
         SRWLOCK g_SnapshotLock = SRWLOCK_INIT;
         Snapshot g_Snapshot;
+        // Game thread only (TakeSnapshot); ResetGroupStrip asks for a clear.
+        Policy::FlashState g_Flash[Policy::kKeyedGroupCount];
+        std::atomic<bool> g_FlashResetPending{ false };
 
         // ---- fault-safe reads (no C++ objects, so __try is legal) ----------
 
@@ -281,15 +297,36 @@ namespace BZROpenShim::Hooks
             ReleaseSRWLockExclusive(&g_SnapshotLock);
         }
 
+        // ShimText may allocate on first use; nothing may throw out of here.
+        void CopyHintText(char (&out)[kHintChars])
+        {
+            out[0] = '\0';
+            try
+            {
+                const char* const text = ShimText("openshim_ui:groupstrip_assign_hint", "Ctrl+F1-F7: assign");
+                if (text)
+                    strncpy_s(out, text, _TRUNCATE);
+            }
+            catch (...)
+            {
+                out[0] = '\0';
+            }
+        }
+
         void TakeSnapshot(ULONGLONG now)
         {
             Snapshot snap;
             snap.takenAt = now;
+            if (g_FlashResetPending.exchange(false, std::memory_order_acq_rel))
+                for (Policy::FlashState& f : g_Flash)
+                    f = Policy::FlashState{};
             if (!HudContextOk() || !ControlPanelIdentityOk())
             {
                 Publish(snap);
                 return;
             }
+            Policy::StripGroup all[Policy::kKeyedGroupCount];
+            const int memberGroup = OffenseOverflowMemberGroup();
             for (int g = 0; g < Policy::kKeyedGroupCount; ++g)
             {
                 int stored = 0;
@@ -300,21 +337,36 @@ namespace BZROpenShim::Hooks
                     Publish(Snapshot{});
                     return;
                 }
-                if (stored <= 0)
-                    continue;
+                if (stored < 0)
+                    stored = 0;
                 if (stored > Policy::kGroupCapacity)
                     stored = Policy::kGroupCapacity;
-                if (!ReadBytes(g_ControlPanelAddr + kGroupListOffset + kGroupStride * static_cast<size_t>(g), handles,
+                if (stored > 0 &&
+                    !ReadBytes(g_ControlPanelAddr + kGroupListOffset + kGroupStride * static_cast<size_t>(g), handles,
                                static_cast<size_t>(stored) * 4))
                 {
                     Publish(Snapshot{});
                     return;
                 }
-                const Policy::StripGroup group = Policy::SummarizeGroup(
-                    g, handles, stored, [](uint32_t h, Policy::MemberInfo& info) { return ResolveMember(h, info); });
-                if (group.liveCount > 0)
-                    snap.groups[snap.count++] = group;
+                uint32_t live[Policy::kGroupCapacity] = {};
+                int liveCount = 0;
+                all[g] = Policy::SummarizeGroup(g, handles, stored, [&](uint32_t h, Policy::MemberInfo& info) {
+                    if (!ResolveMember(h, info))
+                        return false;
+                    live[liveCount++] = h;
+                    return true;
+                });
+                all[g].group = g;
+                all[g].added = Policy::UpdateFlash(g_Flash[g], live, liveCount, now);
+                all[g].memberList = g == memberGroup;
             }
+            int selectNum = 0;
+            if (!ReadBytes(g_ControlPanelAddr + kSelectNumOffset, &selectNum, sizeof(selectNum)))
+                selectNum = 0;
+            snap.hint = Policy::HintMode(selectNum, memberGroup);
+            snap.count = Policy::SelectShown(all, snap.hint, snap.groups);
+            if (snap.hint)
+                CopyHintText(snap.hintText);
             if (g_GaugePointsBound)
             {
                 bool ok = true;
@@ -328,7 +380,7 @@ namespace BZROpenShim::Hooks
                 }
                 snap.gaugeKnown = ok;
             }
-            snap.visible = snap.count != 0;
+            snap.visible = snap.count != 0 || snap.hint;
             Publish(snap);
         }
 
@@ -390,9 +442,22 @@ namespace BZROpenShim::Hooks
                 return !faulted; // a zero size skips this frame only
             if (layout.placement == Policy::Placement::None || text[0] == '\0')
                 return true;
-            return HudGaugeOverlay::DrawPanelText(frame, layout.panel.x1, layout.panel.y1, layout.panel.x2,
-                                                  layout.panel.y2, kPanelColor, layout.textX, layout.textY, text,
-                                                  kTextColor, 0);
+            if (!HudGaugeOverlay::DrawPanelText(frame, layout.panel.x1, layout.panel.y1, layout.panel.x2,
+                                                layout.panel.y2, kPanelColor, layout.textX, layout.textY, text,
+                                                kTextColor, 0))
+                return false;
+            if (!snap.hint || snap.hintText[0] == '\0')
+                return true;
+            int hintW = 0, hintH = 0;
+            if (!Measure(frame, snap.hintText, hintW, hintH, faulted))
+                return !faulted;
+            int hintX = 0, hintY = 0;
+            if (!Policy::PlaceHint(layout.panel, hintW, hintH, frame.viewW, frame.viewH,
+                                   Policy::SpacingFor(frame.viewW, textH), hintX, hintY))
+                return true;
+            // Panel ARGB 0: text only, no backing.
+            return HudGaugeOverlay::DrawPanelText(frame, hintX, hintY, hintX, hintY, 0, hintX, hintY, snap.hintText,
+                                                  kHintColor, 0);
         }
     }
 
@@ -440,5 +505,6 @@ namespace BZROpenShim::Hooks
     {
         Publish(Snapshot{});
         g_LastSnapshot = 0;
+        g_FlashResetPending.store(true, std::memory_order_release);
     }
 }

@@ -2568,11 +2568,40 @@ RallyKey = V
 ; Exposed on the OpenShim Settings page as "Auto Group".
 AutoGroupNewUnits = 0
 
+; Extended unit cap (BZCC model). Stock Redux builds at most 10 offensive
+; units, one per Offense menu slot. With this on, a full Offense range no
+; longer blocks the Recycler/Factory build entry when the new unit can join
+; an F1-F7 group: one of its own type with fewer than 10 live units, else an
+; empty group. The unit is built without a slot and joins that group (this
+; turns AutoGroupNewUnits on as well); it takes a slot when one frees up.
+; Reach the extra units with their F-key, the group's member list
+; (GroupMemberMenu) or Ctrl+Offense. Single player only.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Extended Unit Cap".
+ExtendedUnitCap = 0
+
+; Group member list. Pressing an F1-F7 key while that group is already the
+; selection opens the stock unit menu over the group's units (first ten live
+; ones, keys 1-0); any other key, order or selection closes it. With Ctrl held
+; and nothing selected, the Offense, Defense and Utility labels read "All ..."
+; (Ctrl+key selects the whole category); with ExtendedUnitCap on, Ctrl+Offense
+; also selects the grouped offensive units past the 10 slots. Single player
+; only.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Group Member Menu".
+GroupMemberMenu = 1
+
 ; HUD group strip (from BZCC). A row beside the scrap/pilot gauge lists every
 ; F1-F7 group that has a live unit: key, live count and the first unit's ODF
 ; unitName, with "+" when the group holds more than one type, for example
 ; "F1 4xTank  F2 2xBomber  F3 3xTank+". Long names are shortened to fit the
-; screen. Hidden with no groups, in the pause menu and in the shell.
+; screen. A group that gains units shows " +N" for two seconds, and an open
+; member list (GroupMemberMenu) shows as "F1>". While units are selected it
+; lists every F1-F7 group ("F2 -" when empty) and a dim "Ctrl+F1-F7: assign"
+; hint. Hidden with no groups and nothing selected, in the pause menu and in
+; the shell.
 ; Independent of AutoGroupNewUnits. It only reads the groups, so it also
 ; shows in multiplayer.
 ;
