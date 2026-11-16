@@ -17,6 +17,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -32,6 +33,18 @@ namespace BZROpenShim
     {
         constexpr size_t kHudSpriteRectEntrySize = 0x24;
         static_assert(sizeof(HudSpriteRectRecord) == kHudSpriteRectEntrySize, "Unexpected HUD sprite rect record size");
+        // The bytes a write may touch: x..flags. The last 8 bytes belong to the
+        // next row (see HudSpriteRectRecord). Writing a saved copy of them back
+        // put a previous mission's material pointer into that row, and the
+        // sprite table clear at the next mission end decremented the freed
+        // use count (lock xadd at exe 0x449D17).
+        constexpr size_t kHudSpriteRectOwnedBytes = offsetof(HudSpriteRectRecord, nextRowMaterial);
+        static_assert(kHudSpriteRectOwnedBytes == 0x1C, "HUD sprite rect owned span");
+
+        static void CopyOwnedHudSpriteRectBytes(void* entry, const HudSpriteRectRecord& record)
+        {
+            std::memcpy(entry, &record, kHudSpriteRectOwnedBytes);
+        }
 
         HudSpriteRectRecord* g_HudSpriteRectTableBase = nullptr;
         bool g_HudSpriteRectTableDiscoveryAttempted = false;
@@ -75,8 +88,9 @@ namespace BZROpenShim
         // renderer's per-draw accessors (width 0x0068F090, height 0x0068F0C0,
         // UV block via base-8 at 0x0068F0F0) all index
         // `0x025F8F40 + id*0x24` directly. Layout: int16 x,y,w,h at +0,
-        // float u0,v0,u1,v1 at +8, flags at +0x18, texture refs at
-        // +0x1C/+0x20. (An earlier revision assumed heap-resident 0x30-byte
+        // float u0,v0,u1,v1 at +8, flags at +0x18. +0x1C/+0x20 are the next
+        // row's material pointer and SharedPtr info pointer (rows start at
+        // 0x025F8F38). (An earlier revision assumed heap-resident 0x30-byte
         // runtime records and scanned process memory for them; the scan was
         // later restricted to MEM_PRIVATE regions, which can never contain
         // this MEM_IMAGE table, so discovery failed every session.)
@@ -498,14 +512,14 @@ namespace BZROpenShim
 
             auto* entry = reinterpret_cast<void*>(address);
             DWORD oldProtect = 0;
-            if (!VirtualProtect(entry, sizeof(record), PAGE_EXECUTE_READWRITE, &oldProtect))
+            if (!VirtualProtect(entry, kHudSpriteRectOwnedBytes, PAGE_EXECUTE_READWRITE, &oldProtect))
                 return false;
 
-            *reinterpret_cast<HudSpriteRectRecord*>(entry) = record;
-            FlushInstructionCache(GetCurrentProcess(), entry, sizeof(record));
+            CopyOwnedHudSpriteRectBytes(entry, record);
+            FlushInstructionCache(GetCurrentProcess(), entry, kHudSpriteRectOwnedBytes);
 
             DWORD restoreProtect = 0;
-            VirtualProtect(entry, sizeof(record), oldProtect, &restoreProtect);
+            VirtualProtect(entry, kHudSpriteRectOwnedBytes, oldProtect, &restoreProtect);
             return true;
         }
 
@@ -834,14 +848,14 @@ namespace BZROpenShim
                 return false;
 
             DWORD oldProtect = 0;
-            if (!VirtualProtect(entry, sizeof(record), PAGE_EXECUTE_READWRITE, &oldProtect))
+            if (!VirtualProtect(entry, kHudSpriteRectOwnedBytes, PAGE_EXECUTE_READWRITE, &oldProtect))
                 return false;
 
-            *entry = record;
-            FlushInstructionCache(GetCurrentProcess(), entry, sizeof(record));
+            CopyOwnedHudSpriteRectBytes(entry, record);
+            FlushInstructionCache(GetCurrentProcess(), entry, kHudSpriteRectOwnedBytes);
 
             DWORD restoreProtect = 0;
-            VirtualProtect(entry, sizeof(record), oldProtect, &restoreProtect);
+            VirtualProtect(entry, kHudSpriteRectOwnedBytes, oldProtect, &restoreProtect);
             return true;
         }
 

@@ -581,8 +581,11 @@ namespace BZROpenShim
             float u1 = 0.0f;
             float v1 = 0.0f;
             uint32_t flags18 = 0;
-            uint32_t textureRef1C = 0;
-            uint32_t textureRef20 = 0;
+            // Not this sprite's: rows are 0x24 apart from 0x025F8F38 and this
+            // record starts at row+8, so these are the NEXT row's material
+            // pointer and its SharedPtr info pointer. Read only; never write.
+            uint32_t nextRowMaterial = 0;
+            uint32_t nextRowUseCount = 0;
         };
         extern std::vector<uintptr_t> g_HudSpriteCachedPanelAddresses;
         extern bool g_HudSpriteFallbackDiscoveryAttempted;
