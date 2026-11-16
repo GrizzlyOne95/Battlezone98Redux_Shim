@@ -39,6 +39,22 @@ namespace
         return true;
     }
 
+    // The chunk "disable" switches all follow [General] ChunkMeshes. A missing
+    // key means off: the shipped ini has it off, and an older ini without the
+    // key used to turn the feature on. A mapped value wins over the process
+    // environment, so with no key the env switches cannot turn it back on:
+    // set ChunkMeshes = 1 instead.
+    bool TryReadChunkMeshesDisabled(const IniReader& ini, std::string& out)
+    {
+        std::string value;
+        if (!ini(IniFile::Main, "General", "ChunkMeshes", value))
+        {
+            out = "1";
+            return true;
+        }
+        return TryReadMappedBool(ini, "General", "ChunkMeshes", true, out);
+    }
+
     // [Network] GovernorTuning is a named choice rather than a boolean, because
     // "1" would read as "turn something on" when what it actually selects is
     // which of two measured tuning sets the bandwidth governor runs. The plain
@@ -154,17 +170,17 @@ namespace
         if (Equals(name, "OPENSHIM_DISABLE_CHUNK_EXPERIMENTS") ||
             Equals(name, "BZR_DISABLE_CHUNK_EXPERIMENTS"))
         {
-            return TryReadMappedBool(ini, "General", "ChunkMeshes", true, out);
+            return TryReadChunkMeshesDisabled(ini, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_CHUNK_MESH_PROXY") ||
             Equals(name, "BZR_DISABLE_CHUNK_MESH_PROXY"))
         {
-            return TryReadMappedBool(ini, "General", "ChunkMeshes", true, out);
+            return TryReadChunkMeshesDisabled(ini, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_GENERIC_CHUNK_BATCH") ||
             Equals(name, "BZR_DISABLE_GENERIC_CHUNK_BATCH"))
         {
-            return TryReadMappedBool(ini, "General", "ChunkMeshes", true, out);
+            return TryReadChunkMeshesDisabled(ini, out);
         }
         // Chunk cache pruning limits: raw numbers, clamped by the pruner.
         if (Equals(name, "OPENSHIM_CHUNK_CACHE_MAX_MB"))

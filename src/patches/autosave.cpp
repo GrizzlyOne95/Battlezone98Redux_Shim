@@ -324,7 +324,7 @@ namespace BZROpenShim
             const std::filesystem::path iniPath = g_gameDirectory / "openshim.ini";
             const std::string ini = iniPath.string();
 
-            g_config.enabled = GetPrivateProfileIntA("AutoSave", "Enabled", 1, ini.c_str()) != 0;
+            g_config.enabled = GetPrivateProfileIntA("AutoSave", "Enabled", 0, ini.c_str()) != 0;
             g_config.backupExisting = GetPrivateProfileIntA("AutoSave", "BackupExisting", 1, ini.c_str()) != 0;
             g_config.respectExternalAutoSave =
                 GetPrivateProfileIntA("AutoSave", "RespectExternalAutoSave", 1, ini.c_str()) != 0;
