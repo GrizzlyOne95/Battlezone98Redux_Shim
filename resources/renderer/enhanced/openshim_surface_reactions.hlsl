@@ -13,10 +13,23 @@
     uniform float4 surfaceMuzzle0, uniform float4 surfaceMuzzle1, \
     uniform float4 surfaceBarrel0, uniform float4 surfaceBarrel1, \
     uniform float4x4 surfaceViewToLocal, uniform float surfaceRainTime, \
-    uniform float4 surfaceSnow, uniform float4 surfaceDust,
+    uniform float4 surfaceSnow, uniform float4 surfaceDust, \
+    uniform float4 osMark0, uniform float4 osMark1, uniform float4 osMark2, \
+    uniform float4 osMark3, uniform float4 osMark4, uniform float4 osMark5, \
+    uniform float4 osMark6, uniform float4 osMark7, \
+    uniform float4 osMarkHeat0, uniform float4 osMarkHeat1, uniform float4 osMarkKey,
 #else
 #define OSE_SURFACE_UNIFORMS
 #endif
+// Localized damage scorch (Docs/LOCAL_DAMAGE.md): Renderable custom
+// parameters 1400..1409 written per SubEntity by local_damage.cpp. osMark<i>
+// = entity-local centre (xyz) and radius (w, 0 = unused); osMarkHeat0/1 =
+// ember heat of marks 0-3 / 4-7; osMarkKey (1410) = the main camera in the
+// same local space (xyz), w = 1, so values inherited from another object's
+// draw of the pass fail the camera test and show nothing.
+#define OSE_SCORCH_ARGUMENTS \
+    osMark0, osMark1, osMark2, osMark3, osMark4, osMark5, osMark6, osMark7, \
+    osMarkHeat0, osMarkHeat1, osMarkKey, surfaceViewToLocal, surfaceRainTime
 #define OSE_SURFACE_VALUES \
     float4 surfaceState, float4 surfaceMode, \
     float4 surfaceImpact0, float4 surfaceImpact1, \
@@ -361,6 +374,65 @@ float3 ose_surface_finish(float3 source, float3 local, float2 uv, out float3 glo
     glow = lerp(float3(0.90, 0.12, 0.01), float3(1.0, 0.38, 0.06), heat) * (heat * muzzle * 1.5);
     // Short-lived chunks: restrained hot cracks, not an opaque replacement.
     glow += float3(0.48, 0.075, 0.008) * fragment * smoothstep(0.91, 0.99, noise) * 0.32;
+    return max(source, 0.0);
+}
+
+// Value noise on object-local position (metres), 0..1.
+float ose_scorch_hash(float3 cell)
+{
+    return frac(sin(dot(cell, float3(127.1, 311.7, 74.7))) * 43758.5453);
+}
+
+float ose_scorch_value(float3 p)
+{
+    float3 i = floor(p), f = frac(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float a = lerp(lerp(ose_scorch_hash(i), ose_scorch_hash(i + float3(1, 0, 0)), f.x),
+                   lerp(ose_scorch_hash(i + float3(0, 1, 0)), ose_scorch_hash(i + float3(1, 1, 0)), f.x), f.y);
+    float b = lerp(lerp(ose_scorch_hash(i + float3(0, 0, 1)), ose_scorch_hash(i + float3(1, 0, 1)), f.x),
+                   lerp(ose_scorch_hash(i + float3(0, 1, 1)), ose_scorch_hash(i + float3(1, 1, 1)), f.x), f.y);
+    return lerp(a, b, f.z);
+}
+
+// Char and cooling embers where weapons hit the hull. A blotchy core
+// darkened to about a tenth and desaturated, a ragged brown ring at the
+// edge, and flickering orange-red emission while a mark is still hot.
+// Every radius zero (no hit, or an Entity the walk zeroed) returns early, and
+// so does a key that does not match this draw's camera (see OSE_SCORCH_ARGUMENTS).
+float3 ose_local_scorch(float3 source, float3 viewPos, inout float3 glow,
+                        float4 mark0, float4 mark1, float4 mark2, float4 mark3,
+                        float4 mark4, float4 mark5, float4 mark6, float4 mark7,
+                        float4 heat0, float4 heat1, float4 key, float4x4 viewToLocal, float clock)
+{
+    float4 marks[8] = { mark0, mark1, mark2, mark3, mark4, mark5, mark6, mark7 };
+    float heats[8] = { heat0.x, heat0.y, heat0.z, heat0.w, heat1.x, heat1.y, heat1.z, heat1.w };
+    float largest = max(max(max(mark0.w, mark1.w), max(mark2.w, mark3.w)),
+                        max(max(mark4.w, mark5.w), max(mark6.w, mark7.w)));
+    if (largest < 0.001 || key.w < 0.5) return source;
+    // 0.2% of the distance, at least 5 cm: float precision at 1-2 km stays
+    // well inside it (local_damage_policy.h KeyMatches).
+    float3 cameraLocal = mul(viewToLocal, float4(0.0, 0.0, 0.0, 1.0)).xyz;
+    if (distance(cameraLocal, key.xyz) >= max(0.05, 0.002 * length(key.xyz))) return source;
+    float3 local = mul(viewToLocal, float4(viewPos, 1.0)).xyz;
+    float blotch = ose_scorch_value(local * 1.7) * 0.65 + ose_scorch_value(local * 4.3 + 1.7) * 0.35;
+    float charred = 0.0, ring = 0.0, ember = 0.0;
+    [unroll] for (int i = 0; i < 8; ++i)
+    {
+        float live = step(0.001, marks[i].w);
+        float r = length(local - marks[i].xyz) / max(marks[i].w, 0.001) + (blotch - 0.5) * 0.45;
+        float core = (1.0 - smoothstep(0.25, 0.85, r)) * live;
+        float edge = smoothstep(0.55, 0.85, r) * (1.0 - smoothstep(0.85, 1.05, r)) * live;
+        charred = max(charred, core);
+        ring = max(ring, edge);
+        ember = max(ember, core * saturate(heats[i]));
+    }
+    float luminance = dot(source, float3(0.2126, 0.7152, 0.0722));
+    source = lerp(source, luminance.xxx, charred * 0.85);
+    source *= lerp(1.0, 0.10, charred);
+    source = lerp(source, source * float3(0.45, 0.30, 0.18), ring * 0.60 * (1.0 - charred));
+    float flicker = 0.75 + 0.25 * sin(clock * 13.0 + blotch * 20.0);
+    float cracks = 0.35 + 0.65 * smoothstep(0.45, 0.80, blotch);
+    glow += lerp(float3(0.90, 0.12, 0.01), float3(1.0, 0.38, 0.06), ember) * (ember * cracks * flicker * 1.2);
     return max(source, 0.0);
 }
 

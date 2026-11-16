@@ -27,6 +27,7 @@
 #include "fog_wake_feature.h"
 #include "gpu_instancing.h"
 #include "gpu_skinning.h"
+#include "local_damage.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -221,7 +222,10 @@ namespace BZROpenShim
             if (weaponTeardown)
                 WeaponPresentationSceneTeardownComplete();
             if (worldEnds)
+            {
                 GpuSkinningNotifySceneEntitiesDestroyed();
+                LocalDamageNotifySceneEntitiesDestroyed();
+            }
         }
 
         // `mov al, byte [ecx+disp32]; ret` -- the whole accessor.
@@ -283,6 +287,7 @@ namespace BZROpenShim
 
             // The trampoline was published before the jump went live.
             GpuSkinningSetSceneTeardownSeam(true);
+            LocalDamageSetSceneTeardownSeam(true);
             Log(L"[SCENE] Installed destroyAllEntities hook body=0x%08X skyDomeFlag=+0x%X skyPlaneFlag=+0x%X\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(body)),
                 g_SkyDomeEnabledOffset,
@@ -616,6 +621,7 @@ namespace BZROpenShim
                 FogWakeNotifyMissionRunStateChanged(false);
                 GpuInstancingNotifyMissionRunStateChanged(false);
                 GpuSkinningNotifyMissionRunStateChanged(false);
+                LocalDamageNotifyMissionRunStateChanged(false);
                 NotifyExuMissionSimulationState(false);
                 NativeHud::Runtime::ResetMission();
                 HudFeedback::ResetMission();

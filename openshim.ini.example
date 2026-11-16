@@ -1369,6 +1369,31 @@ PowerScale =
 ShadowFarDistance =
 
 
+[LocalDamage]
+
+; Localized damage scorch. Weapon hits on craft (bullets and explosion
+; splash) leave a charred, darkened patch on the hull where they landed,
+; with a ragged brown edge and embers that glow orange-red and cool over
+; EmberSeconds. Bigger hits leave bigger marks. Repairing a unit back above
+; 90% health clears its marks. Render only: nothing in the simulation,
+; network traffic or saves changes, and each player sees the hits their own
+; game recorded. Allowed in multiplayer.
+; Applies only in the Enhanced render profile on Direct3D 11, to materials
+; that use the OpenShim Enhanced object shader. Redux, Retro, DX9 and
+; mod-supplied shaders are untouched. Buildings, pilots and collisions are
+; not marked. See Docs/LOCAL_DAMAGE.md.
+; Accepted: boolean/integer flag; use 0/1. Default: OFF.
+Enabled = 0
+
+; Marks kept per unit; the oldest is replaced. Hits close to an existing mark
+; grow and reheat it instead. Accepted: 1 to 8. Default: 8.
+MaxMarksPerUnit = 8
+
+; Seconds a fresh mark's embers take to cool. Accepted: 0.5 to 60.
+; Default: 6.
+EmberSeconds = 6
+
+
 [Display]
 ; Mesh-accurate impact effects. When a shot hits a craft, the impact sparks and
 ; explosion are drawn on the hull instead of on the engine's hit sphere. Hit
