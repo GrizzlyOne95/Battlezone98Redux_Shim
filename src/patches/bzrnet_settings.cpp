@@ -208,20 +208,6 @@ namespace BZROpenShim
             return reinterpret_cast<void* (__cdecl*)()>(g_BzrNetGetLobbyAddr)();
         }
 
-        // Experimental and default off until a two-client observer test proves
-        // that the service publishes the new identity after stock reconnects.
-        // In-match (netId != 0) never recycles the control connection.
-        static bool ShouldReauthOnNicknameChange()
-        {
-            if (EnvFlagEnabled("OPENSHIM_DISABLE_BZRNET_REAUTH"))
-                return false;
-            bool enabled = false;
-            if (TryGetUserConfigBool(
-                    kUserConfigNetworkSection, "ReauthOnNicknameChange", enabled))
-                return enabled;
-            return false;
-        }
-
         static bool ValidateBzrNetLobbyState(void* lobby)
         {
             if (!lobby)
@@ -396,7 +382,6 @@ namespace BZROpenShim
             if (!StoreBzrNetNickname(requestedValue, source, store))
                 return BzrNetNicknameResult::InvalidNickname;
             void* const lobby = store.lobby;
-            const bool lobbyValid = store.lobbyValid;
             const char* const sessionState = store.sessionState;
             const char* const backend = store.backend;
             const std::string& stableIdentity = store.stableIdentity;
@@ -422,35 +407,12 @@ namespace BZROpenShim
                 return BzrNetNicknameResult::PersistenceFailed;
             }
 
-            // Lounge/lobby only. Closing the live TCP session to port 1337
-            // makes stock reconnect and SendAuthorization with the new
-            // 0x009453E0 name. Calling SendAuthorization on an already-
-            // authorized socket, SetPlayerData, and a mis-arity 0x006C6E60
-            // call all failed to put a ~650-byte Authorization on the wire.
+            // A live session keeps its name: the MP setup screen
+            // (ApplyBzrNetNicknameForPreLobby) is where a rename reaches the
+            // lounge. The old [Network] ReauthOnNicknameChange experiment is
+            // retired.
             if (lobby || ReadLocalPlayerNetIdValue() != 0)
             {
-                if (lobby && lobbyValid && ReadLocalPlayerNetIdValue() == 0 &&
-                    ShouldReauthOnNicknameChange())
-                {
-                    Log(L"[BZRNET] NicknameNativeSendAttempt backend=%hs session=%hs stable=%hs "
-                        L"attempted=yes boundary=closesocket:1337 reason=ws-recycle source=%hs\n",
-                        backend, sessionState, stableIdentity.c_str(), operationSource);
-
-                    const bool recycled = RecycleBzrNetWebSocket();
-                    Log(L"[BZRNET] NicknameNativeSendCompleted backend=%hs session=%hs stable=%hs "
-                        L"entered=yes completed=%hs result=%hs reason=ws-recycle\n",
-                        backend, sessionState, stableIdentity.c_str(),
-                        recycled ? "yes" : "no",
-                        recycled ? "reauth-queued" : "recycle-failed");
-
-                    if (recycled)
-                    {
-                        Log(L"[BZRNET] Nickname result=%hs (source=%hs)\n",
-                            BzrNetNicknameResultName(BzrNetNicknameResult::ReauthQueued),
-                            operationSource);
-                        return BzrNetNicknameResult::ReauthQueued;
-                    }
-                }
                 Log(L"[BZRNET] NicknameNativeSendAttempt backend=%hs session=%hs stable=%hs "
                     L"attempted=no boundary=0x0074BF60 reason=runtime-name-mutation-unsupported\n",
                     backend, sessionState, stableIdentity.c_str());

@@ -1840,6 +1840,12 @@ namespace BZROpenShim
             RefreshCareerStatsSubscription();
         }
 
+        // The Career screen reads this so it does not show stats while tracking is off.
+        bool IsCareerStatsTrackingEnabled()
+        {
+            return g_CareerStatsEnabled;
+        }
+
         // Display-tier baseline is the openshim.ini value, not the compile-time
         // default: reverting a preference means "what the user configured",
         // which for this feature is the same thing as re-reading the key.

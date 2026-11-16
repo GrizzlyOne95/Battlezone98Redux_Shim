@@ -60,6 +60,7 @@
 #include "hook_engine.h"
 #include "map_filter_extras.h"
 #include "map_letter_jump_policy.h"
+#include "shell_screens.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -78,6 +79,7 @@ namespace BZROpenShim
             using MapFilterExtras::Extra;
             using MapFilterExtras::ExtraFilterInfo;
             using MapFilterExtras::kExtraFilters;
+            namespace Shell = ShellScreens;
 
             // __thiscall with the key by value; declared __fastcall so the
             // dummy edx lines the key up on the stack. Callee pops 0x18.
@@ -177,6 +179,22 @@ namespace BZROpenShim
             void* g_SearchEntry = nullptr;
             bool g_SearchEditing = false;
             char g_SearchText[kSearchInputLimit + 1] = {};
+            // Field chrome: a plate under the entry and four border strips
+            // (top, bottom, left, right). Children of the screen, so they are
+            // forgotten with it. The strips change texture with focus.
+            void* g_SearchFrame[4] = {};
+            // While editing, a UI-thread timer blinks the caret and watches for
+            // a click outside the box (the entry has no focus-loss callback).
+            UINT_PTR g_SearchTimer = 0;
+            bool g_SearchCaretOn = true;
+            bool g_SearchMouseWasDown = false;
+            unsigned g_SearchTimerTicks = 0;
+            constexpr UINT kSearchTimerMs = 50;
+            constexpr unsigned kSearchCaretTicks = 10; // 500 ms per caret phase
+            constexpr float kSearchBorder = 2.0f;
+            constexpr char kSearchPlateTexture[] = "uiplate.png";
+            constexpr char kSearchBorderTexture[] = "uiline.png";
+            constexpr char kSearchFocusTexture[] = "osh_preview_white.png";
 
             constexpr const char* kComponent = "mapfilter";
 
@@ -434,8 +452,18 @@ namespace BZROpenShim
                        IsWidgetLiveChildOfParent(g_SearchParent, g_SearchEntry);
             }
 
+            void StopSearchTimer()
+            {
+                if (g_SearchTimer != 0)
+                    KillTimer(nullptr, g_SearchTimer);
+                g_SearchTimer = 0;
+            }
+
             void ForgetSearchBox()
             {
+                StopSearchTimer();
+                for (void*& piece : g_SearchFrame)
+                    piece = nullptr;
                 g_SearchScreen = nullptr;
                 g_SearchParent = nullptr;
                 g_SearchEntry = nullptr;
@@ -570,15 +598,16 @@ namespace BZROpenShim
             }
 
             // cUI_Text::SetText only changes what is drawn; the next
-            // AppendChar redraws from the backing string. Editing shows a
-            // trailing cursor, idle shows the text or the placeholder.
+            // AppendChar redraws from the backing string. Only while focused
+            // the text carries a blinking trailing caret; idle shows the text
+            // or the placeholder, never a caret.
             void ShowSearchText()
             {
                 if (!g_BzrFn_SetTooltip || !SearchEntryLive())
                     return;
                 char shown[kSearchInputLimit + 8] = {};
                 if (g_SearchEditing)
-                    std::snprintf(shown, sizeof(shown), "%s_", g_SearchText);
+                    std::snprintf(shown, sizeof(shown), g_SearchCaretOn ? "%s_" : "%s ", g_SearchText);
                 else
                     CopyText(shown, sizeof(shown), g_SearchText[0] ? g_SearchText : kSearchPlaceholder);
                 __try
@@ -672,10 +701,89 @@ namespace BZROpenShim
                 }
             }
 
+            // Focus highlight: the border strips turn white while editing.
+            void ApplySearchFocusVisual()
+            {
+                const char* texture = g_SearchEditing && Shell::IsTextureDeployed(kSearchFocusTexture)
+                                          ? kSearchFocusTexture
+                                          : kSearchBorderTexture;
+                __try
+                {
+                    for (void* piece : g_SearchFrame)
+                    {
+                        if (!piece)
+                            continue;
+                        g_BzrFn_SetTextureOff(piece, texture);
+                        g_BzrFn_SetTextureOver(piece, texture);
+                        g_BzrFn_SetTextureOn(piece, texture);
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+
             void EndSearchEdit()
             {
                 g_SearchEditing = false;
+                StopSearchTimer();
+                ApplySearchFocusVisual();
                 ShowSearchText();
+            }
+
+            // Empties the entry's backing string. POD-only: SEH inside.
+            bool TryClearSearchEntry()
+            {
+                if (!g_BzrFn_TextEntryClear)
+                    return false;
+                __try
+                {
+                    g_BzrFn_TextEntryClear(g_SearchEntry);
+                    return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+
+            void CALLBACK SearchTimerProc(HWND, UINT, UINT_PTR, DWORD)
+            {
+                if (!g_SearchEditing)
+                {
+                    StopSearchTimer();
+                    return;
+                }
+                if (!SearchEntryLive())
+                {
+                    ForgetSearchBox(); // the screen closed while focused
+                    return;
+                }
+
+                // A click anywhere outside the box ends the edit. A click on
+                // the box reaches MapSearchOnClick instead.
+                const SHORT button = GetAsyncKeyState(GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON);
+                const bool down = (button & 0x8000) != 0;
+                const bool pressed = (down && !g_SearchMouseWasDown) || (button & 1) != 0;
+                g_SearchMouseWasDown = down;
+                if (pressed)
+                {
+                    float x = 0.0f;
+                    float y = 0.0f;
+                    const Shell::Rect box = { kSearchX, kSearchY, kSearchWidth, kSearchHeight };
+                    if (Shell::CursorDesignPoint(x, y) && !Shell::Contains(box, x, y))
+                    {
+                        EndSearchEdit();
+                        return;
+                    }
+                }
+
+                if (++g_SearchTimerTicks >= kSearchCaretTicks)
+                {
+                    g_SearchTimerTicks = 0;
+                    g_SearchCaretOn = !g_SearchCaretOn;
+                    ShowSearchText();
+                }
             }
 
             void __cdecl MapSearchOnClick()
@@ -683,6 +791,12 @@ namespace BZROpenShim
                 if (!SearchEntryLive())
                     return;
                 g_SearchEditing = true;
+                g_SearchCaretOn = true;
+                g_SearchTimerTicks = 0;
+                g_SearchMouseWasDown = true; // the click that got us here
+                if (g_SearchTimer == 0)
+                    g_SearchTimer = SetTimer(nullptr, 0, kSearchTimerMs, SearchTimerProc);
+                ApplySearchFocusVisual();
                 ShowSearchText();
             }
 
@@ -782,6 +896,56 @@ namespace BZROpenShim
                          letter, selected, target, targetFile);
             }
 
+            void __cdecl SearchDecorHoverNoop(void* /*param*/)
+            {
+            }
+
+            // One flat decorative piece (a button showing one texture in every
+            // state, no click handler), as the options screens build their
+            // panel frames. Added before the entry so it draws underneath.
+            void* AddSearchDecor(void* parent, const char* name, float x, float y, float w, float h,
+                                 const char* texture)
+            {
+                void* mem = ::operator new(kUiButtonSize, std::nothrow);
+                if (!mem)
+                    return nullptr;
+                std::memset(mem, 0, kUiButtonSize);
+                void* piece = g_BzrFn_ButtonCtor(mem, name, x, y, w, h, 0x20, parent, 0, 0);
+                if (!piece)
+                {
+                    ::operator delete(mem, std::nothrow);
+                    return nullptr;
+                }
+                g_BzrFn_SetTextureOff(piece, texture);
+                g_BzrFn_SetTextureOver(piece, texture);
+                g_BzrFn_SetTextureOn(piece, texture);
+                g_BzrFn_SetOnHover(piece, reinterpret_cast<void*>(&SearchDecorHoverNoop));
+                g_BzrFn_AddChild(parent, piece, 0);
+                return piece;
+            }
+
+            // Plate and border behind the entry so it reads as a text field.
+            // Skipped (the entry stays bare) when the textures are not deployed.
+            void BuildSearchChrome(void* parent)
+            {
+                if (!g_BzrFn_SetTextureOff || !g_BzrFn_SetTextureOver || !g_BzrFn_SetTextureOn ||
+                    !g_BzrFn_SetOnHover || !Shell::IsTextureDeployed(kSearchPlateTexture) ||
+                    !Shell::IsTextureDeployed(kSearchBorderTexture))
+                {
+                    return;
+                }
+                constexpr float x = kSearchX;
+                constexpr float y = kSearchY;
+                constexpr float w = kSearchWidth;
+                constexpr float h = kSearchHeight;
+                constexpr float b = kSearchBorder;
+                AddSearchDecor(parent, "OpenShimMapSearchPlate", x, y, w, h, kSearchPlateTexture);
+                g_SearchFrame[0] = AddSearchDecor(parent, "OpenShimMapSearchTop", x, y, w, b, kSearchBorderTexture);
+                g_SearchFrame[1] = AddSearchDecor(parent, "OpenShimMapSearchBottom", x, y + h - b, w, b, kSearchBorderTexture);
+                g_SearchFrame[2] = AddSearchDecor(parent, "OpenShimMapSearchLeft", x, y, b, h, kSearchBorderTexture);
+                g_SearchFrame[3] = AddSearchDecor(parent, "OpenShimMapSearchRight", x + w - b, y, b, h, kSearchBorderTexture);
+            }
+
             bool CreateSearchBox(uint8_t* screen)
             {
                 if (!g_BzrFn_TextEntryCtor || !g_BzrFn_ButtonCtor || !g_BzrFn_AddChild ||
@@ -816,7 +980,8 @@ namespace BZROpenShim
                 void* button = nullptr;
                 __try
                 {
-                    entry = g_BzrFn_TextEntryCtor(entryMem, 0, 1, kSearchVisibleCharacters,
+                    BuildSearchChrome(parent);
+                    entry =g_BzrFn_TextEntryCtor(entryMem, 0, 1, kSearchVisibleCharacters,
                                                   "OpenShimMapSearch", kSearchX, kSearchY,
                                                   kSearchWidth, kSearchHeight, 0x8020, parent);
                     if (!entry)
@@ -898,15 +1063,37 @@ namespace BZROpenShim
             }
 
             result = 1;
-            if (character == '\r' || character == '\n' || character == 0x1B)
+            if (character == '\r' || character == '\n')
             {
-                // Enter or Escape stops editing. Neither reaches the entry:
-                // it has no Enter callback, and Escape would be appended.
+                // Enter stops editing; it never reaches the entry, which has
+                // no Enter callback.
                 EndSearchEdit();
                 return true;
             }
-            if (character == '\t')
+            if (character == 0x1B)
+            {
+                // Escape clears the text first and stops editing once it is
+                // already empty. It never reaches the entry (it would be
+                // appended).
+                if (g_SearchText[0] != '\0' && TryClearSearchEntry())
+                {
+                    g_SearchText[0] = '\0';
+                    RefreshMapListForSearch();
+                    ShowSearchText();
+                }
+                else
+                {
+                    EndSearchEdit();
+                }
                 return true;
+            }
+            if (character == '\t')
+            {
+                // Tab leaves the field. Swallowed: stock would append the
+                // control code to the entry that receives it.
+                EndSearchEdit();
+                return true;
+            }
 
             char before[kSearchInputLimit + 1] = {};
             CopyText(before, sizeof(before), g_SearchText);

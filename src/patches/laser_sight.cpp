@@ -41,6 +41,7 @@
 #include "scene_mutation_drain.h"
 #include "scene_mutation_drain_policy.h"
 #include "game_state.h"
+#include "hud_visibility.h"
 #include "hook_engine.h"
 #include "laser_sight_assets.h"
 #include "laser_sight_policy.h"
@@ -117,6 +118,11 @@ namespace BZROpenShim
             constexpr size_t kCannonShotPitchOffset = 0x90;
             constexpr size_t kOrdnanceLifeSpanOffset = 0x50;
             constexpr size_t kOrdnanceShotSpeedOffset = 0x54;
+            // Weapon filter (Docs/LASER_SIGHT.md, "Weapon filter"), guarded by
+            // the LaserSightFilter* rows: Carrier +0x04 + 4 * slot = the
+            // slot's hardpoint obj76, whose +0x84 is its class id.
+            constexpr size_t kCarrierHardpoints = 0x04;
+            constexpr size_t kObjectClassId = 0x84;
 
             // ---- Config ------------------------------------------------------
             enum class ConfigState : uint8_t
@@ -217,6 +223,29 @@ namespace BZROpenShim
                 LogShimA(usable ? LogLevel::Info : LogLevel::Warn, kComponent,
                          usable ? "[LASERSIGHT] arc rows bound"
                                 : "[LASERSIGHT] arc rows unbound; ballistic weapons get the straight beam");
+                return usable;
+            }
+
+            // The weapon filter's layout guards. Unbound, no beam is drawn:
+            // without them a special weapon could not be told apart.
+            bool BindFilterRows()
+            {
+                static bool attempted = false;
+                static bool usable = false;
+                if (attempted)
+                    return usable;
+                attempted = true;
+                uint32_t hardpoints = 0, categories = 0, weaponClass = 0, dispenser = 0;
+                const HookEngine::EngineRow rows[] = {
+                    {"LaserSightFilterCarrierHardpoint", &hardpoints},
+                    {"LaserSightFilterHardpointCategories", &categories},
+                    {"LaserArcWeaponClassField", &weaponClass},
+                    {"LaserSightFilterDispenserSig", &dispenser},
+                };
+                usable = HookEngine::BindEngineRows("Laser sight filter", rows);
+                LogShimA(usable ? LogLevel::Info : LogLevel::Warn, kComponent,
+                         usable ? "[LASERSIGHT] filter rows bound"
+                                : "[LASERSIGHT] stands down: weapon filter rows unbound");
                 return usable;
             }
 
@@ -516,6 +545,23 @@ namespace BZROpenShim
                     if (!weapon)
                         return false;
                     const uint8_t* bytes = static_cast<const uint8_t*>(weapon);
+                    // Weapon filter: the slot's hardpoint class, then the
+                    // weapon class signature.
+                    const uint8_t* hardpoint = *reinterpret_cast<const uint8_t* const*>(
+                        static_cast<const uint8_t*>(carrier) + kCarrierHardpoints + slot * sizeof(uint32_t));
+                    if (!hardpoint)
+                    {
+                        weapon = nullptr;
+                        return false;
+                    }
+                    const uint8_t* weaponClass = *reinterpret_cast<const uint8_t* const*>(bytes + kWeaponClassOffset);
+                    if (!LS::IsSightedWeapon(
+                            *reinterpret_cast<const int32_t*>(hardpoint + kObjectClassId),
+                            weaponClass ? *reinterpret_cast<const uint32_t*>(weaponClass + kClassSigOffset) : 0u))
+                    {
+                        weapon = nullptr;
+                        return false;
+                    }
                     const void* object = *reinterpret_cast<const void* const*>(bytes + kWeaponObject);
                     if (!object)
                         return false;
@@ -1035,10 +1081,17 @@ namespace BZROpenShim
                         HideBeam();
                     return;
                 }
+                if (HudVisibility::IsHidden())
+                {
+                    if (BeamShown())
+                        HideBeam();
+                    return;
+                }
                 if (IsPauseMenuOpen())
                     return; // keep the last beam; nothing moves
                 Snapshot snap;
-                if (!ReadPlayerSeh(snap.player, snap.playerVtable) || IsPerson(snap.player, snap.playerVtable) ||
+                if (!BindFilterRows() || !ReadPlayerSeh(snap.player, snap.playerVtable) ||
+                    IsPerson(snap.player, snap.playerVtable) ||
                     !ReadWeaponPoseSeh(snap.player, snap.weapon, snap.local, snap.mount))
                 {
                     if (BeamShown())

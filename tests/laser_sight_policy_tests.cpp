@@ -46,6 +46,33 @@ namespace
         Check(FirstSelectedSlot(0x20) == -1 && FirstSelectedSlot(0x80000000u) == -1, "only slots 0..4 exist");
     }
 
+    void WeaponFilterTests()
+    {
+        // Engine signatures as stored (little-endian ASCII; Docs/LASER_SIGHT.md, "Weapon filter").
+        auto sig = [](const char (&s)[5]) {
+            return static_cast<uint32_t>(static_cast<uint8_t>(s[3])) |
+                   static_cast<uint32_t>(static_cast<uint8_t>(s[2])) << 8 |
+                   static_cast<uint32_t>(static_cast<uint8_t>(s[1])) << 16 |
+                   static_cast<uint32_t>(static_cast<uint8_t>(s[0])) << 24;
+        };
+        Check(kWeaponSigDispenser == sig("DISP"), "dispenser signature spells the engine's four-letter code");
+        Check(kHardpointGeneric == 70 && kHardpointCannon == 71 && kHardpointRocket == 72 && kHardpointMortar == 73 &&
+                  kHardpointSpecial == 74,
+              "hardpoint class ids follow OBJECT_CLASS_T");
+
+        Check(IsSightedWeapon(kHardpointCannon, kWeaponSigCannon), "cannon on a cannon hardpoint");
+        Check(IsSightedWeapon(kHardpointMortar, kWeaponSigMortar), "mortar on a mortar hardpoint");
+        Check(IsSightedWeapon(kHardpointRocket, sig("THML")), "missile launcher on a rocket hardpoint");
+        Check(IsSightedWeapon(kHardpointCannon, sig("BGUN")), "beam gun keeps the beam");
+        Check(IsSightedWeapon(kHardpointRocket, sig("TRGT")), "TAG gun keeps the beam");
+        Check(!IsSightedWeapon(kHardpointSpecial, kWeaponSigCannon), "special hardpoint: no beam");
+        Check(!IsSightedWeapon(kHardpointGeneric, kWeaponSigCannon) && !IsSightedWeapon(0, kWeaponSigCannon) &&
+                  !IsSightedWeapon(75, kWeaponSigCannon) && !IsSightedWeapon(-1, kWeaponSigCannon),
+              "any other hardpoint class: no beam");
+        Check(!IsSightedWeapon(kHardpointCannon, kWeaponSigDispenser), "mine layer on a cannon hardpoint: no beam");
+        Check(!IsSightedWeapon(kHardpointCannon, 0u), "a weapon with no class: no beam");
+    }
+
     void TerrainTests()
     {
         const TerrainMarch march;
@@ -462,6 +489,7 @@ int main(int argc, char** argv)
     }
     GateTests();
     SlotTests();
+    WeaponFilterTests();
     TerrainTests();
     RayObbTests();
     SegmentTests();

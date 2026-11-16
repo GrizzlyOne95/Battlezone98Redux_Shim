@@ -3,7 +3,9 @@
 An optional beam from the player vehicle's selected weapon to the first
 terrain or object it meets, up to 500 m, modelled on BZCC's laser sight. It is
 purely cosmetic and fully shim-owned: no engine object is created, and no
-engine state is written. When the selected weapon fires gravity ordnance
+engine state is written. Only projectile weapons on a cannon, rocket or
+mortar hardpoint get a beam; see "Weapon filter". When the selected weapon
+fires gravity ordnance
 (mortars and other grenade launchers), the beam follows the predicted
 trajectory arc instead; see "Ballistic arc".
 
@@ -24,6 +26,9 @@ the beam-mesh block in `tests/native_chunk_mesh_tests.cpp`.
 - Vehicles only. No beam is drawn when the player object is a Person (on foot,
   or after ejecting), when nothing is selected, or when the selected slot is
   empty.
+- Weapons: only a projectile weapon mounted on a cannon, rocket or mortar
+  hardpoint gets a beam (`LaserSight::IsSightedWeapon`; see "Weapon
+  filter").
 
 ## Exports (`plugins/openshim.dll`)
 
@@ -168,12 +173,74 @@ addresses in code come from `scripts/patches.json` rows, never from literals.
      <= 0 (Bullet::Simulate `FUN_00480470-00480470.c:22-64`; lifeTimer
      `ordnance+0x78` = lifeSpan, `FUN_00584fe0.c:140`).
 
+5. **Weapon filter inputs: VERIFIED** (decompile lines below; each guarded
+   at bind time by a `LaserSightFilter*` row in `scripts/patches.json`, plus
+   the `LaserArcWeaponClassField`/`LaserArcWeaponOrdnanceField` rows above;
+   every expected byte string was read from the shipping GOG exe, sha256
+   `8d71f56c...3377413`, and matches exactly once in it).
+   - Carrier `+0x04 + 4*slot` = the slot's hardpoint obj76:
+     Carrier::SetHardpoint `FUN_00472420-00472420.c:5`
+     `*(param_1 + 4 + param_2 * 4) = param_3` (row
+     `LaserSightFilterCarrierHardpoint`, exe `0x0047242D`); the getter
+     `FUN_00417f40-00417f40.c:5` reads the same slot. The 1.5 PDB build names
+     it `Carrier::SetHardpoint` 0x0047E875 (`this->hardpoint[param_1]`,
+     `BZ1/1.5/all_decompiled.c:143367`).
+   - obj76 `+0x84` = class id: `FUN_00472420-00472420.c:6`
+     `*(param_3 + 0x84) == 0x4a` (CLASS_ID_SPECIAL_HARDPOINT; the 1.5 build's
+     `param_2->class_id == CLASS_ID_SPECIAL_HARDPOINT`,
+     `all_decompiled.c:143368`). Same exe row.
+   - Hardpoint class values (1.5 PDB enum OBJECT_CLASS_T,
+     `BZ1/derived/bz15_pdb/enum_values.tsv:570-574` and `raw/types.txt:7190`):
+     70 CLASS_ID_WEAPON_HARDPOINT, 71 CANNON, 72 ROCKET, 73 MORTAR, 74 SPECIAL.
+     In the shipping exe the WeaponClass ODF load `FUN_00611aa0-00611aa0.c:86-106`
+     maps wpnCategory "CANN"/"ROCK"/"MORT"/"SPEC" to class `+0x74` =
+     0x47/0x48/0x49/0x4A, anything else 0x46 (row
+     `LaserSightFilterHardpointCategories`, exe `0x00611D16`), and the
+     WeaponPowerup slot pick `FUN_006130a0-006130a0.c:27-29` accepts a slot
+     when that category is 0x46 or equals the hardpoint's `+0x84`. So
+     `+0x84` holds the same 71-74 values.
+   - The weapon's hardpoint is that slot's (UNVERIFIED in the shipping exe,
+     not needed by the code, which reads the Carrier slot): the 1.5 build
+     creates the weapon's object as a child of `carrier->hardpoint[slot]`
+     (WeaponClass::Build 0x0053E851,
+     `BZ1/1.5/functions/0053/0053e851_WeaponClass_Build.c`) and Weapon::Weapon
+     keeps `obj_get_parent(object)` as `hard`; the shipping
+     `FUN_00611300-00611300.c:23,28-29` stores the object at `+0x10` and
+     `FUN_00618b60(object)` (object `+0x78`) at `+0x14`.
+   - Excluded WeaponClass signature (`+0x0C`): Dispenser `0x44495350`
+     (`FUN_004b5910-004b5910.c:7`, row `LaserSightFilterDispenserSig`,
+     `0x004B592B`). Beam guns, the TAG gun and beam or bolt (laser) ordnance
+     keep the beam: the hardpoint class alone decides for them.
+
 Also used, unchanged from ShellCasings, with no new RE:
 - `Terrain::HeightAt`;
 - `CollisionGrid::Objects/RangeQuery/RangeNext`;
 - `WorldRenderOrigin`;
 - GameObject `+0x0F0` render bridge, `+0x094` entity;
 - obj76 `+0x14` dead flag `0x200`.
+
+## Weapon filter
+
+`LaserSight::IsSightedWeapon(hardpointClass, weaponSig)` runs on
+every tick for the lowest selected slot, before the muzzle pose is read. A
+weapon that fails it gets no beam, exactly as an empty slot.
+
+| Input | Beam |
+|-------|------|
+| hardpoint class 71 cannon, 72 rocket or 73 mortar | yes, unless a mine layer |
+| hardpoint class 74 special | no (mine layers, Phantom/RED field/site camera and the like) |
+| hardpoint class 70 or anything else | no |
+| weapon class Dispenser (`dispenser`, mine layers) | no, even on a cannon hardpoint |
+| beam gun, TAG gun, beam or bolt (laser) ordnance | yes, if the hardpoint allows it |
+| weapon with no weapon class | no |
+
+The hardpoint decides, not the weapon's own wpnCategory: a weapon with no
+wpnCategory fits any hardpoint, so the mount says whether it is a special
+slot. Everything else on a cannon, rocket or mortar hardpoint keeps the beam:
+cannon, machinegun, snipergun, chargegun, mortar, poppergun, detonator,
+lobber and the missile launchers (thermal, image, radar). If any filter row
+fails to bind, the laser sight stands down (`[LASERSIGHT] stands down:
+weapon filter rows unbound`) rather than draw a beam it cannot classify.
 
 ## Ballistic arc
 
@@ -355,6 +422,8 @@ created, creation is not retried until the scene changes.
      about 500 m.
    - Switch weapons (1-5): the beam moves to the new hardpoint. With linked
      weapons, it comes from the lowest slot.
+   - Select a special slot (mine layer, Phantom VIR), a TAG gun, a beam gun
+     or a laser: no beam. The log shows `[LASERSIGHT] filter rows bound`.
    - Hop out: the beam disappears. Get back in: it returns.
    - Turn the option off: it disappears with no restart.
    - Look for:

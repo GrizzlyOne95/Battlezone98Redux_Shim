@@ -39,4 +39,11 @@ namespace BZROpenShim::ContextualHud
     // The backdrop's last submitted screen rectangle (x, y, width, height)
     // when it was drawn within maxAgeMs; false otherwise.
     bool WeaponListRect(uint64_t maxAgeMs, int& x, int& y, int& w, int& h) noexcept;
+
+    // Producer-damage wake for the command fade. True while the command fade
+    // is on and the producer rows bound; HudFeedback then keeps its damage
+    // adapters installed. NoteDamage takes the complete victim object before
+    // the native damage call; it only reads, and returns at once when off.
+    bool WantsProductionDamage() noexcept;
+    void NoteDamage(const void* victim) noexcept;
 }

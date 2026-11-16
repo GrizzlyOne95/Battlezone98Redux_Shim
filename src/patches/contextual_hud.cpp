@@ -33,6 +33,7 @@ namespace BZROpenShim::ContextualHud
         using CommandRender = void(__thiscall*)(void*);
         using Health = float(__thiscall*)(void*);
         using Fill = void(__cdecl*)(void*, int, int, int, int, uint32_t, uint32_t);
+        using TeamRelation = bool(__thiscall*)(void*, int);
         constexpr size_t kSafeFrameGroups = static_cast<size_t>(Group::Commands);
         constexpr size_t kCommands = static_cast<size_t>(Group::Commands);
 
@@ -69,13 +70,16 @@ namespace BZROpenShim::ContextualHud
         uint64_t g_radarOwner = 0;
         int g_radarBound = 0;
         RadarContacts g_radarContacts;
+        // Optional GameObject::EnemyP (HudPaletteEnemyTeam, scripts/patches.json);
+        // without it the enemy-contact pin stands down alone.
+        uint32_t g_enemyTeam = 0;
         struct RadarFrame
         {
             RadarContacts contacts;
             uint64_t owner = 0, value = 0;
-            uint32_t player = 0;
+            uint32_t player = 0, enemyTeams = 0;
             float time = 0;
-            bool active = false, alert = false;
+            bool active = false, alert = false, enemy = false;
         };
         thread_local RadarFrame g_radarFrame;
         thread_local bool g_inRadar = false;
@@ -90,6 +94,10 @@ namespace BZROpenShim::ContextualHud
                 void* player = reinterpret_cast<Current>(g_getPlayer)();
                 if (!player) return false;
                 frame.player = static_cast<uint32_t>(reinterpret_cast<Handle>(g_GameObjectGetHandleAddr)(player));
+                // Native relation per team, once per frame, on the player object.
+                if (g_enemyTeam)
+                    for (int team = 1; team < 16; ++team)
+                        if (reinterpret_cast<TeamRelation>(g_enemyTeam)(player,team)) frame.enemyTeams |= 1u << team;
                 void* target = reinterpret_cast<Pointer>(g_radarTarget)(player);
                 const uint32_t handle = target ? static_cast<uint32_t>(reinterpret_cast<Handle>(g_GameObjectGetHandleAddr)(target)) : 0;
                 const int compact = *reinterpret_cast<const int*>(g_radarCompact);
@@ -151,7 +159,8 @@ namespace BZROpenShim::ContextualHud
                 // frame; a newly drawn contact reveals the whole next frame.
                 auto& activity = g_state.groups[kRadar];
                 const auto now = GetTickCount64();
-                activity.Observe(g_radarFrame.value,now,g_radarFrame.alert ||
+                // A drawn enemy contact pins the radar solid until none remain.
+                activity.Observe(g_radarFrame.value,now,g_radarFrame.alert || g_radarFrame.enemy ||
                     g_radarFrame.contacts.added || g_radarFrame.contacts.invalid);
                 g_radarFrame.contacts.Commit();
                 g_radarContacts = g_radarFrame.contacts;
@@ -171,6 +180,12 @@ namespace BZROpenShim::ContextualHud
                     // recently damaged contact, without reading hidden teams.
                     if (std::isfinite(result) && result > 0 && result <= g_radarFrame.time && result+2 > g_radarFrame.time)
                         g_radarFrame.alert = true;
+                    // Perceived team only (GetPerceivedTeam 0x004625B0 reads
+                    // complete+0x180, bzr_object_layout.h), so a disguised
+                    // contact is classified as the player sees it.
+                    if (!g_radarFrame.enemy)
+                        g_radarFrame.enemy = EnemyContact(*reinterpret_cast<const int*>(static_cast<const uint8_t*>(object) +
+                            ObjectLayout::kGameObjectPerceivedTeam),g_radarFrame.enemyTeams);
                 }
                 __except (EXCEPTION_EXECUTE_HANDLER) { g_radarFrame.contacts.invalid = true; }
             }
@@ -214,6 +229,13 @@ namespace BZROpenShim::ContextualHud
                     {"HudFadeRadarShow",&g_radarShow}, {"CommandMenuAltLayoutFlag",&g_radarAlt},
                 };
                 g_radarBound = HookEngine::BindEngineRows("Radar HUD fading",rows) && HudPalette::BindRadarDrawAdapters() ? 1 : -1;
+                if (g_radarBound > 0)
+                {
+                    uint32_t enemy = 0;
+                    const HookEngine::EngineRow relation[] = { {"HudPaletteEnemyTeam",&enemy} };
+                    if (HookEngine::BindEngineRows("Radar enemy-contact pin",relation)) g_enemyTeam = enemy;
+                    else Log(L"[HUDFADE] Radar enemy-contact pin stands down: relation row unavailable\n");
+                }
                 uint32_t target = 0; SIZE_T read = 0;
                 if (g_radarBound > 0 && (!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(g_radarSlot),&target,4,&read) || read!=4 || target!=g_radarRender))
                 { g_radarBound = -1; Log(L"[HUDFADE] Radar stands down: render slot ownership differs\n"); }
@@ -238,6 +260,51 @@ namespace BZROpenShim::ContextualHud
             Log(L"[HUDFADE] Complete cockpit radar and compass scopes installed\n");
             return true;
         }
+        // Producer identity for the scrap/pilot build-menu pin and the
+        // command producer-damage wake. ControlPanelGlobal: selectNum +0x188,
+        // handles +0x1C (ControlPanel::BroadcastCommand 0x004A70C0, see the
+        // row in scripts/patches.json). Exact primary vtables per row.
+        uint32_t g_controlPanel = 0;
+        std::array<uintptr_t,4> g_producerVtables{};
+        int g_producerBound = 0;
+        std::atomic<bool> g_productionWatch{false}, g_productionDamaged{false};
+        bool BindProducers()
+        {
+            if (!g_producerBound)
+            {
+                uint32_t panel = 0, vtables[4]{};
+                const HookEngine::EngineRow rows[] = {
+                    {"ControlPanelGlobal",&panel}, {"RecyclerVtable",&vtables[0]}, {"FactoryVtable",&vtables[1]},
+                    {"ArmoryVtable",&vtables[2]}, {"ConstructionRigVtable",&vtables[3]},
+                };
+                g_producerBound = HookEngine::BindEngineRows("HUD fade producer triggers",rows) ? 1 : -1;
+                if (g_producerBound > 0)
+                {
+                    g_controlPanel = panel;
+                    for (size_t i = 0; i < 4; ++i) g_producerVtables[i] = vtables[i];
+                }
+            }
+            return g_producerBound > 0;
+        }
+        bool IsProducerObject(const void* object) noexcept
+        {
+            return object && IsProducerVtable(*reinterpret_cast<const uintptr_t*>(object),g_producerVtables);
+        }
+        // A stock build list is on the command panel: every selected unit is
+        // a producer. Unreadable state answers false (normal fading).
+        bool ReadProductionMenu() noexcept
+        {
+            if (g_producerBound <= 0) return false;
+            __try
+            {
+                const auto* panel = reinterpret_cast<const uint8_t*>(g_controlPanel);
+                return ProductionMenuOpen(*reinterpret_cast<const int*>(panel + 0x188),[panel](int i) {
+                    return IsProducerObject(GameObjectFromHandleGog(*reinterpret_cast<const int*>(panel + 0x1C + i * 4)));
+                });
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
         struct MeterSample { bool readable = false, hullWarning = false, ammoWarning = false; uint64_t hull = 0, ammo = 0; };
 
         MeterSample SampleMeters(void* player, void* carrier, uint64_t weaponState, uint32_t ammo) noexcept
@@ -365,12 +432,15 @@ namespace BZROpenShim::ContextualHud
             {
                 activity = {};
                 g_commandInstance = 0;
+                g_productionDamaged.store(false,std::memory_order_relaxed);
             }
             else
             {
                 const uintptr_t instance = reinterpret_cast<uintptr_t>(self);
                 if (instance != g_commandInstance) { activity = {}; g_commandInstance = instance; }
-                activity.Observe(sample.value,now,sample.interacting);
+                // Damage to one of the player's producers (NoteDamage) wakes the panel.
+                const bool damaged = g_productionDamaged.exchange(false,std::memory_order_acq_rel);
+                activity.Observe(sample.value,now,sample.interacting || damaged);
                 opacity = activity.Opacity(g_settings.groups[kCommands],now);
             }
             ReleaseSRWLockExclusive(&g_lock);
@@ -722,6 +792,25 @@ namespace BZROpenShim::ContextualHud
         Log(L"[HUDFADE] Command panel post-draw not installed: render slot unavailable\n");
         return false;
     }
+    bool WantsProductionDamage() noexcept { return g_productionWatch.load(std::memory_order_acquire); }
+    void NoteDamage(const void* victim) noexcept
+    {
+        if (!victim || !g_productionWatch.load(std::memory_order_acquire) || !g_BzrFn_GetPlayerHandle) return;
+        __try
+        {
+            if (!IsProducerObject(victim)) return;
+            const int handle = g_BzrFn_GetPlayerHandle();
+            const auto* player = static_cast<const uint8_t*>(handle ? GameObjectFromHandleGog(handle) : nullptr);
+            if (!player) return;
+            // The player's own producers only (actual team of the player's
+            // own team, ObjectLayout::kGameObjectActualTeam), so nothing hidden is read.
+            const auto* bytes = static_cast<const uint8_t*>(victim);
+            if (*reinterpret_cast<const int*>(bytes + ObjectLayout::kGameObjectActualTeam) ==
+                *reinterpret_cast<const int*>(player + ObjectLayout::kGameObjectActualTeam))
+                g_productionDamaged.store(true,std::memory_order_release);
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
     float RadarDrawOpacity() noexcept { return !ExternallyOwned(Group::Radar) && g_inRadar && g_radarFrame.active ? g_drawOpacity : 1; }
     float BeginDraw(Group group) noexcept
     {
@@ -738,6 +827,7 @@ namespace BZROpenShim::ContextualHud
     {
         AcquireSRWLockExclusive(&g_lock); g_state.Reset(); g_commandInstance = 0;
         g_radarInstance = 0; g_radarOwner = 0; g_radarContacts = {}; ReleaseSRWLockExclusive(&g_lock);
+        g_productionDamaged.store(false,std::memory_order_relaxed);
         for (auto& opacity : g_opacity) opacity.store(1,std::memory_order_relaxed);
     }
     bool ReloadConfig()
@@ -762,8 +852,16 @@ namespace BZROpenShim::ContextualHud
         for (auto& opacity : g_opacity) opacity.store(1,std::memory_order_relaxed);
         g_read = true;
         g_resources.store(settings.groups[1].enabled || settings.groups[2].enabled,std::memory_order_relaxed);
+        g_productionDamaged.store(false,std::memory_order_relaxed);
+        const bool compatible = IsCompatibleGameVersion();
+        const bool wantProducers = settings.groups[1].enabled || settings.groups[2].enabled || settings.groups[kCommands].enabled;
+        const bool producers = compatible && wantProducers && BindProducers();
+        if (compatible && wantProducers && !producers)
+            Log(L"[HUDFADE] Producer build-menu pin and producer-damage wake stand down: rows unavailable\n");
+        // Published after BindProducers filled the vtables (NoteDamage acquires).
+        g_productionWatch.store(producers && settings.groups[kCommands].enabled,std::memory_order_release);
         if (!settings.Active()) { RefreshScrapPilotHudLayout(); return true; }
-        if (!IsCompatibleGameVersion()) return false;
+        if (!compatible) return false;
         const bool installed = InstallForSettings(settings);
         RefreshScrapPilotHudLayout();
         return installed;
@@ -806,7 +904,11 @@ namespace BZROpenShim::ContextualHud
         AcquireSRWLockExclusive(&g_lock);
         // The command renderer owns its own activity sample; stable resource
         // observations must not overwrite input/menu activity recorded there.
-        g_state.Observe(owner,values,now,kSafeFrameGroups);
+        // A producer build menu pins scrap and pilots (the costs it shows).
+        const bool resources = settings.groups[static_cast<size_t>(Group::Scrap)].enabled ||
+            settings.groups[static_cast<size_t>(Group::Pilots)].enabled;
+        const uint32_t pinned = resources && ReadProductionMenu() ? Bit(Group::Scrap) | Bit(Group::Pilots) : 0;
+        g_state.Observe(owner,values,now,kSafeFrameGroups,pinned);
         for (size_t i = 0; i < kSafeFrameGroups; ++i)
             g_opacity[i].store(g_state.groups[i].Opacity(settings.groups[i],now),std::memory_order_relaxed);
         for (size_t i = static_cast<size_t>(Group::Hull); i <= static_cast<size_t>(Group::Ammo); ++i)

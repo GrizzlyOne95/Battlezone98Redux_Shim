@@ -692,6 +692,7 @@ namespace BZROpenShim
         void InstallDistributedRecordDeathIntHookIfPossible();
         void InitializeCareerStatsConfig();
         void RevertCareerStatsToBaseline();
+        bool IsCareerStatsTrackingEnabled();
         void TickCareerSessionState();
         void InstallCareerStatsMpHookIfPossible();
 

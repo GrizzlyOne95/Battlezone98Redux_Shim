@@ -4279,6 +4279,24 @@
       "identity": "preset view record written by the satellite view setter (0x0061BD20): +0 Update_Camera, +4 previous view, +8 Current_View"
     },
     {
+      "name": "HudDisplayInterfaceFlag",
+      "address": "0x008EAAB0",
+      "kind": "data",
+      "identity": "Released GOG 2.2.301 stock show-HUD switch (useDisplayInterface, int). NO_HUD_VIEW (action 3) view setter 0x0061AB00 writes 0 at 0x0061AB78; the cockpit/no-cockpit view setters write 1; the Options mHudOnOffChecklist callback 0x007AF390 stores the box value at 0x007AF3A5. Read by the HUD pass 0x00617600 (HudDisplayInterfaceGate) and by Reticle 0x005BC170, TargetCam 0x005DDE00, SniperInterface 0x005D6530 render. Not written to any config file. hud_visibility.cpp holds it at 0 while Ctrl+= has the HUD hidden."
+    },
+    {
+      "name": "HudDisplayInterfaceGate",
+      "address": "0x00617635",
+      "expected": "83 3D B0 AA 8E 00 00 74 05",
+      "identity": "Released GOG 2.2.301 HUD pass 0x00617600: cmp dword [0x008EAAB0],0; je over the call to 0x004B6F10, which draws the HUD element list (each element's vtable slot 6: ScrapGauge, CockpitRadar, MapRadar, ControlPanel...). Read-only guard proving HudDisplayInterfaceFlag's address in this build."
+    },
+    {
+      "name": "LegacyTextEditorFocusLookup",
+      "address": "0x00823CE0",
+      "expected": "55 8B EC 83 EC 08 A1 40 1B CC 02",
+      "identity": "Released GOG 2.2.301 cdecl void* (void): walks the legacy text-editor list at 0x02CC1B40 and returns the first node whose editor flags (+0x120) hold the 0x100 focus bit, else null. No side effects. The stock WndProc 0x00619340 calls it at 0x0061964E to route keys to a focused in-mission chat or ally prompt (reverse_engineering/coopflow/TEXT_ENTRY_STATE.md)."
+    },
+    {
       "name": "RadarAttackAlertCompare",
       "address": "0x00494D35",
       "expected": "0F 2F 05 D0 73 91 00 76 2B 6A 00 6A 00",
@@ -4805,6 +4823,24 @@
       "address": "0x0048F87B",
       "expected": "C7 41 0C 4E 4E 41 43 8B 55 FC",
       "identity": "CannonClass::CannonClass 0x0048F860 (FUN_0048f860.c:6-13): weapon class+0x0C = 'CANN' 0x43414E4E, label \"cannon\"; shotVariance +0x8C and shotPitch +0x90 default 0. LaserSight applies shotPitch for it."
+    },
+    {
+      "name": "LaserSightFilterCarrierHardpoint",
+      "address": "0x0047242D",
+      "expected": "8B 55 0C 89 54 81 04 83 7D 0C 00 74 15 8B 45 0C 83 B8 84 00 00 00 4A",
+      "identity": "Carrier::SetHardpoint 0x00472420 (FUN_00472420-00472420.c:5-6; 1.5 PDB Carrier::SetHardpoint 0x0047e875): carrier+0x04+4*slot = the slot's hardpoint obj76, then [hardpoint+0x84] == 0x4A (CLASS_ID_SPECIAL_HARDPOINT). LaserSight reads the selected slot's hardpoint class id there (Docs/LASER_SIGHT.md, \"Weapon filter\")."
+    },
+    {
+      "name": "LaserSightFilterHardpointCategories",
+      "address": "0x00611D16",
+      "expected": "8B 4D C4 C7 41 74 47 00 00 00 EB 76 6A 04 68 2C A2 88 00 8D 55 E8 52 FF 15 C8 94 86 00 83 C4 0C 85 C0 75 0C 8B 45 C4 C7 40 74 48 00 00 00 EB 52 6A 04 68 34 A2 88 00 8D 4D E8 51 FF 15 C8 94 86 00 83 C4 0C 85 C0 75 0C 8B 55 C4 C7 42 74 49 00 00 00 EB 2E 6A 04 68 0C A2 88 00 8D 45 E8 50 FF 15 C8 94 86 00 83 C4 0C 85 C0 75 0C 8B 4D C4 C7 41 74 4A 00 00 00 EB 0A 8B 55 C4 C7 42 74 46 00 00 00",
+      "identity": "WeaponClass ODF load 0x00611AA0 (FUN_00611aa0-00611aa0.c:86-106): wpnCategory \"CANN\"/\"ROCK\"/\"MORT\"/\"SPEC\" (strings 0x0088A244/0x0088A22C/0x0088A234/0x0088A20C) -> class+0x74 = 0x47/0x48/0x49/0x4A, else 0x46 (fits any hardpoint). WeaponPowerup slot pick 0x006130A0 (FUN_006130a0-006130a0.c:27-29) matches it against the hardpoint's +0x84. LaserSight draws only for hardpoint class 0x47/0x48/0x49."
+    },
+    {
+      "name": "LaserSightFilterDispenserSig",
+      "address": "0x004B592B",
+      "expected": "C7 41 0C 50 53 49 44 8B 55 FC",
+      "identity": "DispenserClass::DispenserClass 0x004B5910 (FUN_004b5910-004b5910.c:6-8): weapon class+0x0C = 0x44495350, label \"dispenser\" (mine layers). LaserSight draws no beam for it."
     },
     {
       "name": "MultiplayerCreateVtable",

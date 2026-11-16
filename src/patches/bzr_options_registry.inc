@@ -17,6 +17,7 @@ struct ShimSettingDescriptor
     size_t defaultIndex;       // shown when the key is absent/invalid
     ShimSettingApplyGroup applyGroup;
     const char* description;   // one sentence shown in the status label on hover
+    const char* pairedKey = nullptr; // optional second key in the same section, written with the same value
 };
 
 static const char* const kShimSettingsOnOffValues[] = { "1", "0" };
@@ -27,6 +28,8 @@ static const char* const kShimSettingsActionValues[] = { "Reset", "Confirm?" };
 // index 1 shows while it is running.
 static const char* const kShimSettingsBuildValues[] = { "Build", "Building..." };
 static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
+// For keys that DISABLE a feature when 1: On writes 0.
+static const char* const kShimSettingsInvertedOnOffValues[] = { "0", "1" };
 static const char* const kShimSettingsLegacyTankAiValues[] = { "0", "1", "2" };
 static const char* const kShimSettingsLegacyTankAiLabels[] = { "Off", "All teams", "AI teams only" };
 static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
@@ -377,10 +380,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Experimental shallow ground relief. Visual only; collision is unchanged. "
       "DX11 only. Increases GPU cost. Restart required." },
-    { "Sun Flashbang", "Display", "SunFlashbang", nullptr, 0,
+    { "Sun Glare", "Display", "SunFlashbang", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::LiveEngineToggle,
-      "On is stock: looking near the sun paints a fullscreen white flash. Off suppresses only that flash." },
+      "Off suppresses the fullscreen white flash when looking near the sun. The sun disc and flare sprites are untouched. On is the stock flash." },
     { "Explosion Flash", "Display", "ExplosionFlash", nullptr, 0,
       kShimSettingsExplosionFlashValues, kShimSettingsExplosionFlashValues, 3, 0,
       ShimSettingApplyGroup::LiveEngineToggle,
@@ -422,22 +425,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
       ShimSettingApplyGroup::GlobalImprovement,
       "Satellite view pan speed, as a multiple of stock. Single player only." },
-    { "Jet Flames", "Display", "JetFlames", nullptr, 0,
+    { "Faction Color Jets", "Display", "JetFlames", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::JetFlames,
       "Faction-colored engine flames on jets and thrusters." },
-    { "Empty Craft Glow", "Display", "EmptyCraftLights", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::LiveEngineToggle,
-      "Keep emissive running lights lit on craft that have no pilot." },
-    { "Emissive Pulse", "Display", "EmissivePulse", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::LiveEngineToggle,
-      "Vary occupied-craft emissive brightness with asynchronous organic pulses." },
-    { "Star Twinkle", "Display", "StarTwinkle", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::LiveEngineToggle,
-      "Animate brightness variation in compatible star-sky materials." },
     { "Unit Voices", "Display", "UnitVoFeedback", nullptr, 0,
       kShimSettingsUnitVoValues, kShimSettingsUnitVoValues, 3, 0,
       ShimSettingApplyGroup::UnitVo,
@@ -447,14 +438,6 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Multiplayer vehicle flags: the selection screen and the in-match renderer. "
       "Leave off for BZP/BZP-T; their waiting room is faction-only. Restart required." },
-    { "Show Own MP Flag", "Display", "MultiplayerFlagShowOwnCraft", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::RestartRequired,
-      "Also draw your own flag over your own craft; stock draws only other players'. Restart required." },
-    { "Mesh Chunks", "General", "ChunkMeshes", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::RestartRequired,
-      "Generate destruction pieces from the model's mesh and skeleton. Restart required." },
     { "Menu Caching", "General", "FastMenuTransitions", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -473,15 +456,16 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsBindsUiAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Key-binding editor on the Input options page. Restart required." },
+      "Replaces the stock Input options page with the key-binding editor. Turn Off to get the stock input menu back. Restart required." },
     { "Raw Mouse Input", "General", "RawMouseInput", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
-      "Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see No Smoothing. Restart required." },
-    { "No Smoothing", "General", "DisableControlSmoothing", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      "Reads the mouse as raw input, bypassing Windows pointer acceleration. Does not remove aim smoothing; see Input Smoothing. Restart required." },
+    // DisableControlSmoothing is inverted: On (stock easing) writes 0; absent key = On.
+    { "Input Smoothing", "General", "DisableControlSmoothing", nullptr, 0,
+      kShimSettingsInvertedOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Steer, aim, throttle and strafe follow input directly instead of easing toward it, like BZ2's Control Smoothing Off. Affects mouse, keys and joystick. Restart required." },
+      "On is stock eased input. Off makes steer, aim, throttle and strafe follow input directly, like BZ2's Control Smoothing Off. Affects mouse, keys and joystick. Restart required." },
     { "Per-Frame Mouse", "Experimental", "MouseEveryFrame", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
@@ -543,19 +527,23 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Laser Sight", "General", "LaserSight", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::LiveEngineToggle,
-      "A thin beam from your vehicle's selected weapon to whatever it points at, up to 500 m (visual only). Off in multiplayer unless a mod allows it. Applies at once." },
+      "A thin beam from your vehicle's selected cannon, mortar or rocket weapon to whatever it points at, up to 500 m (visual only). Off in multiplayer unless a mod allows it. Applies at once." },
     // Absent key = on (inverted env mapping OPENSHIM_DISABLE_SKINNED_GIBS), so defaultIndex 0 selects "1" (On).
-    { "Skinned Gibs", "General", "SkinnedGibs", nullptr, 0,
+    { "Person Gibs", "General", "SkinnedGibs", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "When a pilot or soldier is fully fragmented, replace the body chunks with limb gibs cut from "
       "the posed model (visual only). Restart required." },
-    // Absent key = on (inverted env mapping OPENSHIM_DISABLE_FRACTURE), so defaultIndex 0 selects "1" (On).
-    { "Fracture Debris", "General", "FractureOnePiece", nullptr, 0,
+    // One row for two keys. FractureOnePiece is the primary (absent = on, inverted env mapping
+    // OPENSHIM_DISABLE_FRACTURE, so defaultIndex 0 selects "1" On); ChunkMeshes is written in
+    // step through pairedKey (its own absent default is off, so shipped inis set both). The row
+    // shows On only when both keys are on.
+    { "Destruction Chunks", "General", "FractureOnePiece", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "When a craft or building whose model is a single piece is fully fragmented, cut it into "
-      "several capped pieces and throw them like debris (visual only). Restart required." },
+      "Destroyed craft and buildings break into debris pieces: mesh and skeleton chunks, and "
+      "single-piece models cut into capped chunks. Visual only. Restart required.",
+      "ChunkMeshes" },
     // Absent key = on, so defaultIndex 0 selects "1" (On).
     { "GPU Skinning", "Experimental", "GpuSkinning", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -563,7 +551,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "DX11 only: animate craft on the GPU instead of the CPU, freeing CPU time with many "
       "craft on screen. Edges may differ from stock by a fraction of a pixel. Next mission." },
     // Read once at startup; absent key = on, so defaultIndex 0 selects "1" (On).
-    { "Primary Monitor", "Graphics", "D3D11PrimaryMonitor", nullptr, 0,
+    { "Primary Monitor Fix", "Graphics", "D3D11PrimaryMonitor", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "DX11 only: open the game window on the Windows primary monitor instead of a "
@@ -598,7 +586,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Turret AA Pitch", "SinglePlayer", "TurretAimPitch", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Turrets pitch up to engage air targets. Single player only." },
+      "Lets turrets aim higher than the stock pitch limit (0.5) so they can engage air targets. Single player only." },
     { "Jump-Snipe Crouch", "SinglePlayer", "JumpSnipeCrouch", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -755,7 +743,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "APC Allied Deploy", "Fixes", "ApcAlliedTargetDeploy", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Let APC AI accept allied deploy targets. Single player only. Restart required." },
+      "With an allied unit targeted, an APC still deploys its soldiers near valid enemies instead of ignoring the order. Stock only deploys on an enemy target, where the soldiers attack it. Single player only. Restart required." },
     { "Splinter Fix", "Fixes", "SplinterUndead", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -899,13 +887,6 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::ReadOnNextUse,
       "Ignore the free camera key (Shift/Ctrl+F11) in multiplayer so nobody scouts with it. "
       "Off is stock. Enforced by your own game only." },
-    // Re-read on every nickname apply; no process restart is required
-    // for the next OK / /nickname to take the new value.
-    { "Live Nickname", "Network", "ReauthOnNicknameChange", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
-      ShimSettingApplyGroup::ReadOnNextUse,
-      "Experimental: after a nickname edit, reconnect the lounge so the new name is "
-      "authorized. Expect a brief drop or Not Ready flicker. In a match it is only saved." },
     // defaultIndex 0 selects "1", matching an absent key (default on).
     { "MP Setup Screen", "Network", "PreLobby", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -991,9 +972,9 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "UnderAttackAlert", "Normal" }, { "SuppressHopOutAttackAlert", "0" },
     { "TargetPolicy", "Default" }, { "ScrapPilotHud", "Stock" }, { "RadarSizeScale", "1.0" },
     { "SatelliteZoomOut", "1.0" }, { "SatellitePanSpeed", "1.0" }, { "JetFlames", "0" },
-    { "EmptyCraftLights", "0" }, { "EmissivePulse", "0" }, { "StarTwinkle", "0" },
+
     { "UnitVoFeedback", "Normal" }, { "MultiplayerFlags", "0" },
-    { "MultiplayerFlagShowOwnCraft", "0" }, { "ChunkMeshes", "0" },
+
     { "FastMenuTransitions", "0" }, { "SoundChannels", "0" }, { "CustomBindsUi", "0" },
     { "RawMouseInput", "0" }, { "DisableControlSmoothing", "0" }, { "MouseEveryFrame", "0" },
     { "MapFilterExtras", "0" }, { "Enabled", "0" }, { "QuickSaveEnabled", "0" }, { "WeaponConvergence", "0" },
@@ -1011,7 +992,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "ScrapDrawDistance", "0" },
     { "D3D11PrimaryMonitor", "0" }, { "ResolutionListFilter", "0" }, { "ResolutionDropdown", "0" },
     { "StockFactionsOnly", "0" }, { "LobbyBanButton", "0" }, { "PersistentPlayerMute", "0" },
-    { "LobbyReadouts", "0" }, { "BlockFreeCamInMultiplayer", "0" }, { "ReauthOnNicknameChange", "0" }, { "PreLobby", "0" },
+    { "LobbyReadouts", "0" }, { "BlockFreeCamInMultiplayer", "0" }, { "PreLobby", "0" },
     { "SkipRebellionLauncher", "0" }, { "FogDistanceCull", "0" },
 };
 

@@ -28,6 +28,16 @@ namespace BZROpenShim
                                         size_t altKeyCount,
                                         const char* value);
 
+    // Same, and also writes `value` under `pairedKey` in the same section when
+    // pairedKey is non-null (one Options row that drives two ini keys).
+    void UpdateIniDocumentPairedValueLossless(std::vector<std::string>& lines,
+                                              const char* section,
+                                              const char* key,
+                                              const char* const* altKeys,
+                                              size_t altKeyCount,
+                                              const char* pairedKey,
+                                              const char* value);
+
     // Reads a text file into lines with trailing CR/LF stripped. A missing or
     // unreadable file yields an empty vector.
     std::vector<std::string> ReadTextFileLines(const std::filesystem::path& path);

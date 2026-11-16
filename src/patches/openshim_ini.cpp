@@ -107,6 +107,19 @@ namespace BZROpenShim
         lines.insert(lines.begin() + insertAt, newLine);
     }
 
+    void UpdateIniDocumentPairedValueLossless(std::vector<std::string>& lines,
+                                              const char* section,
+                                              const char* key,
+                                              const char* const* altKeys,
+                                              size_t altKeyCount,
+                                              const char* pairedKey,
+                                              const char* value)
+    {
+        UpdateIniDocumentValueLossless(lines, section, key, altKeys, altKeyCount, value);
+        if (pairedKey && *pairedKey)
+            UpdateIniDocumentValueLossless(lines, section, pairedKey, nullptr, 0, value);
+    }
+
     std::vector<std::string> ReadTextFileLines(const std::filesystem::path& path)
     {
         std::vector<std::string> lines;

@@ -99,7 +99,8 @@ Confidence labels follow the gate-status convention (**CONFIRMED** from code,
   an authorised socket it puts nothing on the wire, which matches what OpenShim
   observed.
 - **Existing OpenShim re-auth:** `src/patches/bzrnet_settings.cpp`
-  (`[Network] ReauthOnNicknameChange`) closes the port-1337 TCP socket
+  (`ApplyBzrNetNicknameForPreLobby`; the old `[Network] ReauthOnNicknameChange`
+  lounge experiment was retired on 2026-11-16) closes the port-1337 TCP socket
   (`RecycleBzrNetWebSocket`) and relies on the stock reconnect. It does not
   re-send on the same socket. Treat
   `reverse_engineering/notes/bzrnet_nickname_reauth_design_20260905.md` as out of

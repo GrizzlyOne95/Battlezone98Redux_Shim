@@ -110,6 +110,34 @@ int main()
     Check(state.groups[ammo].Opacity(fade,18000)==1 && state.groups[hull].Opacity(fade,18000)==0,
         "spending or refilling ammo reveals it independently of hull");
 
+    // Radar enemy pin: perceived team against the native enemy-team mask.
+    const uint32_t enemies = (1u<<2)|(1u<<5);
+    Check(EnemyContact(2,enemies) && EnemyContact(5,enemies),"a perceived enemy team pins the radar");
+    Check(!EnemyContact(1,enemies),"a perceived friendly team (disguised enemy) does not pin");
+    Check(!EnemyContact(0,0xFFFFFFFFu),"neutral team 0 never pins");
+    Check(!EnemyContact(-1,0xFFFFFFFFu) && !EnemyContact(16,0xFFFFFFFFu),"out-of-range teams fail as not enemy");
+    Check(!EnemyContact(2,0),"without the relation row nothing pins");
+    Activity pinned; pinned.Observe(1,1000);
+    for(uint64_t now=1000;now<=20000;now+=1000) pinned.Observe(1,now,EnemyContact(2,enemies));
+    Check(pinned.Opacity(fade,20000)==1,"a persistent enemy contact keeps the radar solid");
+    pinned.Observe(1,21000,EnemyContact(1,enemies));
+    Check(pinned.Opacity(fade,22500)==0,"the hold resumes after the last enemy leaves");
+
+    // Producer build-menu pin for scrap and pilots.
+    const std::array<uintptr_t,4> producers{0x100,0x200,0x300,0};
+    Check(IsProducerVtable(0x200,producers) && !IsProducerVtable(0x400,producers),"exact producer vtables only");
+    Check(!IsProducerVtable(0,producers),"an unbound (zero) vtable entry never matches a null object");
+    Check(ProductionMenuOpen(1,[](int){return true;}),"a selected producer opens the build menu");
+    Check(!ProductionMenuOpen(0,[](int){return true;}),"no selection, no build menu");
+    Check(!ProductionMenuOpen(2,[](int i){return i==0;}),"a mixed selection is not a build menu");
+    Check(!ProductionMenuOpen(kMaxSelected+1,[](int){return true;}),"an out-of-range selection count fails closed");
+    const size_t scrap = static_cast<size_t>(Group::Scrap), pilots = static_cast<size_t>(Group::Pilots);
+    State menu; std::array<uint64_t,kGroups> stable{1,2,3};
+    menu.Observe(30,stable,1000,commands);
+    menu.Observe(30,stable,9000,commands,Bit(Group::Scrap)|Bit(Group::Pilots));
+    Check(menu.groups[scrap].changedAt==9000 && menu.groups[pilots].changedAt==9000 && menu.groups[0].changedAt==1000,
+        "a build-menu pin refreshes scrap and pilots only");
+
     Check(ScaleAlpha(0x804080FF,0.25f)==0x204080FF,"multiply native alpha while preserving RGB");
     Check(ScaleAlpha(0x004080FF,0.25f)==0x004080FF,"native transparency remains transparent");
     Check(ScaleAlpha(0x804080FF,1)==0x804080FF,"full opacity is byte identical");

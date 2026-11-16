@@ -6,6 +6,8 @@ inventory below records the original research candidates. The map itself adds
 no hooks, settings or enabled capabilities. Implemented fades now cover weapons,
 scrap, pilots, commands, cockpit hull/ammo and radar; their acceptance remains separate
 from the static candidates below.
+Ctrl+= (hide all HUD for screenshots) uses the stock show-HUD switch
+`0x008EAAB0`; see "Hide all HUD" in [CONTEXTUAL_HUD.md](CONTEXTUAL_HUD.md).
 
 ## Evidence boundary
 
@@ -116,7 +118,8 @@ positions or the rotating compass as an activity fingerprint would keep the
 radar permanently awake. Preserve the native visibility/disguise policy;
 activity detection must not discover hidden objects or actual hidden teams.
 Whether alerts pin the entire radar or only their own layer is a policy choice
-still to be made. Tactical MapRadar is a separate lane, not covered by this
+still to be made. The shipped radar fade pins the whole radar while any
+drawn contact's perceived team is an enemy (see CONTEXTUAL_HUD.md). Tactical MapRadar is a separate lane, not covered by this
 cockpit boundary.
 
 ## Targeting, objectives and messages

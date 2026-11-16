@@ -95,7 +95,8 @@ SettingsUi = 1
 
 ; Restored legacy death-chunk rendering / chunkMeshes support.
 ; Accepted: boolean. Default: OFF (a missing key means off).
-; Exposed on the OpenShim Settings page as "Mesh Chunks".
+; Exposed on the OpenShim Settings page as "Destruction Chunks", which writes
+; this key and FractureOnePiece together (the row reads FractureOnePiece).
 ; Generates bone-group pieces automatically from the source Ogre mesh and
 ; skeleton. Cached under openshim/cache/chunks; no external payload pack is
 ; required. Unsupported source assets can still use existing payload packs.
@@ -152,6 +153,7 @@ SkinnedGibsDrawDistance = 150
 ; GOG build only. Per-spawn log lines under TraceSkinnedGibs.
 ; Accepted: 0 = OFF, non-zero = ON. Default: 1.
 ; Legacy env alias: OPENSHIM_DISABLE_FRACTURE
+; Exposed on the OpenShim Settings page as "Destruction Chunks" (shared with ChunkMeshes).
 FractureOnePiece = 1
 
 ; Shell casings: when a cannon-like weapon fires, a small brass casing is
@@ -187,12 +189,13 @@ ShellCasingsClasses = cannon,mortar,machinegun,snipergun,-gquake,-gsandbag
 
 ; Laser sight: a thin glowing beam from the player vehicle's selected weapon
 ; to the first terrain or object it meets, up to 500 m. Vehicles only (no
-; beam on foot). Visual only. Forced off in a network game unless a mod or
-; EXU calls OpenShimSetLaserSightMode(1); 0 here always wins. Applies live
-; from the options menu, no restart. Needs no asset pack: the beam mesh,
-; texture, SM4 shader and openshim_lasersight_beam material are generated in
-; the chunk cache root (a chunk payload directory may ship its own
-; openshim_lasersight.material and friends).
+; beam on foot). Only weapons on a cannon, rocket or mortar hardpoint get
+; it: none for special hardpoints or mine layers. Visual only. Forced off in a network
+; game unless a mod or EXU calls OpenShimSetLaserSightMode(1); 0 here always
+; wins. Applies live from the options menu, no restart. Needs no asset pack:
+; the beam mesh, texture, SM4 shader and openshim_lasersight_beam material
+; are generated in the chunk cache root (a chunk payload directory may ship
+; its own openshim_lasersight.material and friends).
 ; Accepted: boolean. Default: OFF, including when this key is absent.
 LaserSight = 0
 
@@ -304,7 +307,8 @@ RawMouseInput = 0
 ; platform path sets it; ON sets it on PC.
 ; Like BZ2's option this is global: it affects mouse, joystick and keyboard, so
 ; keyboard steering and throttle snap to full instead of ramping up.
-; Exposed on the OpenShim Settings page as "No Smoothing".
+; Exposed on the OpenShim Settings page as "Input Smoothing" (inverted: On is
+; stock smoothing and writes 0, Off writes 1).
 ; Env aliases: OPENSHIM_DISABLE_CONTROL_SMOOTHING, BZR_DISABLE_CONTROL_SMOOTHING
 DisableControlSmoothing = 0
 
@@ -1524,13 +1528,6 @@ TargetPolicy = Default
 ;                                     BZR_DISABLE_MP_FLAG_UI
 MultiplayerFlags = 1
 
-; Also draw your own multiplayer vehicle flag over your own craft.
-; Accepted: boolean. Default: OFF. Restart required.
-; OFF = only other players' flags render; ON = render your own flag too.
-; Ignored when MultiplayerFlags above is OFF.
-; Legacy env aliases: OPENSHIM_MP_FLAG_SHOW_OWN, BZR_MP_FLAG_SHOW_OWN
-MultiplayerFlagShowOwnCraft = 0
-
 ; Scrap/pilot readout layout.
 ; Canonical:
 ;   Legacy = BZ 1.5's gauge, rebuilt: the two readouts stacked at the top left
@@ -1582,7 +1579,7 @@ JetFlames = 0
 ;   0 = suppress only that contribution
 ; Inverted spelling DisableSunFlashbang = 1 does the same thing and wins if
 ; both keys are present. Legacy env alias: OPENSHIM_DISABLE_SUN_FLASHBANG.
-; Exposed on the OpenShim Settings page as "Sun Flashbang"; applies live.
+; Exposed on the OpenShim Settings page as "Sun Glare"; applies live.
 ;
 ; This is NOT bloom, the Glow compositor, the sun sprite material, or
 ; atmospheric scattering. LensFlare::Render multiplies
@@ -2342,14 +2339,6 @@ UdpPort = 0
 ; Accepted: text up to 127 characters.
 ; Blank/absent = use the Steam/GOG account name.
 ; Nickname =
-
-; Experimental: recycle the BZRNet control connection after a nickname edit while in lounge/lobby (not in-match).
-; Accepted: boolean. Default: OFF.
-; When ON, /nickname or the lobby nickname widget updates 0x009453E0, persists openshim.ini, then closes the live TCP :1337 session. Stock reconnects and sends a fresh Authorization containing the new name.
-; Expect a brief lounge drop and possible Not Ready flicker while reconnecting. Observer-visible rename behavior still requires two-client qualification.
-; Requires a live lounge/lobby: the WebSocket must be connected and the lobby at 0x00945470 must be valid. Edits while in-match (netId!=0) remain persist-only and apply on a later connection.
-; Legacy env aliases: OPENSHIM_DISABLE_BZRNET_REAUTH (inverted), OPENSHIM_ENABLE_BZRNET_REAUTH, BZR_ENABLE_BZRNET_REAUTH
-ReauthOnNicknameChange = 0
 
 ; Inject the native nickname and negotiated-route readouts into the MP lobby.
 ; Accepted: boolean. Default: OFF in the player preset (ON here as the

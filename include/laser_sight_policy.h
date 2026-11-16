@@ -58,6 +58,37 @@ namespace BZROpenShim::LaserSight
         return -1;
     }
 
+    // ---- Weapon filter ------------------------------------------------------
+    // The beam is drawn only for projectile weapons on a cannon, rocket or
+    // mortar hardpoint. Facts and citations: Docs/LASER_SIGHT.md, "Weapon
+    // filter".
+    //
+    // Hardpoint object class ids (OBJECT_CLASS_T, _OBJ76 +0x84). A weapon's
+    // wpnCategory uses the same values; Generic is a weapon with no
+    // wpnCategory, which fits any hardpoint.
+    inline constexpr int32_t kHardpointGeneric = 70; // CLASS_ID_WEAPON_HARDPOINT
+    inline constexpr int32_t kHardpointCannon = 71;  // CLASS_ID_CANNON_HARDPOINT ("CANN")
+    inline constexpr int32_t kHardpointRocket = 72;  // CLASS_ID_ROCKET_HARDPOINT ("ROCK")
+    inline constexpr int32_t kHardpointMortar = 73;  // CLASS_ID_MORTAR_HARDPOINT ("MORT")
+    inline constexpr int32_t kHardpointSpecial = 74; // CLASS_ID_SPECIAL_HARDPOINT ("SPEC")
+    // WeaponClass +0x0C signature of mine layers, which can sit on a cannon
+    // hardpoint. Beam guns, the TAG gun, beam and bolt (laser) weapons all
+    // keep the sight.
+    inline constexpr uint32_t kWeaponSigDispenser = 0x44495350u; // 'DISP' dispenser (mine layers)
+
+    inline bool IsSightedHardpoint(int32_t hardpointClass) noexcept
+    {
+        return hardpointClass == kHardpointCannon || hardpointClass == kHardpointRocket ||
+               hardpointClass == kHardpointMortar;
+    }
+
+    // hardpointClass: the mount's class id; weaponSig: WeaponClass +0x0C (0
+    // when the weapon has no class).
+    inline bool IsSightedWeapon(int32_t hardpointClass, uint32_t weaponSig) noexcept
+    {
+        return IsSightedHardpoint(hardpointClass) && weaponSig != 0 && weaponSig != kWeaponSigDispenser;
+    }
+
     // ---- Terrain ----------------------------------------------------------
     struct TerrainMarch
     {

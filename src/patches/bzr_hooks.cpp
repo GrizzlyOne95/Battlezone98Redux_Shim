@@ -3,6 +3,7 @@
 #include "hud_feedback.h"
 #include "contextual_hud.h"
 #include "hud_palette.h"
+#include "hud_visibility.h"
 #include "geometry_contact_test.h"
 #include "mesh_impact.h"
 #include "bzr_hooks.h"
@@ -1848,6 +1849,9 @@ namespace BZROpenShim
         TickOpenShimEventLayer();
         // The HUD installers below write sites only this thread executes.
         HookEngine::NoteFrameThread();
+        // Ctrl+= screenshot toggle: key filters, pending toggle and the stock
+        // show-HUD switch, ahead of this frame's HUD pass.
+        HudVisibility::Tick();
         HudFeedback::Tick();
         ContextualHud::Tick();
         HudPalette::Tick();
