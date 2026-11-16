@@ -789,6 +789,35 @@ void fleshTextureTests()
                 GibFleshZoneMaterialScript().find(GibOptions{}.capMarrowMaterial) != std::string::npos &&
                 GibFleshZoneMaterialScript().rfind(GibFleshZoneMaterialHeader(), 0) == 0,
             "the default cap materials are the ones the writer generates");
+    {
+        // Fracture sink dust: a soft alpha blob, 0 at the border (clamped),
+        // in a stock-sprite-style alpha blend material with a glow technique.
+        const auto dust = FractureDustTextureTga();
+        constexpr unsigned D = kFractureDustTextureSize;
+        const size_t pixels = 18 + static_cast<size_t>(dust.empty() ? 0 : dust[0]);
+        bool borderClear = dust.size() == pixels + static_cast<size_t>(D) * D * 4;
+        unsigned centreAlpha = 0;
+        if (borderClear)
+        {
+            const auto alphaAt = [&](unsigned x, unsigned y) { return dust[pixels + (static_cast<size_t>(y) * D + x) * 4 + 3]; };
+            for (unsigned i = 0; i < D; ++i)
+                borderClear = borderClear && alphaAt(i, 0) == 0 && alphaAt(i, D - 1) == 0 && alphaAt(0, i) == 0 &&
+                              alphaAt(D - 1, i) == 0;
+            centreAlpha = alphaAt(D / 2, D / 2);
+        }
+        Require(dust.size() > 18 && dust[2] == 2 && dust[16] == 32 && (dust[17] & 0x0F) == 8 && borderClear &&
+                    centreAlpha >= 96 && !IsGeneratedGibFleshTga(dust),
+                "sink dust texture is a 32-bit soft blob, clear at the border, not tagged as flesh");
+        const std::string dustScript = FractureDustMaterialScript();
+        Require(dustScript.rfind(FractureDustMaterialHeader(), 0) == 0 &&
+                    dustScript.find(std::string("material ") + kFractureDustMaterialName + "\n") != std::string::npos &&
+                    dustScript.find(std::string("texture ") + kFractureDustTextureFile) != std::string::npos &&
+                    dustScript.find("vertex_program_ref Effect_vertex") != std::string::npos &&
+                    dustScript.find("scene_blend alpha_blend") != std::string::npos &&
+                    dustScript.find("depth_write off") != std::string::npos &&
+                    dustScript.find("scheme glow") != std::string::npos && dustScript.find("import") == std::string::npos,
+                "sink dust material mirrors the stock alpha-blend sprite, with a black glow technique");
+    }
 }
 // Offline check against a real model: prints the split, like
 // scripts/export_gib_payloads.py does.

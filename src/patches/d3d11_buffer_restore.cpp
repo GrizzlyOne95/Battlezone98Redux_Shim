@@ -33,11 +33,14 @@
 // Steam) is patched.
 //
 // Config: on with [Graphics] D3D11DeviceLossRecovery;
-// OPENSHIM_DISABLE_D3D11_BUFFER_RESTORE=1 turns this part off alone.
+// OPENSHIM_DISABLE_D3D11_BUFFER_RESTORE=1 turns it off, and recovery with it:
+// device recovery is not installed without the handleDeviceLost guard here.
 #include "bool_token.h"
 #include "com_vtable_patch.h"
 #include "d3d11_buffer_mirror_policy.h"
 #include "d3d11_buffer_restore.h"
+#include "d3d11_device_loss_recovery.h"
+#include "d3d11_recovery_policy.h"
 #include "hook_engine.h"
 #include "shim_log.h"
 
@@ -46,7 +49,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
+#include <exception>
 #include <string>
 #include <unordered_map>
 
@@ -83,6 +88,8 @@ namespace BZROpenShim
         using FnHandleDeviceLost = void(__fastcall*)(void*, void*);
         using FnReloadAll = void(__fastcall*)(void*, void*, uint32_t);
         using FnGetSingletonPtr = void*(__cdecl*)();
+        using FnGetAutoWindow = void*(__fastcall*)(void*, void*);
+        using FnWindowAttribute = void(__thiscall*)(void*, const std::string&, void*);
 
         FnCtor g_RealCtor = nullptr;
         FnDtor g_RealDtor = nullptr;
@@ -95,6 +102,9 @@ namespace BZROpenShim
         const void* g_BufferVtable = nullptr;
         FnGetSingletonPtr g_MeshManagerPtr = nullptr;
         void* g_ExpectedReloadAll = nullptr;
+        FnGetSingletonPtr g_RootPtr = nullptr;
+        FnGetAutoWindow g_AutoWindow = nullptr;
+        FnWindowAttribute g_WindowAttribute = nullptr;
 
         struct Mirror
         {
@@ -508,6 +518,33 @@ namespace BZROpenShim
             }
         }
 
+        // Asks the auto-created window for its back buffer and render target
+        // view (OgreD3D11RenderWindow.cpp:306-316, reached through the Hwnd
+        // override at 1068-1081); see DeviceLostThrowFailsClosed.
+        bool ThrowFailsClosed() noexcept
+        {
+            bool queried = false;
+            void* backBuffer = nullptr;
+            void* renderTargetView = nullptr;
+            try
+            {
+                void* const root = g_RootPtr();
+                void* const window = root ? g_AutoWindow(root, nullptr) : nullptr;
+                if (window)
+                {
+                    g_WindowAttribute(window, std::string("ID3D11Texture2D"), &backBuffer);
+                    g_WindowAttribute(window, std::string("ID3D11RenderTargetView"), &renderTargetView);
+                    queried = true;
+                }
+            }
+            catch (...)
+            {
+                queried = false;
+            }
+            return D3D11RecoveryPolicy::DeviceLostThrowFailsClosed(queried, backBuffer != nullptr,
+                                                                 renderTargetView != nullptr);
+        }
+
         void __fastcall HookHandleDeviceLost(void* renderSystem, void*)
         {
             EnsureMeshManagerHook();
@@ -520,7 +557,45 @@ namespace BZROpenShim
                 }
                 ~Scope() { g_InDeviceLost.store(false, std::memory_order_release); }
             } scope;
-            g_RealHandleDeviceLost(renderSystem, nullptr);
+            // Ogre's handleDeviceLost (OgreD3D11RenderSystem.cpp:1583-1622)
+            // is not exception-safe: a throw skips the rest of the restore.
+            // On 2026-11-15 the window's _createSwapChain threw
+            // (DXGI_ERROR_INVALID_CALL), the game's frame handler swallowed
+            // it, and the next frame read the null swap chain in
+            // D3D11RenderWindowHwnd::_beginUpdate. So a throw that leaves the
+            // window without its back buffer (and so possibly without a swap
+            // chain) ends the game with the reason; any other throw is
+            // rethrown as stock (D3D11RecoveryPolicy::DeviceLostThrowFailsClosed).
+            try
+            {
+                g_RealHandleDeviceLost(renderSystem, nullptr);
+            }
+            catch (const std::exception& e)
+            {
+                // Ogre::Exception derives from std::exception; its what() is
+                // the full description, "OGRE EXCEPTION(<hr>:...): ...".
+                if (!ThrowFailsClosed())
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "[DX11 Buffers] device restore threw with the window's back buffer and render target intact; rethrowing as stock: %s",
+                             e.what());
+                    throw;
+                }
+                char reason[512];
+                snprintf(reason, sizeof(reason), "Ogre's device restore threw with the window's back buffer or render target (and so maybe its swap chain) gone: %s",
+                         e.what());
+                D3D11RecoveryFailClosed(reason);
+            }
+            catch (...)
+            {
+                if (!ThrowFailsClosed())
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                             "[DX11 Buffers] device restore threw a non-standard exception with the window's back buffer and render target intact; rethrowing as stock");
+                    throw;
+                }
+                D3D11RecoveryFailClosed("Ogre's device restore threw a non-standard exception with the window's back buffer or render target (and so maybe its swap chain) gone");
+            }
         }
 
         struct ThunkSite
@@ -605,6 +680,14 @@ namespace BZROpenShim
         g_ExpectedReloadAll = ogre ? reinterpret_cast<void*>(GetProcAddress(
                                          ogre, "?reloadAll@ResourceManager@Ogre@@UAEXW4LoadingFlags@Resource@2@@Z"))
                                    : nullptr;
+        g_RootPtr = ogre ? reinterpret_cast<FnGetSingletonPtr>(GetProcAddress(ogre, "?getSingletonPtr@Root@Ogre@@SAPAV12@XZ"))
+                         : nullptr;
+        g_AutoWindow = ogre ? reinterpret_cast<FnGetAutoWindow>(GetProcAddress(
+                                  ogre, "?getAutoCreatedWindow@Root@Ogre@@QAEPAVRenderWindow@2@XZ"))
+                            : nullptr;
+        g_WindowAttribute = reinterpret_cast<FnWindowAttribute>(GetProcAddress(
+            renderer,
+            "?getCustomAttribute@D3D11RenderWindowHwnd@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@PAX@Z"));
 
         // The destructor goes first, so no buffer the constructor hook records
         // can be freed unseen.
@@ -622,7 +705,8 @@ namespace BZROpenShim
             {"?handleDeviceLost@D3D11RenderSystem@Ogre@@QAEXXZ", reinterpret_cast<void*>(&HookHandleDeviceLost),
              reinterpret_cast<void**>(&g_RealHandleDeviceLost), 0, {}},
         };
-        if (!g_BufferVtable || !g_MeshManagerPtr || !g_ExpectedReloadAll)
+        if (!g_BufferVtable || !g_MeshManagerPtr || !g_ExpectedReloadAll || !g_RootPtr || !g_AutoWindow ||
+            !g_WindowAttribute)
         {
             LogShimA(LogLevel::Warn, kComponent, "[DX11 Buffers] renderer or OgreMain exports missing; buffers left as stock");
             return false;

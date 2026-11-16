@@ -116,11 +116,23 @@ namespace BZROpenShim::WeaponPresentation
         bool Valid() const noexcept;
     };
 
+    // Alternate flash placement for one bound weapon: the mesh offset and the
+    // muzzleRender offset that replace flash.offset / flash.muzzleRender.offset
+    // for a shot fired with cockpit placement (craft cockpitFlashOffset<N>).
+    struct FlashOffsets
+    {
+        WeaponConvergence::Vec3 mesh = {};
+        WeaponConvergence::Vec3 render = {};
+        bool Valid() const noexcept;
+    };
+
     struct BindRequest
     {
         Identity owner;
         Identity weapon;
         FlashConfig flash;
+        // Optional cockpit placement; an invalid value is dropped at Bind.
+        std::optional<FlashOffsets> cockpitFlash;
         std::optional<RecoilBinding> recoil;
         // A present animation takes precedence over the generated node slide.
         std::optional<AnimationBinding> animation;
@@ -197,8 +209,11 @@ namespace BZROpenShim::WeaponPresentation
         // Called only AFTER the native path has accepted/committed a shot.
         // Serial is monotonically increasing per binding, including pellets'
         // shared logical shot. Matrix is the copied final factory argument.
+        // cockpitPlacement selects the binding's cockpitFlash offsets (when
+        // bound) for each flash layer this shot starts; that choice holds for
+        // the flash's life, including SetMuzzlePose refreshes.
         ShotResult Fire(BindingToken token, uint64_t shotSerial,
-            const Matrix& committedPose) noexcept;
+            const Matrix& committedPose, bool cockpitPlacement = false) noexcept;
         bool SetMuzzlePose(BindingToken token, const Matrix& worldPose) noexcept;
         // Static-translation node contract: refresh live orientation without
         // recapturing rest from an already displaced renderer pose.
@@ -213,7 +228,12 @@ namespace BZROpenShim::WeaponPresentation
         // pass. A repeated serial cannot recover a shared node twice. Rendering
         // never supplies dt. Zero dt freezes; invalid dt/serial is rejected.
         bool BeginSimulationStep(uint64_t stepSerial, float dt) noexcept;
-        void SynchronizeVisuals(Backend& backend) noexcept;
+        // PosesOnly skips every flash create and cancel/detach (scene object
+        // creation and destruction) and leaves them due for the next Full
+        // call; animation, recoil and flash pose updates still run. The world
+        // render-queue hook uses it (include/scene_mutation_drain_policy.h).
+        enum class SceneAccess : uint8_t { Full, PosesOnly };
+        void SynchronizeVisuals(Backend& backend, SceneAccess access = SceneAccess::Full) noexcept;
 
         // Paired around native scene destruction. Nested clearScene ->
         // destroyAllMovableObjects retains stable slots through the outer return.

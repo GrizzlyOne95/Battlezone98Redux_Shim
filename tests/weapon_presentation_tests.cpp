@@ -388,6 +388,98 @@ namespace
         Finish(personRuntime, personBackend);
     }
 
+    void TestCockpitFlashOffset()
+    {
+        namespace Policy = WP::NativePolicy;
+        auto weaponFlash = Policy::ResolveMeshFlashConfig({}, {"\"Small.mesh\"", {}, "0.05", {}, {}, "\"0 0 0\"", {}});
+        weaponFlash.muzzleRender = Policy::ResolveMuzzleRenderConfig({}, {"\"R.render\"", "0.20", {}}, weaponFlash.offset);
+        Require(weaponFlash.IsMesh() && weaponFlash.muzzleRender.Valid(), "cockpit offset base invalid");
+        const auto hull = Policy::Offset("\"0 0 3\"");
+        const auto cockpitOffset = Policy::Offset("\"-0.6 -0.8 3.4\"");
+        Require(hull && cockpitOffset, "cockpit test offsets invalid");
+
+        // Cockpit placement follows flashOffset's render-defaulted rule.
+        auto offsets = Policy::CockpitFlashOffsets(weaponFlash, true, *cockpitOffset);
+        Require(offsets.mesh.x == -0.6f && offsets.render.x == -0.6f, "cockpit offset missed a defaulted layer");
+        auto explicitRender = weaponFlash;
+        explicitRender.muzzleRender.offset = {1, 2, 3};
+        offsets = Policy::CockpitFlashOffsets(explicitRender, false, *cockpitOffset);
+        Require(offsets.mesh.z == 3.4f && offsets.render.z == 3, "cockpit offset overrode explicit muzzleRenderOffset");
+        WP::FlashConfig renderOnly;
+        renderOnly.muzzleRender = weaponFlash.muzzleRender;
+        offsets = Policy::CockpitFlashOffsets(renderOnly, true, *cockpitOffset);
+        Require(offsets.mesh.z == 0 && offsets.render.z == 3.4f, "render-only cockpit offset wrong");
+
+        auto fitted = weaponFlash;
+        Policy::ApplyCraftFlashOffset(fitted, true, *hull);
+        auto request = Request();
+        request.recoil.reset();
+        request.flash = fitted;
+        request.cockpitFlash = Policy::CockpitFlashOffsets(fitted, true, *cockpitOffset);
+
+        // Cockpit shot: both layers at the cockpit gun, and the refresh keeps them there.
+        {
+            FakeBackend backend;
+            WP::Runtime runtime; Start(runtime, true, false);
+            const auto token = Bind(runtime, request);
+            auto pose = WC::Identity();
+            Require(runtime.Fire(token, 1, pose, true).flashStarted, "cockpit shot ignored");
+            runtime.BeginSimulationStep(1, .02f);
+            runtime.SynchronizeVisuals(backend);
+            Near(backend.meshPose.positionX, -0.6, "cockpit mesh flash not at cockpit right offset");
+            Near(backend.meshPose.positionY, -0.8, "cockpit mesh flash not at cockpit up offset");
+            Near(backend.meshPose.positionZ, 3.4, "cockpit mesh flash not at cockpit forward offset");
+            Near(backend.renderers[0].pose.positionX, -0.6, "cockpit render flash not at cockpit offset");
+            pose.positionX = 10;
+            Require(runtime.SetMuzzlePose(token, pose), "cockpit refresh rejected");
+            runtime.SynchronizeVisuals(backend);
+            Near(backend.renderers[0].pose.positionX, 9.4, "refresh dropped the cockpit offset");
+            // Mesh flash expires; the next shot is third person while the
+            // longer render flash from the cockpit shot is still alive.
+            runtime.BeginSimulationStep(2, .04f);
+            runtime.SynchronizeVisuals(backend);
+            Require(runtime.Fire(token, 2, pose, false).flashStarted, "third-person shot ignored");
+            runtime.SynchronizeVisuals(backend);
+            Require(backend.meshCreates == 2 && backend.creates == 1, "flash layers restarted unexpectedly");
+            Near(backend.meshPose.positionX, 10, "third-person mesh flash kept the cockpit offset");
+            Near(backend.meshPose.positionZ, 3, "third-person mesh flash missed flashOffset");
+            runtime.SetMuzzlePose(token, pose);
+            runtime.SynchronizeVisuals(backend);
+            Near(backend.renderers[0].pose.positionX, 9.4, "view switch jumped a live cockpit flash");
+            Near(backend.renderers[0].pose.positionY, -0.8, "view switch jumped a live cockpit flash");
+            Finish(runtime, backend);
+        }
+        // Not the player / not cockpit view: the caller passes false.
+        {
+            FakeBackend backend;
+            WP::Runtime runtime; Start(runtime, true, false);
+            const auto token = Bind(runtime, request);
+            Require(runtime.Fire(token, 1, WC::Identity(), false).flashStarted, "hull shot ignored");
+            runtime.SynchronizeVisuals(backend);
+            Near(backend.meshPose.positionX, 0, "hull shot used the cockpit offset");
+            Near(backend.meshPose.positionZ, 3, "hull shot missed flashOffset");
+            Near(backend.renderers[0].pose.positionZ, 3, "hull render shot missed flashOffset");
+            Finish(runtime, backend);
+        }
+        // No cockpit offset bound, or an invalid one: cockpit placement keeps flashOffset.
+        for (bool invalid : {false, true})
+        {
+            auto plain = request;
+            if (invalid) plain.cockpitFlash = WP::FlashOffsets{{21, 0, 0}, {0, 0, 0}};
+            else plain.cockpitFlash.reset();
+            FakeBackend backend;
+            WP::Runtime runtime; Start(runtime, true, false);
+            const auto token = Bind(runtime, plain);
+            Require(runtime.Fire(token, 1, WC::Identity(), true).flashStarted, "plain cockpit shot ignored");
+            runtime.SynchronizeVisuals(backend);
+            Near(backend.meshPose.positionX, 0, invalid ? "invalid cockpit offset was used" : "absent cockpit offset invented one");
+            Near(backend.meshPose.positionZ, 3, "cockpit shot without a cockpit offset missed flashOffset");
+            Finish(runtime, backend);
+        }
+        // A cockpit offset alone does not start a flash on a vehicle.
+        Require(!Policy::FlashAllowed(false, false), "cockpit offset alone allowed a vehicle flash");
+    }
+
     void TestMuzzleRenderAlongsideMesh()
     {
         namespace Policy = WP::NativePolicy;
@@ -1038,6 +1130,63 @@ namespace
     }
 }
 
+namespace
+{
+    // The world render-queue hook runs PosesOnly: no flash may be created or
+    // cancelled there (crash dump 20980: an EXU mesh flash destroyed mid-sort).
+    void TestPosesOnlyDefersFlashCreateAndCancel()
+    {
+        const auto PosesOnly = WP::Runtime::SceneAccess::PosesOnly;
+        WP::FlashConfig mesh;
+        mesh.mesh = "MyFlash.mesh"; mesh.duration = 0.08f;
+        Require(mesh.Valid(), "test mesh flash config invalid");
+
+        FakeBackend backend;
+        WP::Runtime runtime;
+        Start(runtime, true, true);
+        auto request = Request(); request.flash = mesh;
+        const auto token = Bind(runtime, request);
+        Require(runtime.Fire(token, 1, WC::Identity()).flashStarted, "mesh shot ignored");
+        runtime.BeginSimulationStep(1, 0.01f);
+        runtime.SynchronizeVisuals(backend, PosesOnly);
+        runtime.SynchronizeVisuals(backend, PosesOnly); // a second camera
+        Require(backend.meshCreates == 0, "PosesOnly created a mesh flash");
+        Require(!backend.recoilPoses.empty(), "PosesOnly skipped the recoil pose");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.meshCreates == 1, "deferred mesh flash not created by the Full pass");
+        Near(backend.meshLifetime, 0.07, "deferred mesh flash lifetime wrong");
+
+        runtime.BeginSimulationStep(2, 0.2f); // flash expires
+        runtime.SynchronizeVisuals(backend, PosesOnly);
+        Require(backend.meshCancels == 0 && runtime.Inspect().meshFlashAttachments == 1,
+            "PosesOnly cancelled a mesh flash");
+        runtime.SynchronizeVisuals(backend);
+        Require(backend.meshCancels == 1 && runtime.Inspect().meshFlashAttachments == 0,
+            "deferred cancel not run by the Full pass");
+        Finish(runtime, backend);
+
+        FakeBackend render;
+        WP::Runtime legacy;
+        Start(legacy, true, false);
+        auto plain = Request(); plain.recoil.reset();
+        const auto legacyToken = Bind(legacy, plain);
+        legacy.Fire(legacyToken, 1, WC::Identity());
+        legacy.SynchronizeVisuals(render, PosesOnly);
+        Require(render.creates == 0, "PosesOnly created a native flash");
+        legacy.SynchronizeVisuals(render);
+        Require(render.creates == 1, "deferred native flash not created");
+        legacy.SetMuzzlePose(legacyToken, WC::Identity());
+        legacy.SetSession(false, true); // leaving play retires the flash
+        legacy.SynchronizeVisuals(render, PosesOnly);
+        Require(render.detaches == 0 && legacy.Inspect().nativeAttachments == 1,
+            "PosesOnly detached a native flash");
+        legacy.SynchronizeVisuals(render);
+        Require(render.detaches == 1 && legacy.Inspect().nativeAttachments == 0,
+            "deferred detach not run by the Full pass");
+        legacy.InvalidateResources();
+    }
+}
+
 int main()
 {
     {
@@ -1060,10 +1209,12 @@ int main()
         Near(backend.animationCalls.back().time, 0, "spin stopped at a non-rest phase");
     }
     TestMeshFlashPolicyAndRuntime();
+    TestPosesOnlyDefersFlashCreateAndCancel();
     TestMuzzleRenderAlongsideMesh();
     TestCraftFlashOffsetOverride();
     TestRecoilKickOptIn();
     TestFlashRequiresCraftOffsetForVehicles();
+    TestCockpitFlashOffset();
     TestAnimationRecoil();
     TestConfigurationAndIds();
     TestBoundedMeshLookup();

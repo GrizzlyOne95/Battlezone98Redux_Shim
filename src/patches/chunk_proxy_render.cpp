@@ -47,6 +47,8 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "scene_mutation_drain.h"
+#include "scene_mutation_drain_policy.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -129,6 +131,10 @@ namespace BZROpenShim
         std::vector<std::filesystem::path> g_ChunkPayloadResourceDirectories = {};
         void* g_ChunkProxyBillboardSet = nullptr;
         std::vector<ChunkProxySlot> g_ChunkProxySlots = {};
+        // Mesh proxy objects asked for inside a render-queue callback, built by
+        // CreateRequestedChunkMeshProxyObjects at the drain
+        // (include/scene_mutation_drain_policy.h). Keyed by slot occupant.
+        static SceneMutationDrain::SlotRequests<const uint8_t*> g_ChunkMeshProxyCreateRequests;
         void* g_GenericChunkBatchManualObject = nullptr;
         void* g_GenericChunkBatchSceneNode = nullptr;
         void* g_GenericChunkBatchSceneManager = nullptr;
@@ -1357,6 +1363,18 @@ namespace BZROpenShim
             if (slot.sceneNode && slot.entity)
                 return true;
 
+            // Never create inside the traversal once the drain is installed:
+            // ask for the objects; the next drain builds them hidden and the
+            // following render tick positions and shows them.
+            if (InsideRenderQueueHookWithDeferral())
+            {
+                const size_t index = static_cast<size_t>(&slot - g_ChunkProxySlots.data());
+                if (slot.objectBytes &&
+                    g_ChunkMeshProxyCreateRequests.Request(index, slot.objectBytes, g_ChunkProxySlots.size()))
+                    NoteSceneMutationRequested();
+                return false;
+            }
+
             // Back off only after a failed attempt (Ogre not ready yet). Arming
             // the throttle on success too would let just one fragment per second
             // acquire an entity, while chunk entries expire within 400ms.
@@ -1648,8 +1666,22 @@ namespace BZROpenShim
         // Entity::isVisible on a destroyed chunk entity while the loading
         // screen still rendered frames. Forget everything without calling
         // into Ogre; resources are lazily recreated on the next tick.
+        void CreateRequestedChunkMeshProxyObjects()
+        {
+            if (g_ChunkMeshProxyCreateRequests.Empty())
+                return;
+            g_ChunkMeshProxyCreateRequests.Drain(
+                g_ChunkProxySlots.size(),
+                [](size_t index) -> const uint8_t* {
+                    const ChunkProxySlot& slot = g_ChunkProxySlots[index];
+                    return slot.active ? slot.objectBytes : nullptr;
+                },
+                [](size_t index) { (void)EnsureChunkMeshProxySlot(g_ChunkProxySlots[index]); });
+        }
+
         void ForgetAllChunkProxySceneResources(const wchar_t* reason)
         {
+            g_ChunkMeshProxyCreateRequests.Clear();
             size_t forgotten = 0;
             for (ChunkProxySlot& slot : g_ChunkProxySlots)
             {
@@ -2470,6 +2502,76 @@ namespace BZROpenShim
             return TryReadMainViewCameraSeh(getRoot, getWindow, getViewport, getCamera, getPosition, getFovY, out, fovY);
         }
 
+        using FnOgreCameraSphereVisible = bool(__thiscall*)(const void* camera, const void* sphere, void* culledBy);
+
+        using FnOgreTargetNumViewports = unsigned short(__thiscall*)(const void*);
+
+        static bool TryReadMainViewCameraObjectSeh(FnOgreRootSingleton getRoot, FnOgreRootAutoWindow getWindow,
+                                                   FnOgreTargetNumViewports getNumViewports,
+                                                   FnOgreTargetViewport getViewport, FnOgreViewportCamera getCamera,
+                                                   void** out)
+        {
+            __try
+            {
+                void* const root = getRoot();
+                void* const window = root ? getWindow(root) : nullptr;
+                // getViewport(0) on a window with none throws (no viewport yet).
+                void* const viewport = window && getNumViewports(window) > 0 ? getViewport(window, 0) : nullptr;
+                *out = viewport ? getCamera(viewport) : nullptr;
+                return *out != nullptr;
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                *out = nullptr;
+                return false;
+            }
+        }
+
+        void* GetMainViewCameraObject()
+        {
+            static const FnOgreRootSingleton getRoot =
+                ResolveOgreProc<FnOgreRootSingleton>("?getSingletonPtr@Root@Ogre@@SAPAV12@XZ");
+            static const FnOgreRootAutoWindow getWindow =
+                ResolveOgreProc<FnOgreRootAutoWindow>("?getAutoCreatedWindow@Root@Ogre@@QAEPAVRenderWindow@2@XZ");
+            static const FnOgreTargetViewport getViewport =
+                ResolveOgreProc<FnOgreTargetViewport>("?getViewport@RenderTarget@Ogre@@UAEPAVViewport@2@G@Z");
+            static const FnOgreViewportCamera getCamera =
+                ResolveOgreProc<FnOgreViewportCamera>("?getCamera@Viewport@Ogre@@QBEPAVCamera@2@XZ");
+            static const FnOgreTargetNumViewports getNumViewports =
+                ResolveOgreProc<FnOgreTargetNumViewports>("?getNumViewports@RenderTarget@Ogre@@UBEGXZ");
+            void* camera = nullptr;
+            if (!getRoot || !getWindow || !getNumViewports || !getViewport || !getCamera)
+                return nullptr;
+            return TryReadMainViewCameraObjectSeh(getRoot, getWindow, getNumViewports, getViewport, getCamera, &camera)
+                       ? camera
+                       : nullptr;
+        }
+
+        static bool TrySphereVisibleSeh(FnOgreCameraSphereVisible isVisible, void* camera, const float sphere[4],
+                                        bool& visible)
+        {
+            __try
+            {
+                visible = isVisible(camera, sphere, nullptr);
+                return true;
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                return false;
+            }
+        }
+
+        bool IsSphereInCameraView(void* camera, const float center[3], float radius, bool& visible)
+        {
+            static const FnOgreCameraSphereVisible isVisible = ResolveOgreProc<FnOgreCameraSphereVisible>(
+                "?isVisible@Camera@Ogre@@UBE_NABVSphere@2@PAW4FrustumPlane@2@@Z");
+            if (!camera || !isVisible)
+                return false;
+            // Ogre::Sphere: Real mRadius, then Vector3 mCenter.
+            const float sphere[4] = {radius, center[0], center[1], center[2]};
+            return TrySphereVisibleSeh(isVisible, camera, sphere, visible);
+        }
+
         using FnOgreDestroySceneNodePtr = void(__thiscall*)(void*, void*);
 
         static bool TryDestroyShimObjectSeh(
@@ -2508,6 +2610,115 @@ namespace BZROpenShim
                 return;
             }
             TryDestroyShimObjectSeh(sceneManager, node, entity, destroyEntity, destroySceneNode);
+        }
+
+        using FnOgreDestroyManualObjectPtr = void(__thiscall*)(void*, void*);
+
+        // Two guards, so a throw from the object destroy still frees the node.
+        static bool TryDestroyGenericChunkBatchSeh(
+            void* sceneManager,
+            FnOgreDestroyManualObjectPtr destroyManualObject,
+            FnOgreDestroySceneNodePtr destroySceneNode)
+        {
+            bool objectOk = true;
+            bool nodeOk = true;
+            __try
+            {
+                objectOk = CatchOgreThrow("destroyChunkBatchObject", [&] {
+                    if (g_GenericChunkBatchManualObject &&
+                        IsLikelyLiveOgreObject(g_GenericChunkBatchManualObject))
+                        destroyManualObject(sceneManager, g_GenericChunkBatchManualObject);
+                });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                objectOk = false;
+            }
+            __try
+            {
+                nodeOk = CatchOgreThrow("destroyChunkBatchNode", [&] {
+                    if (g_GenericChunkBatchSceneNode &&
+                        IsLikelyLiveOgreObject(g_GenericChunkBatchSceneNode))
+                        destroySceneNode(sceneManager, g_GenericChunkBatchSceneNode);
+                });
+            }
+            __except (OgreCallSehFilter(GetExceptionCode()))
+            {
+                nodeOk = false;
+            }
+            return objectOk && nodeOk;
+        }
+
+        static void ReleaseChunkProxySlotSeh(ChunkProxySlot& slot)
+        {
+            __try
+            {
+                ReleaseChunkProxySlot(slot);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                ForgetChunkProxySlotOgreRefs(slot);
+            }
+        }
+
+        // Mission end (and save load, and replay) runs destroyAllEntities, not
+        // clearScene, so ForgetAllChunkProxySceneResources never ran there and
+        // the generic chunk batch outlived its mission: the next mission's
+        // first debris refilled the old ManualObject (old section, old
+        // material binding, old bounds) and the device hung about two seconds
+        // later (DXGI_ERROR_DEVICE_HUNG on the second CR mission of a session).
+        // Destroy the batch object and every slot's proxy Entity while they are
+        // still valid, then forget the rest, so the next mission builds fresh.
+        void DestroyChunkProxySceneObjects(void* sceneManager, const wchar_t* reason)
+        {
+            static FnOgreDestroyManualObjectPtr destroyManualObject =
+                ResolveOgreProc<FnOgreDestroyManualObjectPtr>(
+                    "?destroyManualObject@SceneManager@Ogre@@UAEXPAVManualObject@2@@Z");
+            static FnOgreDestroySceneNodePtr destroySceneNode =
+                ResolveOgreProc<FnOgreDestroySceneNodePtr>(
+                    "?destroySceneNode@SceneManager@Ogre@@UAEXPAVSceneNode@2@@Z");
+            // Another scene's teardown must not orphan this scene's objects.
+            if (!sceneManager || sceneManager != GetOgreSceneManagerRuntime())
+                return;
+
+            size_t destroyedSlots = 0;
+            for (ChunkProxySlot& slot : g_ChunkProxySlots)
+            {
+                if (slot.sceneManager == sceneManager && (slot.entity || slot.sceneNode))
+                {
+                    DestroyShimOwnedMeshObject(sceneManager, slot.sceneNode, slot.entity);
+                    ++destroyedSlots;
+                }
+                // The Entity is gone (destroyed here or freed by the stock
+                // call), so Release must not touch it; it still hides the
+                // slot's billboard, which destroyAllEntities leaves alive.
+                slot.entity = nullptr;
+                slot.sceneNode = nullptr;
+                slot.meshAssigned = false;
+                ReleaseChunkProxySlotSeh(slot);
+            }
+            g_ChunkMeshProxyCreateRequests.Clear();
+
+            const bool hadBatch = g_GenericChunkBatchManualObject != nullptr;
+            bool batchDestroyed = false;
+            if (hadBatch && g_GenericChunkBatchSceneManager == sceneManager &&
+                destroyManualObject && destroySceneNode)
+            {
+                batchDestroyed = TryDestroyGenericChunkBatchSeh(
+                    sceneManager, destroyManualObject, destroySceneNode);
+            }
+            g_GenericChunkBatchManualObject = nullptr;
+            g_GenericChunkBatchVisible = false;
+            g_GenericChunkBatchSceneNode = nullptr;
+            g_GenericChunkBatchBuiltVersion = ChunkBatchInvalidation::kUnbuiltVersion;
+            g_GenericChunkBatchBuiltMaterial.clear();
+            g_GenericChunkBatchSceneManager = nullptr;
+            g_GenericChunkBatchSectionCreated = false;
+
+            Log(L"[CHUNKPROXY] scene teardown (%ls): destroyed %zu slot proxy(s), batch=%ls\n",
+                reason ? reason : L"<none>",
+                destroyedSlots,
+                !hadBatch ? L"none" : (batchDestroyed ? L"destroyed" : L"forgotten"));
         }
 
         static bool TryCreateDetachedShimEntitySeh(

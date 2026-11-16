@@ -64,6 +64,26 @@ inline constexpr const char *kFractureInteriorMaterialMarker = "// OpenShim Frac
 std::string FractureInteriorMaterialHeader();
 std::string FractureInteriorMaterialScript();
 
+// The dust a sinking fracture piece kicks up: camera-facing puffs (an Ogre
+// BillboardSet) with a generated soft, clumpy alpha blob. The material mirrors
+// the stock BZSprite/AlphaBlend sprites (Effect_vertex/Effect_fragment, alpha
+// blend, no depth write, black in the glow scheme), so it runs on DX9 and DX11
+// alike. The dust tone is the pass diffuse; the billboard colour is kept grey
+// (R = G = B) because DX11's Effect program swizzles a packed colour .bgra, and
+// its alpha drives the fade. Same override rules as the interior material. The
+// stock smoke.png is a 4x4 frame atlas, and the shipped OgreMain exports no
+// per-billboard texcoord setter, hence the generated single-frame texture.
+inline constexpr const char *kFractureDustMaterialName = "openshim_fracture_dust";
+inline constexpr const char *kFractureDustMaterialFile = "openshim_fracture_dust.material";
+inline constexpr const char *kFractureDustTextureFile = "openshim_fracture_dust.tga";
+inline constexpr const char *kFractureDustMaterialMarker = "// OpenShim FractureOnePiece default sink dust material";
+inline constexpr unsigned kFractureDustTextureSize = 64;
+std::string FractureDustMaterialHeader();
+std::string FractureDustMaterialScript();
+// Uncompressed 32-bit TGA: near-white RGB, alpha a soft clumpy blob that is 0
+// at the border (the material clamps). Deterministic.
+std::vector<uint8_t> FractureDustTextureTga();
+
 // Full first lines of the current generated files, without the newline.
 std::string GibFleshMaterialHeader();
 std::string GibFleshZoneMaterialHeader();

@@ -174,6 +174,7 @@ openshim_add_test(camera_fov_policy_tests STD 17 SOURCES camera_fov_policy_tests
 openshim_add_test(scrap_render_policy_tests STD 17 SOURCES scrap_render_policy_tests.cpp)
 openshim_add_test(pool_draw_distance_policy_tests STD 17 SOURCES pool_draw_distance_policy_tests.cpp)
 openshim_add_test(ordnance_entity_leak_policy_tests STD 17 SOURCES ordnance_entity_leak_policy_tests.cpp)
+openshim_add_test(live_object_gate_tests STD 14 SOURCES live_object_gate_tests.cpp)
 openshim_add_test(briefing_pages_policy_tests STD 17 SOURCES briefing_pages_policy_tests.cpp)
 openshim_add_test(lan_discovery_tests STD 17 SOURCES lan_discovery_tests.cpp)
 openshim_add_test(lan_no_auth_policy_tests STD 17 SOURCES lan_no_auth_policy_tests.cpp)
@@ -238,6 +239,7 @@ endif()
 openshim_add_test(d3d11_buffer_mirror_policy_tests STD 17 SOURCES
     d3d11_buffer_mirror_policy_tests.cpp
 )
+openshim_add_test(d3d11_recovery_policy_tests STD 17 SOURCES d3d11_recovery_policy_tests.cpp)
 openshim_add_test(frame_bridge_protocol_tests STD 17 SOURCES frame_bridge_protocol_tests.cpp)
 openshim_add_test(frame_bridge_camera_tests STD 17 SOURCES frame_bridge_camera_tests.cpp)
 openshim_add_test(frame_bridge_history_tests STD 17 SOURCES frame_bridge_history_tests.cpp)
@@ -853,6 +855,9 @@ add_test(NAME dx11_legacy_material_compat_tests COMMAND dx11_legacy_material_com
 
 # DX11 draw-time shaderless guard bookkeeping (header-only policy).
 openshim_add_test(dx11_draw_guard_policy_tests STD 17 SOURCES dx11_draw_guard_policy_tests.cpp)
+
+# Render-queue scene-mutation drain gate (header-only policy).
+openshim_add_test(scene_mutation_drain_policy_tests STD 17 SOURCES scene_mutation_drain_policy_tests.cpp)
 
 # CLI parser parity defect model (PR #69). This test is engine-independent:
 # it models Redux's strtok comma defect and the pristine-snapshot repair

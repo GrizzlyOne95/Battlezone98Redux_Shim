@@ -46,6 +46,7 @@
 #include "weapon_convergence.h"
 #include "weapon_presentation_hooks.h"
 #include "weapon_presentation_native.h"
+#include "scene_mutation_drain.h"
 #include "headlight_falloff.h"
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
@@ -1773,8 +1774,26 @@ namespace BZROpenShim
         BzrStringInitEmpty(&g_BzrnetLabel4);
     }
 
+    // Everything below that creates or destroys Ogre scene objects (Entity,
+    // SceneNode, Light; attach/detach) runs here, at frameStarted, instead of
+    // inside the render-queue traversal (include/scene_mutation_drain_policy.h).
+    // Only called after a frame in which the world render queue ran, so the
+    // features keep their "only while a world is rendered" contract.
+    void Hooks::RunDeferredSceneMutations() noexcept
+    {
+        RefreshPilotFlashlightState();
+        RefreshWeaponPresentationState(WeaponPresentation::Runtime::SceneAccess::Full);
+        PrepareLaserSightSceneObjects();
+        CreateRequestedChunkMeshProxyObjects();
+    }
+
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
     {
+        // First, before any feature below: true once the frameStarted drain is
+        // installed, and then nothing here may create or destroy scene objects.
+        // The scope also covers engine hooks that fire inside this call.
+        const RenderQueueHookScope renderQueueScope;
+        const bool deferSceneMutation = BeginRenderQueueSceneAccess();
         // Keep one owner per camera/material traversal. Flame callbacks can
         // precede this Ogre traversal, so call-stack nesting alone does not
         // exclude duplicate submissions. A recent observed world callback
@@ -1792,10 +1811,12 @@ namespace BZROpenShim
         // 200 ms and also owns the live SP/MP + EXU authority gate.
         RefreshHeadlightState();
 
-        // Same cadence and the same gate: the pilot flashlight is created and
-        // destroyed here because this is the only callback guaranteed to run
-        // while a world is rendered, on or off foot.
-        RefreshPilotFlashlightState();
+        // Same cadence and the same gate: the pilot flashlight is driven by
+        // this callback because it is the only one guaranteed to run while a
+        // world is rendered, on or off foot. It creates and attaches a Light,
+        // so with the drain live the whole refresh runs at frameStarted.
+        if (!deferSceneMutation)
+            RefreshPilotFlashlightState();
 
         // The sun can be destroyed and rebuilt mid-mission; repopulate light
         // lists the frame that happens. One global read per call otherwise.
@@ -1803,7 +1824,11 @@ namespace BZROpenShim
 
         // Uses the existing SP gate; no allocation/work until a qualified
         // presentation backend is registered. Never advance simulation here.
-        RefreshWeaponPresentationState();
+        // Poses only once the drain is installed: flash create/cancel destroyed
+        // an EXU mesh flash's SubEntities mid-sort (crash dump 20980).
+        RefreshWeaponPresentationState(deferSceneMutation
+            ? WeaponPresentation::Runtime::SceneAccess::PosesOnly
+            : WeaponPresentation::Runtime::SceneAccess::Full);
         GeometryContactTest::Tick();
 
         // Same driver again, and for the same reason: the packed team has to be
@@ -1858,7 +1883,9 @@ namespace BZROpenShim
         SubmitSkinnedGibsToRenderQueue(renderQueue);
         SubmitShellCasingsToRenderQueue(renderQueue);
         // One branch when [General] LaserSight is off; keyed on the muzzle
-        // pose, so the repeat calls of one frame cost a few reads.
+        // pose, so the repeat calls of one frame cost a few reads. Once the
+        // drain is installed (InsideRenderQueueHookWithDeferral) it asks for
+        // missing beam objects instead of building them.
         TickLaserSight();
 
         // Opt-in parity capture and deferred authored-normal installation.
@@ -1888,6 +1915,9 @@ namespace BZROpenShim
 
         if (!g_JumpSnipeProbeInstalled)
             InstallJumpSnipingProbeIfRequested();
+        // Outside any scene traversal: drains deferred scene mutations only
+        // while the frameStarted listener is stalled (scene_mutation_drain.h).
+        RunSceneMutationFallbackDrain();
         // Secondary driver for the multiplayer guard, kept so the gate still
         // reconciles if the Ogre world-queue hook (the primary driver, see
         // LegacyWorldUpdateRenderQueueHook) failed to install. Shares
