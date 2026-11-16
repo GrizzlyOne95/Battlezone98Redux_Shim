@@ -4887,11 +4887,11 @@ namespace BZROpenShim
                 std::string writeError;
                 if (!WriteUserConfigValueLossless("Gameplay", def.iniKey, nullptr, 0, chord.c_str(), writeError))
                 {
-                    // Roll back, as for the Rally Point row.
-                    if (!previousKey.empty())
-                        Hooks::SetRtsCommandKeyText(index, previousKey.c_str());
+                    // Roll back, as for the Rally Point row. An empty previous
+                    // key (the action had none) unbinds it again.
+                    Hooks::SetRtsCommandKeyText(index, previousKey.c_str());
                     g_InputBindingUiStatusText = "Could not save " + displayText + " to openshim.ini; kept " +
-                                                 previousKey + ".";
+                                                 (previousKey.empty() ? std::string("no key") : previousKey) + ".";
                     Log(L"[INPUTUI] openshim.ini write failed for %hs key=%hs error=%hs; kept %hs\n",
                         command.c_str(), chord.c_str(), writeError.c_str(), previousKey.c_str());
                     RefreshInputBindingUiControls();
@@ -5049,6 +5049,14 @@ namespace BZROpenShim
                         Log(L"[INPUTUI] Conflict: gamekey action=%hs chord=%hs is also %hs\n",
                             command.c_str(), chord.c_str(), save ? "Quick Save" : "Quick Load");
                     }
+                }
+                // Likewise an RTS action key (Input > RTS Actions): its filter
+                // takes the press in missions.
+                if (const char* rts = Hooks::RtsCommandActionTakingChord(parsed))
+                {
+                    status += std::string(" ") + rts + " uses it too and takes it in missions.";
+                    Log(L"[INPUTUI] Conflict: gamekey action=%hs chord=%hs is also RTS action %hs\n",
+                        command.c_str(), chord.c_str(), rts);
                 }
             }
 

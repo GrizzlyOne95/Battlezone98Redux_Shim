@@ -33,12 +33,15 @@
 #include "engine_globals.h"
 #include "game_state.h"
 #include "hook_engine.h"
+#include "hud_visibility.h"
 #include "iat_patch.h"
 #include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "quicksave.h"
 #include "quicksave_key_policy.h"
 #include "rts_commands_policy.h"
+#include "rts_markers.h"
+#include "scene_mutation_drain.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -83,6 +86,12 @@ namespace BZROpenShim::Hooks
         constexpr size_t kExecuteModeSlot = 11; // vtable +0x2C (FUN_004a7140 line 15)
         constexpr size_t kPositionSlot = 3;     // Entity at +0x18, vtable +0xC
         constexpr size_t kEntityOffset = 0x18;
+        // GameObject's pending order, as GameObject::SetCommand writes it:
+        // +0xC8 = 0, +0xCC = what, +0xD0 = who's handle (0 without one),
+        // +0xD4 = a freshly built path object (FUN_004dbd60 lines 20-34;
+        // FUN_004dbce0 lines 8-11 for the who-less form). Read only, to
+        // see which order a unit-menu pick gave (the ping below).
+        constexpr size_t kPendingOrderOffset = 0xC8;
         // Reticle (ReticleGlobal): +0xA8 VECTOR_3D* ground hit, +0xAC the
         // GameObject* under the reticle; both zero when nothing is picked
         // (Reticle::Simulate FUN_005ba560 lines 150-179).
@@ -437,19 +446,48 @@ namespace BZROpenShim::Hooks
             }
         }
 
-        // The object's most-derived MSVC RTTI type name (CompleteObjectLocator
-        // at vtable[-1], TypeDescriptor at +0xC, name at +8), or null.
-        const char* RttiName(void* obj)
+        // Copies a NUL-terminated string one byte at a time under SEH; false
+        // on a fault or when it does not fit.
+        bool CopyCString(uintptr_t address, char* out, size_t capacity)
+        {
+            if (address < 0x10000 || !out || capacity == 0)
+                return false;
+            __try
+            {
+                const char* src = reinterpret_cast<const char*>(address);
+                for (size_t i = 0; i < capacity; ++i)
+                {
+                    out[i] = src[i];
+                    if (out[i] == '\0')
+                        return true;
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+            }
+            out[0] = '\0';
+            return false;
+        }
+
+        // A copy of the object's most-derived MSVC RTTI type name
+        // (CompleteObjectLocator at vtable[-1], TypeDescriptor at +0xC, name
+        // at +8), read fault-safe; null when unreadable. The policy compares
+        // the copy, never engine memory.
+        struct RttiNameBuffer
+        {
+            char text[128];
+        };
+
+        const char* RttiName(void* obj, RttiNameBuffer& buffer)
         {
             const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(obj)));
             if (!vtable)
                 return nullptr;
             const uintptr_t col = reinterpret_cast<uintptr_t>(ReadPtr(vtable - sizeof(void*)));
             const uintptr_t td = col ? reinterpret_cast<uintptr_t>(ReadPtr(col + 0x0C)) : 0;
-            char probe[2] = {};
-            if (!td || !ReadBytes(td + 0x08, probe, sizeof(probe)))
+            if (!td || !CopyCString(td + 0x08, buffer.text, sizeof(buffer.text)))
                 return nullptr;
-            return reinterpret_cast<const char*>(td + 0x08);
+            return buffer.text;
         }
 
         bool ReadModeList(void* obj, Policy::ModeList& out)
@@ -550,17 +588,64 @@ namespace BZROpenShim::Hooks
             WriteBytes(reinterpret_cast<uintptr_t>(merged), &a, sizeof(a));
         }
 
+        struct PendingOrder
+        {
+            int flag = 0;      // +0xC8
+            int what = 0;      // +0xCC
+            uint32_t who = 0;  // +0xD0
+            uint32_t path = 0; // +0xD4
+        };
+        static_assert(sizeof(PendingOrder) == 16, "GameObject +0xC8..+0xD7");
+
+        bool ReadPendingOrder(void* obj, PendingOrder& out)
+        {
+            return obj && ReadBytes(reinterpret_cast<uintptr_t>(obj) + kPendingOrderOffset, &out, sizeof(out));
+        }
+
+        // Orders given through ExecuteMode never reach BroadcastCommand, so
+        // rts_markers.cpp would draw no ping for them. One ping per pick: the
+        // first own selected unit whose pending order changed and names a
+        // target object.
+        void PingMenuOrder(const uint32_t* handles, int n, const PendingOrder* before, const bool* haveBefore)
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                PendingOrder after;
+                if (!haveBefore[i] || !obj || !IsPlayerTeam(obj) || !ReadPendingOrder(obj, after))
+                    continue;
+                if (std::memcmp(&after, &before[i], sizeof(after)) == 0 || after.who == 0)
+                    continue;
+                if (void* const target = SafeGetObj(after.who))
+                {
+                    NotifyRtsMarkersCommand(after.what, target);
+                    return;
+                }
+            }
+        }
+
         // Entered in place of `call ControlPanel::DispatchMode` at 0x004A512A
         // (thiscall: ecx = panel, the chosen mode). A smart mode goes only to
         // the commandable units whose own menu holds it; skipped units count
-        // as accepted, so the selection still clears as stock does.
+        // as accepted, so the selection still clears as stock does. Every
+        // pick (stock or smart) then gets its command ping.
         bool __fastcall DispatchHook(void* panel, void*, int mode)
         {
-            const unsigned smart = g_SmartMask.load(std::memory_order_acquire);
-            if (!Policy::IsSmartMode(mode, smart) || reinterpret_cast<uintptr_t>(panel) != g_ControlPanelAddr)
+            if (reinterpret_cast<uintptr_t>(panel) != g_ControlPanelAddr)
                 return g_FnDispatch(panel, mode);
             uint32_t handles[Policy::kSelectCapacity];
             const int n = ReadSelection(handles);
+            PendingOrder before[Policy::kSelectCapacity];
+            bool haveBefore[Policy::kSelectCapacity] = {};
+            for (int i = 0; i < n; ++i)
+                haveBefore[i] = ReadPendingOrder(SafeGetObj(handles[i]), before[i]);
+            const unsigned smart = g_SmartMask.load(std::memory_order_acquire);
+            if (!Policy::IsSmartMode(mode, smart))
+            {
+                const bool accepted = g_FnDispatch(panel, mode);
+                PingMenuOrder(handles, n, before, haveBefore);
+                return accepted;
+            }
             bool all = true;
             int sent = 0;
             int skipped = 0;
@@ -583,6 +668,7 @@ namespace BZROpenShim::Hooks
             }
             if (skipped > 0)
                 LogBudgeted(L"[RTS] mode %d sent to %d unit(s), %d skipped (no such entry)\n", mode, sent, skipped);
+            PingMenuOrder(handles, n, before, haveBefore);
             return all;
         }
 
@@ -599,6 +685,7 @@ namespace BZROpenShim::Hooks
             }
             uint32_t handles[Policy::kSelectCapacity];
             const int n = ReadSelection(handles);
+            bool ownOrdered = false;
             for (int i = 0; i < n; ++i)
             {
                 void* const obj = SafeGetObj(handles[i]);
@@ -607,22 +694,37 @@ namespace BZROpenShim::Hooks
                 Policy::ModeList own;
                 if (!ReadModeList(obj, own) || !Policy::UnitTakesMode(own, Policy::kModeDefend))
                     continue;
-                SafeSetCommandObj(obj, what, target);
+                if (SafeSetCommandObj(obj, what, target) && IsPlayerTeam(obj))
+                    ownOrdered = true;
             }
+            // The stock BroadcastCommand this replaces is where rts_markers
+            // pings an object order; one ping for the pick.
+            if (ownOrdered)
+                NotifyRtsMarkersCommand(what, target);
         }
 
         // ---- Hold ------------------------------------------------------------
 
+        bool HoldHooksReady()
+        {
+            return g_SharedReady && g_HoldKeyReady && AiHoldHooksReady();
+        }
+
         bool HoldAvailableNow()
         {
-            return IsSinglePlayerSession();
+            return IsSinglePlayerSession() && HoldHooksReady();
         }
 
         // Defend(0) (GameObject::SetCommand(CMD_DEFEND): who = 0 builds the
         // SitTask, FUN_004dbce0) plus the native hold, for each selected own
-        // commandable unit whose menu has Defend. Returns how many held.
+        // commandable unit whose menu has Defend. Returns how many held. The
+        // hold is registered first and the order only after it, so a unit
+        // the native hold refuses keeps its orders (none at all when the
+        // hold is unavailable).
         int HoldSelection()
         {
+            if (!HoldAvailableNow())
+                return 0;
             uint32_t handles[Policy::kSelectCapacity];
             const int n = ReadSelection(handles);
             int held = 0;
@@ -634,8 +736,6 @@ namespace BZROpenShim::Hooks
                 Policy::ModeList own;
                 if (!ReadModeList(obj, own) || !Policy::UnitTakesMode(own, Policy::kModeDefend))
                     continue;
-                if (!SafeSetCommand(obj, Policy::kCmdDefend))
-                    continue;
                 bool ok = false;
                 try
                 {
@@ -645,8 +745,20 @@ namespace BZROpenShim::Hooks
                 {
                     ok = false;
                 }
-                if (ok)
-                    ++held;
+                if (!ok)
+                    continue;
+                if (!SafeSetCommand(obj, Policy::kCmdDefend))
+                {
+                    try
+                    {
+                        SetAiHold(static_cast<int>(handles[i]), false);
+                    }
+                    catch (...)
+                    {
+                    }
+                    continue;
+                }
+                ++held;
             }
             return held;
         }
@@ -769,7 +881,9 @@ namespace BZROpenShim::Hooks
                 if (obj == user || !IsPlayerTeam(obj))
                     continue;
                 const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(obj)));
-                if (!vtable || !Policy::IsBaseStructure(VtableDerivesFrom(vtable, ".?AVBuilding@@"), RttiName(obj)))
+                RttiNameBuffer name;
+                if (!vtable ||
+                    !Policy::IsBaseStructure(VtableDerivesFrom(vtable, ".?AVBuilding@@"), RttiName(obj, name)))
                     continue;
                 const uint32_t handle = SafeGetHandle(obj);
                 if (handle != 0)
@@ -809,13 +923,14 @@ namespace BZROpenShim::Hooks
             void* const picked = ReadPtr(g_ReticleAddr + kReticleObjectOffset);
             const bool pickedLive = picked && IsLiveObject(picked, n);
             Policy::Family family = Policy::Family::None;
+            RttiNameBuffer name;
             if (pickedLive && IsPlayerTeam(picked) && SafeCanCommand(picked))
-                family = Policy::ClassifyFamily(RttiName(picked));
+                family = Policy::ClassifyFamily(RttiName(picked, name));
             void* first = nullptr;
             if (selectedCount > 0)
                 first = SafeGetObj(selected[0]);
             if (family == Policy::Family::None && first)
-                family = Policy::ClassifyFamily(RttiName(first));
+                family = Policy::ClassifyFamily(RttiName(first, name));
             if (family == Policy::Family::None)
             {
                 LogBudgeted(L"[RTS] area select: no unit family under the reticle or selected\n");
@@ -843,7 +958,7 @@ namespace BZROpenShim::Hooks
                 void* const obj = g_ObjectScratch[i];
                 if (!IsPlayerTeam(obj) || obj == UserObject())
                     continue;
-                const Policy::Family f = Policy::ClassifyFamily(RttiName(obj));
+                const Policy::Family f = Policy::ClassifyFamily(RttiName(obj, name));
                 if (f != family)
                     continue;
                 Policy::AreaCandidate& c = candidates[candidateCount];
@@ -970,8 +1085,10 @@ namespace BZROpenShim::Hooks
                 // Only a fresh keydown needs the (engine-reading) gate.
                 if (msg == WM_KEYDOWN && (static_cast<unsigned long>(lParam) & (1UL << 30)) == 0)
                 {
+                    // A focused chat line or ally prompt owns the keyboard
+                    // (HudVisibility::TextEditorFocused; unknown = focused).
                     gate = fresh && KeyActionActive(id) && !IsRallyKey(g_Keys[i]) && WorldInteractive() &&
-                           !EditorActive();
+                           !EditorActive() && !HudVisibility::TextEditorFocused();
                     if (gate && id == Policy::KeyId::RemoteTarget)
                         gate = SelectionHasOwnUnit();
                 }
@@ -1115,18 +1232,27 @@ namespace BZROpenShim::Hooks
 
         // Redirects the E8 call at `site` to `target` when it still calls
         // `expectedCallee`. Returns the original callee on success, 0 else.
+        // Install-time lines only; retries can hit the same refusal up to
+        // kMaxInstallAttempts times, so they share a small budget of their own.
+        volatile long g_InstallLogBudget = 12;
+
         uint32_t RedirectCall(uint32_t site, const void* target, uint32_t expectedCallee, const char* name)
         {
             uint8_t original[5] = {};
             if (!ReadBytes(site, original, sizeof(original)) || original[0] != 0xE8)
+            {
+                if (InterlockedDecrement(&g_InstallLogBudget) >= 0)
+                    Log(L"[RTS] %hs: no call at 0x%08X; left stock\n", name, site);
                 return 0;
+            }
             int32_t rel = 0;
             std::memcpy(&rel, original + 1, sizeof(rel));
             const uint32_t callee = site + 5 + static_cast<uint32_t>(rel);
             if (callee != expectedCallee)
             {
-                Log(L"[RTS] %hs: call at 0x%08X goes to 0x%08X, not 0x%08X; left stock\n", name, site, callee,
-                    expectedCallee);
+                if (InterlockedDecrement(&g_InstallLogBudget) >= 0)
+                    Log(L"[RTS] %hs: call at 0x%08X goes to 0x%08X, not 0x%08X; left stock\n", name, site, callee,
+                        expectedCallee);
                 return 0;
             }
             HookEngine::PatchDef patch;
@@ -1142,7 +1268,8 @@ namespace BZROpenShim::Hooks
             std::memcpy(patch.payload.data() + 1, &newRel, sizeof(newRel));
             if (!HookEngine::ApplyPatch(patch))
             {
-                Log(L"[RTS] %hs: patch refused\n", name);
+                if (InterlockedDecrement(&g_InstallLogBudget) >= 0)
+                    Log(L"[RTS] %hs: patch refused\n", name);
                 return 0;
             }
             return callee;
@@ -1175,10 +1302,18 @@ namespace BZROpenShim::Hooks
             return true;
         }
 
+        // Each part binds its rows once and remembers it: a redirected call
+        // site no longer matches its row bytes, so a retry must not re-bind
+        // it (offense_overflow.cpp InstallExtended). A retry only re-tries
+        // the redirects that have not gone in yet.
         void InstallParts()
         {
 #if defined(_M_IX86)
-            if (!g_MergeReady)
+            static bool s_mergeBound = false;
+            static bool s_dispatchBound = false;
+            static bool s_broadcastBound = false;
+            static bool s_holdMenuBound = false;
+            if (!s_mergeBound)
             {
                 const HookEngine::EngineRow rows[] = {
                     { "ModeListIntersect", &g_IntersectAddr },
@@ -1186,13 +1321,15 @@ namespace BZROpenShim::Hooks
                 };
                 if (HookEngine::BindEngineRows("RTS smart menu merge", rows))
                 {
+                    s_mergeBound = true;
                     g_FnIntersect = reinterpret_cast<FnIntersect>(g_IntersectAddr);
-                    g_MergeReady = RedirectCall(g_MergeRowAddr + kMergeCallOffset,
-                                                reinterpret_cast<const void*>(&MergeHook), g_IntersectAddr,
-                                                "ControlPanel::Render/ModeList merge (rts)") != 0;
                 }
             }
-            if (!g_DispatchReady)
+            if (s_mergeBound && !g_MergeReady)
+                g_MergeReady = RedirectCall(g_MergeRowAddr + kMergeCallOffset,
+                                            reinterpret_cast<const void*>(&MergeHook), g_IntersectAddr,
+                                            "ControlPanel::Render/ModeList merge (rts)") != 0;
+            if (!s_dispatchBound)
             {
                 const HookEngine::EngineRow rows[] = {
                     { "ControlPanelDispatchMode", &g_DispatchAddr },
@@ -1200,13 +1337,15 @@ namespace BZROpenShim::Hooks
                 };
                 if (HookEngine::BindEngineRows("RTS smart menu dispatch", rows))
                 {
+                    s_dispatchBound = true;
                     g_FnDispatch = reinterpret_cast<FnDispatchMode>(g_DispatchAddr);
-                    g_DispatchReady = RedirectCall(g_DispatchRowAddr + kDispatchCallOffset,
-                                                   reinterpret_cast<const void*>(&DispatchHook), g_DispatchAddr,
-                                                   "ControlPanel::Render/DispatchMode (rts)") != 0;
                 }
             }
-            if (!g_BroadcastReady)
+            if (s_dispatchBound && !g_DispatchReady)
+                g_DispatchReady = RedirectCall(g_DispatchRowAddr + kDispatchCallOffset,
+                                               reinterpret_cast<const void*>(&DispatchHook), g_DispatchAddr,
+                                               "ControlPanel::Render/DispatchMode (rts)") != 0;
+            if (!s_broadcastBound)
             {
                 const HookEngine::EngineRow rows[] = {
                     { "ControlPanelBroadcastCommandObj", &g_BroadcastObjAddr },
@@ -1215,13 +1354,15 @@ namespace BZROpenShim::Hooks
                 };
                 if (HookEngine::BindEngineRows("RTS smart menu Defend target", rows))
                 {
+                    s_broadcastBound = true;
                     g_FnBroadcastObj = reinterpret_cast<FnBroadcastObj>(g_BroadcastObjAddr);
                     g_FnSetCommandObj = reinterpret_cast<FnSetCommandObj>(g_SetCommandObjAddr);
-                    g_BroadcastReady = RedirectCall(g_BroadcastRowAddr + kBroadcastCallOffset,
-                                                    reinterpret_cast<const void*>(&BroadcastHook), g_BroadcastObjAddr,
-                                                    "ControlPanel::Render/Defend target (rts)") != 0;
                 }
             }
+            if (s_broadcastBound && !g_BroadcastReady)
+                g_BroadcastReady = RedirectCall(g_BroadcastRowAddr + kBroadcastCallOffset,
+                                                reinterpret_cast<const void*>(&BroadcastHook), g_BroadcastObjAddr,
+                                                "ControlPanel::Render/Defend target (rts)") != 0;
             if (!g_TargetReady)
             {
                 const HookEngine::EngineRow rows[] = {
@@ -1256,7 +1397,7 @@ namespace BZROpenShim::Hooks
                     g_HoldKeyReady = true;
                 }
             }
-            if (g_HoldKeyReady && (!g_HoldClickReady || !g_LabelReady))
+            if (g_HoldKeyReady && !s_holdMenuBound)
             {
                 const HookEngine::EngineRow rows[] = {
                     { "ControlPanelDefendClickSoundCall", &g_DefendClickRowAddr },
@@ -1267,22 +1408,26 @@ namespace BZROpenShim::Hooks
                 const uint32_t sound = HookEngine::ResolveNamedAddress("PlayGlobalSound");
                 if (sound != 0 && HookEngine::BindEngineRows("RTS Shift+Defend hold", rows))
                 {
+                    s_holdMenuBound = true;
                     g_PlaySoundAddr = sound;
                     g_FnPlaySound = reinterpret_cast<FnPlaySound>(sound);
                     g_FnLocalize = reinterpret_cast<FnLocalize>(g_LocalizeAddr);
                     g_FnSelectNone = reinterpret_cast<FnSelectNone>(g_SelectNoneAddr);
                     g_DefendClickResumeAddr = g_DefendClickRowAddr + kDefendClickResumeOffset;
-                    // The label first: a click that holds without its label
-                    // would surprise; a label without the click is never set.
-                    if (!g_LabelReady)
-                        g_LabelReady = RedirectCall(g_LabelRowAddr + kLabelCallOffset,
-                                                    reinterpret_cast<const void*>(&ModeLabelThunk), g_LocalizeAddr,
-                                                    "ControlPanel::Render/mode label (rts)") != 0;
-                    if (g_LabelReady && !g_HoldClickReady)
-                        g_HoldClickReady = RedirectCall(g_DefendClickRowAddr + kDefendClickCallOffset,
-                                                        reinterpret_cast<const void*>(&DefendClickThunk), sound,
-                                                        "ControlPanel::Render/Defend click (rts)") != 0;
                 }
+            }
+            if (s_holdMenuBound)
+            {
+                // The label first: a click that holds without its label
+                // would surprise; a label without the click is never set.
+                if (!g_LabelReady)
+                    g_LabelReady = RedirectCall(g_LabelRowAddr + kLabelCallOffset,
+                                                reinterpret_cast<const void*>(&ModeLabelThunk), g_LocalizeAddr,
+                                                "ControlPanel::Render/mode label (rts)") != 0;
+                if (g_LabelReady && !g_HoldClickReady)
+                    g_HoldClickReady = RedirectCall(g_DefendClickRowAddr + kDefendClickCallOffset,
+                                                    reinterpret_cast<const void*>(&DefendClickThunk),
+                                                    g_PlaySoundAddr, "ControlPanel::Render/Defend click (rts)") != 0;
             }
 #endif
         }
@@ -1295,11 +1440,6 @@ namespace BZROpenShim::Hooks
         bool SmartRepairPartsReady()
         {
             return g_SharedReady && g_MergeReady && g_DispatchReady;
-        }
-
-        bool HoldHooksReady()
-        {
-            return g_SharedReady && g_HoldKeyReady;
         }
 
         void MarkParts()
@@ -1372,8 +1512,8 @@ namespace BZROpenShim::Hooks
         if (InstallShared())
             InstallParts();
         MarkParts();
-        const bool all = SmartMenuPartsReady() && g_TargetReady && g_AreaReady && g_HoldKeyReady && g_HoldClickReady &&
-                         g_LabelReady;
+        const bool all = SmartMenuPartsReady() && g_TargetReady && g_AreaReady && HoldHooksReady() &&
+                         g_HoldClickReady && g_LabelReady;
         if (all || s_attempts >= kMaxInstallAttempts)
         {
             s_done = true;
@@ -1381,7 +1521,7 @@ namespace BZROpenShim::Hooks
                 L"area %hs, hold %hs, Shift+Defend click %hs, label %hs\n",
                 all ? "complete" : "gave up", s_attempts, g_MergeReady ? "yes" : "no", g_DispatchReady ? "yes" : "no",
                 g_BroadcastReady ? "yes" : "no", g_TargetReady ? "yes" : "no", g_AreaReady ? "yes" : "no",
-                g_HoldKeyReady ? "yes" : "no", g_HoldClickReady ? "yes" : "no", g_LabelReady ? "yes" : "no");
+                HoldHooksReady() ? "yes" : "no", g_HoldClickReady ? "yes" : "no", g_LabelReady ? "yes" : "no");
         }
         RefreshRtsCommandsState();
     }
@@ -1407,8 +1547,13 @@ namespace BZROpenShim::Hooks
                                std::memory_order_release);
     }
 
-    // Frame/game thread (beside TickOffenseOverflow): installs the key
-    // filters once a feature with a key is on, and runs queued key actions.
+    // Frame/game thread (beside TickOffenseOverflow, inside the world
+    // render-queue hook): installs the key filters once a feature with a key
+    // is on. The queued key actions change the selection, the player's
+    // target and unit orders (SelectAdd calls the object's OnSelect), so they
+    // run from the scene-mutation drain at frameStarted, outside the
+    // traversal; only while that drain is not installed do they run here,
+    // the pre-drain behaviour every other feature keeps.
     void TickRtsCommands()
     {
         const bool anyKey = g_TargetActive.load(std::memory_order_acquire) ||
@@ -1418,14 +1563,29 @@ namespace BZROpenShim::Hooks
             return;
         g_LastTickMs.store(GetTickCount64(), std::memory_order_relaxed);
         EnsureKeyFilters();
-        if (g_PendingRemoteTarget.exchange(false))
-            DoRemoteTarget();
-        if (g_PendingBuilding.exchange(false))
-            DoBuildingCycle();
-        if (const int area = g_PendingArea.exchange(0))
-            DoAreaSelect(area == 2);
-        if (g_PendingHold.exchange(false))
-            DoHoldKey();
+        if (!InsideRenderQueueHookWithDeferral())
+            RunRtsCommandsPendingActions();
+    }
+
+    // RunDeferredSceneMutations (bzr_hooks.cpp), or the tick above when the
+    // drain is not installed: runs the actions the key filter queued.
+    void RunRtsCommandsPendingActions() noexcept
+    {
+        try
+        {
+            if (g_PendingRemoteTarget.exchange(false))
+                DoRemoteTarget();
+            if (g_PendingBuilding.exchange(false))
+                DoBuildingCycle();
+            if (const int area = g_PendingArea.exchange(0))
+                DoAreaSelect(area == 2);
+            if (g_PendingHold.exchange(false))
+                DoHoldKey();
+        }
+        catch (...)
+        {
+            LogBudgeted(L"[RTS] a queued key action threw; dropped\n");
+        }
     }
 
     // Mission end/load: drop queued actions.
@@ -1437,6 +1597,19 @@ namespace BZROpenShim::Hooks
         g_PendingHold.store(false);
         g_LogBudget = 48;
         RefreshRtsCommandsState();
+    }
+
+    const char* RtsCommandActionTakingChord(const QuickSaveKeyPolicy::Chord& chord)
+    {
+        const Policy::KeyId id =
+            Policy::ActionTakingChord(g_Keys, chord.vk, chord.extended, chord.shift, chord.ctrl, chord.alt);
+        return id == Policy::KeyId::Count ? nullptr : Policy::GetKeyDef(id).displayText;
+    }
+
+    const char* RtsCommandActionUsingKey(unsigned vk, bool extended)
+    {
+        const Policy::KeyId id = Policy::ActionUsingKey(g_Keys, vk, extended);
+        return id == Policy::KeyId::Count ? nullptr : Policy::GetKeyDef(id).displayText;
     }
 
     int RtsCommandKeyCount()
@@ -1454,6 +1627,15 @@ namespace BZROpenShim::Hooks
         if (index < 0 || index >= Policy::kKeyCount || !text)
             return "unknown action";
         const Policy::KeyId id = static_cast<Policy::KeyId>(index);
+        if (text[0] == '\0')
+        {
+            // Rollback of a binding that had no key (its default was taken).
+            g_Keys[index] = {};
+            g_KeyText[index].clear();
+            g_Latch[index] = {};
+            Log(L"[RTS] %hs unbound\n", Policy::GetKeyDef(id).iniKey);
+            return nullptr;
+        }
         Policy::Key key;
         if (const char* reason = CheckKey(id, text, key))
             return reason;

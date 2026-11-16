@@ -3104,7 +3104,7 @@
       "name": "ModeListIntersect",
       "address": "0x0049F270",
       "expected": "55 8B EC 83 EC 08 56 89 4D FC C7 45 F8 00 00 00",
-      "identity": "ModeList::Intersect(const ModeList& other), thiscall ret 4 (FUN_0049f270): for each of the 11 slots, a slot whose mode differs from other's is cleared and its enabled bit dropped; enabled is ANDed; active becomes -1 unless both agree. The stock rule that turns a mixed selection's menu into its common subset. RtsSmartCommandMenu / RtsSmartRepairReload call it as the original from the redirected ControlPanelMergeModeListCall. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+      "identity": "ModeList::Intersect(const ModeList& other), thiscall ret 4 (FUN_0049f270): each of the 11 slots whose mode differs from other's is zeroed (FUN_0049f270.c lines 8-12; no per-slot enabled-bit change), then the enabled masks at +0x2C are ANDed (line 13); active (+0x30) becomes -1 unless both lists agree on it and FUN_0046faf0 accepts it (lines 14-19). The stock rule that turns a mixed selection's menu into its common subset. RtsSmartCommandMenu / RtsSmartRepairReload call it as the original from the redirected ControlPanelMergeModeListCall. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
     },
     {
       "name": "ControlPanelMergeModeListCall",

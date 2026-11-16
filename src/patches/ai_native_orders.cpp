@@ -670,6 +670,15 @@ namespace BZROpenShim::Hooks
         return enabled ? g_DefendActive : true;
     }
 
+    // The hooks SetAiHold needs: the SitTask DoState hook (to shoot) and the
+    // DoSubTask retarget-period hooks (to stop the chase). Read live: the
+    // retarget hooks land later in InstallAiTuningHooksIfPossible.
+    bool AiHoldHooksReady()
+    {
+        InstallAiNativeOrdersHooksIfPossible();
+        return g_SitHookInstalled && g_RetargetPeriodHooksInstalled;
+    }
+
     bool SetAiHold(int handle, bool hold)
     {
         const uint32_t key = static_cast<uint32_t>(handle);

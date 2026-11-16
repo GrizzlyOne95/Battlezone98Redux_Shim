@@ -487,6 +487,40 @@ namespace BZROpenShim
             return nullptr;
         }
 
+        // The RTS action whose key filter takes this chord in a mission, or
+        // KeyId::Count. Mirrors ClassifyKey: Ctrl and Alt chords are never
+        // ours; a needsShift action takes only Shift+key, a shiftVariant
+        // action both, the others only the plain key. Used by the rally,
+        // QuickSave and gamekey rebinding paths to refuse or warn.
+        inline KeyId ActionTakingChord(const Key* keys, unsigned vk, bool extended, bool shift, bool ctrl, bool alt)
+        {
+            if (!keys || vk == 0 || ctrl || alt)
+                return KeyId::Count;
+            for (int i = 0; i < kKeyCount; ++i)
+            {
+                if (keys[i].vk != vk || keys[i].extended != extended)
+                    continue;
+                const KeyDef& def = GetKeyDef(static_cast<KeyId>(i));
+                const bool taken = def.needsShift ? shift : (def.shiftVariant || !shift);
+                if (taken)
+                    return static_cast<KeyId>(i);
+            }
+            return KeyId::Count;
+        }
+
+        // The RTS action using this key at all (any Shift state), or
+        // KeyId::Count: the rally key is one plain key whose Shift variant
+        // clears, so it may share no RTS key.
+        inline KeyId ActionUsingKey(const Key* keys, unsigned vk, bool extended)
+        {
+            for (int i = 0; keys && vk != 0 && i < kKeyCount; ++i)
+            {
+                if (keys[i].vk == vk && keys[i].extended == extended)
+                    return static_cast<KeyId>(i);
+            }
+            return KeyId::Count;
+        }
+
         // ---- key messages -----------------------------------------------------
 
         constexpr unsigned kWmKeyDown = 0x0100;

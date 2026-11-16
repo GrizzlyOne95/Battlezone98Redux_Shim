@@ -294,6 +294,29 @@ namespace
               "plain-only action ignores a Shift QuickSave chord");
     }
 
+    void TestChordClashes()
+    {
+        Key keys[kKeyCount] = {};
+        for (int i = 0; i < kKeyCount; ++i)
+            keys[i] = Key{ static_cast<unsigned>(GetKeyDef(static_cast<KeyId>(i)).defaultText[0]), false };
+        // Remote target (T) takes only Shift+T: plain T stays frontal_target.
+        Check(ActionTakingChord(keys, 'T', false, true, false, false) == KeyId::RemoteTarget, "Shift+T is ours");
+        Check(ActionTakingChord(keys, 'T', false, false, false, false) == KeyId::Count, "plain T is stock");
+        // Area select (X) takes X and Shift+X.
+        Check(ActionTakingChord(keys, 'X', false, false, false, false) == KeyId::AreaSelect, "X is ours");
+        Check(ActionTakingChord(keys, 'X', false, true, false, false) == KeyId::AreaSelect, "Shift+X is ours");
+        // Hold (Z) and building cycle (B) take only the plain key.
+        Check(ActionTakingChord(keys, 'Z', false, false, false, false) == KeyId::Hold, "Z is ours");
+        Check(ActionTakingChord(keys, 'Z', false, true, false, false) == KeyId::Count, "Shift+Z is stock");
+        Check(ActionTakingChord(keys, 'B', false, false, true, false) == KeyId::Count, "Ctrl+B (eject) is stock");
+        Check(ActionTakingChord(keys, 'X', false, false, false, true) == KeyId::Count, "Alt chords are stock");
+        Check(ActionTakingChord(keys, 'X', true, false, false, false) == KeyId::Count, "extended bit must match");
+        Check(ActionTakingChord(keys, 'J', false, false, false, false) == KeyId::Count, "unbound key");
+        Check(ActionUsingKey(keys, 'T', false) == KeyId::RemoteTarget, "the rally key may not be T");
+        Check(ActionUsingKey(keys, 'V', false) == KeyId::Count, "V is free for the rally key");
+        Check(ActionTakingChord(nullptr, 'X', false, false, false, false) == KeyId::Count, "no keys");
+    }
+
     KeyEvent Down(unsigned vk, bool shift = false, bool ctrl = false)
     {
         KeyEvent e;
@@ -364,6 +387,7 @@ int main()
     TestAreaSelect();
     TestHoldLabel();
     TestKeys();
+    TestChordClashes();
     TestKeyMessages();
     if (OpenShimTest::FailureCount() != 0)
     {

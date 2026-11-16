@@ -105,10 +105,15 @@ The tests pin both cases.
 
 ## Hold (Z, and Shift on the Defend entry)
 
-Hold gives `GameObject::SetCommand(CMD_DEFEND)` 0x004DBCE0 (who = 0, the same
-as Lua `Defend(h, 0)`), then `SetAiHold(handle, true)`
-(Docs/NATIVE_HOLD_DEFEND_FOLLOW.md). It goes to the selected own commandable
-units with a Defend entry; others are skipped.
+Hold registers `SetAiHold(handle, true)` (Docs/NATIVE_HOLD_DEFEND_FOLLOW.md),
+then gives `GameObject::SetCommand(CMD_DEFEND)` 0x004DBCE0 (who = 0, the same
+as Lua `Defend(h, 0)`). It goes to the selected own commandable units with a
+Defend entry; others are skipped. The hold goes first so a unit the native
+hold refuses keeps its orders; if the order then fails the hold is dropped.
+The native hold needs the SitTask DoState hook and the DoSubTask
+retarget-period hooks (`ai_native_orders.cpp` `AiHoldHooksReady`). Without
+them neither path issues anything, the Shift+Defend click opens the stock
+submenu, and the Hold option reads Unavailable.
 
 - **Key path.** Keeps the selection.
 - **Menu path.** Plays mnu_clik and deselects, as the other entries do.
@@ -146,23 +151,48 @@ places:
   plus the Defend entry's number can fire both. Set `RtsHold = 1` (Options:
   Hold = Key Only) to keep only the Z key.
 
+## Command pings for unit-menu orders
+
+`rts_markers.cpp` pings orders where `ControlPanel::BroadcastCommand` runs.
+A unit-menu pick (Follow, Get Repair, Get Reload, Rescue, Recycle, and the
+smart modes) goes through `DispatchMode` and the unit's `ExecuteMode`
+instead, so `DispatchHook` snapshots each selected unit's pending order
+(`GameObject +0xC8..+0xD7`: flag, what, who handle, path; FUN_004dbd60.c
+lines 20-34) before the pick and, after it, calls
+`NotifyRtsMarkersCommand(what, who)` once, for the first own unit whose
+order changed and names a target object. The smart Defend-target pick
+(`BroadcastHook`) skips the stock BroadcastCommand, so it calls the same
+entry once. `RtsCommandPings` and the local-panel gate apply as for the
+broadcast pings. An order without a target object (Hunt) gets no ping.
+
 ## Keys
 
 - **Filters.** Keys are filtered as QuickSave does: a window-procedure
   subclass plus a `PeekMessageA` import hook. A latch swallows the
   autorepeats and the keyup of a swallowed keydown.
 - **When they act.** Only in a live, interactive world: not in the pause
-  menu, the shell, or the map editor (`InputEditModeFlag`). The world tick
-  must have run in the last 500 ms. Ctrl and Alt chords are never taken.
+  menu, the shell, the map editor (`InputEditModeFlag`), or while a legacy
+  text editor (in-mission chat, ally prompt) has focus
+  (`LegacyTextEditorFocusLookup` 0x00823CE0, shared with the Ctrl+= HUD
+  toggle as `HudVisibility::TextEditorFocused`; a failed bind or a fault
+  counts as focused, so the key stays the game's). The world tick must have
+  run in the last 500 ms. Ctrl and Alt chords are never taken.
+- **Where they run.** The filter only queues the action. The actions change
+  the selection (`SelectAdd` calls the object's OnSelect, vtable +0x20),
+  the player's target and unit orders, so they run from
+  `RunDeferredSceneMutations` at frameStarted, outside the render-queue
+  traversal. Only while that drain is not installed do they run in the
+  world render-queue tick, as the other drained features do.
 - **Clashes.** A key equal to the Rally Point key is left to rally (rally
   wins). Rebinding refuses modifiers, digits, F1-F10, Space, Tab, Alt,
   Enter, Esc, the rally key, another RTS key, and, for the Shift actions, a
-  Shift-only QuickSave chord.
+  Shift-only QuickSave chord. The other way round, rebinding the rally key
+  refuses any RTS key, and rebinding QuickSave/QuickLoad refuses a chord an
+  RTS filter takes (the plain key, or Shift+key for Shift+T and Shift+X).
+  Binding a stock gamekey action to such a chord saves it with a warning
+  that the RTS action takes it in missions.
 - **Stock binds.** Stock binds X, Z and plain B to nothing (gamekey.map,
   input.map). F is pitch_down, which is why area select is on X.
-- **Chat risk (UNVERIFIED).** Whether the game routes keys away while the
-  multiplayer chat line is open has not been confirmed. Plain B, X or Z may
-  act while typing in chat.
 
 ## Live checklist (not yet run)
 
@@ -177,3 +207,14 @@ places:
 5. Z holds; with Shift held the Defend entry reads Hold, and clicking it
    (or pressing its number) holds and deselects.
 6. In multiplayer, Hold is inert and the rest work.
+7. Open the in-mission chat line (and the ally prompt) and type B, X, Z and
+   Shift+T: every letter reaches the text and no RTS action fires.
+8. Unit-menu Follow, Get Repair and Recycle each draw one yellow ping on
+   their target; the smart Defend-target pick draws one too.
+9. B cycle order: with three buildings built in a known order, B visits
+   them newest first and wraps around (review N2).
+10. Shift plus the Defend entry's number key (Shift+digit) holds and
+    deselects exactly like the Shift+click, and with `RtsHold = 1` it opens
+    the stock submenu (review N8).
+11. Rebinding: the rally key refuses B; QuickSave refuses Shift+X; binding a
+    stock action to X saves with the RTS clash warning.

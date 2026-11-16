@@ -1787,6 +1787,9 @@ namespace BZROpenShim
         RefreshWeaponPresentationState(WeaponPresentation::Runtime::SceneAccess::Full);
         PrepareLaserSightSceneObjects();
         CreateRequestedChunkMeshProxyObjects();
+        // RTS key actions: selection, target and order changes (SelectAdd
+        // runs the object's OnSelect), kept out of the traversal.
+        RunRtsCommandsPendingActions();
     }
 
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
@@ -1860,7 +1863,8 @@ namespace BZROpenShim
         TickGroupStrip();
         // Group member list: attaches its command-panel render scope once.
         TickOffenseOverflow();
-        // RTS command extras: key filters and queued key actions.
+        // RTS command extras: key filters; the queued key actions run from
+        // RunDeferredSceneMutations (inline only without the drain).
         TickRtsCommands();
 
         // Sample after the stock world queue update, when Ogre has evaluated

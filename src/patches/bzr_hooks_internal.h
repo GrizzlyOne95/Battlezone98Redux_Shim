@@ -1405,6 +1405,7 @@ namespace BZROpenShim
         bool SetAiFollowEngageEnabled(bool enabled);
         bool SetAiDefendRefreshEnabled(bool enabled);
         bool SetAiHold(int handle, bool hold);
+        bool AiHoldHooksReady();
         bool IsAiHeldCraft(void* craft);
         bool IsAiHeldProcess(void* process);
         void ResetAiNativeOrders();
@@ -1479,14 +1480,26 @@ namespace BZROpenShim
         void ReloadRtsCommandsConfig();
         void RefreshRtsCommandsState();
         void ResetRtsCommands();
-        // Frame thread, beside TickOffenseOverflow: key filters and actions.
+        // Frame thread, beside TickOffenseOverflow: key filters (and the
+        // queued actions while the scene-mutation drain is not installed).
         void TickRtsCommands();
+        // The queued key actions; RunDeferredSceneMutations (frameStarted).
+        void RunRtsCommandsPendingActions() noexcept;
         // Options > Input > RTS Actions (main thread). Index = KeyId in
         // rts_commands_policy.h. Set returns nullptr on success, else the
-        // reason the key was refused; the caller persists it.
+        // reason the key was refused; the caller persists it. An empty text
+        // unbinds the action (the rollback of a binding that had no key).
         int RtsCommandKeyCount();
         const char* RtsCommandKeyText(int index);
         const char* SetRtsCommandKeyText(int index, const char* text);
+        // The display name of the RTS action whose key filter takes `chord`
+        // in a mission (Shift and plain as the action uses them; never Ctrl
+        // or Alt chords), else nullptr. Main thread: QuickSave and gamekey
+        // rebinding.
+        const char* RtsCommandActionTakingChord(const QuickSaveKeyPolicy::Chord& chord);
+        // The display name of the RTS action bound to this key in any Shift
+        // state, else nullptr. Main thread: rally key rebinding.
+        const char* RtsCommandActionUsingKey(unsigned vk, bool extended);
 
         // --- HUD group strip (group_strip.cpp) ---------------------------------
         // Read-only F1-F7 group row on the HUD. Tick: the world render tick
