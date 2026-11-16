@@ -203,6 +203,10 @@ namespace BZROpenShim
             OrdnanceEntityLeakOnSceneEntitiesDestroyed();
             if (g_OgreFn_DestroyAllEntitiesOriginal)
                 g_OgreFn_DestroyAllEntitiesOriginal(sceneManager);
+            // Only the world's scene ends a mission.
+            void* const worldScene = GetOgreSceneManagerRuntime();
+            if (!worldScene || worldScene == sceneManager)
+                GpuSkinningNotifySceneEntitiesDestroyed();
         }
 
         // `mov al, byte [ecx+disp32]; ret` -- the whole accessor.
@@ -263,6 +267,7 @@ namespace BZROpenShim
             }
 
             // The trampoline was published before the jump went live.
+            GpuSkinningSetSceneTeardownSeam(true);
             Log(L"[SCENE] Installed destroyAllEntities hook body=0x%08X skyDomeFlag=+0x%X skyPlaneFlag=+0x%X\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(body)),
                 g_SkyDomeEnabledOffset,

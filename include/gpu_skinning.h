@@ -23,6 +23,12 @@ namespace BZROpenShim
 
     void GpuSkinningNotifyMissionRunStateChanged(bool running);
 
+    // From SceneManager::destroyAllEntities, the real end of a mission's
+    // world. Once the seam is installed, a new generation starts only after
+    // it; without the seam, at the next world render.
+    void GpuSkinningSetSceneTeardownSeam(bool installed);
+    void GpuSkinningNotifySceneEntitiesDestroyed();
+
     // Called from the render queue hook on the render thread. Installs the
     // frame listener that does the work at frame start; otherwise one load.
     void GpuSkinningRenderFrameTick();

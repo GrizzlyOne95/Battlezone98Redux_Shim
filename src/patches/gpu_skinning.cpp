@@ -44,6 +44,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <malloc.h>
 #include <new>
 #include <mutex>
 #include <string>
@@ -215,6 +216,17 @@ namespace BZROpenShim
         bool g_listenerInstalled = false;
         // Set once the setting has been read for the current mission.
         bool g_missionEvaluated = false;
+        // The destroyAllEntities seam is live (lifecycle_seams.cpp).
+        bool g_teardownSeam = false;
+        // Mission ended, old world not yet torn down. The debrief keeps
+        // rendering it for seconds, and the next generation must not start
+        // on it: whatever it cloned or compiled would sit in the Modable
+        // group the engine clears at teardown.
+        bool g_awaitTeardown = false;
+        // Frames rendered in RUN_STARTED while still waiting. A load runs
+        // teardown long before this many; past it the teardown was missed.
+        uint32_t g_awaitStartedFrames = 0;
+        constexpr uint32_t kAwaitTeardownFrameLimit = 300;
         uint32_t g_generation = 0;
         uint32_t g_frame = 0;
 
@@ -1795,8 +1807,15 @@ namespace BZROpenShim
             return IsPointerShaped(entity) ? entity : nullptr;
         }
 
+        // Where the scan was when it faulted, for the disable message.
+        const char* g_scanStage = "idle";
+        void* g_scanEntity = nullptr;
+        char g_scanFaultDetail[160] = {};
+
         void ScanFrame()
         {
+            g_scanStage = "arena";
+            g_scanEntity = nullptr;
             // Every Entity is proven against this scene before it is touched;
             // without one nothing can be proven, so the frame is skipped.
             void* const sceneManager = Hooks::GetOgreSceneManagerRuntime();
@@ -1826,6 +1845,7 @@ namespace BZROpenShim
                 void* directRoot = nullptr;
                 void* ownerRoot = nullptr;
                 ReadBridgeRoots(static_cast<const uint8_t*>(obj76), directRoot, ownerRoot);
+                g_scanStage = "resolve-root";
                 void* const candidates[] = {
                     ResolveRootEntity(directRoot, frame, convertPass),
                     ResolveRootEntity(ownerRoot, frame, convertPass),
@@ -1835,6 +1855,8 @@ namespace BZROpenShim
                     if (!entity || live.count(entity) != 0 || held.count(entity) != 0)
                         continue;
 
+                    g_scanEntity = entity;
+                    g_scanStage = "tracked";
                     const auto converted = g_converted.find(entity);
                     if (converted != g_converted.end())
                     {
@@ -1859,11 +1881,14 @@ namespace BZROpenShim
                         if (changes!=variants.end())
                         {
                             variantsHandled.insert(entity);
+                            g_scanStage = "adopt-variant";
                             for (const auto& change:changes->second)
                                 AdoptSurfaceVariantNow(entity,change.index,change.before.c_str(),change.after.c_str());
                         }
+                        g_scanStage = "on-clones";
                         if (EntityOnClones(entity, converted->second))
                             continue;
+                        g_scanStage = "reconvert";
                         // The game re-assigned a material since last frame:
                         // convert the newcomer or put the whole entity back.
                         ConversionError error;
@@ -1872,6 +1897,7 @@ namespace BZROpenShim
                             ++g_stats.reconverted;
                             continue;
                         }
+                        g_scanStage = "revert";
                         RevertEntity(entity, converted->second);
                         ++g_stats.reverted;
                         CountReject(entity, error);
@@ -1882,6 +1908,7 @@ namespace BZROpenShim
                     live.insert(entity);
                     if (!convertPass || g_rejected.count(entity) != 0)
                         continue;
+                    g_scanStage = "rtti";
                     char rtti[64];
                     const char* className = Hooks::TryGetRttiClassName(entity, rtti, sizeof(rtti));
                     if (!className || std::strcmp(className, ".?AVEntity@Ogre@@") != 0)
@@ -1896,6 +1923,7 @@ namespace BZROpenShim
                         continue;
                     }
 
+                    g_scanStage = "convert";
                     EntityRecord record;
                     ConversionError error;
                     if (ConvertEntity(entity, record, error))
@@ -1921,6 +1949,8 @@ namespace BZROpenShim
             // stay pending for a bounded number of frames, then expire. An
             // entity that has left the arena is dropped at once: its address
             // can be reused, and a stale change must not land on the new one.
+            g_scanStage = "variants";
+            g_scanEntity = nullptr;
             if (!variants.empty())
             {
                 uint32_t expired=0;
@@ -1946,6 +1976,7 @@ namespace BZROpenShim
                         "[GPUSKIN] %u surface-variant change(s) expired unapplied (entity never converted)",expired);
             }
 
+            g_scanStage = "prune";
             // Entities no longer in the arena are not touched again: their
             // pointers may be dangling, and a reused address starts fresh.
             for (auto it = g_converted.begin(); it != g_converted.end();)
@@ -1974,10 +2005,52 @@ namespace BZROpenShim
                 ScanFrame();
                 return true;
             }
-            catch (...)
+            catch (const std::exception& e)
             {
+                _snprintf_s(g_scanFaultDetail, sizeof(g_scanFaultDetail), _TRUNCATE,
+                    "C++ exception: %s", e.what());
                 return false;
             }
+            catch (...)
+            {
+                _snprintf_s(g_scanFaultDetail, sizeof(g_scanFaultDetail), _TRUNCATE,
+                    "C++ exception (unknown type)");
+                return false;
+            }
+        }
+
+        int RecordScanSehFault(EXCEPTION_POINTERS* info)
+        {
+            const EXCEPTION_RECORD* const record = info ? info->ExceptionRecord : nullptr;
+            void* const address = record ? record->ExceptionAddress : nullptr;
+            // Barely any stack is left: record the code and get out.
+            if (record && record->ExceptionCode == EXCEPTION_STACK_OVERFLOW)
+            {
+                strcpy_s(g_scanFaultDetail, "SEH 0xC00000FD stack overflow");
+                return EXCEPTION_EXECUTE_HANDLER;
+            }
+            HMODULE module = nullptr;
+            char moduleName[MAX_PATH] = "?";
+            if (address && GetModuleHandleExA(
+                    GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                    static_cast<LPCSTR>(address), &module) && module)
+            {
+                char path[MAX_PATH] = {};
+                if (GetModuleFileNameA(module, path, MAX_PATH))
+                {
+                    const char* base = std::strrchr(path, '\\');
+                    strncpy_s(moduleName, base ? base + 1 : path, _TRUNCATE);
+                }
+            }
+            const uintptr_t accessAddress =
+                (record && record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2)
+                    ? static_cast<uintptr_t>(record->ExceptionInformation[1]) : 0;
+            _snprintf_s(g_scanFaultDetail, sizeof(g_scanFaultDetail), _TRUNCATE,
+                "SEH 0x%08lX at %s+0x%X access=0x%08X",
+                record ? record->ExceptionCode : 0ul, module ? moduleName : "abs",
+                static_cast<unsigned>(reinterpret_cast<uintptr_t>(address) - reinterpret_cast<uintptr_t>(module)),
+                static_cast<unsigned>(accessAddress));
+            return EXCEPTION_EXECUTE_HANDLER;
         }
 
         // No destructible locals: SEH and C++ unwinding do not mix in one frame.
@@ -1988,12 +2061,20 @@ namespace BZROpenShim
             {
                 ok = ScanFrameCxx();
             }
-            __except (EXCEPTION_EXECUTE_HANDLER)
+            __except (RecordScanSehFault(GetExceptionInformation()))
             {
                 ok = false;
+                if (GetExceptionCode() == EXCEPTION_STACK_OVERFLOW)
+                    _resetstkoflw();
             }
             if (!ok)
+            {
+                LogShimA(LogLevel::Error, kComponent,
+                    "[GPUSKIN] entity scan fault: stage=%s entity=0x%08X %s",
+                    g_scanStage, static_cast<unsigned>(reinterpret_cast<uintptr_t>(g_scanEntity)),
+                    g_scanFaultDetail[0] ? g_scanFaultDetail : "(no detail)");
                 Disable("fault during entity scan");
+            }
         }
 
         // Ogre::FrameListener, laid out to its vtable: frameStarted,
@@ -2110,6 +2191,31 @@ namespace BZROpenShim
         return twin->second.pass;
     }
 
+    void GpuSkinningSetSceneTeardownSeam(bool installed)
+    {
+        g_teardownSeam = installed;
+    }
+
+    void GpuSkinningNotifySceneEntitiesDestroyed()
+    {
+        // Also the end of a mission an in-mission load replaces, whose run
+        // state never left RUN_STARTED.
+        g_awaitTeardown = false;
+        g_missionEvaluated = false;
+        if (!g_active.exchange(false))
+            return;
+        // Called from an engine detour: nothing may escape into it.
+        try
+        {
+            LogMissionSummary();
+            ReleaseMissionStateCxx();
+        }
+        catch (...)
+        {
+            Disable("fault releasing mission state at scene teardown");
+        }
+    }
+
     uint32_t GpuSkinningGeneration()
     {
         return g_generation;
@@ -2122,6 +2228,10 @@ namespace BZROpenShim
             g_missionEvaluated = false;
             if (!g_active.exchange(false))
                 return;
+            // Only after a live generation: the startup flip out of
+            // RUN_STARTED has no world, and no teardown follows it.
+            g_awaitTeardown = g_teardownSeam;
+            g_awaitStartedFrames = 0;
             LogMissionSummary();
             ReleaseMissionStateCxx();
             return;
@@ -2229,7 +2339,19 @@ namespace BZROpenShim
         // RUN_STARTED arrives before the old world is torn down
         // (lifecycle_seams.cpp), and a command-line mission is already
         // RUN_STARTED when the seam installs.
-        if (!g_missionEvaluated)
+        if (g_awaitTeardown)
+        {
+            int state = Hooks::kBzrRunStateUnknown;
+            if (Hooks::TryReadBzrRunState(state) && state == Hooks::kBzrRunStateStarted &&
+                ++g_awaitStartedFrames >= kAwaitTeardownFrameLimit)
+            {
+                g_awaitTeardown = false;
+                LogShimA(LogLevel::Info, kComponent,
+                    "[GPUSKIN] no scene teardown seen after %u mission frames; starting anyway",
+                    kAwaitTeardownFrameLimit);
+            }
+        }
+        if (!g_missionEvaluated && !g_awaitTeardown)
             GpuSkinningNotifyMissionRunStateChanged(true);
         if (g_listenerInstalled || !g_active.load(std::memory_order_acquire))
             return;
