@@ -17,7 +17,7 @@ struct ShimSettingDescriptor
     size_t defaultIndex;       // shown when the key is absent/invalid
     ShimSettingApplyGroup applyGroup;
     const char* description;   // one sentence shown in the status label on hover
-    const char* pairedKey;     // optional second key in the same section, written with the same value
+    const char* pairedKey = nullptr; // optional second key in the same section, written with the same value
 };
 
 static const char* const kShimSettingsOnOffValues[] = { "1", "0" };
