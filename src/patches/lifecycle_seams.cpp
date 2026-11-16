@@ -116,6 +116,7 @@ namespace BZROpenShim
             ForgetShellCasingSceneResources(L"clearScene");
             ForgetProducerRallyMeshes(L"clearScene");
             ForgetLaserSightSceneResources(L"clearScene");
+            ForgetRtsMarkersSceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
             SceneMutationDrainSceneTeardown();
             ForgetMultiplayerFlagSceneResources(L"clearScene");
@@ -138,6 +139,7 @@ namespace BZROpenShim
             ForgetShellCasingSceneResources(L"destroyAllMovableObjects");
             ForgetProducerRallyMeshes(L"destroyAllMovableObjects");
             ForgetLaserSightSceneResources(L"destroyAllMovableObjects");
+            ForgetRtsMarkersSceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
             SceneMutationDrainSceneTeardown();
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
@@ -605,6 +607,7 @@ namespace BZROpenShim
                 NotifyFracturePrewarmMissionRunState(false);
                 DeactivateShellCasings(L"left simulation");
                 DeactivateLaserSight(L"left simulation");
+                DeactivateRtsMarkers(L"left simulation");
 
                 ResetPathBlockState(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);

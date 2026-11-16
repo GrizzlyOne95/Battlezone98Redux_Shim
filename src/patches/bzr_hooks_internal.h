@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "bzr_hooks.h"
+#include "rts_markers.h"
 #include "quicksave_key_policy.h"
 #include "stable_id_list.h"
 #include "bzr_object_layout.h"

@@ -196,6 +196,7 @@
     <ClCompile Include="src\patches\skinned_gibs.cpp" />
     <ClCompile Include="src\patches\shell_casings.cpp" />
     <ClCompile Include="src\patches\laser_sight.cpp" />
+    <ClCompile Include="src\patches\rts_markers.cpp" />
     <ClCompile Include="src\patches\scene_mutation_drain.cpp" />
 
     <ClCompile Include="src\patches\path_block.cpp" />

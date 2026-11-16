@@ -2609,6 +2609,27 @@ GroupMemberMenu = 1
 ; Exposed on the OpenShim Settings page as "Group Strip".
 GroupStrip = 1
 
+; RTS command pings (from BZCC/RTS games). Each order the local player gives
+; draws a short ring on the ground: a green ring shrinking onto a Go point, a
+; red ring around an attack target that follows it, a yellow ring for any
+; other order on a point or object. Local visuals only: nothing is sent or
+; saved, so it also works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Command Pings".
+RtsCommandPings = 1
+
+; Artillery range rings. Around the piloted vehicle and every selected
+; own-team unit carrying a gravity cannon (howitzer, mortar-type ordnance),
+; a ring at its flat-ground maximum range from the ODF shotSpeed and
+; lifeSpan, and a ring at the aim point (cockpit reticle or satellite
+; cursor): green when one of them can reach it allowing for the height
+; difference, red when none can. At most 16 units. Local visuals only.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Artillery Range".
+RtsArtilleryRange = 1
+
 
 [Updater]
 ; Stage a newer OpenShim from the Steam Workshop when the main menu first appears (Steam builds, never in multiplayer); it installs when you quit. 0 = manual "Check for Updates" only. Default: 1.

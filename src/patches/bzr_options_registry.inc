@@ -676,6 +676,20 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Shows each F1-F7 group that has units in a strip beside the scrap and pilot gauge: "
       "the key, how many units are alive and the first unit's name, with + when the group "
       "mixes types. Read only, so it also works in multiplayer." },
+    // [Gameplay], Controls page next to Group Strip. Ships ON: default "On" (0).
+    { "Command Pings", "Gameplay", "RtsCommandPings", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Each order you give draws a short ring on the ground: green where units go, red "
+      "around an attack target (it follows the target), yellow for other orders. Only you "
+      "see it, so it also works in multiplayer." },
+    // [Gameplay], Controls page next to Command Pings. Ships ON: default "On" (0).
+    { "Artillery Range", "Gameplay", "RtsArtilleryRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Draws the maximum range on the ground around your vehicle and selected units that "
+      "carry a howitzer-type weapon, and a ring at the aim point: green when one of them "
+      "can reach it, red when none can. Only you see it, so it also works in multiplayer." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalTurbo,
@@ -998,7 +1012,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
-    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsArtilleryRange", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
