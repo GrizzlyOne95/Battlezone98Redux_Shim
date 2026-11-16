@@ -198,6 +198,7 @@ namespace BZROpenShim
             DestroyShellCasingSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyProducerRallySceneObjects(sceneManager, L"destroyAllEntities");
             DestroyLaserSightSceneObjects(sceneManager, L"destroyAllEntities");
+            DestroyChunkProxySceneObjects(sceneManager, L"destroyAllEntities");
             SceneMutationDrainSceneTeardown();
             OrdnanceEntityLeakOnSceneEntitiesDestroyed();
             if (g_OgreFn_DestroyAllEntitiesOriginal)
