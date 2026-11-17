@@ -1556,6 +1556,9 @@ namespace BZROpenShim
         bool ProducerRallyConfirmPending();
         // The SPACE label call site is redirected (the queue label chains on it).
         bool ProducerRallySpaceLabelHooked();
+        // The BroadcastCommand(where) entry detour 0x004A70C0 is installed (the
+        // queue's plain-order clear listens on it).
+        bool ProducerRallyBroadcastHookInstalled();
 
         // --- HUD group strip (group_strip.cpp) ---------------------------------
         // Read-only F1-F7 group row on the HUD. Tick: the world render tick

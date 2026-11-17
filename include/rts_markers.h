@@ -20,6 +20,8 @@ namespace BZROpenShim
         bool IsRtsMarkersObjectCommandHook(const char* patchName);
         void* PrepareRtsMarkersObjectCommandHook(uint32_t site);
         void NoteRtsMarkersObjectCommandHookInstalled();
+        // The JMP5 landed (the order queue's plain-order clear relies on it).
+        bool RtsMarkersObjectCommandHookInstalled();
 
         // An order on an object that did not go through BroadcastCommand:
         // rts_commands.cpp's per-unit unit-menu dispatch (ExecuteMode) and

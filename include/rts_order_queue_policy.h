@@ -37,7 +37,7 @@ namespace BZROpenShim
         constexpr int kCmdDefend = 15;
         constexpr int kCmdBuild = 21;
 
-        // The commands the Space/Alt button can queue. Select (Shift+Space is
+        // The commands the Space/Alt button can queue. Select (Ctrl+Space is
         // SelectAdd), No Dropoff, Stop, Build and everything else stay stock.
         inline bool IsQueueable(int cmd)
         {
@@ -279,7 +279,7 @@ namespace BZROpenShim
 
         // ---- One press ---------------------------------------------------------
         // Shared by the label and the press hook: the option is active (on,
-        // hooks bound, single player), the multi-select modifier is held,
+        // hooks bound, single player), Shift is held (Ctrl is not),
         // something is selected and the context command queues.
         inline bool QueueArmed(bool active, bool modifierHeld, int selectNum, int cmd)
         {

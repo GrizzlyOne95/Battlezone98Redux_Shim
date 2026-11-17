@@ -1058,6 +1058,7 @@ namespace BZROpenShim::Hooks
                     continue;
                 }
                 ++held;
+                NoteRtsOrderQueuePlainOrder(&handles[i], 1); // Hold is a plain order
             }
             return held;
         }

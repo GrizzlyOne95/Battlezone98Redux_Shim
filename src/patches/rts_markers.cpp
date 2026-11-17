@@ -489,6 +489,7 @@ namespace BZROpenShim
             // ---- Command pings -----------------------------------------------
             RM::PingQueue<RM::kMaxPings> g_Pings;
             FnObjectBroadcast g_OrigObjectBroadcast = nullptr;
+            std::atomic<bool> g_ObjectCommandHookInstalled{ false };
             volatile long g_PingLogBudget = 16;
 
             // The order came from the local ControlPanel with units selected.
@@ -1752,7 +1753,13 @@ namespace BZROpenShim
 
         void NoteRtsMarkersObjectCommandHookInstalled()
         {
+            g_ObjectCommandHookInstalled.store(true, std::memory_order_release);
             LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] %s installed", kHookName);
+        }
+
+        bool RtsMarkersObjectCommandHookInstalled()
+        {
+            return g_ObjectCommandHookInstalled.load(std::memory_order_acquire);
         }
 
         void TickRtsMarkers(float dt)

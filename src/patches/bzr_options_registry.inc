@@ -780,7 +780,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Queue Orders", "Gameplay", "RtsOrderQueue", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Hold the multi-select modifier (Shift by default): the Space and Alt command labels read "
+      "Hold Shift: the Space and Alt command labels read "
       "Queue plus the order, and pressing the key adds the order to the end of each selected unit's "
       "queue (8 deep) instead of replacing its orders. Single player only." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,

@@ -2718,6 +2718,11 @@ namespace BZROpenShim::Hooks
         return ArmedAndMatching();
     }
 
+    bool ProducerRallyBroadcastHookInstalled()
+    {
+        return (g_CommandHooksInstalled.load(std::memory_order_acquire) & (1u << kHookBroadcast)) != 0;
+    }
+
     bool ProducerRallySpaceLabelHooked()
     {
         return g_SpaceLabelHooked.load(std::memory_order_acquire);

@@ -5,8 +5,7 @@ Default **off**, single player only. Source: `src/patches/rts_order_queue.cpp`, 
 
 ## Behaviour
 
-With a selection, hold the stock multi-select modifier (the game's own `cmd_multi` byte, so a
-rebind is respected) and aim at something the Space or Alt button can order:
+With a selection, hold Shift (without Ctrl, which stays the stock multi-select modifier) and aim at something the Space or Alt button can order:
 
 - The Space label and the Alt label read `Queue <label>` (`Queue Defend`, `Queue Go To`). The
   prefix is the localization key `openshim_ui:rts_order_queue_prefix`.
@@ -16,7 +15,7 @@ rebind is respected) and aim at something the Space or Alt button can order:
   the press is skipped so the player can chain more orders. A press without the modifier is stock
   (`SelectNone` included).
 - Queueable: Go (3), Attack (4), Follow (5), Pickup (7), Dropoff (8), Get Repair (10), Get Reload
-  (11), Defend (15). Never: Select (1; Shift+Space stays `SelectAdd`), No Dropoff (9), Stop (2),
+  (11), Defend (15). Never: Select (1; Ctrl+Space stays `SelectAdd`), No Dropoff (9), Stop (2),
   Build (21), anything else; those, and the null-target broadcasts, run stock.
 - Caps: 8 entries per unit, 32 units with a queue. A press that cannot fit (any selected unit's
   queue full, or too few free unit slots) is refused for every unit: the stock `mnu_buzz.wav`
@@ -35,10 +34,11 @@ rebind is respected) and aim at something the Space or Alt button can order:
 
 | Event | Covered by |
 |---|---|
-| Unit dies / is gone / changes team | drain pass (`ObjectAlive`, `IsPlayerTeam`) |
+| Unit dies / is gone / changes team / becomes the player's piloted object | drain pass (`ObjectAlive`, `IsPlayerTeam`, user-object check); a unit that is not commandable is skipped for that pass |
 | Plain order from the Space/Alt buttons | the press hooks, after the stock call |
 | Any other player `BroadcastCommand` (object 0x004A7050 and ground 0x004A70C0 entry detours; OverView, submenu picks, the Defend/Nav submenus) | `NoteRtsOrderQueuePlainBroadcast` from the `rts_markers.cpp` listeners on those two detours (the ground one is skipped when rally set mode consumes the confirm, which orders nothing) |
 | Unit-menu picks (`DispatchMode`), smart Defend pick, Build at Nav pick | `NoteRtsOrderQueuePlainOrder` from the `rts_commands.cpp` hooks |
+| Hold (Shift+Defend alternate, `HoldSelection`) | `NoteRtsOrderQueuePlainOrder` per held unit |
 | Mission load / reset | `ResetRtsOrderQueue` (feature registry revert) |
 | Option turned off, or a network game | `RefreshRtsOrderQueueState` (feature registry MP gate, every 250 ms) |
 
@@ -64,7 +64,7 @@ stock broadcast is not drawn for queued entries.
 
 ### Out of scope (v1)
 
-- OverView (satellite) orders: not hooked (Shift there only affects `SELECT`); a plain order from
+- OverView (satellite) orders: not hooked (Shift is not read there); a plain order from
   it clears queues through the broadcast listener.
 - The digit-key submenus (Defend / Attack / Go To Nav target picks, the unit menu): stock Shift
   already skips the unit branch of the digit menu; their picks are plain orders (clear).
@@ -99,15 +99,19 @@ read from the shipped exe and disassembled on 2026-11-17.
   ProducerRallyPoints; the queue chains in its hook), ALT at **0x004A26C1** (`E8 7A A4 37 00`,
   lines 604 and 677). Returning a pointer to a static buffer is safe: the string is held in a
   frame local and drawn at once (lines 604-612), never freed.
-- Shift: the stock Shift state is the byte `cmd_multi` at 0x00919875 (`CommandMenuUnitBranchInput`),
-  the same one Render, OverView and `Reticle::Simulate` read. With a selection Shift does not change
+- Modifier: Shift via `GetKeyState(VK_SHIFT)` on the game thread, as RtsHold and the RTS keys
+  read it (Battlezone Platform also queues on Shift+Space). The stock multi-select byte `cmd_multi`
+  at 0x00919875 (`keyboard Control` in the shipped `input.map` lines 46-50; engine row
+  `CommandMenuUnitBranchInput`) must be clear, so Ctrl+Shift keeps its stock meaning. That byte is
+  the one Render, OverView and `Reticle::Simulate` read; Shift is not, so it does not change
   which command the button offers (`Reticle::Simulate` `FUN_005ba560` lines 148-174 chooses the
   reticle object with the selected leader excluded only without the modifier; `ActionMode::GetCommand`
   asks the selected unit's class virtuals, which do not read it; the per-class virtuals were not
   swept: UNVERIFIED), so Defend on an own building is reachable under Shift as without it.
 - Idle: `GameObject` current command record +0xA8 and pending +0xC8, `what` at +4; idle means both
-  none, select or stop (`RtsCommandsPolicy::IsIdle`; the idle-unit alert already relies on it).
-  SetCommand writes the pending record immediately, so a unit just ordered reads busy at once
+  none, select or stop (`RtsCommandsPolicy::IsIdle`). The helper (`RtsCommandsUnitIdle`) does not
+  apply the idle alert's `ScavengerBusy` test, so a self-harvesting scavenger reads idle and a
+  Shift press issues at once (stock-like) instead of queueing. SetCommand writes the pending record immediately, so a unit just ordered reads busy at once
   (matches the alert's behaviour; no separate in-flight tracking is kept).
 - Thread: `RunDeferredSceneMutations` is the Ogre frameStarted listener on the game's main thread;
   `rts_commands.cpp` already issues `SetCommand` (Hold) and `SelectAdd` from it.
@@ -126,7 +130,8 @@ read from the shipped exe and disassembled on 2026-11-17.
 
 All are REL32 call redirects (`RedirectCall`), each re-reading and comparing the bytes first, and the
 option is marked unavailable (`MarkOptionHookFailed`) unless every site, the SPACE label chain and
-the shared `rts_commands.cpp` rows are in place. The ground sites' callee is read from the verified
+the shared `rts_commands.cpp` rows and both broadcast entry detours (RtsMarkers object, Producer
+Rally ground) are in place. A retry accepts a site that already calls our own hook. The ground sites' callee is read from the verified
 rel32 (0x004A70C0) instead of an engine row: that function's entry is detoured by
 ProducerRallyPoints, so a byte row there would read as a mismatch.
 
@@ -135,7 +140,14 @@ ProducerRallyPoints, so a byte row there would read as a mismatch.
 `rows bound`, `<site>: redirected`, `install complete|gave up`, `active=<0|1> (option, hooks, single
 player)` (change-only), `queued handle= cmd= depth=`, `issued handle= cmd= (idle, now|from queue)`,
 `dropped handle= cmd= target= (gone)`, `cleared handle= entries= (<reason>)` / `cleared all`,
-`refused (full)`.
+`refused (full)`, `label space|alt armed= modifier= cmd= selected=` (change-only per row, so a
+"Queue" label decision shows in the log).
+
+Known gap: the label only checks modifier, selection and command, not that the press has a target.
+`HandlePress` additionally needs an object or ground point; with none (the null arm, left stock) the
+label can read `Queue ...` while the press runs stock. The press-side target (the ControlPanel
+button's object/position fields, +0x1120/+0x1124 for SPACE) was not verified for the ALT row, so
+the label does not read it.
 
 ## Live test checklist (not yet run)
 
@@ -145,4 +157,4 @@ player)` (change-only), `queued handle= cmd= depth=`, `issued handle= cmd= (idle
 2. The tank reaches the Go point and starts defending (`[ORDERQ] issued ... (from queue)`).
 3. A plain order, Stop through the menu, or the tank dying clears the queue.
 4. Rally set mode armed with a Recycler selected: the label reads `Rally`, the press sets the rally.
-5. Shift+Space on a select button still adds to the selection.
+5. Ctrl+Space on a select button still adds to the selection.

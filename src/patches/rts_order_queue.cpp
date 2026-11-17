@@ -2,8 +2,8 @@
 // BZR Open Shim - [Gameplay] RtsOrderQueue (default off, single player):
 // Shift-queued orders for the stock Space and Alt command buttons.
 //
-// While the stock multi-select modifier byte (cmd_multi, 0x00919875, so a
-// rebind is respected) is held with units selected and the context command is
+// While Shift is held (and the stock multi-select modifier cmd_multi, 0x00919875,
+// Ctrl by default, is not) with units selected and the context command is
 // one of Go / Attack / Follow / Defend / Pickup / Dropoff / Get Repair /
 // Get Reload, the Space and Alt labels read "Queue <label>" and the press
 // issues the order to each idle selected unit at once and appends it to the
@@ -247,6 +247,13 @@ namespace BZROpenShim::Hooks
                    team == playerTeam;
         }
 
+        // The player's own piloted object (never ordered, as DoAreaSelect).
+        bool IsUserObject(void* obj)
+        {
+            const uintptr_t slot = EngineGlobals::UserObjectSlot();
+            return obj && slot && ReadPtr(slot) == obj;
+        }
+
         int ReadSelection(uint32_t (&handles)[RtsCommandsPolicy::kSelectCapacity])
         {
             int n = 0;
@@ -257,10 +264,15 @@ namespace BZROpenShim::Hooks
             return ReadBytes(g_ControlPanelAddr + kSelectListOffset, handles, static_cast<size_t>(n) * 4) ? n : 0;
         }
 
+        // Shift queues (as RtsHold and the RTS keys read it: GetKeyState on the game
+        // thread). The stock multi-select modifier (cmd_multi, Ctrl by default) keeps
+        // its stock meaning, so Ctrl+Shift is not a queue press.
         bool ModifierHeld()
         {
-            uint8_t value = 0;
-            return g_MultiAddr != 0 && ReadBytes(g_MultiAddr, &value, 1) && value != 0;
+            if (GetKeyState(VK_SHIFT) >= 0)
+                return false;
+            uint8_t multi = 0;
+            return g_MultiAddr != 0 && ReadBytes(g_MultiAddr, &multi, 1) && multi == 0;
         }
 
         bool SafeSetCommandObj(void* obj, int what, void* target)
@@ -466,8 +478,11 @@ namespace BZROpenShim::Hooks
         {
             if (HandlePress(panel, what, nullptr, where))
                 return;
+            // A rally confirm sets a rally and gives no order: keep the queues.
+            const bool rallyConfirm = ProducerRallyConfirmPending();
             g_FnBroadcastWhere(panel, what, where);
-            NoteRtsOrderQueuePlainBroadcast(panel);
+            if (!rallyConfirm)
+                NoteRtsOrderQueuePlainBroadcast(panel);
         }
 
         // Entered in place of `call ControlPanel::SelectNone` at 0x004A1FD7 and
@@ -495,7 +510,21 @@ namespace BZROpenShim::Hooks
             if (!ReadInt(g_ControlPanelAddr + (alt ? kAltButtonCommandOffset : kCmdButtonCommandOffset), cmd) ||
                 !ReadInt(g_ControlPanelAddr + kSelectNumOffset, selectNum))
                 return stock;
-            if (!Q::QueueArmed(true, ModifierHeld(), selectNum, cmd) || ProducerRallyConfirmPending())
+            const bool modifier = ModifierHeld();
+            const bool armed = Q::QueueArmed(true, modifier, selectNum, cmd) && !ProducerRallyConfirmPending();
+            {
+                // Change-only decision log (per row): armed state or command changed.
+                static int lastState[2] = { -1, -1 };
+                const int state = (armed ? 1 : 0) | (modifier ? 2 : 0) | ((cmd & 0xFF) << 2);
+                int& last = lastState[alt ? 1 : 0];
+                if (state != last)
+                {
+                    last = state;
+                    LogBudgeted(L"[ORDERQ] label %hs armed=%d modifier=%d cmd=%d selected=%d\n", alt ? "alt" : "space",
+                                armed ? 1 : 0, modifier ? 1 : 0, cmd, selectNum);
+                }
+            }
+            if (!armed)
                 return stock;
             static char buffers[2][Q::kLabelCapacity];
             const char* prefix = "Queue";
@@ -534,6 +563,9 @@ namespace BZROpenShim::Hooks
             int32_t rel = 0;
             std::memcpy(&rel, original + 1, sizeof(rel));
             const uint32_t callee = site + 5 + static_cast<uint32_t>(rel);
+            // Already our own hook from an earlier install attempt: done.
+            if (callee == static_cast<uint32_t>(reinterpret_cast<uintptr_t>(target)))
+                return expectedCallee != 0 ? expectedCallee : callee;
             if (expectedCallee != 0 && callee != expectedCallee)
             {
                 if (InterlockedDecrement(&g_InstallLogBudget) >= 0)
@@ -573,11 +605,15 @@ namespace BZROpenShim::Hooks
         }
 
         // The SPACE label chains on ProducerRallyPoints' redirect and the idle
-        // read comes from rts_commands.cpp, so both must be in place too.
+        // read comes from rts_commands.cpp, so both must be in place too, as
+        // must the two BroadcastCommand entry detours the plain-order clear
+        // listens on (RtsMarkers object 0x004A7050, Producer Rally ground
+        // 0x004A70C0).
         bool PartsReady()
         {
             return g_RowsBound && g_SelectNoneReady && g_PressReady && g_AltLabelReady &&
-                   RtsCommandsHelpersReady() && ProducerRallySpaceLabelHooked();
+                   RtsCommandsHelpersReady() && ProducerRallySpaceLabelHooked() &&
+                   RtsMarkersObjectCommandHookInstalled() && ProducerRallyBroadcastHookInstalled();
         }
 
         void MarkParts()
@@ -641,8 +677,14 @@ namespace BZROpenShim::Hooks
             {
                 // The ground sites call BroadcastCommand(where) 0x004A70C0 (its
                 // rel32 is part of both rows' verified bytes); both must agree.
-                const uint32_t whereCallee = CalleeAt(g_WherePressRow);
-                if (whereCallee == 0 || whereCallee != CalleeAt(g_AltWherePressRow))
+                // On a retry a ground site may already be ours: keep the callee
+                // learned the first time.
+                const uint32_t whereCallee = g_FnBroadcastWhere
+                                                 ? static_cast<uint32_t>(reinterpret_cast<uintptr_t>(g_FnBroadcastWhere))
+                                                 : CalleeAt(g_WherePressRow);
+                const uint32_t ourWhere = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&PressWhereHook));
+                const uint32_t altCallee = CalleeAt(g_AltWherePressRow);
+                if (whereCallee == 0 || (altCallee != whereCallee && altCallee != ourWhere))
                 {
                     if (InterlockedDecrement(&g_InstallLogBudget) >= 0)
                         Log(L"[ORDERQ] the SPACE and ALT ground calls do not share a callee; left stock\n");
@@ -693,11 +735,14 @@ namespace BZROpenShim::Hooks
             {
                 const uint32_t handle = handles[i];
                 void* const obj = SafeGetObj(handle);
-                if (!obj || !ObjectAlive(obj) || !IsPlayerTeam(obj))
+                if (!obj || !ObjectAlive(obj) || !IsPlayerTeam(obj) || IsUserObject(obj))
                 {
                     ClearUnit(handle, Q::ClearReason::Dead);
                     continue;
                 }
+                // As EvaluateIdleUnit: a unit that cannot take orders is left alone this pass.
+                if (!SafeCanCommand(obj))
+                    continue;
                 const bool idle = RtsCommandsUnitIdle(obj);
                 for (;;)
                 {
@@ -759,10 +804,11 @@ namespace BZROpenShim::Hooks
         {
             s_done = true;
             Log(L"[ORDERQ] install %hs after %d attempt(s): rows %hs, SelectNone %hs, press %hs, ALT label %hs, "
-                L"SPACE label chain %hs\n",
+                L"SPACE label chain %hs, broadcast detours %hs\n",
                 PartsReady() ? "complete" : "gave up", s_attempts, g_RowsBound ? "yes" : "no",
                 g_SelectNoneReady ? "yes" : "no", g_PressReady ? "yes" : "no", g_AltLabelReady ? "yes" : "no",
-                ProducerRallySpaceLabelHooked() ? "yes" : "no");
+                ProducerRallySpaceLabelHooked() ? "yes" : "no",
+                (RtsMarkersObjectCommandHookInstalled() && ProducerRallyBroadcastHookInstalled()) ? "yes" : "no");
         }
         RefreshRtsOrderQueueState();
     }
