@@ -1401,6 +1401,7 @@ namespace BZROpenShim
         extern bool g_SmartScavengerPathingEnabled;
         // Built scavengers skip InitState's 5 s coast (SP + SmartScavengerPathing).
         void RefreshScavengerInstantStartState();
+        void RevertScavengerInstantStartToBaseline();
         bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         void InstallAiTuningHooksIfPossible();
 

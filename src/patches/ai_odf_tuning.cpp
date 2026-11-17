@@ -2682,7 +2682,7 @@ namespace BZROpenShim
         constexpr uint32_t kScavengerWaitStockConst = 0x008A285Cu; // 5.0f
         constexpr uint32_t kScavengerWaitFloorConst = 0x008A2584u; // 0.5f
 
-        static void RefreshScavengerWaitFloorState(bool wantActive)
+        static void RefreshScavengerWaitFloorState(bool wantActive, const char* offReason)
         {
             if (!g_ScavengerWaitFloorInstalled ||
                 wantActive == g_ScavengerWaitFloorPatchActive)
@@ -2701,19 +2701,14 @@ namespace BZROpenShim
             g_ScavengerWaitFloorPatchActive = wantActive;
             Log(L"[SCAVPATH] scavenger wait floor: %hs (%hs)\n",
                 wantActive ? "0.5 s" : "stock 5 s",
-                wantActive ? "single-player"
-                           : (g_SmartScavengerPathingEnabled ? "network game"
-                                                             : "SmartScavengerPathing off"));
+                wantActive ? "single-player" : offReason);
         }
 
-        // Single-player gate, same shape as RefreshApcAlliedTargetDeployFixState:
-        // the stock bytes go back for network games and when the option is
-        // off. Only touches .text, and only logs, when the wanted state changes.
-        void RefreshScavengerInstantStartState()
+        // Writes both sites to the wanted state. Only touches .text, and only
+        // logs, when the wanted state changes.
+        static void ApplyScavengerInstantStart(bool wantActive, const char* offReason)
         {
-            const bool wantActive =
-                g_SmartScavengerPathingEnabled && IsSinglePlayerSession();
-            RefreshScavengerWaitFloorState(wantActive);
+            RefreshScavengerWaitFloorState(wantActive, offReason);
 
             if (!g_ScavengerInstantStartInstalled)
                 return;
@@ -2733,9 +2728,28 @@ namespace BZROpenShim
             g_ScavengerInstantStartPatchActive = wantActive;
             Log(L"[SCAVPATH] scavenger instant start: %hs (%hs)\n",
                 wantActive ? "on" : "off",
-                wantActive ? "single-player"
-                           : (g_SmartScavengerPathingEnabled ? "network game"
-                                                             : "SmartScavengerPathing off"));
+                wantActive ? "single-player" : offReason);
+        }
+
+        // Single-player gate, same shape as RefreshApcAlliedTargetDeployFixState:
+        // the stock bytes go back for network games and when the option is off.
+        void RefreshScavengerInstantStartState()
+        {
+            const bool wantActive =
+                g_SmartScavengerPathingEnabled && IsSinglePlayerSession();
+            ApplyScavengerInstantStart(
+                wantActive,
+                g_SmartScavengerPathingEnabled ? "network game" : "SmartScavengerPathing off");
+        }
+
+        // Mission end: put the stock bytes back. The gate only reconciles once
+        // the next mission's world is live, so without this a network game
+        // that follows a single-player mission would run its first frames with
+        // single-player scavenger timing. A following single-player mission
+        // turns it back on at its first gate tick.
+        void RevertScavengerInstantStartToBaseline()
+        {
+            ApplyScavengerInstantStart(false, "mission end");
         }
 
         // Binds and byte-checks the site once; the gate does the writing.

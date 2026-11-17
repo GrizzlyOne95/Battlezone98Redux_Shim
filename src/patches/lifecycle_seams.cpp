@@ -636,6 +636,9 @@ namespace BZROpenShim
                 // Rallies belong to the world being left; without this a load
                 // that restores the same producer handle would inherit them.
                 ResetProducerRallyPoints();
+                // Stock scavenger bytes go back before the next mission's
+                // single-player gate has run (it may be a network game).
+                RevertScavengerInstantStartToBaseline();
                 ResetUnderAttackAlertCooldown();
                 ResetHopOutAttackAlertTracking();
             }
