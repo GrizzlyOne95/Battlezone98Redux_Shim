@@ -316,6 +316,9 @@ namespace BZROpenShim
         constexpr size_t kPendingRecordOffset = 0xC8;
         constexpr size_t kRecordWhatOffset = 0x04;
         constexpr size_t kRecordPathOffset = 0x0C;
+        // The target object's handle, 0 without one (Docs/RTS_COMMANDS.md,
+        // "Command pings for unit-menu orders"; FUN_004dbd60.c lines 20-34).
+        constexpr size_t kRecordWhoOffset = 0x08;
         // AiPath (row RtsAiPathCtor): point count at +4, VECTOR_2D* at +8.
         constexpr size_t kPathCountOffset = 0x04;
         constexpr size_t kPathPointsOffset = 0x08;
@@ -323,6 +326,9 @@ namespace BZROpenShim
         constexpr int kCmdStop = 2;
         constexpr int kCmdGo = 3;
         constexpr int kCmdAttack = 4;
+        constexpr int kCmdFollow = 5;
+        constexpr int kCmdFormation = 6;
+        constexpr int kCmdDefend = 15;
         constexpr int kCmdLast = 26;
         // A line shorter than this is the unit standing on its destination.
         constexpr float kMinLineLength = 2.0f;
@@ -370,8 +376,25 @@ namespace BZROpenShim
             float a = 1.0f;
         };
 
-        // Go green, Attack red, any other order yellow (the ping colours);
-        // the pending order's line is dimmer.
+        // Reads the target object handle of the command record at `object +
+        // record`. False for idle or unknown commands and for orders without
+        // a target object (who == 0).
+        template <typename Reader>
+        bool CommandTarget(Reader&& read, uintptr_t object, size_t record, int& what, uint32_t& who)
+        {
+            what = 0;
+            who = 0;
+            int32_t value = 0;
+            if (!object || !read(object + record + kRecordWhatOffset, &value, sizeof(value)))
+                return false;
+            what = value;
+            if (what <= kCmdStop || what > kCmdLast)
+                return false;
+            return read(object + record + kRecordWhoOffset, &who, sizeof(who)) && who != 0;
+        }
+
+        // Go green, Attack red, Follow / Formation / Defend blue, any other
+        // order yellow; the pending order's line is dimmer.
         inline LineColour WaypointColour(int what, bool pending)
         {
             LineColour c;
@@ -379,6 +402,8 @@ namespace BZROpenShim
                 c = {0.30f, 1.00f, 0.40f, 0.70f};
             else if (what == kCmdAttack)
                 c = {1.00f, 0.22f, 0.16f, 0.70f};
+            else if (what == kCmdFollow || what == kCmdFormation || what == kCmdDefend)
+                c = {0.35f, 0.65f, 1.00f, 0.70f};
             else
                 c = {1.00f, 0.86f, 0.30f, 0.70f};
             if (pending)

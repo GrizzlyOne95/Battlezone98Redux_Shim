@@ -274,6 +274,27 @@ namespace
         const LineColour go = WaypointColour(kCmdGo, false), goPending = WaypointColour(kCmdGo, true);
         Check(go.g > go.r && goPending.a < go.a && Near(goPending.g, go.g), "pending is the same colour, dimmer");
         Check(WaypointColour(kCmdAttack, false).r > WaypointColour(kCmdAttack, false).g, "attack is red");
+        for (const int friendly : {kCmdFollow, kCmdFormation, kCmdDefend})
+            Check(WaypointColour(friendly, false).b > WaypointColour(friendly, false).r, "follow/formation/defend are blue");
+
+        // Target handle: ATTACK on handle 0x1234 in the current record.
+        uint32_t who = 0;
+        mem.Put<int32_t>(obj + kCurrentRecordOffset + kRecordWhatOffset, kCmdAttack);
+        mem.Put<uint32_t>(obj + kCurrentRecordOffset + kRecordWhoOffset, 0x1234u);
+        Check(CommandTarget(read, obj, kCurrentRecordOffset, what, who) && what == kCmdAttack && who == 0x1234u,
+              "an order on an object yields its handle");
+        mem.Put<uint32_t>(obj + kCurrentRecordOffset + kRecordWhoOffset, 0u);
+        Check(!CommandTarget(read, obj, kCurrentRecordOffset, what, who), "no target object: no ring");
+        mem.Put<uint32_t>(obj + kCurrentRecordOffset + kRecordWhoOffset, 0x1234u);
+        mem.Put<int32_t>(obj + kCurrentRecordOffset + kRecordWhatOffset, kCmdStop);
+        Check(!CommandTarget(read, obj, kCurrentRecordOffset, what, who), "a stale handle under STOP is ignored");
+        Check(!CommandTarget(read, 0, kCurrentRecordOffset, what, who), "no object: no target");
+        mem.Put<int32_t>(obj + kCurrentRecordOffset + kRecordWhatOffset, kCmdLast + 1);
+        Check(!CommandTarget(read, obj, kCurrentRecordOffset, what, who), "unknown command id: no target");
+        mem.Put<int32_t>(obj + kPendingRecordOffset + kRecordWhatOffset, kCmdFollow);
+        mem.Put<uint32_t>(obj + kPendingRecordOffset + kRecordWhoOffset, 0x5678u);
+        Check(CommandTarget(read, obj, kPendingRecordOffset, what, who) && what == kCmdFollow && who == 0x5678u,
+              "pending record read the same way");
     }
 
     void RouteTests()
@@ -366,7 +387,9 @@ namespace
         Check(kFirstPowerSlot == kPoolSize, "power rings follow the rings");
         Check(kMaxPowerRingSlots == kMaxPowerRings && kMaxWaypointLineSlots == kMaxWaypointUnits,
               "one slot per ring and per line");
-        Check(kSlotCount == kPoolSize + kMaxPowerRings + 2 * kMaxWaypointUnits, "pool holds everything at once");
+        Check(kFirstTargetRingSlot == kFirstPendingSlot + kMaxWaypointUnits && kMaxTargetRingSlots == kMaxWaypointUnits,
+              "a target ring per selected unit after the pending lines");
+        Check(kSlotCount == kPoolSize + kMaxPowerRings + 3 * kMaxWaypointUnits, "pool holds everything at once");
         Check(2u * (kMaxLineSegments + 1u) <= 2u * (kMaxSegments + 1u), "a line fits the ring strip budget");
     }
 
