@@ -55,6 +55,9 @@ namespace BZROpenShim::WeaponPresentation
 
     using MeshId = std::array<char, kMeshIdBytes>;
     std::optional<MeshId> ParseMeshId(std::string_view name) noexcept;
+    // Lower-cased copy of a C string into folded; false when empty or longer than
+    // kMeshIdBytes (a longer name can never match a native node). Reads name unguarded.
+    bool FoldNodeName(const char* name, char (&folded)[kMeshIdBytes + 1], size_t& length) noexcept;
     bool ValidPose(const Matrix& pose) noexcept;
 
     struct MeshNodeView
@@ -74,6 +77,21 @@ namespace BZROpenShim::WeaponPresentation
     // edges; refuse cycles, duplicate matches, failed reads and partial graphs.
     MeshLookupResult FindMeshNode(uintptr_t root, const MeshId& id,
         ReadMeshNode read, void* user, size_t limit = kMaxBindings);
+
+    // One native node's local MAT_3D (relative to its parent) and parent edge.
+    struct NodeFrameView
+    {
+        Matrix local = WeaponConvergence::Identity();
+        uintptr_t parent = 0;
+    };
+    using ReadNodeFrame = bool (*)(uintptr_t, NodeFrameView&, void*);
+    inline constexpr size_t kMaxNodeDepth = 64;
+    // World frame of `node`, composed the way obj_rel_parent_matrix(node, nullptr)
+    // does it: node.local * parent.local * ... up to the parentless node, which
+    // must be `root`. Refuses failed reads, cycles, a chain that ends anywhere
+    // but `root`, chains deeper than `limit` and an invalid composed pose.
+    bool ComposeNodeWorld(uintptr_t root, uintptr_t node, ReadNodeFrame read,
+        void* user, Matrix& out, size_t limit = kMaxNodeDepth);
 
     struct Identity
     {

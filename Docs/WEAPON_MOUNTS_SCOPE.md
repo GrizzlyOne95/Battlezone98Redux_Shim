@@ -1,6 +1,6 @@
 # Scope: "taps" / child turrets on hardpoints for BZR-OpenShim
 
-**Status (2026-11-16):** BZ2 "taps" are power taps, so this is a new feature ("weapon mounts"). No go/no-go decision yet on the Lua slice.
+**Status (2026-11-16):** BZ2 "taps" are power taps, so this is a new feature ("weapon mounts"). Native getters for option A are implemented and live-tested (section 5). The Lua mount module is not written yet.
 
 Status: read-only scoping. Anything without a cite is UNVERIFIED.
 D = <GIT>\Battlezone_Source\BZ2\_analysis\global_decompile\bzcc_battlezone2_20190509\results\bins\battlezone2_unpacked.exe-a533c2\decomps
@@ -51,8 +51,8 @@ Reusable pieces that exist:
 1. Per-frame driver: `TickOpenShimEventLayer()` in `LegacyWorldUpdateRenderQueueHook`, "the shim's designated safe per-frame driver" (Docs/NATIVE_EVENT_LAYER.md section 2.1).
    Event sinks for damage/kill (Docs/NATIVE_EVENT_LAYER.md section 2.2, 3.1-3.2): SimDamage(victim, damager), SimKill. Damage hook sites 0x0047EFA0/0x004AA678/0x005A0CE2/0x005AA372, healthRatio at obj+0x200, death latch objectState+0x14 bit 0x200.
    Lifetime rule: re-resolve by handle, never cached pointer, the arena reuses slots (same doc).
-2. Hardpoint/muzzle pose: OpenShim exports `OpenShimGetWeaponMuzzle` (src/patches/weapon_presentation_native.cpp:1401); EXU wraps it as `exu.GetWeaponMuzzlePosition(handle, slot)`
-   (ExtraUtilities/src/Game/EntityRenderApi.cpp:332-345, Definitions/ExtraUtils.lua:3770). Position only; the full pose Matrix exists internally (WP::Matrix, weapon_presentation_native.cpp:114) but is not exported as a matrix. Native weapon hardpoint mask lives at [carrier+0x2C] (scripts/patches.json entry for Person::Simulate 0x0059D340).
+2. Hardpoint/muzzle pose: OpenShim exports `OpenShimGetWeaponMuzzle` (`weapon_presentation_native.cpp`); EXU wraps it as `exu.GetWeaponMuzzlePosition(handle, slot)`
+   (ExtraUtilities/src/Game/EntityRenderApi.cpp:332-345, Definitions/ExtraUtils.lua:3770). Position only; the full pose Matrix exists internally (WP::Matrix) but is not exported as a matrix. Native weapon hardpoint mask lives at [carrier+0x2C] (scripts/patches.json entry for Person::Simulate 0x0059D340).
 3. Ogre bone attach exists for particles only: `exu.AttachParticleSystemToBone/Object` (ExtraUtils.lua:1020-1029). No GameObject attach.
 4. Lua: `BuildObject`, `SetOwner/GetOwner`, `SetTransform/GetTransform`, `SetPosition`, `SetVelocity`, `RemoveObject` (Docs/BZR_LUA_AGENT_REFERENCE.md:619-700).
    Stock ownership: `SetOwner` exists. `exu.SetAsUser`, `exu.ClaimVehicleControl` exist (ExtraUtils.lua:1572, 2322).
@@ -66,7 +66,7 @@ Reusable pieces that exist:
 ### A. EXU + Lua "mounted turret" (recommended minimal slice)
 - Mod ODF side (no engine change): arm gun = an ordinary turret-class/gun-tower style unit ODF (immobile, own weapon, own AI) built via BuildObject, team = parent.
 - Lua per frame (via an existing update hook): for each registered parent/mount pair, compute parent hardpoint pose, `SetTransform(child, pose)`, zero velocity, `SetOwner(child, parent)`; remove child when parent handle dies; mirror health optionally.
-- Gap that needs native work: a hardpoint (or bone) world MATRIX getter. Add an export next to OpenShimGetWeaponMuzzle returning the full 4x4 (weapon_presentation_native.cpp:114 already holds a Matrix) and an EXU wrapper `exu.GetHardpointTransform(h, slot)`. For arm bones that are not weapon hardpoints, an Ogre bone world transform getter (the particle-attach code already resolves bones; ExtraUtils.lua:1022).
+- Gap that needs native work: a hardpoint (or bone) world MATRIX getter. Add an export next to OpenShimGetWeaponMuzzle returning the full 4x4 (the native pose code already holds a Matrix) and an EXU wrapper `exu.GetHardpointTransform(h, slot)`. For arm bones that are not weapon hardpoints, an Ogre bone world transform getter (the particle-attach code already resolves bones; ExtraUtils.lua:1022).
 - Child must not collide with parent: needs either spawning with the engine's no-collision relationship (UNVERIFIED how) or letting SetTransform run before collision (UNVERIFIED).
 - Effort: S-M (getter export + wrapper + a small Lua module, ~1 week of testing). Single-player first.
 - Risks: lag of one frame behind parent motion; MP: SetTransform on non-local children (see 2.6) - run the follow only on the machine that owns both; save/load: children are normal objects so they save, but the pair registry in Lua must be rebuilt (use `GetOwner` of child as the pair key; ExtraUtilities Storage/Continuity.lua exist for this - not read).
@@ -92,3 +92,46 @@ Reusable pieces that exist:
 - BZ1 1.5 decompile (Battlezone_Source/BZ1/1.5/all_decompiled.c) for a native hardpoint-matrix function and Walker class - search started but not read.
 - BZ2 destroy path for taps and damage forwarding.
 - Whether `SetTransform` is safe every frame on a craft-class object in BZR (OpenShim docs say use SetTransform for orientation; no per-frame stress evidence read).
+
+## 5. Native getters (implemented)
+Exports in `src/patches/weapon_presentation_native.cpp` (next to `OpenShimGetWeaponMuzzle`), wrapped by EXU as
+`exu.GetHardpointTransform(handle, slot)` and `exu.GetBoneTransform(handle, boneName)`. Both write a 64-byte MAT_3D
+(`WeaponConvergence::Matrix`, the layout Lua `GetTransform`/`SetTransform` use) and return 1, or return 0.
+
+```c
+int __cdecl OpenShimGetHardpointTransform(uint32_t handle, int slot, void* outMatrix); // slot 0..4
+int __cdecl OpenShimGetNodeTransform(uint32_t handle, const char* name, void* outMatrix); // name <= 8 chars
+```
+
+- What they read: the native node tree, the same data `obj_rel_parent_matrix(node, nullptr)` (0x0062E070, scripts/patches.json) composes:
+  node local MAT_3D at +0x20, parent at +0x78, multiplied row-vector local * parent up to the parentless root, which must be the
+  object's own OBJ76 (GameObject+0xF4). Reimplemented as the bounded pure helper `WeaponPresentation::ComposeNodeWorld`
+  (unit-tested in tests/weapon_presentation_tests.cpp), so a bad chain fails instead of looping. No engine call, no writes.
+- Hardpoint = the weapon's "hard" node (weapon+0x14), the frame `MountWorldMatrix` (0x006116A0) starts from, before the muzzle
+  offset (weapon+0x1C) and the barrel aim (weapon object +0x20). Slot needs the carrier mask bit (carrier+0x2C) and a weapon whose
+  root (weapon+0x18) is this object. Craft only (RTTI `.?AVCraft@@`).
+- Node name: matched case-insensitively against the 8-byte native part name (for example `AGe11GC1`, `age11lt2` on avwalk; the
+  Redux `.skeleton` bone names are the same). A name used by two nodes is refused. These are native nodes, not Ogre-only bones.
+- Failure cases: a node whose composed frame is scaled, mirrored or non-orthonormal (ValidPose tolerance 0.01) returns nil, same as a missing
+  node; an out-of-range slot returns nil (unlike `GetWeaponMuzzlePosition`, which raises an arg error).
+- Lifetime: re-resolved by handle on every call (`GameObjectFromHandleGog`, generation-checked), and a dead root or node fails. No
+  network, settings, presentation or renderer gate: the getters answer in multiplayer and off-screen.
+- Frame timing: the root node matched `GetTransform(h)` within 0.2 mm in the same Lua `Update` (live, below), so the getters see the
+  same state Lua does. Whether the engine advances leg animation before or after Lua `Update` in a tick is UNVERIFIED; at worst the
+  pose is one sim tick old.
+- Off-screen: the Ogre nodes copy the native matrices (`ModelPose` 0x00681A00, scripts/patches.json), not the other way round, so the
+  native pose does not depend on rendering. Live: a second walker behind the player camera reported leg motion (not frame-verified).
+
+Live test (GOG 2.2.301, SP lcbench.bzn, background never-activate run, 2026-11-16, 4105 Lua frames over 18 s):
+avwalk hardpoints 0/1 and nodes `avwalk`, `age11lt1`, `age11lt2`, `age11lsh` returned every frame. Ordnance spawn transforms
+(`exu.BulletInit`, 10 walker shots) were 1.8-2.5 cm from the nearest hardpoint read in the previous `Update` (the walker moved about
+1 cm per frame). Shin node travelled 10.2 m in the walker body frame while walking (11.2 m for the walker behind the camera).
+An avturr glued 6 m above hardpoint 0 with `SetTransform` + `SetPosition` for 6 s (1392 frames) was at most 0.9 mm from its target
+on the next frame. Empty slot 4, slots 9/-1, a missing name, a 9-character name and a removed handle all returned nil.
+`exu.GetWeaponMuzzlePosition` returned nil throughout (presentation adapter not configured), so the cross-check used BulletInit.
+
+Follow-ups (out of this slice, YAGNI until the Lua module needs them):
+- Lua mount module (option A): registry, per-frame SetTransform, parent-death cleanup, child-parent collision handling.
+- Selection suppression for mounted children; damage forwarding child -> parent.
+- ODF keys for authored mounts (option B), save/load of the pairing, MP ownership/qualification of the per-frame follow.
+- Ogre-only skeleton bones (skinned meshes) if a mount ever needs one; this slice reads native nodes only.

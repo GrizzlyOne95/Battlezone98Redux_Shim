@@ -693,6 +693,14 @@ namespace
         Require(WP::ParseMeshId("12345678").has_value(), "eight-byte ID rejected");
         for (const auto value : { "", "recoil_test", "bad id", "bad\n" })
             Require(!WP::ParseMeshId(value).has_value(), "invalid mesh ID truncated/accepted");
+        {
+            char folded[WP::kMeshIdBytes + 1] = {};
+            size_t length = 99;
+            Require(WP::FoldNodeName("AGe11GC1", folded, length) && length == 8 &&
+                std::memcmp(folded, "age11gc1", 8) == 0, "8-char node name not accepted/case-folded");
+            Require(!WP::FoldNodeName("age11gc1x", folded, length), "9-char node name accepted");
+            Require(!WP::FoldNodeName("", folded, length), "empty node name accepted");
+        }
     }
 
     bool ReadNode(uintptr_t address, WP::MeshNodeView& result, void* user)
@@ -728,6 +736,47 @@ namespace
         graph[3].child = 99;
         Require(WP::FindMeshNode(1, wanted, ReadNode, &graph).status ==
             WP::MeshLookupStatus::InvalidGraph, "unreadable graph accepted early match");
+    }
+
+    bool ReadFrame(uintptr_t address, WP::NodeFrameView& result, void* user)
+    {
+        const auto& graph = *static_cast<std::map<uintptr_t, WP::NodeFrameView>*>(user);
+        const auto it = graph.find(address);
+        if (it == graph.end())
+            return false;
+        result = it->second;
+        return true;
+    }
+
+    void TestNodeWorldComposition()
+    {
+        // Root at (10,0,0) yawed 90 degrees (right=-Z, front=+X); arm 2 m along
+        // the root's front; hand 1 m up from the arm. Row-vector local*parent.
+        WP::Matrix root = WC::Identity();
+        root.rightX = 0; root.rightZ = -1; root.frontX = 1; root.frontZ = 0;
+        root.positionX = 10;
+        WP::Matrix arm = WC::Identity();
+        arm.positionZ = 2;
+        WP::Matrix hand = WC::Identity();
+        hand.positionY = 1;
+        std::map<uintptr_t, WP::NodeFrameView> graph = {
+            { 1, { root, 0 } }, { 2, { arm, 1 } }, { 3, { hand, 2 } } };
+        WP::Matrix world = WC::Identity();
+        Require(WP::ComposeNodeWorld(1, 3, ReadFrame, &graph, world), "valid node chain rejected");
+        Near(world.positionX, 12, "child world X did not follow the parent basis");
+        Near(world.positionY, 1, "child world Y lost the local offset");
+        Near(world.positionZ, 0, "child world Z did not follow the parent basis");
+        Near(world.frontX, 1, "child world orientation ignored the root yaw");
+        Require(WP::ComposeNodeWorld(1, 1, ReadFrame, &graph, world) && world.positionX == 10,
+            "root world frame was not its own matrix");
+        Require(!WP::ComposeNodeWorld(2, 3, ReadFrame, &graph, world), "chain ending off the root accepted");
+        Require(!WP::ComposeNodeWorld(1, 3, ReadFrame, &graph, world, 2), "over-deep chain accepted");
+        Require(!WP::ComposeNodeWorld(1, 99, ReadFrame, &graph, world), "unreadable node accepted");
+        graph[1].parent = 3;
+        Require(!WP::ComposeNodeWorld(1, 3, ReadFrame, &graph, world), "cyclic chain did not fail closed");
+        graph[1].parent = 0;
+        graph[2].local.rightX = 2;
+        Require(!WP::ComposeNodeWorld(1, 3, ReadFrame, &graph, world), "non-rigid composed pose accepted");
     }
 
     void TestOptInAndSessionGates()
@@ -1218,6 +1267,7 @@ int main()
     TestAnimationRecoil();
     TestConfigurationAndIds();
     TestBoundedMeshLookup();
+    TestNodeWorldComposition();
     TestOptInAndSessionGates();
     TestAcceptedShotPoseAndDeduplication();
     TestNoFlashRestartAndFollowPose();
