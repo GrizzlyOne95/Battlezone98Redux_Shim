@@ -10,6 +10,7 @@
 #include "hook_engine.h"
 #include "hud_visibility.h"
 #include "kill_ticker.h"
+#include "local_damage.h"
 #include "openshim_events.h"
 #include "patcher.h"
 #include "shim_log.h"
@@ -17,6 +18,7 @@
 
 #include <Windows.h>
 #include <atomic>
+#include <intrin.h>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -453,9 +455,23 @@ namespace BZROpenShim::HudFeedback
             // distributedObject subobject, complete object at -0x18.
             if (receiver) ContextualHud::NoteDamage(static_cast<const uint8_t*>(receiver) - 0x18);
             const DamageContext context = BeforeDamage(receiver, damage, static_cast<KillTicker::DamageKind>(Index));
-            const uint32_t result = original(receiver, damage, argument);
-            AfterDamage(context);
-            return result;
+            if constexpr (Index == 1)
+            {
+                // Craft only: the localized damage scorch keeps the hit point
+                // of bullet and splash damage (its caller's return address).
+                const LocalDamage::CraftCapture scorch = LocalDamage::BeforeCraftDamage(
+                    receiver, damage, argument, reinterpret_cast<uintptr_t>(_ReturnAddress()));
+                const uint32_t result = original(receiver, damage, argument);
+                LocalDamage::AfterCraftDamage(scorch);
+                AfterDamage(context);
+                return result;
+            }
+            else
+            {
+                const uint32_t result = original(receiver, damage, argument);
+                AfterDamage(context);
+                return result;
+            }
         }
 
         bool InstallDamage()
@@ -591,9 +607,10 @@ namespace BZROpenShim::HudFeedback
         const bool kills = g_killsEnabled.load(std::memory_order_relaxed);
         if (kills) KillTicker::Tick();
         const bool needsReticle = g_needsDraw.load(std::memory_order_relaxed);
-        // The command fade's producer-damage wake needs the damage adapters
-        // alone (no event subscription, no reticle draw).
-        const bool production = ContextualHud::WantsProductionDamage();
+        // The command fade's producer-damage wake and the localized damage
+        // scorch need the damage adapters alone (no event subscription, no
+        // reticle draw).
+        const bool production = ContextualHud::WantsProductionDamage() || LocalDamage::WantsDamage();
         if (!needsReticle && !kills && !production) return;
         const Settings settings = ReadSettings();
         if (!IsCompatibleGameVersion()) return;

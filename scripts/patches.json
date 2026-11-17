@@ -4027,6 +4027,18 @@
       "identity": "Released GOG 2.2.301 Powerup DamageAlloc distributedObject entry, this=complete+0x18, two stack args; RET 8 at 0x005AA639. Calls SetDamageFlags, applies health loss and flags depletion. Live PID50980 bytes matched."
     },
     {
+      "name": "LocalDamageBulletHitCall",
+      "address": "0x0048085F",
+      "expected": "8B 50 18 8B 42 38 FF D0",
+      "identity": "Released GOG 2.2.301 Ordnance::Hit (FUN_00480750) target damage call: mov edx,[eax+0x18]; mov eax,[edx+0x38]; call eax at 0x00480865, so the DamageAlloc return address is 0x00480867 (row + 8). Decompile FUN_00480750 line 46: (**(code **)(param_2[6] + 0x38))(local_8c + 0x60,*(int *)(local_8c + 0x14) + 0x38), i.e. DAMAGE at ordnance+0x60 and the third argument at the ordnance obj76 + 0x38 (front). Read only: the localized damage scorch compares _ReturnAddress() in the craft DamageAlloc adapter against it; nothing is patched here."
+    },
+    {
+      "name": "LocalDamageSplashCall",
+      "address": "0x004CA0B4",
+      "expected": "8B 42 18 8B 50 38 FF D2",
+      "identity": "Released GOG 2.2.301 explosion splash damage call in FUN_004C9AB0: mov eax,[edx+0x18]; mov edx,[eax+0x38]; call edx at 0x004CA0BA, so the DamageAlloc return address is 0x004CA0BC (row + 8). Decompile FUN_004c9ab0 lines 146-154: DAMAGE built in locals local_fc..local_f0 and passed with the explosion-to-target vector through the vtable +0x38 call. Read only: the localized damage scorch compares _ReturnAddress() against it; nothing is patched here."
+    },
+    {
       "name": "HudSpriteSubmit",
       "address": "0x0068CA30",
       "expected": "55 8B EC 81 EC 98 00 00 00 A1 00 70 8E 00",
