@@ -1131,13 +1131,6 @@ ShadowFarDistance = 256
 ; collision, placement and gameplay heights are unchanged. Requires DX11 and a
 ; game restart. Unsupported renderer/build/terrain contracts retain native terrain.
 TerrainMicroRelief = 0
-; Curved (PN-triangle) smoothing of the tessellated terrain, on top of
-; TerrainMicroRelief. Rounds the faceted ridges and peaks of the 5 m height
-; lattice using the stock vertex normals; the surface moves at most 1 world unit
-; up or down, horizontal positions are unchanged. Visual only: collision and
-; gameplay heights are unchanged. Ignored unless TerrainMicroRelief = 1.
-; Default: 0 (opt-in). Restart required. Env: OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING.
-TerrainTessellationSmoothing = 0
 
 
 ; NOTE: terrain booleans below are integer flags; use 0/1.

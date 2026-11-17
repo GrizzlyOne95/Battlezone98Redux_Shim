@@ -266,9 +266,6 @@ namespace BZROpenShim
             int tessellationFactor = 2;
             bool microReliefTest = false;
             float microReliefAmplitude = 0.25f;
-            // PN-triangle smoothing of the tessellated surface; needs the relief
-            // domain (its matrices and bounds), so it is off without micro relief.
-            bool tessellationSmoothing = false;
             bool semanticCapture = false;
             bool semanticDumpJson = true;
             bool semanticRenderer = false;
@@ -1002,8 +999,6 @@ namespace BZROpenShim
                 config.microReliefAmplitude = reliefAmplitude;
             config.tessellationTest = config.tessellationTest || config.microReliefTest;
             if (config.microReliefAmplitude == 0.0f) config.microReliefTest = false;
-            config.tessellationSmoothing = config.microReliefTest &&
-                IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING");
             // The persistent UI switch uses the visually qualified factor-4
             // relief preset; plain submission tests keep their factor-2 default.
             // It is adaptive by default (screen-space edges scaled by paint

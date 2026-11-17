@@ -10,8 +10,6 @@ param(
     [ValidateRange(0, 1)][float]$ReliefAmplitude = 0.25,
     [switch]$Editor,
     [ValidateRange(10, 120)][int]$RunSeconds = 45,
-    # Windowed ogre.cfg mode for GPU-cost runs, e.g. '2560 x 1440 @ 32-bit colour'.
-    [string]$VideoMode = '',
     [switch]$Deploy
 )
 $ErrorActionPreference = 'Stop'
@@ -21,7 +19,6 @@ if (Get-Process -Name battlezone98redux -ErrorAction SilentlyContinue) {
 $savedWindowed = $env:BZR_FORCE_WINDOWED
 $env:BZR_FORCE_WINDOWED = '1'
 . "$PSScriptRoot\BZRHarness.ps1"
-if ($VideoMode) { $null = Set-BZROgreWindowed -GameRoot $GameRoot -VideoMode $VideoMode }
 if (Get-Process -Name battlezone98redux -ErrorAction SilentlyContinue) {
     throw 'A game is already running; finish that session before this test.'
 }
