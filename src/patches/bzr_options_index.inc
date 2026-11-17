@@ -42,6 +42,9 @@ static size_t ShimSettingIndexFromText(const ShimSettingDescriptor& setting, con
     // LegacyTankAi was a bool: old true/false values read as All teams/Off.
     if (setting.values == kShimSettingsLegacyTankAiValues && BZROpenShim::BoolToken::TryParse(normalized, token))
         return token ? 1 : 0;
+    // Turbo was a bool too: true/false read as All teams/Off.
+    if (setting.values == kShimSettingsTurboValues && BZROpenShim::BoolToken::TryParse(normalized, token))
+        return token ? 1 : 0;
 
     return setting.defaultIndex;
 }
