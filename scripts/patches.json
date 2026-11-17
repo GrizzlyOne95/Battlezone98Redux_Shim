@@ -3447,6 +3447,30 @@
       "identity": "AiPath::AiPath(const VECTOR_3D* from, const VECTOR_3D* to) FUN_00460490, thiscall: `mov [this],0`, `mov [this+4],2` (point count), `operator new(count*8)` stored at +8 (VECTOR_2D points, {x, z} floats). Read only: RtsWaypointLines takes the destination as points[count-1]. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
     },
     {
+      "name": "BuildGotoVtable",
+      "address": "0x00877C40",
+      "kind": "data",
+      "identity": "BuildGoto primary vtable (RTTI COL 0x008A6870, .?AVBuildGoto@@), stored by the BuildGoto ctor 0x0049DFA0 at 0x0049DFE4. Read only: RtsPendingBuildGhost compares a rig process's task (+0x38) with it after checking the RTTI name."
+    },
+    {
+      "name": "RtsPendingBuildTask",
+      "address": "0x0049E999",
+      "expected": "8B 55 F0 8B 42 44 50 8B 4D F0 8B 51 10 52 8B 45 F0 8B 48 34 51 8B 4D EC E8 EA F5 FF FF 89 45 E8 EB 07 C7 45 E8 00 00 00 00 8B 55 E8 89 55 E4 C7 45 FC FF FF FF FF 8B 45 F0 8B 4D E4 89 48 38",
+      "identity": "RigProcess::InitUState 0x0049E940 (RigProcess vtable 0x00877C80 slot 51, shared by RigFriend/RigEnemy), the BUILD task: `new(0x158)`, then BuildGoto::BuildGoto(this+0x34 (the rig), this+0x10, this+0x44 (the class)) at 0x0049E9B1 and `mov [this+0x38], task` at 0x0049E9D5. ExitUState 0x0049E9F0 (slot 52) deletes [this+0x38] and clears it. Read only: RtsPendingBuildGhost reads the task at GameObject+0xFC (the process), +0x38. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-17."
+    },
+    {
+      "name": "RtsPendingBuildGotoCtor",
+      "address": "0x0049DFE1",
+      "expected": "8B 55 F0 C7 02 40 7C 87 00 8B 45 F0 8B 4D 10 89 88 50 01 00 00 8B 55 F0 C6 82 3E 01 00 00 01 8B 45 F0 C7 80 4C 01 00 00 00 00 00 00",
+      "identity": "BuildGoto::BuildGoto 0x0049DFA0 (thiscall ret 0xC) after its base ctor 0x004E54C0: `mov [this], 0x00877C40` (BuildGotoVtable), `mov [this+0x150], class` (the third argument), `mov byte [this+0x13E], 1`, `mov [this+0x14C], 0` (stage 0). Read only: RtsPendingBuildGhost takes the ghost class from +0x150 and the stage from +0x14C. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-17."
+    },
+    {
+      "name": "RtsPendingBuildStage",
+      "address": "0x0049E3E6",
+      "expected": "8B 45 E0 83 78 08 0D 75 07 32 C0 E9 20 05 00 00 8B 4D E0 C7 41 18 00 00 00 00 8B 55 E0 C7 42 7C 00 00 00 00 8B 45 E0 8B 48 10 89 4D DC 8B 55 E0 8B 82 4C 01 00 00 89 45 A8 83 7D A8 04",
+      "identity": "BuildGoto stage step 0x0049E3D0: `cmp [this+8], 0xD` / `jne` (13 = finished: returns false), the owning rig from [this+0x10], then the stage [this+0x14C] switched over 0..4 (`cmp ...,4` / `ja`; 0 travelling, 1 and 4 final approach to +0x140..+0x148, 2 deploying, 3 building). Read only: RtsPendingBuildGhost shows a ghost at stages 0, 1, 2, 4 of a task whose +0x10 is the rig and whose +0x08/+0x0C are not 13. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-17."
+    },
+    {
       "name": "ClassLoadAssetsFlag",
       "address": "0x008E7732",
       "kind": "data",

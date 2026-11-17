@@ -280,6 +280,8 @@ openshim_opt:RtsBuildAtNav:label~Build at Nav~~~~~~
 openshim_opt:RtsBuildAtNav:desc~With a building picked on a selected Construction Rig, Go To Nav reads Build at Nav: the rig builds it at the nav you pick, facing your way. A spot it cannot build on buzzes and keeps the selection.~~~~~~
 openshim_opt:RtsBuildGhost:label~Build Ghost~~~~~~
 openshim_opt:RtsBuildGhost:desc~While you place a building, a see-through copy of it shows where it will stand: green when the spot is good, yellow without power, red when blocked. With Build at Nav, the Go To Nav list also shows it at every nav. Only you see it.~~~~~~
+openshim_opt:RtsPendingBuildGhost:label~Pending Build Ghost~~~~~~
+openshim_opt:RtsPendingBuildGhost:desc~A dim see-through copy of each building your Construction Rigs have been ordered to build stands where it will go, from the order until construction starts. Only you see it.~~~~~~
 openshim_opt:RtsPowerRange:label~Power Range~~~~~~
 openshim_opt:RtsPowerRange:desc~While you place a building that needs power (gun towers, the Comm Bunker), the reach of every allied power plant shows as a ring on the ground. Only you see it.~~~~~~
 openshim_opt:RtsWaypointLines:label~Waypoint Lines~~~~~~

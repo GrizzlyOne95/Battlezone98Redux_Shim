@@ -8,6 +8,10 @@
 //    power, red blocked. While the Go To Nav submenu is open and Build at Nav
 //    is active with a picked rig selected, a neutral ghost at every listed
 //    nav, facing the player's heading on the terrain.
+//  * [Gameplay] RtsPendingBuildGhost (default on): a dim neutral ghost at the
+//    drop matrix of each of the local player's rigs with a BUILD order whose
+//    construction has not started (its BuildGoto task, process +0x38), at
+//    most eight.
 //  * [Gameplay] RtsPowerRange (default on): while the stock preview or a nav
 //    ghost shows a COMM/TURR/SHLD class, a ground ring of each allied power
 //    plant's powerRadius (rings drawn by rts_markers.cpp).
@@ -22,7 +26,8 @@
 // The ghosts are shim-owned Ogre entities of the class's own mesh with one of
 // four generated materials (rts_markers_assets.h) set on the entity; the
 // mesh's materials are never touched. One cached entity per class for the
-// cursor ghost (one visible at a time), ten for the nav ghosts. A mesh that
+// cursor ghost (one visible at a time), ten for the nav ghosts, eight for
+// the pending build ghosts (all Neutral). A mesh that
 // fails to load is remembered and never retried.
 //
 // Rows: scripts/patches.json "Rts*" (and the ConstructionRig rows Build at Nav
@@ -83,6 +88,18 @@ namespace BZROpenShim
             constexpr size_t kMatrixBlockFrontOffset = 0x38;
             constexpr size_t kPlantVectorOperand = 0x03;     // RtsPowerPlantList: mov [ebp-44h], imm32
             constexpr size_t kPowerRadiusOffset = 0x160;     // RtsPowerRadius
+            constexpr size_t kOwnershipOffset = 0x80;        // == 2: network replica (rts_commands.cpp)
+            constexpr uint8_t kReplicaOwnership = 2;
+            constexpr size_t kObjectProcessOffset = 0xFC;    // GetAIProcess 0x0045BDF0 (ai_native_orders.cpp)
+            constexpr size_t kProcessTaskOffset = 0x38;      // RtsPendingBuildTask
+            constexpr size_t kTaskStateOffset = 0x08;        // RtsPendingBuildStage
+            constexpr size_t kTaskResultOffset = 0x0C;
+            constexpr size_t kTaskOwnerOffset = 0x10;        // RtsPendingBuildStage
+            constexpr size_t kTaskStageOffset = 0x14C;       // RtsPendingBuildGotoCtor / Stage
+            constexpr size_t kTaskClassOffset = 0x150;       // RtsPendingBuildGotoCtor
+            constexpr size_t kObj76FlagsOffset = 0x14;       // as laser_sight.cpp: 0x200 = dead
+            constexpr uint32_t kObj76DeadFlag = 0x200;
+            constexpr size_t kMaxObjects = 4096;             // as rts_commands.cpp
 
             // MAT_3D (bzr_hooks_internal.h LegacyMat3): right, up, front
             // floats, a pad, then the position as doubles.
@@ -101,6 +118,7 @@ namespace BZROpenShim
             bool g_GhostOn = true;
             bool g_PowerOn = true;
             bool g_LinesOn = true;
+            bool g_PendingOn = true;
 
             void LoadConfig()
             {
@@ -110,9 +128,12 @@ namespace BZROpenShim
                 g_PowerOn = TryGetUserConfigBool("Gameplay", "RtsPowerRange", value) ? value : true;
                 value = true;
                 g_LinesOn = TryGetUserConfigBool("Gameplay", "RtsWaypointLines", value) ? value : true;
+                value = true;
+                g_PendingOn = TryGetUserConfigBool("Gameplay", "RtsPendingBuildGhost", value) ? value : true;
                 g_ConfigLoaded = true;
-                LogShimA(LogLevel::Info, kComponent, "[RTSPLACE] config buildGhost=%d powerRange=%d waypointLines=%d",
-                         g_GhostOn ? 1 : 0, g_PowerOn ? 1 : 0, g_LinesOn ? 1 : 0);
+                LogShimA(LogLevel::Info, kComponent,
+                         "[RTSPLACE] config buildGhost=%d powerRange=%d waypointLines=%d pendingBuildGhost=%d",
+                         g_GhostOn ? 1 : 0, g_PowerOn ? 1 : 0, g_LinesOn ? 1 : 0, g_PendingOn ? 1 : 0);
             }
 
             // ---- Engine bindings (patch thread, then read-only) --------------
@@ -128,11 +149,15 @@ namespace BZROpenShim
             bool g_NavTried = false;
             bool g_PowerTried = false;
             bool g_LinesTried = false;
+            bool g_PendingTried = false;
             bool g_SlotRefusalLogged = false;
             bool g_NavBound = false;
             bool g_PowerBound = false;
             bool g_LinesBound = false;
+            bool g_PendingBound = false;
             uint32_t g_RigVtable = 0;
+            uint32_t g_BuildGotoVtable = 0;
+            uintptr_t g_ObjectListGlobal = 0;
             uint32_t g_GetCommandAddr = 0;
             uintptr_t g_Display = 0;
             uintptr_t g_AltPassFlag = 0;
@@ -361,6 +386,7 @@ namespace BZROpenShim
             constexpr size_t kCursorCache = 8;
             GhostSlot g_CursorGhosts[kCursorCache];
             GhostSlot g_NavGhosts[RP::kMaxNavGhosts];
+            GhostSlot g_PendingGhosts[RP::kMaxPendingGhosts];
             void* g_SceneManager = nullptr;
             bool g_SceneFailed = false; // node creation failed in this scene; not retried until it changes
 
@@ -613,6 +639,7 @@ namespace BZROpenShim
             {
                 HideGhosts(g_CursorGhosts, kCursorCache);
                 HideGhosts(g_NavGhosts, RP::kMaxNavGhosts);
+                HideGhosts(g_PendingGhosts, RP::kMaxPendingGhosts);
             }
 
             void ForgetGhosts(const wchar_t* reason)
@@ -625,6 +652,12 @@ namespace BZROpenShim
                     slot = GhostSlot{};
                 }
                 for (GhostSlot& slot : g_NavGhosts)
+                {
+                    if (slot.node || slot.entity)
+                        ++held;
+                    slot = GhostSlot{};
+                }
+                for (GhostSlot& slot : g_PendingGhosts)
                 {
                     if (slot.node || slot.entity)
                         ++held;
@@ -851,6 +884,161 @@ namespace BZROpenShim
                 }
             }
 
+
+            // ---- Pending build ghosts ----------------------------------------
+            struct PendingBuild
+            {
+                void* rig;
+                uint32_t buildClass;
+                DropMatrix matrix;
+            };
+
+            size_t g_PendingShownLast = 0;
+
+            // The engine's object vector (GameObject::objectList: _Myfirst at
+            // +0, _Mylast at +4; lua_handle_sync.cpp SnapshotObjects).
+            size_t SnapshotObjects(uint32_t* out, size_t capacity)
+            {
+                size_t count = 0;
+                __try
+                {
+                    const uint8_t* vec = *reinterpret_cast<uint8_t* const*>(g_ObjectListGlobal);
+                    if (!vec)
+                        return 0;
+                    const uint32_t* first = *reinterpret_cast<const uint32_t* const*>(vec);
+                    const uint32_t* last = *reinterpret_cast<const uint32_t* const*>(vec + 4);
+                    if (!first || last < first || static_cast<size_t>(last - first) > kMaxObjects)
+                        return 0;
+                    const size_t available = static_cast<size_t>(last - first);
+                    for (size_t i = 0; i < available && count < capacity; ++i)
+                        if (first[i] >= 0x10000)
+                            out[count++] = first[i];
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return 0;
+                }
+                return count;
+            }
+
+            // One object: a live, local Construction Rig on `userTeam` whose
+            // AI process (+0xFC) runs a BuildGoto task (process +0x38, vtable
+            // checked) of its own (task +0x10) that has not started building.
+            bool ReadPendingBuildSeh(uint32_t object, int32_t userTeam, PendingBuild& out)
+            {
+                __try
+                {
+                    const uint8_t* const obj = reinterpret_cast<const uint8_t*>(static_cast<uintptr_t>(object));
+                    if (*reinterpret_cast<const uint32_t*>(obj) != g_RigVtable ||
+                        *reinterpret_cast<const int32_t*>(obj + kGameObjectActualTeamOffset) != userTeam ||
+                        obj[kOwnershipOffset] == kReplicaOwnership)
+                        return false;
+                    const uint8_t* const obj76 = *reinterpret_cast<const uint8_t* const*>(obj + kGameObjectObjOffset);
+                    if (obj76 && (*reinterpret_cast<const uint32_t*>(obj76 + kObj76FlagsOffset) & kObj76DeadFlag))
+                        return false;
+                    const uint8_t* const proc = *reinterpret_cast<const uint8_t* const*>(obj + kObjectProcessOffset);
+                    if (reinterpret_cast<uintptr_t>(proc) < 0x10000)
+                        return false;
+                    const uint8_t* const task = *reinterpret_cast<const uint8_t* const*>(proc + kProcessTaskOffset);
+                    if (reinterpret_cast<uintptr_t>(task) < 0x10000 ||
+                        *reinterpret_cast<const uint32_t*>(task) != g_BuildGotoVtable ||
+                        *reinterpret_cast<const uint8_t* const*>(task + kTaskOwnerOffset) != obj ||
+                        !RP::PendingBuildShows(*reinterpret_cast<const int32_t*>(task + kTaskStateOffset),
+                                               *reinterpret_cast<const int32_t*>(task + kTaskResultOffset),
+                                               *reinterpret_cast<const int32_t*>(task + kTaskStageOffset)))
+                        return false;
+                    const uint32_t buildClass = *reinterpret_cast<const uint32_t*>(task + kTaskClassOffset);
+                    if (buildClass < 0x10000)
+                        return false;
+                    out.rig = const_cast<uint8_t*>(obj);
+                    out.buildClass = buildClass;
+                    std::memcpy(&out.matrix, obj + kRigDropMatrixOffset, sizeof(DropMatrix));
+                    return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+
+            // At most kMaxPendingGhosts, in object-list order; `skipRig` (the
+            // rig the cursor ghost is previewing) is left out. `found` counts
+            // the rigs with a pending order before that skip.
+            size_t GatherPendingBuilds(PendingBuild (&out)[RP::kMaxPendingGhosts], const void* skipRig,
+                                       size_t& found)
+            {
+                found = 0;
+                static uint32_t objects[kMaxObjects];
+                const uintptr_t slot = EngineGlobals::UserObjectSlot();
+                uint32_t user = 0;
+                int32_t userTeam = -1;
+                if (!slot || !ReadU32(slot, user) || user < 0x10000 ||
+                    !ReadI32(static_cast<uintptr_t>(user) + kGameObjectActualTeamOffset, userTeam))
+                    return 0;
+                const size_t count = SnapshotObjects(objects, kMaxObjects);
+                size_t n = 0;
+                for (size_t i = 0; i < count && found < RP::kMaxPendingGhosts; ++i)
+                {
+                    if (!ReadPendingBuildSeh(objects[i], userTeam, out[n]))
+                        continue;
+                    ++found;
+                    if (out[n].rig != skipRig)
+                        ++n;
+                }
+                return n;
+            }
+
+            // A slot already holding the class keeps it (no entity churn
+            // while the same orders stand); the rest take the free slots.
+            void ShowPendingGhosts(const GhostOgre& api, void* sceneManager, const Vec3& origin,
+                                   const PendingBuild* builds, size_t count)
+            {
+                bool taken[RP::kMaxPendingGhosts] = {};
+                bool placed[RP::kMaxPendingGhosts] = {};
+                size_t assign[RP::kMaxPendingGhosts] = {};
+                for (size_t b = 0; b < count; ++b)
+                {
+                    for (size_t s = 0; s < RP::kMaxPendingGhosts && !placed[b]; ++s)
+                    {
+                        if (!taken[s] && g_PendingGhosts[s].entity &&
+                            g_PendingGhosts[s].buildClass == builds[b].buildClass)
+                        {
+                            taken[s] = placed[b] = true;
+                            assign[b] = s;
+                        }
+                    }
+                }
+                // Empty slots before ones caching another class's entity.
+                for (int pass = 0; pass < 2; ++pass)
+                {
+                    for (size_t b = 0; b < count; ++b)
+                    {
+                        for (size_t s = 0; s < RP::kMaxPendingGhosts && !placed[b]; ++s)
+                        {
+                            if (!taken[s] && (pass == 1 || !g_PendingGhosts[s].entity))
+                            {
+                                taken[s] = placed[b] = true;
+                                assign[b] = s;
+                            }
+                        }
+                    }
+                }
+                for (size_t s = 0; s < RP::kMaxPendingGhosts; ++s)
+                    if (!taken[s])
+                        HideSlot(g_PendingGhosts[s]);
+                for (size_t b = 0; b < count; ++b)
+                {
+                    GhostSlot& slot = g_PendingGhosts[assign[b]];
+                    const DropMatrix& m = builds[b].matrix;
+                    Vec3 renderPos{};
+                    SC::Quat q{};
+                    if (!RenderPose(m.right, m.up, m.front, m.posit, origin, renderPos, q) ||
+                        !EnsureSlotEntity(api, sceneManager, slot, builds[b].buildClass) ||
+                        !ShowSlot(api, slot, RP::Tint::Neutral, renderPos, q))
+                        HideSlot(slot);
+                }
+            }
+
             // ---- Power rings -------------------------------------------------
             RtsPowerRing g_PowerRings[RP::kMaxPowerRings];
             size_t g_PowerRingCount = 0;
@@ -983,6 +1171,31 @@ namespace BZROpenShim
                         g_PowerBound = true;
                     }
                 }
+                if (g_CoreBound && !g_PendingTried)
+                {
+                    g_PendingTried = true;
+                    uint32_t task = 0, ctor = 0, stage = 0;
+                    const HookEngine::EngineRow rows[] = {
+                        {"BuildGotoVtable", &g_BuildGotoVtable},
+                        {"RtsPendingBuildTask", &task},
+                        {"RtsPendingBuildGotoCtor", &ctor},
+                        {"RtsPendingBuildStage", &stage},
+                    };
+                    const uint32_t objectList = HookEngine::ResolveNamedAddress("GameObject::objectList");
+                    if (HookEngine::BindEngineRows("RTS pending build ghost", rows) && objectList)
+                    {
+                        if (VtableTypeNameMatches(g_BuildGotoVtable, ".?AVBuildGoto@@"))
+                        {
+                            g_ObjectListGlobal = objectList;
+                            g_PendingBound = true;
+                        }
+                        else
+                        {
+                            LogShimA(LogLevel::Warn, kComponent,
+                                     "[RTSPLACE] BuildGotoVtable RTTI mismatch; no pending build ghost");
+                        }
+                    }
+                }
                 if (!g_LinesTried)
                 {
                     g_LinesTried = true;
@@ -1046,6 +1259,8 @@ namespace BZROpenShim
                      "Unavailable: Power Range did not hook on this game build (see openshim.log)."},
                     {"RtsWaypointLines", g_LinesBound,
                      "Unavailable: Waypoint Lines did not bind on this game build (see openshim.log)."},
+                    {"RtsPendingBuildGhost", GhostReady() && g_PendingBound,
+                     "Unavailable: Pending Build Ghost did not hook on this game build (see openshim.log)."},
                 };
                 for (const Mark& m : marks)
                 {
@@ -1070,14 +1285,16 @@ namespace BZROpenShim
             if (g_CoreBound && !g_SlotInstalled)
                 g_SlotInstalled = InstallSlot();
             MarkOptions();
-            const bool all = GhostReady() && g_NavBound && g_PowerBound && g_LinesBound;
+            const bool all = GhostReady() && g_NavBound && g_PowerBound && g_LinesBound && g_PendingBound;
             if (all || s_attempts >= kMaxInstallAttempts)
             {
                 s_done = true;
                 LogShimA(LogLevel::Info, kComponent,
-                         "[RTSPLACE] install %s after %d attempt(s): ghost %s, nav ghosts %s, power %s, lines %s",
+                         "[RTSPLACE] install %s after %d attempt(s): ghost %s, nav ghosts %s, power %s, lines %s, "
+                         "pending %s",
                          all ? "complete" : "gave up", s_attempts, GhostReady() ? "yes" : "no",
-                         g_NavBound ? "yes" : "no", g_PowerBound ? "yes" : "no", g_LinesBound ? "yes" : "no");
+                         g_NavBound ? "yes" : "no", g_PowerBound ? "yes" : "no", g_LinesBound ? "yes" : "no",
+                         g_PendingBound ? "yes" : "no");
             }
         }
 
@@ -1096,7 +1313,7 @@ namespace BZROpenShim
         {
             if (!g_ConfigLoaded)
                 LoadConfig();
-            return g_GhostOn || g_PowerOn || g_LinesOn;
+            return g_GhostOn || g_PowerOn || g_LinesOn || g_PendingOn;
         }
 
         bool RtsWaypointLinesEnabled()
@@ -1112,7 +1329,7 @@ namespace BZROpenShim
                 LoadConfig();
             ++g_Serial;
             g_PowerRingCount = 0;
-            if (!GhostReady() || (!g_GhostOn && !g_PowerOn) || !sceneManager || !renderOrigin)
+            if (!GhostReady() || (!g_GhostOn && !g_PowerOn && !g_PendingOn) || !sceneManager || !renderOrigin)
             {
                 HideAllGhosts();
                 return;
@@ -1153,6 +1370,23 @@ namespace BZROpenShim
                 ShowNavGhosts(api, sceneManager, origin, navClass, navs, navCount);
             else
                 HideGhosts(g_NavGhosts, RP::kMaxNavGhosts);
+
+            // The rig the cursor ghost is previewing shows that instead.
+            PendingBuild pending[RP::kMaxPendingGhosts];
+            size_t pendingCount = 0, pendingFound = 0;
+            if (g_PendingOn && g_PendingBound && api.usable)
+                pendingCount =
+                    GatherPendingBuilds(pending, g_GhostOn && cursor ? g_Record.rig : nullptr, pendingFound);
+            if (pendingCount)
+                ShowPendingGhosts(api, sceneManager, origin, pending, pendingCount);
+            else
+                HideGhosts(g_PendingGhosts, RP::kMaxPendingGhosts);
+            if (pendingFound != g_PendingShownLast)
+            {
+                LogShimA(LogLevel::Info, kComponent, "[RTSPLACE] rigs with a pending build %zu -> %zu",
+                         g_PendingShownLast, pendingFound);
+                g_PendingShownLast = pendingFound;
+            }
 
             if (g_PowerOn && g_PowerBound)
             {
@@ -1200,6 +1434,8 @@ namespace BZROpenShim
                 drop(slot);
             for (GhostSlot& slot : g_NavGhosts)
                 drop(slot);
+            for (GhostSlot& slot : g_PendingGhosts)
+                drop(slot);
             ClearFailedClasses();
             g_SceneFailed = false;
             g_MaterialsChecked = false;
@@ -1214,6 +1450,7 @@ namespace BZROpenShim
             HideAllGhosts();
             ClearFailedClasses();
             g_Record = PreviewRecord{};
+            g_PendingShownLast = 0;
             g_PowerRingCount = 0;
             g_SceneFailed = false;
             g_RecordLogBudget = 8;
