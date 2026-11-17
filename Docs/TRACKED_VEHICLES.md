@@ -8,7 +8,8 @@ ODF without `classLabel = "tracked"` is untouched.
 Status: phase 1 (contact physics) and phase 2 (tread clips and
 `treadSound`) implemented and live-checked; phase 2b (rotating turret,
 `turretName`) implemented and live-checked with AI units; phase 3
-(multiplayer) implemented, not yet live-tested; see "Verification" below.
+(multiplayer) implemented and live-checked with two LAN peers; see
+"Verification" below.
 
 ## ODF
 
@@ -399,7 +400,15 @@ SaveGame and reload:
   Frame captures show the model intact (turret seated on the hull) but
   are too far away to measure the turret angle.
 
-Phase 3 (multiplayer): not yet live-tested. Static only: the decompiled
+Phase 3 (multiplayer): live-checked 2026-11-17 with two OpenShim LAN peers
+on misn03cr and an avtank copy with `classLabel = "tracked"` and a turret.
+Both peers logged the install line and the same DistributedObject ids;
+the replica's turret settled within 0.006 rad of the owner's (about
+0.01-0.02 rad behind while slewing); the replica ran no tread contact
+physics and moved smoothly, with one 1.18 m correction snap; an owner
+change kept the id; no crashes or warnings. Not yet checked live: the
+player turret controls (mouse turns the turret, strafe turns the hull)
+and tread clips on a real tread rig. Static basis: the decompiled
 GameObject::Simulate (0x004DEEC0) calls the Simulate slot for remote
 objects in up to five sub-steps after copying true_transform, and the
 PostSimulate wrapper (0x004DF370) calls slot 16 once with the frame time
