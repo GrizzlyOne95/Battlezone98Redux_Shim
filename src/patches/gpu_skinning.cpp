@@ -1817,7 +1817,10 @@ namespace BZROpenShim
                 std::lock_guard<std::mutex> lock(g_variantMutex);
                 for (auto& entry:variants)
                 {
-                    if (variantsHandled.count(entry.first) ||
+                    // A rejected entity stays on CPU skinning for the rest
+                    // of the mission, so there is no clone record to adopt
+                    // into and the owner's own assignment already stands.
+                    if (variantsHandled.count(entry.first) || g_rejected.count(entry.first) ||
                         (!live.count(entry.first) && !held.count(entry.first))) continue;
                     for (auto& change:entry.second)
                     {

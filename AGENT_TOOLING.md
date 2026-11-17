@@ -93,6 +93,15 @@ Opt-in overnight-run diagnostics in `src/patches/soak_telemetry.cpp`. Off instal
   - `[SOAK] main-loop stalled ms=<n> lastFrame=<f>` and `[SOAK] main-loop resumed after ms=<n>` -- the render-thread frame counter did not move for 2000 ms (mission loads also trigger this).
   - `[LIGHTING] change field=<name> old=<v> new=<v> frame=<f> mission=<name> capture=<path>` -- a step between consecutive mission frames: `ambient`, `fogColour`, `sunDiffuse` (any channel > 0.08), `sunDirection` (> 5 degrees), `fogStart`/`fogEnd` (> 10%), `fogMode`, `sun` (present/absent) and `scheme` (any change; the main viewport's material scheme). Colours and directions print as `r,g,b`. One line per field per 2 s. `capture=` is the PNG path in the game `logs` folder (`openshim_soak_lighting_<pid>_<nn>.png`, written by `RenderTarget::writeContentsToFile` at that frame's `frameRenderingQueued`), `none` when the cap (30 per process, one per 10 s) held it, `unavailable` when the Ogre exports are missing or a write failed.
 
+## UI performance logging
+
+`[UIPERF]` shell-transition timing (`src/patches/ui_performance.cpp`) is opt-in.
+
+- Turn it on with `[Diagnostics] UiPerformanceLogging = 1` (and `UiPerformanceVerbose = 1` for per-directory detail) in the game's `openshim.ini`. Back the ini up and restore it after the run.
+- Setting `OPENSHIM_UI_PERFORMANCE_LOGGING=1` in the environment is not enough when the ini has the key: the ini value is read first, and OpenShim's environment mapping answers the env lookup from the ini too, so a shipped `UiPerformanceLogging = 0` wins.
+- Check it took effect: `openshim.log` logs `UiPerf disabled; hooks not installed` when it is off.
+- `[UIPERF]` scan counts cover `GetFileAttributesW/A` only. `GetFileAttributesExW` is not counted there; the stats the resource-walk stat cache answers are summed in its `[WALKSTAT]` line.
+
 ## Runtime / Safety Rules
 - Static addresses, decompiler output, leaked-PDB hints, and runtime bytes are different evidence classes; corroborate them rather than treating one as authoritative for all builds.
 - For leaked/private PDB work, follow `reverse_engineering/notes/private_pdb_semantic_ranking.md`; same-RVA equality alone is not identity evidence.

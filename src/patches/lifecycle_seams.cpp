@@ -44,6 +44,7 @@
 #include "geometry_contact_test.h"
 #include "mesh_impact.h"
 #include "headlight_falloff.h"
+#include "rts_placement.h"
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
@@ -117,6 +118,7 @@ namespace BZROpenShim
             ForgetShellCasingSceneResources(L"clearScene");
             ForgetProducerRallyMeshes(L"clearScene");
             ForgetLaserSightSceneResources(L"clearScene");
+            ForgetRtsMarkersSceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
             SceneMutationDrainSceneTeardown();
             ForgetMultiplayerFlagSceneResources(L"clearScene");
@@ -139,6 +141,7 @@ namespace BZROpenShim
             ForgetShellCasingSceneResources(L"destroyAllMovableObjects");
             ForgetProducerRallyMeshes(L"destroyAllMovableObjects");
             ForgetLaserSightSceneResources(L"destroyAllMovableObjects");
+            ForgetRtsMarkersSceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
             SceneMutationDrainSceneTeardown();
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
@@ -214,6 +217,7 @@ namespace BZROpenShim
             DestroyShellCasingSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyProducerRallySceneObjects(sceneManager, L"destroyAllEntities");
             DestroyLaserSightSceneObjects(sceneManager, L"destroyAllEntities");
+            DestroyRtsPlacementSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyChunkProxySceneObjects(sceneManager, L"destroyAllEntities");
             SceneMutationDrainSceneTeardown();
             OrdnanceEntityLeakOnSceneEntitiesDestroyed();
@@ -610,6 +614,7 @@ namespace BZROpenShim
                 NotifyFracturePrewarmMissionRunState(false);
                 DeactivateShellCasings(L"left simulation");
                 DeactivateLaserSight(L"left simulation");
+                DeactivateRtsMarkers(L"left simulation");
 
                 ResetPathBlockState(L"left simulation");
                 HeadlightNotifyMissionRunStateChanged(false);

@@ -90,6 +90,13 @@ namespace BZROpenShim
         int ProducerRallyCommandHookIndex(const char* patchName);
         void* PrepareProducerRallyCommandHook(int index, uint32_t site);
         void NoteProducerRallyCommandHookInstalled(int index);
+        // Listener seam on the same BroadcastCommand detour (0x004A70C0, the
+        // ground-point broadcaster), so no second detour is written there:
+        // called on the game thread before the stock call, for every order
+        // rally set mode does not consume. One listener; null clears it.
+        // RtsMarkers (rts_markers.cpp) uses it for its command pings.
+        using BroadcastCommandListener = void (*)(void* panel, int what, const float* where);
+        void SetBroadcastCommandListener(BroadcastCommandListener listener);
     }
     // REL32 target at HoverCraft::UpdateSounds' turbo-stop Sound::Find call.
     // Naked: reads the craft from the caller's frame, cdecl (name, owner) args.

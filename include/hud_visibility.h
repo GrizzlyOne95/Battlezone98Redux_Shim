@@ -17,6 +17,12 @@ namespace BZROpenShim::HudVisibility
     // True while the player has hidden the HUD. Any thread; one atomic load.
     bool IsHidden() noexcept;
 
+    // True while a legacy text editor (in-mission chat, ally prompt) has
+    // keyboard focus (LegacyTextEditorFocusLookup). A failed bind or a fault
+    // reads as focused, so a key filter leaves the key to the game. Main
+    // (window) thread, from key filters.
+    bool TextEditorFocused() noexcept;
+
     // Frame thread (world render-queue tick): installs the key filters once,
     // applies a pending toggle and keeps the stock switch at 0 while hidden.
     void Tick() noexcept;

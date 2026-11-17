@@ -19,4 +19,12 @@ namespace BZROpenShim
     // Idempotent; fails closed if the engine address does not verify.
     // OPENSHIM_DISABLE_RESOURCE_WALK_STAT_CACHE=1 keeps it off.
     void InstallResourceWalkStatCacheIfPossible();
+
+    // Opens the same per-thread scope around another engine walk (the shell
+    // resource setters). Returns false, opening nothing, when the import hooks
+    // are not in place. Each true return must be paired with exactly one
+    // EndResourceWalkStatScope on the same thread; the label names the walk in
+    // the [WALKSTAT] summary line. Ending with no scope open is a no-op.
+    bool BeginResourceWalkStatScope();
+    void EndResourceWalkStatScope(const char* label);
 }
