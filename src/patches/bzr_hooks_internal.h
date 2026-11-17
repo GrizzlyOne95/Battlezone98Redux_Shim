@@ -1211,6 +1211,9 @@ namespace BZROpenShim
             ShieldPushMode::Mode pushMode = ShieldPushMode::Mode::Front;
             // Radial mode only (`shieldReflectSpeed`); <= 0 turns ricochet off.
             float reflectSpeed = ShieldPushMode::kDefaultReflectSpeed;
+            // Radial ricochet only (`shieldHitExplosion`); 0 = no effect.
+            unsigned long long hitExplosionPacked = 0;
+            char hitExplosionName[ShieldPushMode::kExplosionNameMax + 1] = {};
         };
         struct TeamFilterCache
         {
