@@ -761,6 +761,10 @@ openshim_add_test(rts_commands_policy_tests STD 20 SOURCES
     rts_commands_policy_tests.cpp
 )
 
+openshim_add_test(producer_badges_policy_tests STD 20 SOURCES
+    producer_badges_policy_tests.cpp
+)
+
 openshim_add_test(quicksave_key_policy_tests STD 20 SOURCES
     quicksave_key_policy_tests.cpp
 )
