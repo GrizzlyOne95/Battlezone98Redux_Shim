@@ -204,30 +204,37 @@ namespace BZROpenShim
             return g_RealGetFileAttributesExW(path, level, info);
         }
 
+        void EnterScope()
+        {
+            if (t_Scope.depth++ == 0)
+                t_Scope.startTick = GetTickCount64();
+        }
+
+        void LeaveScope(const char* label)
+        {
+            if (t_Scope.depth == 0)
+                return;
+            if (--t_Scope.depth != 0)
+                return;
+            if (t_Scope.hits || t_Scope.misses)
+                LogShimA(LogLevel::Info, kComponent,
+                         "[WALKSTAT] %s %llu ms: %u stat calls answered from enumeration, "
+                         "%u passed to the OS, %u entries seen",
+                         label,
+                         static_cast<unsigned long long>(GetTickCount64() - t_Scope.startTick),
+                         t_Scope.hits, t_Scope.misses,
+                         static_cast<unsigned>(t_Scope.entries.size()));
+            t_Scope.entries.clear();
+            t_Scope.openEnums.clear();
+            t_Scope.hits = t_Scope.misses = 0;
+        }
+
         void __fastcall BuildSingleIAResourceHook(void* self, void* /*edx*/, void* request)
         {
             struct ScopeGuard
             {
-                ScopeGuard()
-                {
-                    if (t_Scope.depth++ == 0)
-                        t_Scope.startTick = GetTickCount64();
-                }
-                ~ScopeGuard()
-                {
-                    if (--t_Scope.depth != 0)
-                        return;
-                    if (t_Scope.hits || t_Scope.misses)
-                        LogShimA(LogLevel::Info, kComponent,
-                                 "[WALKSTAT] build %llu ms: %u stat calls answered from enumeration, "
-                                 "%u passed to the OS, %u entries seen",
-                                 static_cast<unsigned long long>(GetTickCount64() - t_Scope.startTick),
-                                 t_Scope.hits, t_Scope.misses,
-                                 static_cast<unsigned>(t_Scope.entries.size()));
-                    t_Scope.entries.clear();
-                    t_Scope.openEnums.clear();
-                    t_Scope.hits = t_Scope.misses = 0;
-                }
+                ScopeGuard() { EnterScope(); }
+                ~ScopeGuard() { LeaveScope("build"); }
             } guard;   // closes even if the engine throws through here
             g_BuildOriginal(self, request);
         }
@@ -290,6 +297,21 @@ namespace BZROpenShim
             }
             return true;
         }
+    }
+
+    // Needs only the import hooks; the buildSingleIAResource detour is not
+    // involved. A no-op when the imports are not patched (disabled, failed).
+    bool BeginResourceWalkStatScope()
+    {
+        if (!g_ImportsPatched)
+            return false;
+        EnterScope();
+        return true;
+    }
+
+    void EndResourceWalkStatScope(const char* label)
+    {
+        LeaveScope(label ? label : "scope");
     }
 
     void InstallResourceWalkStatCacheIfPossible()
