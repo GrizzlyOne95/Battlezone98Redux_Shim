@@ -1082,6 +1082,46 @@
       "identity": "Target of the first CALL in Sound::Find (0x0043AC74 -> 0x0043BC50): a 10-byte cdecl leaf returning the live sound list head [0x00915598]. The audio update 0x0043A170 and StopAll 0x0043A570 walk the same list from it with next at +0x00 (Sound::Next 0x00439CC0). The anchor is the E8 opcode, not its rel32 operand."
     },
     {
+      "name": "Sound::InitControl",
+      "pattern": "55 8B EC 6A 2C 6A 00 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 0C 8B 4D 08 F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 41 14 8B 55 08 F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 42 18 8B 45 08 F3 0F 10 05 ?? ?? ?? ?? F3 0F 11 40 1C 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0043A990",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Complete 69-byte cdecl leaf that clears a 0x2C-byte sound control block (memset at +0x0B) and stores 11025.0f at +0x14, 100.0f at +0x18 and 0.0f at +0x1C, on exact GOG Redux 2.2.301. HoverCraft::UpdateSounds 0x004EEA20 calls it at 0x004EEBAC on [ebp-0xB0], sets the block's +0x10 flags to 0x4001 and passes it to PlayGlobalSound 0x0043AA30 at 0x004EEC1A as the third argument. Used by the tracked class's treadSound loop. Pattern verified single-match by whole-image scan on 2026-11-16."
+    },
+    {
+      "name": "Sound::InitPrep",
+      "pattern": "55 8B EC 8B 45 08 C7 00 47 41 53 30 8B 4D 08 C7 41 04 32 00 00 00 8B 55 08 C7 42 08 04 00 00 00 8B 45 08 C7 40 0C 00 00 00 00 8B 4D 08 C7 41 10 64 00 00 00 8B 55 08 C7 42 14 FF FF FF FF 8B 45 08 C7 40 18 11 2B 00 00 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0043A9E0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Complete 74-byte cdecl leaf that fills a seven-dword GAS prep block with 'GAS0', 0x32, 4, 0, 100, -1, 0x2B11 (11025), on exact GOG Redux 2.2.301. HoverCraft::UpdateSounds 0x004EEA20 calls it at 0x004EEBC2 on [ebp-0x20], then stores the priority at +0x04 (0x41 when obj76+0x14 has bit 0x10, else 0x2D) and loop mode 1 at +0x0C before passing it to PlayGlobalSound 0x0043AA30 as the fourth argument. Used by the tracked class's treadSound loop. Pattern verified single-match by whole-image scan on 2026-11-16."
+    },
+    {
+      "name": "Sound::SetParams",
+      "pattern": "55 8B EC 83 7D 0C 00 7C 1A 8B 45 08 8B 4D 0C 89 48 40 8B 55 08 8B 42 14 0D 80 00 00 00 8B 4D 08 89 41 14 83 7D 10 00 7C 1F F3 0F 2A 45 10 8B 55 08 F3 0F 11 42 20 8B 45 08 8B 48 14 81 C9 00 01 00 00 8B 55 08 89 4A 14 83 7D 14 00 7C 18 8B 45 08 8B 4D 14 89 48 48 8B 55 08 8B 42 14 83 C8 40 8B 4D 08 89 41 14 B8 01 00 00 00 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0043AE50",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Complete 109-byte cdecl leaf SetSoundParams(sound, volume, pan, rate) on exact GOG Redux 2.2.301: each non-negative argument is stored (volume int at +0x40 with flag 0x80, pan as float at +0x20 with flag 0x100, rate int at +0x48 with flag 0x40, flags at +0x14) and a negative one is left unchanged; returns 1. HoverCraft::UpdateSounds 0x004EEA20 calls it at 0x004EECEF as (thrust sound, volume, -2, rate). Used by the tracked class's treadSound loop. Pattern verified single-match by whole-image scan on 2026-11-16."
+    },
+    {
+      "name": "Sound::Stop",
+      "pattern": "55 8B EC 83 7D 08 00 75 02 EB 0C 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 5D C3",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0043AAA0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Complete 25-byte cdecl leaf Sound::Stop(sound) on exact GOG Redux 2.2.301: returns for a null sound, otherwise forwards it to the release call 0x0043B010. The HoverCraft sound cleanup 0x004EE8F0 calls it at 0x004EE94C on the record Sound::Find returned for class+0x5B0, and the Lua StopSound binding 0x004FFA90 likewise after Sound::Find. Used by the tracked class's treadSound loop. Pattern verified single-match by whole-image scan on 2026-11-16."
+    },
+    {
       "name": "Carrier::GetWeapon",
       "pattern": "55 8B EC 51 89 4D FC B8 01 00 00 00 8B 4D 08 D3 E0 8B 4D FC 23 41 2C 74 0E 8B 55 08 8B 45 FC 8B 44 90 18 EB 04 EB 02 33 C0 8B E5 5D C2 04 00",
       "offset": 0,
@@ -1295,6 +1335,16 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Floor query (terrain plus object floors) on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): void __cdecl(int ignoreEntity, double x, double y, double z, float* floorY, Vec3* normal, int* floorObject), caller cleans 0x28 bytes. Stock HoverCraft::Simulate calls it at 0x004EC631 and 0x004EDDE6 with ignoreEntity = obj+0xF0 and the craft posit, then forms obj76+0xB4 + posit.y - 0.2 - floorY as its unpiloted ground clearance (0x004EDDFA-0x004EDE25). The body first samples terrain height and normal through 0x00785730 (call at 0x00444FB6), then tests object floors below y + 1; 0x004451D0 wraps it with ignoreEntity = 0. tracked_vehicle_class.cpp calls it, read-only, for each tread contact. Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "Obj76::SyncNode",
+      "pattern": "55 8B EC 83 EC 3C A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 7D 08 00 0F 84 7F 01 00 00 8B 45 0C 50 8D 4D C4 51 E8",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00681A00",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Model node to Ogre sync on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): void __cdecl(obj76* node, MAT_3D* local), caller cleans 8 bytes. Returns at once for a null node; otherwise sets the orientation (vtable +0x20, quaternion with x negated) and, unless node+0x84 == 0x28, the position (vtable +0x2C, (-x, y, z)) of the Ogre node at node+0xC8 and again of the one at node+0xCC. Stock HoverCraft::UpdateWeaponAim calls it after posing each weapon node (call at 0x004EB7A4) and the TurretTank simulate after posing its turret nodes. tracked_vehicle_class.cpp calls it for the turret node and the root children it re-poses. Unique by whole-image scan 2026-11-16."
     },
     {
       "name": "CollisionGrid::Objects",
