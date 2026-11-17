@@ -15,7 +15,14 @@ Tests: `tests/local_damage_policy_tests.cpp`. Shared Entity walk:
 
 ## Switching it on
 
-`openshim.ini`:
+In game: Options > OpenShim > Video > **Hull Scorch** (On/Off). It applies
+live: Off stops capture and clears the marks already on the hulls; On starts
+marking at the next hit. It still only draws on DX11 with the Enhanced
+profile. The row writes `HullScorch`, replacing an older `Enabled` line in
+place (`Enabled` is also AutoSave's key, and menu rows need unique keys; both
+spellings are read, `HullScorch` first).
+
+Or `openshim.ini`:
 
 ```ini
 [LocalDamage]
@@ -24,8 +31,10 @@ MaxMarksPerUnit = 8  ; 1..8; the oldest mark is replaced
 EmberSeconds = 6     ; 0.5..60; time for a fresh mark's embers to cool
 ```
 
-The setting is read at start-up and again at every mission start. Allowed in
-multiplayer.
+The setting is read at start-up, at every mission start and when the menu row
+changes. Allowed in multiplayer. `MaxMarksPerUnit` and `EmberSeconds` have no
+menu row; they are read at start-up, at mission start and whenever a live
+options row changes.
 
 ## Behaviour
 

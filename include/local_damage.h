@@ -19,9 +19,14 @@ namespace BZROpenShim::LocalDamage
         float before = 0.0f;     // health ratio (complete+0x200)
     };
 
-    // [LocalDamage] Enabled, read once and again at each mission start.
+    // [LocalDamage] HullScorch (older spelling: Enabled), read once and again at
+    // each mission start, and on RequestReload.
     // HudFeedback installs the shared DamageAlloc adapters while this holds.
     bool WantsDamage();
+
+    // Options-menu toggle: any thread. The render-queue tick re-reads the
+    // ini; turning it off zeroes the marked Entities and stops capture.
+    void RequestReload();
 
     // Craft DamageAlloc adapter (hud_feedback.cpp DamageHook<1>), sim thread.
     // Fixed storage only: no heap, no Ogre calls.
