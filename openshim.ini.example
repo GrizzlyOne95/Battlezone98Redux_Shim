@@ -2681,6 +2681,19 @@ RtsAreaSelect = 1
 ; Exposed on the OpenShim Settings page as "Hold".
 RtsHold = 2
 
+; Build at Nav. With a building picked on a selected Construction Rig, the
+; unit menu's Go To Nav entry reads "Build at Nav"; picking a nav checks the
+; spot with the rig's own placement test (slope, overlap, power for guns
+; and the Comm Bunker) and gives the rig BUILD there, facing the way you
+; face. A spot it cannot use buzzes, and when nothing else was ordered the
+; selection stays so you can pick another nav. Other selected units go to
+; the nav as before. Only your own, local rigs; runs in multiplayer
+; (UNVERIFIED live there, see Docs/RTS_COMMANDS.md).
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Build at Nav".
+RtsBuildAtNav = 1
+
 ; The RTS action keys. One key each, no modifier; rebind them in Options >
 ; Input > RTS Actions, which writes these lines. The remote-target key is
 ; used with Shift (Shift+T). Refused, with a log line and a fall back to the

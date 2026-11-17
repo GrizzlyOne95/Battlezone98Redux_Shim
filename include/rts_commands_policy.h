@@ -607,5 +607,104 @@ namespace BZROpenShim
         {
             return value < kHoldOff ? kHoldOff : (value > kHoldKeyAndShiftMenu ? kHoldKeyAndShiftMenu : value);
         }
+
+        // ---- Build at Nav ------------------------------------------------------
+
+        // Mode 10 is Go To Nav (names table 0x008E7B00). Its submenu's nav
+        // pick sends CMD_GO (3) to the selection (0x004A4A6D `push 3`).
+        constexpr int kModeGoToNav = 10;
+        constexpr int kCmdGo = 3;
+        // ConstructionRig::GetCommand(VECTOR) 0x0049D230 returns CMD_DROPOFF
+        // (8) for a spot it accepts and CMD_NO_DROPOFF (9) otherwise
+        // (0x0049D4E2 / 0x0049D50B / 0x0049D533).
+        constexpr int kCmdDropoff = 8;
+        // CMD_BUILD: ConstructionRig::SetActiveMode FUN_0049d0e0 line 12.
+        constexpr int kCmdBuild = 0x15;
+        // Mode ids up to 0x1A are fixed entries; a larger one is the
+        // GameObjectClass* of a building (FUN_0049d0e0 lines 12-13).
+        constexpr uint32_t kLastFixedMode = 0x1A;
+        // DistributedObject +0x68 == 2: a remote replica (FUN_004b9830).
+        constexpr uint8_t kReplicaOwnership = 2;
+
+        // What the engine side reads from one selected object.
+        struct RigPick
+        {
+            bool isRig = false;   // vtable is ConstructionRig's
+            bool ownTeam = false; // the player's team
+            bool replica = true;  // GameObject +0x80 (DistributedObject +0x68) == kReplicaOwnership
+            int32_t busy = 1;     // +0x228; GetCommand refuses unless 0
+            ModeList modes;       // +0x1A4
+            uint32_t dropClass = 0; // +0x370, written with the active mode
+        };
+
+        // The building class a rig has picked and not yet placed, or 0. The
+        // stock hover test (FUN_0049d230 line 36): active mode above
+        // 0x1A and +0x228 == 0. The drop class must equal that mode too, so
+        // a stale +0x370 (never cleared on cancel) or a PRODMENU submenu
+        // stub (SetActiveMode never sees one) does not count.
+        inline uint32_t PickedBuildClass(const RigPick& rig)
+        {
+            if (!rig.isRig || !rig.ownTeam || rig.replica || rig.busy != 0)
+                return 0;
+            const uint32_t mode = static_cast<uint32_t>(ModeAt(rig.modes, rig.modes.active));
+            if (mode <= kLastFixedMode || mode != rig.dropClass)
+                return 0;
+            return mode;
+        }
+
+        // The rig's picked entry is still enabled (the build menu greys out
+        // what the team cannot afford).
+        inline bool PickedSlotEnabled(const RigPick& rig)
+        {
+            return SlotEnabled(rig.modes, rig.modes.active);
+        }
+
+        // The Go To Nav entry reads "Build at Nav" while a selected rig has a
+        // building picked.
+        inline bool ShowBuildAtNavLabel(bool active, int mode, bool selectionHasPickedRig)
+        {
+            return active && mode == kModeGoToNav && selectionHasPickedRig;
+        }
+
+        enum class BuildAtNavVerdict
+        {
+            Build,
+            NotAffordable, // the picked entry is disabled
+            NoPosition,    // the nav's position could not be read
+            BadSpot,       // GetCommand did not return CMD_DROPOFF
+        };
+
+        // `queried`: GetCommand ran without a fault and gave `result`.
+        inline BuildAtNavVerdict DecideBuildAtNav(bool slotEnabled, bool havePosition, bool queried, int result)
+        {
+            if (!slotEnabled)
+                return BuildAtNavVerdict::NotAffordable;
+            if (!havePosition)
+                return BuildAtNavVerdict::NoPosition;
+            if (!queried || result != kCmdDropoff)
+                return BuildAtNavVerdict::BadSpot;
+            return BuildAtNavVerdict::Build;
+        }
+
+        inline const char* BuildAtNavVerdictName(BuildAtNavVerdict verdict)
+        {
+            switch (verdict)
+            {
+            case BuildAtNavVerdict::Build: return "build";
+            case BuildAtNavVerdict::NotAffordable: return "entry disabled (cannot afford)";
+            case BuildAtNavVerdict::NoPosition: return "nav position unreadable";
+            case BuildAtNavVerdict::BadSpot: return "cannot build there";
+            default: return "?";
+            }
+        }
+
+        // The stock pick deselects after the order (SelectNone 0x004A6D50 at
+        // 0x004A4A80). When every unit that would have been ordered was a
+        // refused rig, nothing happened, so the selection stays and the
+        // player can pick another nav.
+        inline bool KeepSelectionAfterNavPick(int built, int stockOrdered, int refused)
+        {
+            return refused > 0 && built == 0 && stockOrdered == 0;
+        }
     }
 }

@@ -3269,6 +3269,18 @@
       "identity": "ControlPanel::Render 0x004A08E0, the unit-menu entry label (FUN_004a08e0.c line 1396): mode [ebp-0x28C], push the mode's name (table 0x008E7B00, 8 bytes per mode), push \"names\" (0x0087736C), `call 0x0081CB40` (UiLocalize) at +0x13 = 0x004A57BE, add esp,8. RtsHold (Shift alternate) redirects it (REL32) so the Defend entry reads \"Hold\" while Shift is held. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
     },
     {
+      "name": "ControlPanelNavPickBroadcastCall",
+      "address": "0x004A4A64",
+      "expected": "7E 21 8B 85 50 FD FF FF 50 6A 03 8B 8D BC FD FF FF E8 D6 25 00 00 8B 8D BC FD FF FF E8 CB 22 00 00 EB 32",
+      "identity": "ControlPanel::Render 0x004A08E0, the Go To Nav submenu's nav pick (the nav slots 0x23..0x2C, FUN_004a08e0.c lines 1207-1290; nav object FUN_005E0F70 at 0x004A4A18 into [ebp-0x2B0]): after mnu_clik (0x004A4A4F), `cmp [this+0x188],0` then `jle` (selection empty: SetTarget instead), push the nav [ebp-0x2B0], push 3 (CMD_GO), ecx = this [ebp-0x244], `call 0x004A7050` (ControlPanel::BroadcastCommand(what, GameObject*)) at +0x11 = 0x004A4A75, ecx = this, `call 0x004A6D50` (SelectNone) at +0x1C = 0x004A4A80, `jmp 0x004A4AB9`. Single match in the image. RtsBuildAtNav redirects both calls (REL32): picked Construction Rigs get BUILD at the nav, the rest the stock GO, and SelectNone is skipped when every rig was refused. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ConstructionRigGetCommandPos",
+      "address": "0x0049D230",
+      "expected": "55 8B EC 83 EC 54 A1 00 70 8E 00 33 C5 89 45 FC 89 4D D4 8B 4D D4 E8 C5 29 FD FF 89 45 C4 8B 45 D4 83 B8 28 02 00 00 00",
+      "identity": "ConstructionRig::GetCommand(const VECTOR_3D* pos), thiscall ret 4, ConstructionRig vtable (0x00877994) slot 12 (FUN_0049d230): returns 0 unless [this+0x228] == 0 (guarded: `cmp dword [eax+0x228],0` at 0x0049D251) and the active mode (FUN_0046fc10, call at 0x0049D246) is non-zero; 3 for mode 1; for a mode above 0x1A (a picked building class, also at [this+0x370], 0x0049D2B2) it sets the drop matrix at +0x378 with the user's facing (0x0049CF90 at 0x0049D2AA), checks CanBuildHere 0x00466E50 and, for COMM/TURR/SHLD, a friendly power plant in range, and returns 8 (CMD_DROPOFF, 0x0049D4E2) or 9 (0x0049D50B / 0x0049D533). The stock reticle hover calls it; RtsBuildAtNav calls it once with the nav's position to validate the spot and set the matrix before giving BUILD. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
       "name": "ClassLoadAssetsFlag",
       "address": "0x008E7732",
       "kind": "data",
@@ -6517,18 +6529,6 @@
       "address": "0x005CF100",
       "expected": "55 8B EC 83 EC 24 89 4D FC",
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWave::UpdateExtents (FUN_005cf100, __fastcall ecx=this): stores [this+0xE4/E8/EC/F0] = floor/ceil((pos -/+ r) * 1/Grid_Size), r = [[this+0xC]+0x78]. Restore and Simulate walk these inclusive, one delta entry per cell, against a side*side*2 buffer (side = floor(r*2*0.2)+2) allocated in the ctor FUN_005cef80, so the stock extents overrun it. OpenShim post-hooks it (9-byte prologue detour) to clamp the max edges to the buffer."
-    },
-    {
-      "name": "SeismicWaveClassBuildingScaleRead",
-      "address": "0x005CEDE3",
-      "expected": "8B 55 08 51 F3 0F 10 82 C0 00 00 00 F3 0F 11 04 24 8B 45 F0 05 C0 00 00 00 50 68 61 8F 16 02 68 1B E4 F8 7F 8D 4D EC E8 F1 A9 FB FF",
-      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWaveClass ctor (FUN_005cea80, ret 0xC) last ODF read: pushes default [parent+0xC0], out this+0xC0, key 0x02168F61 (FNV-1a \"buildingscale\"), section 0x7FF8E41B (\"seismicwaveclass\"), ecx = local ParameterDB scope [ebp-0x14], then E8 at +0x27 (0x005CEE0A) to ParameterDB::GetFloat 0x00589800 (__thiscall, sscanf %f into out or default on a miss, found in AL, ret 0x10); the scope destructor 0x00589530 follows. Window matched once in the exe. seismic_walker_velocity_scale.cpp redirects that call to read walkerVelocityScale (0xEB72A482) in the same live scope; class = out-0xC0."
-    },
-    {
-      "name": "SeismicWaveSimulateAddVelocityCall",
-      "address": "0x005D08BC",
-      "expected": "8B 8D AC FD FF FF 8B 51 0C F3 0F 59 82 AC 00 00 00 F3 0F 58 45 D4 F3 0F 11 45 D4 8D 45 CC 50 8B 8D A8 FD FF FF E8 CA 6C ED FF",
-      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWave Simulate (FUN_005cf510; this stored once at [ebp-0x254] by the prologue at 0x005CF525) linear kick for mobile targets: adds [this+0xC]->shakeVeloc(+0xAC) noise into the velocity delta at [ebp-0x34], pushes it, ecx = target [ebp-0x258] (FUN_004da060 result of the range search), then E8 at +0x25 (0x005D08E1) to GameObject::AddVelocity 0x004A75B0 (__thiscall, ret 4; the GameObjectAddVelocity row). Only AddVelocity call in Simulate (Ghidra xrefs); window matched once in the exe. seismic_walker_velocity_scale.cpp redirects it to a thunk that passes [ebp-0x254] as the wave and scales the delta for 'WALK' targets."
     },
     {
       "name": "DynamicMainAllocVertices",
