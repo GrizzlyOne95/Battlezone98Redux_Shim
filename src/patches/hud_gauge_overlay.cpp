@@ -87,7 +87,7 @@ namespace BZROpenShim::HudGaugeOverlay
             if (!original)
                 return;
             original(self, edx);
-            // Ctrl+= hides every painter (notice, kill ticker, rally, groups).
+            // Ctrl+= hides every painter (notice, kill ticker, rally, groups, badges).
             if (HudVisibility::IsHidden())
                 return;
 

@@ -1518,6 +1518,13 @@ namespace BZROpenShim
         void TickGroupStrip();
         void ResetGroupStrip();
 
+        // --- Producer build badges (producer_badges.cpp) -----------------------
+        // [Gameplay] RtsProducerBadges, default OFF. Tick: the world render tick
+        // (frame/game thread), throttled to 5 Hz internally.
+        void ReloadProducerBadgesConfig();
+        void TickProducerBadges();
+        void ResetProducerBadges();
+
         // --- Unit behaviour fixes (unit_behavior_fixes.cpp) --------------------
         extern bool g_ApcAlliedTargetDeployFixEnabled;
         extern bool g_ApcAlliedTargetDeployFixInstalled;

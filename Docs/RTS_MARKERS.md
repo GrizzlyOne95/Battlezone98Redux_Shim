@@ -275,6 +275,8 @@ Each group binds once on the patch thread (all or nothing, byte-checked); every 
 11. Multiplayer: repeat 1-7 and 12 as a client and as the host; nothing appears for other players.
 12. Pending Build Ghost: order two rigs to build different buildings far away (one from the reticle, one with Build at Nav): a dim ghost at each spot while they drive. Each goes when its rig starts building. Cancel one order (give it Go): its ghost goes. Kill a rig on its way: its ghost goes.
 
+Producer build badges (name and build percent over busy own producers, `[Gameplay] RtsProducerBadges`, default off) are a HUD overlay, not a ring: see `Docs/PRODUCER_BADGES.md`.
+
 ## Known limits
 
 - The cursor point is only refreshed in the views listed above. In other camera views it can be stale. UNVERIFIED.

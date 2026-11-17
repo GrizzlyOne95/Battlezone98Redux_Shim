@@ -1865,6 +1865,8 @@ namespace BZROpenShim
         HudPalette::Tick();
         // F1-F7 group strip: 4 Hz group snapshot for its HUD painter.
         TickGroupStrip();
+        // Producer build badges: 5 Hz scan for its HUD painter.
+        TickProducerBadges();
         // Group member list: attaches its command-panel render scope once.
         TickOffenseOverflow();
         // RTS command extras: key filters; the queued key actions run from

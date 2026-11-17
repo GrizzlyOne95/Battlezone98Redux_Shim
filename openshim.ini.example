@@ -2773,6 +2773,14 @@ RtsPowerRange = 1
 ; Exposed on the OpenShim Settings page as "Waypoint Lines".
 RtsWaypointLines = 1
 
+; Producer Badges. A badge above each of your Recycler, Factories, Armories
+; and Construction Rigs that is building something: the name of the item and
+; its build percent (the stock build progress). Drawn for you only.
+;
+; Accepted: boolean. Default: 0.
+; Exposed on the OpenShim Settings page as "Producer Badges".
+RtsProducerBadges = 0
+
 ; Idle Unit Alert. Plays a short stock sound (ping.wav) when one of your
 ; units goes from busy to idle: its current and pending orders are both none
 ; or Stop. At most one alert every 5 seconds, and none for a unit's first

@@ -498,6 +498,8 @@ namespace BZROpenShim
             ReloadRtsCommandsConfig();
             // [Gameplay] GroupStrip, likewise.
             ReloadGroupStripConfig();
+            // [Gameplay] RtsProducerBadges, likewise.
+            ReloadProducerBadgesConfig();
             // [Gameplay] RtsCommandPings / RtsArtilleryRange, and the placement
             // aids RtsBuildGhost / RtsPendingBuildGhost / RtsPowerRange /
             // RtsWaypointLines, and the under-attack rings RtsAttackMarks,
