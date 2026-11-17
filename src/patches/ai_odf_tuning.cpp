@@ -2636,6 +2636,96 @@ namespace BZROpenShim
                 g_TurretTankEnemyVtableAddr);
         }
 
+        // ScavengerProcess::InitState compares the scavenger's age with the
+        // shared 5.0f constant. Mission-start units take the jbe and get a
+        // RecycleTask at once; anything older (every built scavenger) falls
+        // through to a 5 s coast first. Smart Scavengers makes that jbe a jmp
+        // so built scavengers start at once too. Only the opcode byte at +7
+        // changes; the shared constant is never written. The wait after a
+        // finished RecycleTask is a different path and stays stock.
+        // Row ScavengerInitStateAgeBranch guards "comiss xmm0,[5.0f]; jbe +0x78".
+        static uint32_t g_ScavengerInitStateAgeBranchAddr = 0;
+        static bool g_ScavengerInstantStartInstalled = false;
+        static bool g_ScavengerInstantStartPatchActive = false;
+        constexpr uint32_t kScavengerAgeJccOffset = 7;
+        constexpr uint8_t kScavengerAgeJbeOpcode = 0x76;
+        constexpr uint8_t kScavengerAgeJmpOpcode = 0xEB;
+
+        // Single-player gate, same shape as RefreshApcAlliedTargetDeployFixState:
+        // the stock byte goes back for network games and when the option is
+        // off. Only touches .text, and only logs, when the wanted state changes.
+        void RefreshScavengerInstantStartState()
+        {
+            if (!g_ScavengerInstantStartInstalled)
+                return;
+
+            const bool wantActive =
+                g_SmartScavengerPathingEnabled && IsSinglePlayerSession();
+            if (wantActive == g_ScavengerInstantStartPatchActive)
+                return;
+
+            const uint8_t opcode =
+                wantActive ? kScavengerAgeJmpOpcode : kScavengerAgeJbeOpcode;
+            if (!WritePatchBytes(g_ScavengerInitStateAgeBranchAddr + kScavengerAgeJccOffset,
+                                 &opcode, 1))
+            {
+                Log(L"[SCAVPATH] Failed writing scavenger instant start branch wanted=%hs\n",
+                    wantActive ? "on" : "off");
+                return;
+            }
+
+            g_ScavengerInstantStartPatchActive = wantActive;
+            Log(L"[SCAVPATH] scavenger instant start: %hs (%hs)\n",
+                wantActive ? "on" : "off",
+                wantActive ? "single-player"
+                           : (g_SmartScavengerPathingEnabled ? "network game"
+                                                             : "SmartScavengerPathing off"));
+        }
+
+        // Binds and byte-checks the site once; the gate does the writing.
+        // Installed whatever the option says, because the option can be
+        // switched on later from the settings page.
+        static void InstallScavengerInstantStartIfPossible()
+        {
+            static int s_bound = 0;
+            if (g_ScavengerInstantStartInstalled || s_bound < 0)
+                return;
+
+            if (s_bound == 0)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "ScavengerInitStateAgeBranch", &g_ScavengerInitStateAgeBranchAddr },
+                };
+                s_bound = HookEngine::BindEngineRows("Scavenger instant start", rows) ? 1 : -1;
+                if (s_bound < 0)
+                {
+                    Log(L"[SCAVPATH] Scavenger instant start unavailable: InitState age branch did not match this game build\n");
+                    return;
+                }
+            }
+
+            // The row guard matched the stock jbe, but seed from the live byte
+            // anyway so a re-run with the jmp in place reads as applied.
+            uint8_t current = 0;
+            if (!HookEngine::ReadMemory(g_ScavengerInitStateAgeBranchAddr + kScavengerAgeJccOffset,
+                                        &current, 1) ||
+                (current != kScavengerAgeJbeOpcode && current != kScavengerAgeJmpOpcode))
+            {
+                s_bound = -1;
+                Log(L"[SCAVPATH] Scavenger instant start unavailable: unexpected branch byte 0x%02X at 0x%08X\n",
+                    static_cast<unsigned>(current),
+                    g_ScavengerInitStateAgeBranchAddr + kScavengerAgeJccOffset);
+                return;
+            }
+
+            g_ScavengerInstantStartPatchActive = (current == kScavengerAgeJmpOpcode);
+            g_ScavengerInstantStartInstalled = true;
+            Log(L"[SCAVPATH] Scavenger instant start ready at 0x%08X (%hs)\n",
+                g_ScavengerInitStateAgeBranchAddr + kScavengerAgeJccOffset,
+                g_ScavengerInstantStartPatchActive ? "on" : "off");
+            RefreshScavengerInstantStartState();
+        }
+
         static void InstallAiTuningCoreHooksIfPossible()
         {
             InstallAiNativeOrdersHooksIfPossible();
@@ -2646,6 +2736,7 @@ namespace BZROpenShim
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();
+            InstallScavengerInstantStartIfPossible();
             // These installs are retried, so a hook that lands on a later
             // pass takes back an earlier Unavailable mark.
             if (g_AttackTaskDoStateHookInstalled && GetLegacyAttackHelpers())
