@@ -49,6 +49,10 @@
 // own-team object (units and buildings) an enemy hit in the last 2 s, the
 // window the stock radar flashes its blip for (slots kFirstAttackRingSlot..).
 // Detection reads the engine's own GameObject::enemyShot stamp; no hook.
+//
+// [Gameplay] RtsOrderQueue (rts_order_queue.cpp): an amber chain of lines and
+// target rings for the queued orders of the selected units (slots
+// kFirstQueueLineSlot.. and kFirstQueueRingSlot..), drawn whenever it is on.
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
@@ -518,6 +522,9 @@ namespace BZROpenShim
             {
                 try
                 {
+                    // Any player order that reaches the broadcast ends the
+                    // selected units' queued orders (RtsOrderQueue).
+                    NoteRtsOrderQueuePlainBroadcast(panel);
                     if (!where || !IsLocalPanelOrder(panel))
                         return;
                     const RM::PingKind kind = RM::ClassifyPing(what, false);
@@ -555,6 +562,7 @@ namespace BZROpenShim
             // 0x004A7050: thiscall, two stack arguments, ret 8.
             void __fastcall ObjectBroadcastDetour(void* panel, void* /*edx*/, int what, void* target)
             {
+                NoteRtsOrderQueuePlainBroadcast(panel);
                 OnObjectCommand(panel, what, target);
                 g_OrigObjectBroadcast(panel, what, target);
             }
@@ -1124,11 +1132,8 @@ namespace BZROpenShim
             // piloted vehicle (no ring under the camera), and for another
             // team's object the local team does not detect right now (the
             // line must not track an enemy the player cannot see).
-            bool ReadLiveTarget(void* unit, bool pending, int& what, uint32_t& who, float (&out)[3])
+            bool ReadLiveObjectPosition(void* unit, uint32_t who, float (&out)[3])
             {
-                int targetWhat = 0;
-                if (!ReadRtsCommandTarget(unit, pending, targetWhat, who))
-                    return false;
                 void* target = SafeGetObj(who);
                 void* const player = SafeGetPlayer();
                 if (!target || target == unit || target == player)
@@ -1142,7 +1147,13 @@ namespace BZROpenShim
                         ((static_cast<uint32_t>(detected) >> static_cast<uint32_t>(playerTeam)) & 1u) == 0)
                         return false;
                 }
-                if (!TryGetGameObjectWorldPosition(target, out))
+                return TryGetGameObjectWorldPosition(target, out);
+            }
+
+            bool ReadLiveTarget(void* unit, bool pending, int& what, uint32_t& who, float (&out)[3])
+            {
+                int targetWhat = 0;
+                if (!ReadRtsCommandTarget(unit, pending, targetWhat, who) || !ReadLiveObjectPosition(unit, who, out))
                     return false;
                 what = targetWhat;
                 return true;
@@ -1273,6 +1284,111 @@ namespace BZROpenShim
                 }
                 for (size_t i = unitCount; i < RM::kMaxWaypointLineSlots; ++i)
                     g_LineSource[i] = 0;
+            }
+
+            // ---- Queued orders (RtsOrderQueue) --------------------------------
+            // For each selected own unit that holds a queue: an amber line
+            // from where its current order ends (else the unit) through every
+            // queued point, one line slot per leg (kFirstQueueLineSlot..), and
+            // a ring on each distinct queued object target. Drawn whenever
+            // the option is active, whatever RtsWaypointLines says. An object
+            // that is gone, or an enemy the player cannot detect, drops its
+            // leg (the chain carries on from the previous point).
+            void QueueLine(RingRequest& line, const float from[3], float toX, float toZ)
+            {
+                if (!RtsPlacement::ShouldDrawLine(from[0], from[2], toX, toZ))
+                    return;
+                const RtsOrderQueuePolicy::LineColour c = RtsOrderQueuePolicy::kQueueColour;
+                line.wanted = true;
+                line.line = true;
+                std::memcpy(line.centre, from, sizeof(line.centre));
+                line.end[0] = toX;
+                line.end[1] = toZ;
+                line.colour.r = c.r;
+                line.colour.g = c.g;
+                line.colour.b = c.b;
+                line.colour.a = c.a;
+            }
+
+            void SetGroundHeight(float (&p)[3])
+            {
+                double ground = p[1];
+                if (TerrainHeightSeh(p[0], p[2], ground))
+                    p[1] = static_cast<float>(ground);
+            }
+
+            void BuildQueueRequests(RingRequest (&requests)[RM::kSlotCount])
+            {
+                if (!RtsOrderQueueDrawActive())
+                    return;
+                void* units[RM::kMaxWaypointLineSlots] = {};
+                const size_t unitCount = GatherSelectedOwnUnits(units);
+                uint32_t ringTargets[RM::kMaxQueueRingSlots] = {};
+                size_t lines = 0, rings = 0;
+                for (size_t i = 0; i < unitCount && lines < RM::kMaxQueueLineSlots; ++i)
+                {
+                    RtsOrderQueuePolicy::Entry legs[RtsOrderQueuePolicy::kMaxEntries];
+                    const int legCount = RtsOrderQueueSnapshot(SafeGetHandle(units[i]), legs, RtsOrderQueuePolicy::kMaxEntries);
+                    float pos[3] = {};
+                    if (legCount <= 0 || !TryGetGameObjectWorldPosition(units[i], pos))
+                        continue;
+                    // The chain starts where the current order ends.
+                    float from[3] = {pos[0], pos[1], pos[2]};
+                    int what = 0;
+                    float x = 0.0f, z = 0.0f;
+                    float targetPos[3] = {};
+                    uint32_t who = 0;
+                    if (ReadLiveTarget(units[i], false, what, who, targetPos))
+                    {
+                        from[0] = targetPos[0];
+                        from[1] = targetPos[1];
+                        from[2] = targetPos[2];
+                    }
+                    else if (ReadRtsCommandDestination(units[i], false, what, x, z))
+                    {
+                        from[0] = x;
+                        from[2] = z;
+                        SetGroundHeight(from);
+                    }
+                    for (int j = 0; j < legCount && lines < RM::kMaxQueueLineSlots; ++j)
+                    {
+                        float to[3] = {};
+                        if (legs[j].kind == RtsOrderQueuePolicy::Kind::Object)
+                        {
+                            if (!ReadLiveObjectPosition(units[i], legs[j].target, to))
+                                continue;
+                            bool ringed = false;
+                            for (size_t r = 0; r < rings && !ringed; ++r)
+                                ringed = ringTargets[r] == legs[j].target;
+                            if (!ringed && rings < RM::kMaxQueueRingSlots)
+                            {
+                                void* const target = SafeGetObj(legs[j].target);
+                                RingRequest& ring = requests[RM::kFirstQueueRingSlot + rings];
+                                ringTargets[rings++] = legs[j].target;
+                                ring.wanted = true;
+                                std::memcpy(ring.centre, to, sizeof(ring.centre));
+                                ring.radius = RM::TargetRingRadius(ReadBoundingRadiusSeh(target));
+                                ring.colour.r = RtsOrderQueuePolicy::kQueueColour.r;
+                                ring.colour.g = RtsOrderQueuePolicy::kQueueColour.g;
+                                ring.colour.b = RtsOrderQueuePolicy::kQueueColour.b;
+                                ring.colour.a = RtsOrderQueuePolicy::kQueueColour.a;
+                            }
+                        }
+                        else
+                        {
+                            to[0] = legs[j].where[0];
+                            to[1] = legs[j].where[1];
+                            to[2] = legs[j].where[2];
+                            SetGroundHeight(to);
+                        }
+                        QueueLine(requests[RM::kFirstQueueLineSlot + lines], from, to[0], to[2]);
+                        if (requests[RM::kFirstQueueLineSlot + lines].wanted)
+                            ++lines;
+                        from[0] = to[0];
+                        from[1] = to[1];
+                        from[2] = to[2];
+                    }
+                }
             }
 
             // ---- Under-attack marks ----------------------------------------
@@ -1452,6 +1568,7 @@ namespace BZROpenShim
             void BuildRequests(RingRequest (&requests)[RM::kSlotCount])
             {
                 BuildPlacementRequests(requests);
+                BuildQueueRequests(requests);
                 if (g_AttackOn)
                     BuildAttackRequests(requests);
                 if (g_RangeOn)
@@ -1644,7 +1761,7 @@ namespace BZROpenShim
                 LoadConfig();
             if (!g_AttackOn)
                 ClearAttackMarks();
-            if (!g_PingsOn && !g_RangeOn && !g_AttackOn && !RtsPlacementAnyEnabled())
+            if (!g_PingsOn && !g_RangeOn && !g_AttackOn && !RtsPlacementAnyEnabled() && !RtsOrderQueueDrawActive())
             {
                 if (g_AnyVisible)
                     HideAll();

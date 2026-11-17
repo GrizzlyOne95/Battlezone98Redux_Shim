@@ -505,6 +505,8 @@ namespace BZROpenShim
             // RtsWaypointLines, and the under-attack rings RtsAttackMarks,
             // likewise.
             ReloadRtsMarkersConfig();
+            // [Gameplay] RtsOrderQueue (Shift-queued orders), likewise.
+            ReloadRtsOrderQueueConfig();
 
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;
             if (TryGetUserConfigBool(
@@ -734,6 +736,11 @@ namespace BZROpenShim
             // stands Hold (native hold, single player only) down online.
             { "RtsCommands", FeatureTier::SinglePlayer,
               &ResetRtsCommands, &RefreshRtsCommandsState },
+            // [Gameplay] RtsOrderQueue: queued orders per unit; single player
+            // only (the refresh clears the table online). Revert clears it at
+            // mission end.
+            { "RtsOrderQueue", FeatureTier::SinglePlayer,
+              &ResetRtsOrderQueue, &RefreshRtsOrderQueueState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config

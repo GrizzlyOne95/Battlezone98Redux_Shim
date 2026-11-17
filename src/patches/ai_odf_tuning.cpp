@@ -3108,6 +3108,7 @@ namespace BZROpenShim
             // retarget-period hooks (installed late in the core pass) are, and
             // RTS commands mark their options from what is ready on each pass.
             InstallRtsCommandsIfPossible();
+            InstallRtsOrderQueueIfPossible();
             InstallRtsPlacementIfPossible();
         }
 

@@ -644,6 +644,7 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsWaypointLines" = "1"
     "Gameplay/RtsAttackMarks" = "0"
     "Gameplay/RtsProducerBadges" = "0"
+    "Gameplay/RtsOrderQueue" = "0"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }

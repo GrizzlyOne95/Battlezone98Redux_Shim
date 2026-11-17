@@ -2800,6 +2800,21 @@ RtsIdleUnitAlert = 0
 ; Exposed on the OpenShim Settings page as "Attack Marks".
 RtsAttackMarks = 0
 
+; Queue Orders. While the multi-select modifier (stock Shift, read from the
+; game's own input so a rebind is respected) is held with units selected, the
+; Space and Alt command labels read "Queue Go To", "Queue Defend" and so on
+; for Go, Attack, Follow, Defend, Pickup, Dropoff and Get Repair/Reload.
+; Pressing the key then gives each selected idle unit the order now and
+; appends it to the queue of a busy one (8 per unit, 32 units); each queue
+; entry is issued when the unit goes idle (Defend and Follow never do, so
+; later entries wait). A plain order, or the unit dying, clears its queue.
+; Amber lines show the queued route for selected units. Single player only.
+; The satellite view and the digit-key submenus are not covered.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Queue Orders".
+RtsOrderQueue = 0
+
 ; The RTS action keys. One key each, no modifier; rebind them in Options >
 ; Input > RTS Actions, which writes these lines. The remote-target key is
 ; used with Shift (Shift+T). Refused, with a log line and a fall back to the

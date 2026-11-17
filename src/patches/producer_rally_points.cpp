@@ -1329,8 +1329,12 @@ namespace BZROpenShim::Hooks
         {
             if (Policy::SpaceRowLabelOverride(ArmedAndMatching(), key))
                 return Policy::kSpaceRowArmedLabel;
-            return g_OrigSpaceLocalize(section, key);
+            // Rally keeps priority; otherwise the queued-orders label chains
+            // here (RtsOrderQueue: "Queue <label>" while Shift is held).
+            return RtsOrderQueueSpaceLabel(g_OrigSpaceLocalize(section, key));
         }
+
+        std::atomic<bool> g_SpaceLabelHooked{ false };
 
         // Patch thread, beside InstallPanelRow. Optional: the label stays stock
         // when the row does not bind or the patch is refused.
@@ -1361,7 +1365,10 @@ namespace BZROpenShim::Hooks
             patch.payload[0] = 0xE8;
             std::memcpy(patch.payload.data() + 1, &rel, sizeof(rel));
             if (HookEngine::ApplyPatch(patch))
+            {
+                g_SpaceLabelHooked.store(true, std::memory_order_release);
                 Log(L"[RALLY] SPACE row reads Rally while set mode is armed\n");
+            }
             else
                 Log(L"[RALLY] SPACE label patch refused; the SPACE row keeps Go To\n");
         }
@@ -2704,6 +2711,16 @@ namespace BZROpenShim::Hooks
         const unsigned mask = g_CommandHooksInstalled.fetch_or(bit, std::memory_order_acq_rel) | bit;
         Log(L"[RALLY] %hs installed%hs\n", kCommandHookNames[index],
             mask == kAllCommandHooks ? "; rally set mode available (V arms, menu_press confirms)" : "");
+    }
+
+    bool ProducerRallyConfirmPending()
+    {
+        return ArmedAndMatching();
+    }
+
+    bool ProducerRallySpaceLabelHooked()
+    {
+        return g_SpaceLabelHooked.load(std::memory_order_acquire);
     }
 
     void SetBroadcastCommandListener(BroadcastCommandListener listener)

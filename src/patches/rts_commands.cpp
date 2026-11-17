@@ -719,6 +719,9 @@ namespace BZROpenShim::Hooks
             {
                 const bool accepted = g_FnDispatch(panel, mode);
                 PingMenuOrder(handles, n, before, haveBefore);
+                // A unit-menu pick is a plain order: it ends any queue.
+                if (accepted)
+                    NoteRtsOrderQueuePlainOrder(handles, n);
                 return accepted;
             }
             bool all = true;
@@ -744,6 +747,8 @@ namespace BZROpenShim::Hooks
             if (skipped > 0)
                 LogBudgeted(L"[RTS] mode %d sent to %d unit(s), %d skipped (no such entry)\n", mode, sent, skipped);
             PingMenuOrder(handles, n, before, haveBefore);
+            if (sent > 0)
+                NoteRtsOrderQueuePlainOrder(handles, n);
             return all;
         }
 
@@ -775,7 +780,10 @@ namespace BZROpenShim::Hooks
             // The stock BroadcastCommand this replaces is where rts_markers
             // pings an object order; one ping for the pick.
             if (ownOrdered)
+            {
                 NotifyRtsMarkersCommand(what, target);
+                NoteRtsOrderQueuePlainOrder(handles, n);
+            }
         }
 
         // ---- Build at Nav ----------------------------------------------------
@@ -976,6 +984,8 @@ namespace BZROpenShim::Hooks
                 NotifyRtsMarkersCommand(Policy::kCmdBuild, nav);
             else if (ownOrdered)
                 NotifyRtsMarkersCommand(what, nav);
+            if (built > 0 || ordered > 0)
+                NoteRtsOrderQueuePlainOrder(handles, n);
             LogBudgeted(L"[RTS] Build at Nav: %d rig(s) building, %d unit(s) sent to the nav, %d refused%hs\n", built,
                         ordered, refused, g_SkipNavSelectNone ? "; selection kept" : "");
         }
@@ -2186,6 +2196,30 @@ namespace BZROpenShim::Hooks
         g_ScavStateLogBudget = 300;
         g_LogBudget = 48;
         RefreshRtsCommandsState();
+    }
+
+    // Game thread: the order queue's idle test (rts_order_queue.cpp), the same
+    // record reads as the idle features (current and pending `what` both
+    // none, select or stop).
+    bool RtsCommandsUnitIdle(void* obj)
+    {
+        int current = 0;
+        int pending = 0;
+        const uintptr_t base = reinterpret_cast<uintptr_t>(obj);
+        return obj &&
+               ReadInt(base + RtsPlacement::kCurrentRecordOffset + RtsPlacement::kRecordWhatOffset, current) &&
+               ReadInt(base + RtsPlacement::kPendingRecordOffset + RtsPlacement::kRecordWhatOffset, pending) &&
+               Policy::IsIdle(current, pending);
+    }
+
+    bool RtsCommandsHelpersReady()
+    {
+        return g_SharedReady;
+    }
+
+    bool RtsCommandsWorldActive()
+    {
+        return g_SharedReady && WorldInteractive() && !EditorActive();
     }
 
     // Game thread (the build ghost tick): the first selected commandable

@@ -16,6 +16,7 @@
 
 #include "bzr_hooks.h"
 #include "rts_markers.h"
+#include "rts_order_queue_policy.h"
 #include "quicksave_key_policy.h"
 #include "stable_id_list.h"
 #include "bzr_object_layout.h"
@@ -1490,6 +1491,14 @@ namespace BZROpenShim
         bool RtsBuildAtNavPickedRig(void*& rig, uint32_t& buildClass);
         void RefreshRtsCommandsState();
         void ResetRtsCommands();
+        // Game thread: true when the object's current and pending command
+        // records are both idle (RtsCommandsPolicy::IsIdle); false when
+        // unreadable. Read by the order queue (rts_order_queue.cpp).
+        bool RtsCommandsUnitIdle(void* obj);
+        // True while the world is live, not paused, not in the editor.
+        bool RtsCommandsWorldActive();
+        // The shared rows of rts_commands.cpp are bound (the idle read works).
+        bool RtsCommandsHelpersReady();
         // Frame thread, beside TickOffenseOverflow: key filters (and the
         // queued actions while the scene-mutation drain is not installed).
         void TickRtsCommands();
@@ -1510,6 +1519,43 @@ namespace BZROpenShim
         // The display name of the RTS action bound to this key in any Shift
         // state, else nullptr. Main thread: rally key rebinding.
         const char* RtsCommandActionUsingKey(unsigned vk, bool extended);
+
+        // --- RTS order queue (rts_order_queue.cpp, Docs/RTS_ORDER_QUEUE.md) -----
+        // [Gameplay] RtsOrderQueue: Shift-queued orders. Install: patch thread,
+        // retried from InstallAiTuningHooksIfPossible. Everything else runs on
+        // the frame/game thread.
+        void InstallRtsOrderQueueIfPossible();
+        void ReloadRtsOrderQueueConfig();
+        // Mission gate reconcile (every 250 ms) and option changes: on, bound
+        // and single player; clears the table when it turns off.
+        void RefreshRtsOrderQueueState();
+        // Mission end / load: drops every queue.
+        void ResetRtsOrderQueue();
+        // Frame thread, world render tick: drains inline only while the
+        // scene-mutation drain is not installed.
+        void TickRtsOrderQueue();
+        // RunDeferredSceneMutations (frameStarted): ~4 Hz, issues the next
+        // entry of each idle unit's queue.
+        void RunRtsOrderQueue() noexcept;
+        // True while the option is active and some unit holds a queue (the
+        // marker tick draws the amber chain for it).
+        bool RtsOrderQueueDrawActive();
+        // A unit's queued entries in order; the count copied.
+        int RtsOrderQueueSnapshot(uint32_t handle, RtsOrderQueuePolicy::Entry* out, int capacity);
+        // A player order that did not queue (BroadcastCommand entry listeners
+        // in rts_markers.cpp; the unit-menu hooks in rts_commands.cpp): clears
+        // the queues of the units it reaches. Game thread, selection intact.
+        void NoteRtsOrderQueuePlainBroadcast(void* panel);
+        void NoteRtsOrderQueuePlainOrder(const uint32_t* handles, int count);
+        // The SPACE row's stock label -> "Queue <label>" while queueing is
+        // armed (called by the redirected SPACE label call in
+        // producer_rally_points.cpp, after the rally check); else the label.
+        const char* RtsOrderQueueSpaceLabel(const char* stockLabel);
+        // producer_rally_points.cpp: set mode is armed for the current
+        // selection (the next ground confirm sets a rally, not an order).
+        bool ProducerRallyConfirmPending();
+        // The SPACE label call site is redirected (the queue label chains on it).
+        bool ProducerRallySpaceLabelHooked();
 
         // --- HUD group strip (group_strip.cpp) ---------------------------------
         // Read-only F1-F7 group row on the HUD. Tick: the world render tick

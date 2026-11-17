@@ -3681,6 +3681,48 @@
       "identity": "ControlPanel::Render 0x004A08E0, SPACE row label: call Localize 0x0081CB40 (\"names\", table[cmd * 2]) with cmd = ControlPanel +0x111C and the table at 0x008E7A18 (FUN_004a08e0.c line 604; mov edx,[ecx+0x111c] at 0x004A2069, mov eax,[edx*8+0x8e7a18] at 0x004A206F, push 0x0087736C \"names\" at 0x004A2077), then add esp,8 and the result stored to [ebp-0x388]. The ALT row reads the same table with a different instruction (mov ecx,[eax*8+0x8e7a18] at 0x004A26B4, line 677), so this site is the SPACE row only. ProducerRallyPoints redirects this one call (REL32) so the label reads \"Rally\" while rally set mode is armed and the key is \"Go To\" (0x00877EAC); every other case calls the original."
     },
     {
+      "name": "ControlPanelCmdObjBroadcastCall",
+      "address": "0x004A1F7A",
+      "expected": "E8 D1 50 00 00 EB 50 8B",
+      "identity": "ControlPanel::Render 0x004A08E0, the SPACE button's generic press (menu_press DAT_0091988E, command not 0/1/9; FUN_004a08e0.c lines 579-592), object arm: after mnu_clik (0x004A1F34) and the object lookup (FUN_00462630 on cmdButton.object +0x1120 into [ebp-0x3C0]), push the object, push cmdButton.command (+0x111C), ecx = this [ebp-0x244], `call 0x004A7050` (ControlPanel::BroadcastCommand(what, GameObject*); rel32 D1 50 00 00 -> 0x004A7050), then `jmp` over the other arms to the SelectNone at 0x004A1FD7. Arm shape read from the bytes 0x004A1F50..0x004A1FDC (push edx; mov ecx,[ebp-0x244]; call), disassembled 2026-11-17. RtsOrderQueue redirects this call (REL32): with the multi-select modifier held it appends the order to each selected unit's queue instead of broadcasting. Exact GOG Redux 2.2.301."
+    },
+    {
+      "name": "ControlPanelCmdWhereBroadcastCall",
+      "address": "0x004A1FB0",
+      "expected": "E8 0B 51 00 00 EB 1A 6A",
+      "identity": "ControlPanel::Render 0x004A08E0, the SPACE button's generic press, ground arm (cmdButton.position +0x1124 non-zero; FUN_004a08e0.c lines 585-588): push [this+0x1124], push [this+0x111C], ecx = this, `call 0x004A70C0` (ControlPanel::BroadcastCommand(what, const VECTOR_3D*); rel32 0B 51 00 00 -> 0x004A70C0, the function ProducerRallyPoints detours at its entry), then `jmp` to SelectNone 0x004A1FD7. Bytes 0x004A1F50..0x004A1FDC disassembled 2026-11-17. RtsOrderQueue redirects this call (REL32); the stock call (through the entry detour) runs for every press it does not queue. Exact GOG Redux 2.2.301."
+    },
+    {
+      "name": "ControlPanelCmdSelectNoneCall",
+      "address": "0x004A1FD7",
+      "expected": "E8 74 4D 00 00 C7 85 60 FD FF FF 00",
+      "identity": "ControlPanel::Render 0x004A08E0, `call 0x004A6D50` (ControlPanel::SelectNone; rel32 74 4D 00 00) that every arm of the SPACE generic press reaches (FUN_004a08e0.c line 592; the null arm at 0x004A1FCC falls through to it). RtsOrderQueue redirects it (REL32) so a queued press keeps the selection and the player can chain more orders. Exact GOG Redux 2.2.301, bytes read from the shipped image 2026-11-17."
+    },
+    {
+      "name": "ControlPanelAltObjBroadcastCall",
+      "address": "0x004A25DB",
+      "expected": "E8 70 4A 00 00 EB 50 8B",
+      "identity": "ControlPanel::Render 0x004A08E0, the ALT button's press (alt_press DAT_0091988F with altButton.command +0x112C non-zero, after mnu_clik at 0x004A2595; FUN_004a08e0.c lines 657-669), object arm (altButton.object +0x1130 via FUN_00462630 into [ebp-0x360]): push the object, push [this+0x112C], ecx = this, `call 0x004A7050` (rel32 70 4A 00 00), `jmp` to SelectNone 0x004A2638. Bytes 0x004A2570..0x004A2640 disassembled 2026-11-17. RtsOrderQueue redirects this call (REL32). Exact GOG Redux 2.2.301."
+    },
+    {
+      "name": "ControlPanelAltWhereBroadcastCall",
+      "address": "0x004A2611",
+      "expected": "E8 AA 4A 00 00 EB 1A 6A",
+      "identity": "ControlPanel::Render 0x004A08E0, the ALT button's press, ground arm (altButton.position +0x1134 non-zero): push [this+0x1134], push [this+0x112C], ecx = this, `call 0x004A70C0` (rel32 AA 4A 00 00 -> 0x004A70C0), `jmp` to SelectNone 0x004A2638 (FUN_004a08e0.c lines 662-664). Bytes disassembled 2026-11-17. RtsOrderQueue redirects this call (REL32). Exact GOG Redux 2.2.301."
+    },
+    {
+      "name": "ControlPanelAltSelectNoneCall",
+      "address": "0x004A2638",
+      "expected": "E8 13 47 00 00 0F B6 15 67 55 91 00",
+      "identity": "ControlPanel::Render 0x004A08E0, `call 0x004A6D50` (ControlPanel::SelectNone; rel32 13 47 00 00) after the ALT press (FUN_004a08e0.c line 669), followed by `movzx edx, byte [0x00915567]`. RtsOrderQueue redirects it (REL32) so a queued ALT press keeps the selection. Exact GOG Redux 2.2.301, bytes read from the shipped image 2026-11-17."
+    },
+    {
+      "name": "CommandMenuAltLabelLocalizeCall",
+      "address": "0x004A26C1",
+      "expected": "E8 7A A4 37 00 83 C4 08 89 85 38 FC FF FF",
+      "identity": "ControlPanel::Render 0x004A08E0, ALT row label: call Localize 0x0081CB40 (\"names\", table[cmd * 2]) with cmd = ControlPanel +0x112C and the table at 0x008E7A18 (`mov ecx,[eax*8+0x8E7A18]` at 0x004A26B4; FUN_004a08e0.c line 677), then add esp,8 and the result stored to [ebp-0x3C8]. The SPACE row's twin is CommandMenuSpaceLabelLocalizeCall. RtsOrderQueue redirects this one call (REL32) so the label reads \"Queue <label>\" while the multi-select modifier is held; every other case calls the original. Exact GOG Redux 2.2.301, bytes read from the shipped image 2026-11-17."
+    },
+    {
       "name": "HudViewportWidth",
       "address": "0x02CECEE0",
       "kind": "data",
