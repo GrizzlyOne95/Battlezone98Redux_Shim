@@ -1655,6 +1655,7 @@ namespace BZROpenShim
             {"InitializeMpWhitelistTgaConfig", &InitializeMpWhitelistTgaConfig},
             {"InitializeMpBlockFreeCam", &InitializeMpBlockFreeCam},
             {"InitializeSeismicWaveExtentClampConfig", &InitializeSeismicWaveExtentClampConfig},
+            {"InitializeSeismicWalkerVelocityScale", &InitializeSeismicWalkerVelocityScale},
             {"InitializeDynamicAllocGuardConfig", &InitializeDynamicAllocGuardConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},

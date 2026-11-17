@@ -216,6 +216,7 @@
     <ClCompile Include="src\patches\mp_whitelist_tga.cpp" />
     <ClCompile Include="src\patches\no_damage_slowdown.cpp" />
     <ClCompile Include="src\patches\mp_block_freecam.cpp" />
+    <ClCompile Include="src\patches\seismic_walker_velocity_scale.cpp" />
     <ClCompile Include="src\patches\seismic_wave_extent_clamp.cpp" />
     <ClCompile Include="src\patches\dynamic_alloc_guard.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
