@@ -122,14 +122,26 @@ The tests pin both cases.
   0 (none), 1 (CMD_SELECT, which selecting a unit leaves in the pending
   record until the next AI tick) or 2 (CMD_STOP). The offsets are the waypoint-line ones in
   `include/rts_placement_policy.h`; `IsIdle` is in `rts_commands_policy.h`.
-  Scavengers are left out: live (2026-11-17) one gathered three scrap
-  pieces with both records at 0, so the records cannot tell it from an idle
-  one. Whether tugs and constructors read 0 while they work is UNVERIFIED;
-  the `idle state` log line (below) is there to check it.
+  A scavenger gathers on its own with both records at 0 (live, 2026-11-17),
+  so for scavengers its AI process decides: busy while the
+  `ScavengerProcess` (GameObject +0xFC; `ScavengerFriend` on the player's
+  team, `ScavengerEnemy` on AI teams; curState +0x1C) is in RECYCLE (4) and
+  its `RecycleTask` (process +0x58, curState +0x48) is new (0), searching
+  (1), going to scrap (2), to the drop-off (3) or to repair (4). States 0
+  and 1 last one tick, and a working scavenger passes through 1 after every
+  pickup. Wait (5), done (6), stuck (7) and every other process state read
+  idle, so a scavenger with no scrap left stays idle (`ScavengerGathering`;
+  offsets from `Battlezone_Source\BZ1\research\SCAVENGER_RETARGET_RE_20261117.md`).
+  `[RTS] scav state handle=<h> process=<rtti>/<state> recycle=<state>`
+  logs each change. Live (2026-11-17): gathering read 4/2; with no reachable
+  scrap left the scavenger went idle and stayed idle while the process cycled
+  WAIT (1) and RECYCLE with the task done (6). Whether tugs and
+  constructors read 0 while they work is UNVERIFIED; the `idle state` log
+  line (below) is there to check it.
 - **Eligible.** In the `GameObject::objectList` snapshot, on the player's
   team, commandable (`CanCommand`), not the player's own piloted object, and
   of a tracked family (`IdleTracksFamily`: Combat, TurretTank, Howitzer,
-  Minelayer, Tug, ConstructionRig), which leaves buildings and scavengers out. "Alive" is
+  Minelayer, Scavenger, Tug, ConstructionRig), which leaves buildings out. "Alive" is
   only "still in the object list" (UNVERIFIED that a dying unit leaves it
   at once).
 - **Key.** J selects exactly one idle unit (`SelectNone`, then `SelectAdd`),

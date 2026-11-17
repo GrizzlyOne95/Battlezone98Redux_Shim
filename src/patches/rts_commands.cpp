@@ -1296,9 +1296,77 @@ namespace BZROpenShim::Hooks
         bool EditorActive();
         bool WorldInteractive();
 
+        // GameObject::aiProcess (GameObject +0xFC, GetAIProcess 0x0045BDF0);
+        // ScavengerProcess curState +0x1C and task +0x58; RecycleTask curState
+        // +0x48 (SCAVENGER_RETARGET_RE_20261117.md sections 1 and 5).
+        constexpr uintptr_t kAiProcessOffset = 0xFC;
+        constexpr uintptr_t kScavProcessStateOffset = 0x1C;
+        constexpr uintptr_t kScavProcessTaskOffset = 0x58;
+        constexpr uintptr_t kRecycleTaskStateOffset = 0x48;
+
+        struct ScavStateCache
+        {
+            uint32_t handle;
+            int process;
+            int recycle;
+        };
+        ScavStateCache g_ScavStateCache[16] = {};
+        volatile LONG g_ScavStateLogBudget = 300;
+
+        // Player-team scavengers run ScavengerFriend, AI-team ones
+        // ScavengerEnemy; both derive from ScavengerProcess and add no fields
+        // (1.5 decomp: their constructors only swap the vtable).
+        bool IsScavengerProcessName(const char* name)
+        {
+            return std::strcmp(name, ".?AVScavengerFriend@@") == 0 ||
+                   std::strcmp(name, ".?AVScavengerEnemy@@") == 0 ||
+                   std::strcmp(name, ".?AVScavengerProcess@@") == 0;
+        }
+
+        // True while a scavenger's AI process is working on scrap. Logs each
+        // change of (process state, recycle state) per scavenger.
+        bool ScavengerBusy(void* obj, uint32_t handle)
+        {
+            int processState = -1;
+            int recycleState = -1;
+            bool recycleTask = false;
+            void* const process = ReadPtr(reinterpret_cast<uintptr_t>(obj) + kAiProcessOffset);
+            RttiNameBuffer name;
+            const char* processName = process ? RttiName(process, name) : nullptr;
+            if (processName && IsScavengerProcessName(processName) &&
+                ReadInt(reinterpret_cast<uintptr_t>(process) + kScavProcessStateOffset, processState))
+            {
+                void* const task = ReadPtr(reinterpret_cast<uintptr_t>(process) + kScavProcessTaskOffset);
+                RttiNameBuffer taskName;
+                const char* taskRtti = task ? RttiName(task, taskName) : nullptr;
+                recycleTask = taskRtti && std::strcmp(taskRtti, ".?AVRecycleTask@@") == 0;
+                if (recycleTask && !ReadInt(reinterpret_cast<uintptr_t>(task) + kRecycleTaskStateOffset, recycleState))
+                    recycleTask = false;
+            }
+            ScavStateCache* slot = nullptr;
+            for (ScavStateCache& c : g_ScavStateCache)
+            {
+                if (c.handle == handle)
+                {
+                    slot = &c;
+                    break;
+                }
+                if (!slot && c.handle == 0)
+                    slot = &c;
+            }
+            if (!slot)
+                slot = &g_ScavStateCache[handle % 16];
+            if ((slot->handle != handle || slot->process != processState || slot->recycle != recycleState) &&
+                InterlockedDecrement(&g_ScavStateLogBudget) >= 0)
+                Log(L"[RTS] scav state handle=0x%08X process=%hs/%d recycle=%d\n", handle,
+                    processName ? processName : "?", processState, recycleState);
+            *slot = { handle, processState, recycleState };
+            return Policy::ScavengerGathering(processState, recycleTask, recycleState);
+        }
+
         // Reads one object for the idle features. False unless it is an alive
         // (in the object list snapshot), own, commandable unit of a tracked
-        // family (so never a building or scavenger), and not the player's own piloted
+        // family (so never a building), and not the player's own piloted
         // object (as DoAreaSelect skips it).
         bool EvaluateIdleUnit(void* obj, void* user, uint32_t& handle, bool& idle, int& current, int& pending,
                               Policy::Family& family)
@@ -1316,6 +1384,8 @@ namespace BZROpenShim::Hooks
                 !ReadInt(base + RtsPlacement::kPendingRecordOffset + RtsPlacement::kRecordWhatOffset, pending))
                 return false;
             idle = Policy::IsIdle(current, pending);
+            if (idle && family == Policy::Family::Scavenger && ScavengerBusy(obj, handle))
+                idle = false;
             return true;
         }
 
@@ -2088,7 +2158,10 @@ namespace BZROpenShim::Hooks
             if (const int idle = g_PendingIdle.exchange(0))
                 DoIdleSelect(idle == 2);
             if (g_IdleResetPending.exchange(false))
+            {
                 g_IdleTracker.Clear();
+                std::memset(g_ScavStateCache, 0, sizeof(g_ScavStateCache));
+            }
             if (g_IdlePickResetPending.exchange(false))
                 g_LastIdlePick = 0;
             ScanIdleAlerts();
@@ -2110,6 +2183,7 @@ namespace BZROpenShim::Hooks
         g_IdleResetPending.store(true); // the drain thread clears the table
         g_IdlePickResetPending.store(true);
         g_IdleStateLogBudget = 300;
+        g_ScavStateLogBudget = 300;
         g_LogBudget = 48;
         RefreshRtsCommandsState();
     }

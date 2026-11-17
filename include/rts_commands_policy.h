@@ -401,12 +401,27 @@ namespace BZROpenShim
             return IsIdleWhat(currentWhat) && IsIdleWhat(pendingWhat);
         }
 
-        // Families the idle key and alert track. Not scavengers: they gather
-        // scrap on their own while both records read 0 (live, 2026-11-17), so
-        // the records cannot tell a working scavenger from an idle one.
+        // Families the idle key and alert track: every known unit family, so
+        // never a building.
         inline bool IdleTracksFamily(Family family)
         {
-            return family != Family::None && family != Family::Scavenger;
+            return family != Family::None;
+        }
+
+        // A scavenger gathers scrap on its own while both command records read
+        // 0 (live, 2026-11-17), so its AI process decides. ScavengerProcess
+        // (ScavengerFriend / ScavengerEnemy) curState 4 is RECYCLE. Its
+        // RecycleTask states 0 (new) and 1 (searching) last one tick, and a
+        // working scavenger passes through 1 after every pickup, so they count
+        // as busy with 2 (to scrap), 3 (to drop-off) and 4 (repair). 5 (wait),
+        // 6 (done), 7 (stuck) and every other process state (WAIT 1 when no
+        // scrap is left) are idle.
+        // (Battlezone_Source\BZ1\research\SCAVENGER_RETARGET_RE_20261117.md
+        // sections 1 and 5; ScavengerProcess_DoState.c, RecycleTask_GetState.c.)
+        constexpr int kScavProcessRecycle = 4;
+        inline bool ScavengerGathering(int processState, bool recycleTask, int recycleState)
+        {
+            return processState == kScavProcessRecycle && recycleTask && recycleState >= 0 && recycleState <= 4;
         }
 
         // Ascending handle order: stable whatever order the object list has.
