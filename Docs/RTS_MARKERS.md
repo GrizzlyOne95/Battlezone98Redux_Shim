@@ -145,7 +145,7 @@ Four more local-only features share the tick and the ring pool. Their rows are o
 - **Build Ghost** (`[Gameplay] RtsBuildGhost`). While the stock placement square shows, a see-through copy of the picked building's own mesh stands at the rig's drop matrix, tinted like the square: green valid, yellow no power, red blocked. While the Go To Nav submenu is open and Build at Nav is active for a selected rig with a building picked, a neutral blue-white copy stands at every listed nav (at most 10), on the terrain, facing the player's heading.
 - **Pending Build Ghost** (`[Gameplay] RtsPendingBuildGhost`). For each of the local player's Construction Rigs with a BUILD order (the stock reticle order or Build at Nav), a dim pale blue copy of the ordered building stands at the rig's drop matrix, from the order until construction starts, the order is replaced or cancelled, or the rig dies. At most 8 rigs: the first 8 in the engine's object list order; with more than 4096 objects in the list none show. The rig the cursor ghost is previewing shows only the cursor ghost.
 - **Power Range** (`[Gameplay] RtsPowerRange`). While a ghost of a `COMM`, `TURR` or `SHLD` class shows (cursor or nav), a yellow ground ring of `powerRadius` around each allied power plant, nearest 16 first. This works with Build Ghost off.
-- **Waypoint Lines** (`[Gameplay] RtsWaypointLines`). For each selected own-team unit (at most 16, never the piloted vehicle), a 0.6 m draped ribbon from the unit to its current order's destination (green Go, red Attack, yellow anything else), and a dimmer one (alpha x0.45) from there to its pending order's destination. Idle units and orders without a path draw nothing.
+- **Waypoint Lines** (`[Gameplay] RtsWaypointLines`). For each selected own-team unit (at most 16, never the piloted vehicle), a 0.6 m draped ribbon from the unit to its current order's destination (green Go, red Attack, blue Follow / Formation / Defend, yellow anything else; when two units target one object with different orders, the first selected unit's colour wins), and a dimmer one (alpha x0.45) from there to its pending order's destination. Idle units and orders without a path or target draw nothing. An order on an object (the record's `who` handle is set and still resolves) ends its line at the object's live position, replacing the stale last route point, and puts a ring in the line's colour around that object (sized like the attack ping; one ring per object however many units target it, at most 16). The change-only log line `[RTSMARKERS] unit line source=route|straight what=N [target=live]` records which kind each unit drew.
 
 Where the code lives:
 
@@ -155,13 +155,14 @@ Where the code lives:
 
 ### Pool slots
 
-The pool grows to `RtsMarkers::kSlotCount` = 71; slots 0-22 keep the layout above.
+The pool grows to `RtsMarkers::kSlotCount` = 87; slots 0-22 keep the layout above.
 
 | Slots | Use |
 |---|---|
 | 23-38 | power rings |
 | 39-54 | waypoint lines (current order) |
 | 55-70 | waypoint lines (pending order) |
+| 71-86 | target rings (current order's object) |
 
 A line is the ring strip's other shape: a triangle strip sampled every 4 m (`LineSegmentsFor`, at most 96 segments, the ring vertex budget), each pair lifted `kLift` above `Terrain::HeightAt`. It uses the ring material, `g_PoolFailed` and the rebuild key (now 10 floats: centre, radius or -1 for a line, colour, end x/z).
 
@@ -201,9 +202,10 @@ Power rings:
 
 Waypoint lines:
 
-- Each GameObject has two 0x20-byte command records: current at +0xA8 and pending at +0xC8 (promote `FUN_004dbb40` copies one over the other; D lines 10-31). `what` is at +0x04 and the AiPath* at +0x0C.
+- Each GameObject has two 0x20-byte command records: current at +0xA8 and pending at +0xC8 (promote `FUN_004dbb40` copies one over the other; D lines 10-31). `what` is at +0x04, the target object's handle (`who`, 0 without one) at +0x08 (Docs/RTS_COMMANDS.md; FUN_004dbd60.c lines 20-34) and the AiPath* at +0x0C.
 - An AiPath has its point count at +0x04 and `{x, z}` float pairs at +0x08 (ctor `FUN_00460490`). The destination is the last point; its height comes from the terrain.
-- `what` 0-2 (none, select, stop) or above 26 draws nothing; so does a count of 0 or above 4096, or a non-finite point.
+- `what` 0-2 (none, select, stop) or above 26 draws nothing; so does a count of 0 or above 4096, or a non-finite point, unless the order has a live target (below).
+- Target lines and rings: `who` resolves through the handle table every tick, so a dead target falls back to the path's end. No live target is used when it is the unit itself or the piloted vehicle (no ring under the camera), or when it belongs to another team and the local team's bit in its `isVisible` mask (+0x18C, per-team detection bits as `satellite_visibility.cpp` reads them) is clear: the line then ends at the planned destination, so it never tracks an enemy the player cannot see. While an order ping already rings the same object, the target ring waits for it to fade. Pings keep their colours (Follow and Defend pings stay yellow); only lines and rings use blue.
 
 ### Rows
 

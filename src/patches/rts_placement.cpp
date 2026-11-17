@@ -1476,5 +1476,16 @@ namespace BZROpenShim
             return RP::CommandDestination(read, reinterpret_cast<uintptr_t>(gameObject),
                                           pending ? RP::kPendingRecordOffset : RP::kCurrentRecordOffset, what, x, z);
         }
+
+        bool ReadRtsCommandTarget(void* gameObject, bool pending, int& what, uint32_t& who)
+        {
+            what = 0;
+            who = 0;
+            if (!g_LinesBound || !gameObject)
+                return false;
+            const auto read = [](uintptr_t address, void* out, size_t size) { return CopySeh(address, out, size); };
+            return RP::CommandTarget(read, reinterpret_cast<uintptr_t>(gameObject),
+                                     pending ? RP::kPendingRecordOffset : RP::kCurrentRecordOffset, what, who);
+        }
     }
 }

@@ -45,7 +45,11 @@ namespace BZROpenShim
         constexpr size_t kFirstPowerSlot = kPoolSize;
         constexpr size_t kFirstWaypointSlot = kFirstPowerSlot + kMaxPowerRingSlots;
         constexpr size_t kFirstPendingSlot = kFirstWaypointSlot + kMaxWaypointLineSlots;
-        constexpr size_t kSlotCount = kFirstPendingSlot + kMaxWaypointLineSlots;
+        // Then one ring per distinct object a selected unit's current order
+        // targets (attack, follow, defend...).
+        constexpr size_t kMaxTargetRingSlots = kMaxWaypointLineSlots;
+        constexpr size_t kFirstTargetRingSlot = kFirstPendingSlot + kMaxWaypointLineSlots;
+        constexpr size_t kSlotCount = kFirstTargetRingSlot + kMaxTargetRingSlots;
 
         // ---- Ring geometry ---------------------------------------------------
         constexpr unsigned kMinSegments = 48;

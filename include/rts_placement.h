@@ -64,5 +64,8 @@ namespace BZROpenShim
         // of its AiPath. False when idle, pathless, unreadable or when the
         // rows did not bind. Game thread.
         bool ReadRtsCommandDestination(void* gameObject, bool pending, int& what, float& x, float& z);
+        // The handle of the object that order targets (attack, follow,
+        // defend...). False when it has none. Game thread.
+        bool ReadRtsCommandTarget(void* gameObject, bool pending, int& what, uint32_t& who);
     }
 }

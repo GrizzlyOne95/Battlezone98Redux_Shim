@@ -41,7 +41,9 @@
 // ([Gameplay] RtsWaypointLines: a thin draped ribbon from each selected
 // own-team unit to its current order's destination, slots
 // kFirstWaypointSlot.., and a dimmer one on to its pending order's,
-// kFirstPendingSlot..).
+// kFirstPendingSlot..). An order on an object (attack, follow, defend...)
+// ends its line at the object's live position, and the object gets a ring
+// in the line's colour (slots kFirstTargetRingSlot.., one per object).
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
@@ -1085,7 +1087,71 @@ namespace BZROpenShim
                 line.colour.a = c.a;
             }
 
-            // Per selected-unit index: 0 none, 1 straight line, 2 planned route
+            // The live position of the object the unit's order targets. False
+            // without one, when it is gone, when it is the unit itself or the
+            // piloted vehicle (no ring under the camera), and for another
+            // team's object the local team does not detect right now (the
+            // line must not track an enemy the player cannot see).
+            bool ReadLiveTarget(void* unit, bool pending, int& what, uint32_t& who, float (&out)[3])
+            {
+                int targetWhat = 0;
+                if (!ReadRtsCommandTarget(unit, pending, targetWhat, who))
+                    return false;
+                void* target = SafeGetObj(who);
+                void* const player = SafeGetPlayer();
+                if (!target || target == unit || target == player)
+                    return false;
+                if (!SameTeam(target, player))
+                {
+                    int playerTeam = -1, detected = 0;
+                    if (!ReadInt(reinterpret_cast<uintptr_t>(player) + kGameObjectActualTeamOffset, playerTeam) ||
+                        playerTeam < kGameTeamMin || playerTeam > kGameTeamMax ||
+                        !ReadInt(reinterpret_cast<uintptr_t>(target) + kGameObjectIsVisibleOffset, detected) ||
+                        ((static_cast<uint32_t>(detected) >> static_cast<uint32_t>(playerTeam)) & 1u) == 0)
+                        return false;
+                }
+                if (!TryGetGameObjectWorldPosition(target, out))
+                    return false;
+                what = targetWhat;
+                return true;
+            }
+
+            // A live order ping already rings this object.
+            bool PingRingsTarget(uint32_t who)
+            {
+                for (size_t i = 0; i < RM::kMaxPings; ++i)
+                    if (g_Pings.slots[i].active && g_Pings.slots[i].targetHandle == who)
+                        return true;
+                return false;
+            }
+
+            // One ring per distinct target, in the line's colour, sized to the
+            // target like the attack ping.
+            void AddTargetRing(RingRequest (&requests)[RM::kSlotCount], uint32_t (&handles)[RM::kMaxTargetRingSlots],
+                               size_t& count, uint32_t who, const float pos[3], int what)
+            {
+                for (size_t i = 0; i < count; ++i)
+                    if (handles[i] == who)
+                        return;
+                if (count >= RM::kMaxTargetRingSlots || (g_PingsOn && PingRingsTarget(who)))
+                    return;
+                void* target = SafeGetObj(who);
+                if (!target)
+                    return;
+                RingRequest& ring = requests[RM::kFirstTargetRingSlot + count];
+                handles[count++] = who;
+                const RtsPlacement::LineColour c = RtsPlacement::WaypointColour(what, false);
+                ring.wanted = true;
+                std::memcpy(ring.centre, pos, sizeof(ring.centre));
+                ring.radius = RM::TargetRingRadius(ReadBoundingRadiusSeh(target));
+                ring.colour.r = c.r;
+                ring.colour.g = c.g;
+                ring.colour.b = c.b;
+                ring.colour.a = c.a;
+            }
+
+            // Per selected-unit index: 0 none, 1 straight line, 2 planned route, +2
+            // when the line ends on a live target
             // (change-only log).
             int g_LineSource[RM::kMaxWaypointLineSlots] = {};
 
@@ -1105,6 +1171,8 @@ namespace BZROpenShim
                     return;
                 void* units[RM::kMaxWaypointLineSlots] = {};
                 const size_t unitCount = GatherSelectedOwnUnits(units);
+                uint32_t targetHandles[RM::kMaxTargetRingSlots] = {};
+                size_t targetCount = 0;
                 for (size_t i = 0; i < unitCount; ++i)
                 {
                     float pos[3] = {};
@@ -1114,7 +1182,20 @@ namespace BZROpenShim
                     float from[3] = {pos[0], pos[1], pos[2]};
                     int what = 0;
                     float x = 0.0f, z = 0.0f;
-                    if (ReadRtsCommandDestination(units[i], false, what, x, z))
+                    bool haveDestination = ReadRtsCommandDestination(units[i], false, what, x, z);
+                    // An order on an object ends at where the object is now,
+                    // not where its path was planned to.
+                    float targetPos[3] = {};
+                    uint32_t who = 0;
+                    const bool haveTarget = ReadLiveTarget(units[i], false, what, who, targetPos);
+                    if (haveTarget)
+                    {
+                        x = targetPos[0];
+                        z = targetPos[2];
+                        haveDestination = true;
+                        AddTargetRing(requests, targetHandles, targetCount, who, targetPos, what);
+                    }
+                    if (haveDestination)
                     {
                         RingRequest& current = requests[RM::kFirstWaypointSlot + i];
                         LineRequest(current, pos, x, z, what, false);
@@ -1124,15 +1205,24 @@ namespace BZROpenShim
                             int routeCount = 0;
                             if (!ReadUnitRoute(units[i], pos, current, routeIndex, routeCount))
                                 current.routeCount = 0;
-                            const int source = current.routeCount >= 2 ? 2 : 1;
+                            else if (haveTarget)
+                            {
+                                // The route's goal is stale once the target moves.
+                                current.route[2 * (current.routeCount - 1)] = x;
+                                current.route[2 * (current.routeCount - 1) + 1] = z;
+                            }
+                            const int source = (current.routeCount >= 2 ? 2 : 1) + (haveTarget ? 2 : 0);
                             if (g_LineSource[i] != source)
                             {
                                 g_LineSource[i] = source;
-                                if (source == 2)
-                                    LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] unit line source=route idx=%u count=%d",
-                                             routeIndex, routeCount);
+                                const char* const target = haveTarget ? " target=live" : "";
+                                if (current.routeCount >= 2)
+                                    LogShimA(LogLevel::Info, kComponent,
+                                             "[RTSMARKERS] unit line source=route idx=%u count=%d what=%d%s", routeIndex,
+                                             routeCount, what, target);
                                 else
-                                    LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] unit line source=straight");
+                                    LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] unit line source=straight what=%d%s",
+                                             what, target);
                             }
                         }
                         double ground = pos[1];
@@ -1142,7 +1232,11 @@ namespace BZROpenShim
                     }
                     if (!requests[RM::kFirstWaypointSlot + i].wanted)
                         g_LineSource[i] = 0;
-                    if (ReadRtsCommandDestination(units[i], true, what, x, z))
+                    float pendingTarget[3] = {};
+                    uint32_t pendingWho = 0;
+                    if (ReadLiveTarget(units[i], true, what, pendingWho, pendingTarget))
+                        LineRequest(requests[RM::kFirstPendingSlot + i], from, pendingTarget[0], pendingTarget[2], what, true);
+                    else if (ReadRtsCommandDestination(units[i], true, what, x, z))
                         LineRequest(requests[RM::kFirstPendingSlot + i], from, x, z, what, true);
                 }
                 for (size_t i = unitCount; i < RM::kMaxWaypointLineSlots; ++i)
