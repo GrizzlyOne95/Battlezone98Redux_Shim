@@ -3526,7 +3526,7 @@ namespace BZROpenShim
             if (row == kShimPseudoRowBans)
                 return ShimText("openshim_ui:row:BannedPlayers:desc", "Lists the players you have banned as host; Unban removes one immediately.");
             if (row == kShimPseudoRowRtsCommands)
-                return ShimText("openshim_ui:row:RTSCommands:desc", "Target your own units and buildings, mixed-selection command menus, area select and Hold.");
+                return ShimText("openshim_ui:row:RTSCommands:desc", "Target your own units and buildings, mixed-selection command menus, area select, Hold and Build at Nav.");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
