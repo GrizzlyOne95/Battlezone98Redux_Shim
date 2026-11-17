@@ -15,10 +15,11 @@ RTS Commands. Keys: Options > Input > RTS Actions (written to
 | Hold | `RtsHold` (2) | `RtsHoldKey` (Z); Shift on the Defend entry | Off (single player only) |
 | Build at Nav | `RtsBuildAtNav` (on) | stock menu keys (Go To Nav, then the nav) | Runs for local rigs (UNVERIFIED live) |
 | Build ghost | `RtsBuildGhost` (on) | none (shows while placing) | Local visual (UNVERIFIED live) |
+| Pending build ghost | `RtsPendingBuildGhost` (on) | none (shows until the rig starts building) | Local visual (UNVERIFIED live) |
 | Power range | `RtsPowerRange` (on) | none (shows while placing a powered building) | Local visual (UNVERIFIED live) |
 | Waypoint lines | `RtsWaypointLines` (on) | none (shows for the selection) | Local visual (UNVERIFIED live) |
 
-The last three are the placement aids in `src/patches/rts_placement.cpp`,
+The last four are the placement aids in `src/patches/rts_placement.cpp`,
 drawn with the RTS marker rings; see Docs/RTS_MARKERS.md, "Placement aids".
 Build at Nav's own placement check runs inside `SuppressRtsGhostRecord`, so
 it never moves the build ghost.

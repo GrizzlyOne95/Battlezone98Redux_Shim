@@ -2743,6 +2743,17 @@ RtsBuildAtNav = 1
 ; Exposed on the OpenShim Settings page as "Build Ghost".
 RtsBuildGhost = 1
 
+; Pending Build Ghost. Once a Construction Rig of yours is ordered to
+; build (from the reticle or with Build at Nav), a dim pale blue copy of
+; the building stands where it will go until the rig starts building,
+; the order is replaced, or the rig dies. Up to eight rigs at once: the
+; first eight in the engine's object list, and none when that list holds
+; over 4096 objects. Drawn for you only; nothing is sent or saved.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Pending Build Ghost".
+RtsPendingBuildGhost = 1
+
 ; Power Range. While a building that needs power (gun towers, the Comm
 ; Bunker) is being placed, a ring on the ground around every allied power
 ; plant shows its reach, at most 16 rings, nearest first. The stock test

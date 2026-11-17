@@ -140,9 +140,10 @@ If any row fails to bind, the feature fails closed:
 
 ## Placement aids
 
-Three more local-only features share the tick and the ring pool. Their rows are on Options > Controls > RTS Commands; all ship on, stock value off.
+Four more local-only features share the tick and the ring pool. Their rows are on Options > Controls > RTS Commands; all ship on, stock value off.
 
 - **Build Ghost** (`[Gameplay] RtsBuildGhost`). While the stock placement square shows, a see-through copy of the picked building's own mesh stands at the rig's drop matrix, tinted like the square: green valid, yellow no power, red blocked. While the Go To Nav submenu is open and Build at Nav is active for a selected rig with a building picked, a neutral blue-white copy stands at every listed nav (at most 10), on the terrain, facing the player's heading.
+- **Pending Build Ghost** (`[Gameplay] RtsPendingBuildGhost`). For each of the local player's Construction Rigs with a BUILD order (the stock reticle order or Build at Nav), a dim pale blue copy of the ordered building stands at the rig's drop matrix, from the order until construction starts, the order is replaced or cancelled, or the rig dies. At most 8 rigs: the first 8 in the engine's object list order; with more than 4096 objects in the list none show. The rig the cursor ghost is previewing shows only the cursor ghost.
 - **Power Range** (`[Gameplay] RtsPowerRange`). While a ghost of a `COMM`, `TURR` or `SHLD` class shows (cursor or nav), a yellow ground ring of `powerRadius` around each allied power plant, nearest 16 first. This works with Build Ghost off.
 - **Waypoint Lines** (`[Gameplay] RtsWaypointLines`). For each selected own-team unit (at most 16, never the piloted vehicle), a 0.6 m draped ribbon from the unit to its current order's destination (green Go, red Attack, yellow anything else), and a dimmer one (alpha x0.45) from there to its pending order's destination. Idle units and orders without a path draw nothing.
 
@@ -175,7 +176,7 @@ The ghost never drives the preview; it copies what the stock code already decide
 - Mesh: `GameObjectClass::Build` `FUN_004e1190` copies the 8-byte base name at class+0x28 (D lines 80-82), and `FUN_0067f480` creates the entity from `"%.*s.mesh"` of the same bytes (D lines 26-38). The ghost does the same (`MeshNameFor`, printable bytes only) with `SceneManager::createEntity`, then `Entity::setMaterialName` with one of `openshim_rtsghost_g/_y/_r/_n`. The mesh's own materials are never touched. A mesh that fails to load is logged once and not retried until the scene's entities are destroyed or the simulation ends (64 remembered classes).
 - Before the first ghost in a scene, all four ghost materials must exist (`MaterialManager` `resourceExists`). Ogre 1.10 `setMaterialName` silently falls back to BaseWhite, so a missing material would draw an opaque white building; instead the ghost stays off for that scene, with one log line.
 - Teardown: on `clearScene` and `destroyAllMovableObjects` the pointers are dropped without an Ogre call. On `SceneManager::destroyAllEntities` (mission change, load, replay; the exe keeps one SceneManager per process) `DestroyRtsPlacementSceneObjects` destroys the ghost entities before the original runs and keeps their nodes (lifecycle_seams.cpp, next to LaserSight). The remembered failed classes are cleared there and when leaving the simulation.
-- Entities: up to 8 cached cursor ghosts, one per class, one visible at a time (least recently shown is destroyed when a ninth class appears); 10 nav ghosts, rebuilt only when the picked class changes. Names come from Ogre's auto-named `createEntity` overload, so they are unique.
+- Entities: up to 8 cached cursor ghosts, one per class, one visible at a time (least recently shown is destroyed when a ninth class appears); 10 nav ghosts, rebuilt only when the picked class changes; 8 pending build ghosts, a slot keeping its class while the same orders stand. Names come from Ogre's auto-named `createEntity` overload, so they are unique.
 - Materials `openshim_rtsghost.material` and `openshim_rtsghost-sm4.hlsl` are written next to the ring assets. Technique 0 (DX11): an SM4 shader returning the material's `tint`, brightened (x1.15 + 0.05). Technique 1 (DX9): fixed function with ambient, diffuse and specular black and the same brightened colour as emissive, so no scene light changes it. Both: `alpha_blend`, `depth_write off`, `depth_check on`, no fog, back faces culled.
 
 Nav ghosts:
@@ -183,6 +184,13 @@ Nav ghosts:
 - The submenu is open when ControlPanel+0x117C equals the nav menu id at 0x008E7BF4 (`ControlPanel::Render` `FUN_004a08e0`, gate at 0x004A465A).
 - The navs are the user team's slots 0x23..0x2C (`FUN_004a08e0` D lines ~1255-1260; `Team::GetSlot` 0x005E0F70 reads `team + slot*4`, a GameObject*). The user team is the global read by `FUN_00462370`. Empty slots are skipped. GetCommand is never called for them.
 - The heading is the player's front vector (GameObject+0xF4, +0x38: `FUN_00462490`), flattened; GetCommand turns a building the same way.
+
+Pending build ghosts:
+
+- Each tick walks the engine object vector (`GameObject::objectList`, as `lua_handle_sync.cpp`). A rig qualifies when its vtable is `ConstructionRigVtable`, its team (+0x174) is the user object's, its byte +0x80 is not 2 (a network replica, as `rts_commands.cpp`) and its obj76 flags lack 0x200 (dead).
+- Its AI process is GameObject+0xFC. `RigProcess::InitUState` 0x0049E940 stores `new BuildGoto(rig, ..., class)` at process+0x38 (0x0049E9D5); `ExitUState` 0x0049E9F0 deletes it and clears +0x38. The task must carry `BuildGotoVtable` 0x00877C40 (RTTI `.?AVBuildGoto@@`, checked at bind) and its owner at +0x10 must be the rig.
+- The BuildGoto ctor 0x0049DFA0 sets the class at +0x150 and the stage at +0x14C to 0 (0x0049DFF0, 0x0049E003). The stage step 0x0049E3D0 returns early when +0x08 is 13 (0x0049E3E9) and switches over the stage 0..4 (0x0049E416-0x0049E423). Stages (jump table 0x0049E924): 0 travelling (0x0049E433); 1 and 4 final approach (0x0049E5B7, 0x0049E78D), which call the rig's Deploy (vtable +0x60, 0x004AE2B0) and set stage 2 (0x0049E6F6, 0x0049E8EA); 2 deploying (0x0049E72B), set to 3 at 0x0049E741 once vtable +0x68 (0x004AE300, rig +0x228 == 2) reports deployed; 3 deployed and building (0x0049E753), which waits on 0x00472400, calls Undeploy (+0x64) and sets +0x0C to 13 (done). The ghost shows at stages 0, 1, 2 and 4 and hides at 3 or when +0x08 or +0x0C is 13.
+- Position and facing are the rig's drop matrix (+0x378), which FinishBuild builds at; the class is the task's +0x150. Material `openshim_rtsghost_n` (the nav ghost's).
 
 Power rings:
 
@@ -218,8 +226,13 @@ Waypoint lines:
 | `RtsUserFront` | 0x00462490 | +0xF4, +0x38 front vector |
 | `RtsCommandPromote` | 0x004DBB40 | record offsets 0xA8/0xC8, what/path |
 | `RtsAiPathCtor` | 0x00460490 | AiPath count +4, points +8 |
+| `BuildGotoVtable` | 0x00877C40 | BuildGoto task identity (data row, RTTI checked) |
+| `RtsPendingBuildTask` | 0x0049E999 | task at process +0x38 |
+| `RtsPendingBuildGotoCtor` | 0x0049DFE1 | task vtable, class +0x150, stage +0x14C |
+| `RtsPendingBuildStage` | 0x0049E3E6 | done flag +0x08, owner +0x10, stages 0..4 |
+| `GameObject::objectList` | named address | the object vector walked for rigs |
 
-Each group binds once on the patch thread (all or nothing, byte-checked); every engine read and call runs under SEH. Without the core rows or the slot there is no ghost and no power ring; without the nav rows no nav ghosts; without the power rows no power rings; without the two waypoint rows no lines.
+Each group binds once on the patch thread (all or nothing, byte-checked); every engine read and call runs under SEH. Without the core rows or the slot there is no ghost and no power ring; without the nav rows no nav ghosts; without the power rows no power rings; without the two waypoint rows no lines; without the pending rows (or the core rows) no pending build ghosts.
 
 ### Not verified
 
@@ -230,6 +243,7 @@ Each group binds once on the patch thread (all or nothing, byte-checked); every 
 - UNVERIFIED: multiplayer. Everything is local and reads only the local player's own selection and rigs, but nothing was run in a network game.
 - The power ring is flat (2D); the stock test is 3D distance from the plant to the building's sphere centre, so on slopes a spot just inside a ring can still be yellow.
 - Animated or skinned building meshes show in bind pose.
+- UNVERIFIED: whether anything other than GetCommand moves a rig's drop matrix between the order and FinishBuild. A later reticle hover over the same rig moves it; the pending ghost of that rig is hidden while the cursor ghost shows, and follows the moved matrix afterwards.
 
 ### Live checklist (not yet run)
 
@@ -243,7 +257,8 @@ Each group binds once on the patch thread (all or nothing, byte-checked); every 
 8. Hide the HUD (Ctrl+=): ghosts, rings and lines all hide.
 9. DX9 and DX11: ghosts are see-through, unlit, unaffected by fog, and hidden behind hills.
 10. Turn each option off in Options > Controls > RTS Commands: its visuals go on the next frame; the others stay.
-11. Multiplayer: repeat 1-7 as a client and as the host; nothing appears for other players.
+11. Multiplayer: repeat 1-7 and 12 as a client and as the host; nothing appears for other players.
+12. Pending Build Ghost: order two rigs to build different buildings far away (one from the reticle, one with Build at Nav): a dim ghost at each spot while they drive. Each goes when its rig starts building. Cancel one order (give it Go): its ghost goes. Kill a rig on its way: its ghost goes.
 
 ## Known limits
 

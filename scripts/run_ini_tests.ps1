@@ -433,6 +433,7 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # building or with units selected. Write nothing the game reads. Default
     # on by design.
     "Gameplay/RtsBuildGhost",
+    "Gameplay/RtsPendingBuildGhost",
     "Gameplay/RtsPowerRange",
     "Gameplay/RtsWaypointLines",
 
@@ -638,6 +639,7 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsHold" = "2"
     "Gameplay/RtsBuildAtNav" = "1"
     "Gameplay/RtsBuildGhost" = "1"
+    "Gameplay/RtsPendingBuildGhost" = "1"
     "Gameplay/RtsPowerRange" = "1"
     "Gameplay/RtsWaypointLines" = "1"
     "ODF/CrashValueGuards" = "1"

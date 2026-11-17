@@ -149,6 +149,29 @@ namespace BZROpenShim
             return optionOn && !hudHidden && buildNavActive && openMenu == navMenu && pickedClass != 0;
         }
 
+        // ---- Pending build ghosts ----------------------------------------------
+        // A rig given BUILD runs a BuildGoto task (RigProcess::InitUState
+        // 0x0049E940 stores it at process +0x38; ExitUState 0x0049E9F0 deletes
+        // and clears it). Its stage at +0x14C (0x0049E416, jump table
+        // 0x0049E924): 0 travelling (0x0049E433); 1 and 4 final approach
+        // (0x0049E5B7, 0x0049E78D), which call the rig's Deploy (vtable +0x60,
+        // 0x004AE2B0) and set stage 2 (0x0049E6F6, 0x0049E8EA); 2 deploying
+        // (0x0049E72B), set to 3 at 0x0049E741 once vtable +0x68 (0x004AE300,
+        // rig +0x228 == 2) reports deployed; 3 deployed/building (0x0049E753),
+        // which waits on 0x00472400, calls Undeploy (+0x64) and sets +0x0C to
+        // 13 (done). +0x08 at 13 also means finished (0x0049E3E9). The ghost
+        // shows before construction starts.
+        constexpr size_t kMaxPendingGhosts = 8;
+        constexpr int32_t kTaskDone = 0xD;
+        constexpr int32_t kStageBuilding = 3;
+        constexpr int32_t kLastStage = 4;
+
+        inline bool PendingBuildShows(int32_t state, int32_t result, int32_t stage)
+        {
+            return state != kTaskDone && result != kTaskDone && stage >= 0 && stage <= kLastStage &&
+                   stage != kStageBuilding;
+        }
+
         // ---- Orientation -------------------------------------------------------
         struct Axes
         {
