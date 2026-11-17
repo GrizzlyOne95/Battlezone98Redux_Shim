@@ -122,14 +122,11 @@ namespace BZROpenShim::HudVisibility
             }
         }
 
-        // Unknown reads as "an editor has focus": the key then stays the game's.
-        bool TextEditorFocused() noexcept
+        bool CallFocusLookup(uint32_t address) noexcept
         {
-            if (!g_focusLookupAddr)
-                return true;
             __try
             {
-                return reinterpret_cast<FocusLookupFn>(g_focusLookupAddr)() != nullptr;
+                return reinterpret_cast<FocusLookupFn>(address)() != nullptr;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -277,6 +274,29 @@ namespace BZROpenShim::HudVisibility
             LogShimA(LogLevel::Info, "hudvisibility", "HUD %s (stock switch %s)", hide ? "hidden" : "shown",
                      readable ? "driven" : "unreadable");
         }
+    }
+
+    // Unknown reads as "an editor has focus": the key then stays the game's.
+    // Shared with rts_commands.cpp; the row is bound on first use, apart from
+    // the HUD switch rows, so a HUD-row miss does not take the check down.
+    bool TextEditorFocused() noexcept
+    {
+        uint32_t address = g_focusLookupAddr;
+        if (!address)
+        {
+            try
+            {
+                address = HookEngine::EngineAddress("LegacyTextEditorFocusLookup");
+            }
+            catch (...)
+            {
+                address = 0;
+            }
+            if (!address)
+                return true;
+            g_focusLookupAddr = address;
+        }
+        return CallFocusLookup(address);
     }
 
     bool IsHidden() noexcept

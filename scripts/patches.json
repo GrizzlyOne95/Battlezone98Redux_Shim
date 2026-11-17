@@ -363,6 +363,15 @@
       "identity": "ControlPanel::BroadcastCommand(AiCommand what, const VECTOR_3D* where) at 0x004A70C0 on GOG Redux 2.2.301, thiscall ret 8 (0x004A7134). Loops i < [this+0x188] (selectNum) over handles [this+0x1C+4*i], GetObj 0x004DA060, CanCommand vtable+0x38, then GameObject::SetCommand 0x004DBE70(what, where, selectNum as int64). Callers (whole-image E8 scan 2026-11-12): ControlPanel::Render 0x004A08E0 menu_press paths 0x004A1EF0 and 0x004A1FB0 (cmdButton what [this+0x111C], where [this+0x1124] = Reticle groundPos, followed by SelectNone 0x004A6D50 on the second), 0x004A2611 (the +0x112C/+0x1134 command) and OverView 0x00588783 (`mov ecx,0x978E20`). ProducerRallyPoints detours the entry (JMP5 over the 6-byte push ebp/mov ebp,esp/sub esp,0Ch prologue, relocated to a trampoline) and consumes a CMD_GO while rally set mode is armed as the rally confirm. Single match in the GOG image (scan 2026-11-12)."
     },
     {
+      "name": "RTS Markers Object Command Hook",
+      "pattern": "55 8B EC 83 EC 0C 89 4D F4 C7 45 FC 00 00 00 00 EB 09 8B 45 FC 83 C0 01 89 45 FC 8B 4D F4 8B 55 FC 3B 91 88 01 00 00 7D 3C 8B 45 FC 8B 4D F4 8B 54 81 1C 52 E8 ?? ?? ?? ?? 83 C4 04 89 45 F8 8B 45 F8 8B 10 8B 4D F8 8B 42 38 FF D0 0F B6 C8 85 C9 74 10 8B 55 0C 52 8B 45 08 50 8B 4D F8 E8",
+      "offset": 0,
+      "expected_size": 6,
+      "fallback": "0x004A7050",
+      "require_unique": true,
+      "identity": "ControlPanel::BroadcastCommand(AiCommand what, GameObject* target) at 0x004A7050 on GOG Redux 2.2.301, thiscall ret 8. Loops i < [this+0x188] (selectNum) over handles [this+0x1C+4*i], GetObj, CanCommand vtable+0x38, then 0x004DBD60(what, target) per unit (FUN_004a7050.c lines 9-13; FUN_004dbd60.c line 21 stores what at +0xCC, line 30 reads target+0x18). Callers (whole-image E8 scan 2026-11-16): ControlPanel::Render 0x004A08E0 at 0x004A1EBA, 0x004A1F0C, 0x004A1F7A, 0x004A1FCC, 0x004A25DB, 0x004A262D, 0x004A3688, 0x004A423A, 0x004A4A75 and OverView at 0x00588769. RtsMarkers detours the entry (JMP5 over the 6-byte push ebp/mov ebp,esp/sub esp,0Ch prologue, relocated to a trampoline) to note a ping, then calls the original unchanged. Single match in the GOG image (scan 2026-11-16)."
+    },
+    {
       "name": "Deferred Modable Rebuild Main Store",
       "pattern": "83 B8 8C 00 00 00 04 75 05 E9 ?? ?? ?? ?? 8B 4D B8 C7 81 8C 00 00 00 04 00 00 00 E8",
       "offset": 17,
@@ -2990,6 +2999,12 @@
       "identity": "The global ControlPanel on exact GOG Redux 2.2.301: `mov ecx,0x978E20` before every ControlPanel command call from OverView (0x00588184, 0x00588605) and Reticle::Simulate (0x005BAA78, 0x005BAA9E). ControlPanel::BroadcastCommand(VECTOR) 0x004A70C0 loops i < [this+0x188] (selectNum, 0x004A70E1) over handles [this+0x1C+4*i] (0x004A70EF) resolved with GameObject::GetObj 0x004DA060. Read by ProducerRallyPoints. AutoGroupNewUnits appends to its groups: mission save FUN_005c7b90 line 118 (0x005C7E5D `mov ecx,0x978E20`, call 0x004A7440) writes groupNum (+0xFC4, 0x28 bytes) and groupList (+0x18C, 0xE38 bytes = 10 x 0x16C, 91 handles each) (FUN_004a7440 lines 8-10); mission load FUN_005c7510 line 204 (0x005C7A11) reads them back (FUN_004a73a0); BindGroup FUN_004a6f00 lines 7-10 and SelectGroup FUN_004a6dd0 lines 14-24 use the same layout, called with this = ControlPanel from FUN_004a08e0 (vtable slot 6) at 0x004A1D39 and 0x004A1D60."
     },
     {
+      "name": "RtsMarkersCursorPointField",
+      "address": "0x004A720F",
+      "expected": "8B 55 FC 8B 45 0C 89 82 24 11 00 00",
+      "identity": "ControlPanel +0x1124, the VECTOR_3D* cursor point, written here by 0x004A71E0 (FUN_004a71e0.c line 12, the ground pointer handed over by Reticle::Simulate). Reticle::Simulate FUN_005ba560.c lines 157-175 refresh it every frame in views 0/1/2/7 (line 115) and leave it null when aiming at the sky; OverView FUN_00587ef0.c lines 158, 163, 169, 285, 288 point it at the satellite cursor and line 74 clears it. Read only, by RtsMarkers for the artillery cursor ring."
+    },
+    {
       "name": "ControlPanelVtable",
       "address": "0x00877E50",
       "kind": "data",
@@ -3084,6 +3099,192 @@
       "address": "0x009181B8",
       "kind": "data",
       "identity": "int, 1 while the stock EditMode input program is on, on exact GOG Redux 2.2.301. FUN_005B08B0 builds the active input-program mask (bit 0 ControlMode, bit 1 AlwaysOn, bit 2 EditMode, names at 0x008E8F90) and sets bit 2 when this is 1; FUN_005B0920 stores (arg == 1), called with 1 by the editor-enter routine FUN_004C82D0 and with 0 by editor-exit FUN_004C8310. Not TerrainEditMode (0x009454B8), which unscripted missions also carry. Read only, by ProducerRallyPoints to leave V/Ctrl+V to edit_vertflip/edit_paste."
+    },
+    {
+      "name": "ModeListIntersect",
+      "address": "0x0049F270",
+      "expected": "55 8B EC 83 EC 08 56 89 4D FC C7 45 F8 00 00 00",
+      "identity": "ModeList::Intersect(const ModeList& other), thiscall ret 4 (FUN_0049f270): each of the 11 slots whose mode differs from other's is zeroed (FUN_0049f270.c lines 8-12; no per-slot enabled-bit change), then the enabled masks at +0x2C are ANDed (line 13); active (+0x30) becomes -1 unless both lists agree on it and FUN_0046faf0 accepts it (lines 14-19). The stock rule that turns a mixed selection's menu into its common subset. RtsSmartCommandMenu / RtsSmartRepairReload call it as the original from the redirected ControlPanelMergeModeListCall. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelMergeModeListCall",
+      "address": "0x004A2E26",
+      "expected": "50 8B 8D BC FD FF FF 81 C1 3C 11 00 00 E8 38 C4 FF FF",
+      "identity": "ControlPanel::Render 0x004A08E0, the unit-menu merge over the selection (FUN_004a08e0.c lines 796-809): push the next unit's ModeList (GameObject +0x1A4), ecx = this [ebp-0x244] + 0x113C (the merged list), `call 0x0049F270` (ModeList::Intersect) at +0xD = 0x004A2E33 (line 808). RtsSmartCommandMenu / RtsSmartRepairReload redirect it (REL32) to keep Hunt, Follow Close, Defend, Get Repair and Get Reload when only some units offer them. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelDispatchMode",
+      "address": "0x004A7140",
+      "expected": "55 8B EC 83 EC 14 89 4D F0 C6 45 FF 01 C7 45 F8",
+      "identity": "ControlPanel::DispatchMode(int mode), thiscall ret 4, char result (FUN_004a7140): for each selected handle GameObject::GetObj 0x004DA060, vtable +0x38 (can command), vtable +0x2C (ExecuteMode(mode)); the results are ANDed. RtsSmartCommandMenu calls it as the original for every mode it does not filter. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelDispatchModeCall",
+      "address": "0x004A511D",
+      "expected": "8B 85 74 FD FF FF 50 8B 8D BC FD FF FF E8 11 20 00 00",
+      "identity": "ControlPanel::Render 0x004A08E0, the unit-menu entry pick (FUN_004a08e0.c line 1377): push mode [ebp-0x28C], ecx = this [ebp-0x244], `call 0x004A7140` at +0xD = 0x004A512A; a true result deselects (SelectNone at 0x004A513C). Redirected (REL32) so a smart mode goes only to units whose own ModeList holds it. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelBroadcastCommandObj",
+      "address": "0x004A7050",
+      "expected": "55 8B EC 83 EC 0C 89 4D F4 C7 45 FC 00 00 00 00",
+      "identity": "ControlPanel::BroadcastCommand(AiCommand what, GameObject* who), thiscall ret 8 (FUN_004a7050): for each selected, commandable object calls GameObject::SetCommand(what, who) 0x004DBD60. RtsSmartCommandMenu calls it as the original from the redirected ControlPanelDefendTargetBroadcastCall. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelDefendTargetBroadcastCall",
+      "address": "0x004A3679",
+      "expected": "8B 95 88 FD FF FF 52 6A 0F 8B 8D BC FD FF FF E8 C3 39 00 00",
+      "identity": "ControlPanel::Render 0x004A08E0, the Defend submenu's target pick (FUN_004a08e0.c line 946): push the target [ebp-0x278], push 0xF (CMD_DEFEND), ecx = this, `call 0x004A7050` at +0xF = 0x004A3688, then SelectNone (0x004A3693). Redirected (REL32) so Defend-on-target goes only to units with a Defend entry. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectSetCommandObj",
+      "address": "0x004DBD60",
+      "expected": "55 8B EC 6A FF 68 BC 77 84 00 64 A1 00 00 00 00",
+      "identity": "GameObject::SetCommand(AiCommand what, GameObject* who), thiscall ret 8 (FUN_004dbd60): the stock per-unit order the Defend target pick uses (called from ControlPanel::BroadcastCommand 0x004A7050). RtsSmartCommandMenu calls it for each unit it keeps. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectSetCommand",
+      "address": "0x004DBCE0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 D4 00 00 00",
+      "identity": "GameObject::SetCommand(AiCommand what), thiscall ret 4 (0x004DBD52; FUN_004dbce0): priority +0xC8 = 0, what +0xCC, who +0xD0 = 0, as Lua Defend(h, 0). RtsHold gives CMD_DEFEND (0xF) this way before the native hold. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectSetTarget",
+      "address": "0x0049F450",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 74 0D 8B",
+      "identity": "GameObject::SetTarget(GameObject* target), thiscall ret 4 (FUN_0049f450): stores the target's handle at +0x21C (kGameObjectTargetHandle). RtsRemoteTarget sets the player's target with it. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelSelectAdd",
+      "address": "0x004A6C70",
+      "expected": "55 8B EC 51 89 4D FC 83 7D 08 00 74 4B 8B 45 08",
+      "identity": "ControlPanel::SelectAdd(GameObject* obj), thiscall ret 4 (FUN_004a6c70): vtable +0x38 can-command test, SetSelected(1), handle appended at [this+0x1C+4*selectNum], selectNum +0x188; no duplicate or capacity check. RtsAreaSelect checks both before each call. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectGetModeList",
+      "address": "0x0049F430",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 05 A4 01 00 00",
+      "identity": "GameObject::GetModeList(), thiscall: returns this + 0x1A4 (FUN_0049f430). Guard only: the RTS command extras read each unit's ModeList at +0x1A4. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelDefendClickSoundCall",
+      "address": "0x004A50A5",
+      "expected": "83 BD 74 FD FF FF 11 75 27 6A 00 6A 00 6A 00 68 20 1B 87 00 E8 72 59 F9 FF 83 C4 10 8B 8D BC FD FF FF 8B 15 DC 7B 8E 00 89 91 7C 11 00 00 EB 6C",
+      "identity": "ControlPanel::Render 0x004A08E0, the unit-menu entry click (FUN_004a08e0.c line 1370): `cmp [ebp-0x28C],0x11` (MODE_DEFEND), then PlayGlobalSound(\"mnu_next.wav\" 0x00871B20, 0, 0, 0) `call 0x0043AA30` at +0x14 = 0x004A50B9, add esp,0x10, currentItem +0x117C = the Defend submenu, `jmp 0x004A5141` (+0x9C). RtsHold (Shift alternate) redirects the sound call (REL32) to a thunk: with Shift held it issues Hold, drops the call frame and resumes at 0x004A5141; otherwise it tail-jumps to the sound. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelModeLabelLocalizeCall",
+      "address": "0x004A57AB",
+      "expected": "8B 95 74 FD FF FF 8B 04 D5 00 7B 8E 00 50 68 6C 73 87 00 E8 7D 73 37 00 83 C4 08",
+      "identity": "ControlPanel::Render 0x004A08E0, the unit-menu entry label (FUN_004a08e0.c line 1396): mode [ebp-0x28C], push the mode's name (table 0x008E7B00, 8 bytes per mode), push \"names\" (0x0087736C), `call 0x0081CB40` (UiLocalize) at +0x13 = 0x004A57BE, add esp,8. RtsHold (Shift alternate) redirects it (REL32) so the Defend entry reads \"Hold\" while Shift is held. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelNavPickBroadcastCall",
+      "address": "0x004A4A64",
+      "expected": "7E 21 8B 85 50 FD FF FF 50 6A 03 8B 8D BC FD FF FF E8 D6 25 00 00 8B 8D BC FD FF FF E8 CB 22 00 00 EB 32",
+      "identity": "ControlPanel::Render 0x004A08E0, the Go To Nav submenu's nav pick (the nav slots 0x23..0x2C, FUN_004a08e0.c lines 1207-1290; nav object FUN_005E0F70 at 0x004A4A18 into [ebp-0x2B0]): after mnu_clik (0x004A4A4F), `cmp [this+0x188],0` then `jle` (selection empty: SetTarget instead), push the nav [ebp-0x2B0], push 3 (CMD_GO), ecx = this [ebp-0x244], `call 0x004A7050` (ControlPanel::BroadcastCommand(what, GameObject*)) at +0x11 = 0x004A4A75, ecx = this, `call 0x004A6D50` (SelectNone) at +0x1C = 0x004A4A80, `jmp 0x004A4AB9`. Single match in the image. RtsBuildAtNav redirects both calls (REL32): picked Construction Rigs get BUILD at the nav, the rest the stock GO, and SelectNone is skipped when every rig was refused. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ConstructionRigGetCommandPos",
+      "address": "0x0049D230",
+      "expected": "55 8B EC 83 EC 54 A1 00 70 8E 00 33 C5 89 45 FC 89 4D D4 8B 4D D4 E8 C5 29 FD FF 89 45 C4 8B 45 D4 83 B8 28 02 00 00 00",
+      "identity": "ConstructionRig::GetCommand(const VECTOR_3D* pos), thiscall ret 4, ConstructionRig vtable (0x00877994) slot 12 (FUN_0049d230): returns 0 unless [this+0x228] == 0 (guarded: `cmp dword [eax+0x228],0` at 0x0049D251) and the active mode (FUN_0046fc10, call at 0x0049D246) is non-zero; 3 for mode 1; for a mode above 0x1A (a picked building class, also at [this+0x370], 0x0049D2B2) it sets the drop matrix at +0x378 with the user's facing (0x0049CF90 at 0x0049D2AA), checks CanBuildHere 0x00466E50 and, for COMM/TURR/SHLD, a friendly power plant in range, and returns 8 (CMD_DROPOFF, 0x0049D4E2) or 9 (0x0049D50B / 0x0049D533). The stock reticle hover calls it; RtsBuildAtNav calls it once with the nav's position to validate the spot and set the matrix before giving BUILD. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsGhostDisplaySetBox",
+      "address": "0x0049D328",
+      "expected": "8B 45 D4 05 78 03 00 00 50 8D 4D E4 51 B9 D8 86 97 00 E8 A1 F2 FF FF",
+      "identity": "ConstructionRig::GetCommand 0x0049D230, the stock preview box: `mov eax,[ebp-0x2C]` (this), `add eax,0x378` (the drop matrix MAT_3D, 64 bytes, set just before by 0x0049CF90), push it and the footprint rect, `mov ecx,0x009786D8` (the global ConstructionDisplay, imm32 at +0x0E), `call 0x0049C5E0` (box setter: corners and centre transformed by the drop matrix). Read only: RtsBuildGhost takes the ConstructionDisplay address from +0x0E and the matrix offset 0x378 from +0x04. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsGhostDisplayInit",
+      "address": "0x0049C390",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC C7 40 68 00 00 00 00 68 D8 78 87 00 E8 25 FB 1E 00 83 C4 04 8B 4D FC 89 41 6C 68 F0 78 87 00 E8 12 FB 1E 00 83 C4 04 8B 55 FC 89 42 70 68 E4 78 87 00 E8 FF FA 1E 00 83 C4 04 8B 4D FC 89 41 74",
+      "identity": "ConstructionDisplay::Init, vtable 0x00877900 slot 3 (FUN_0049c390): `mov [this+0x68],0` (current sprite: none), then the sprite table lookups 0x0068BED0 of \"ground.G\" (0x008778D8) into +0x6C, \"ground.Y\" (0x008778F0) into +0x70 and \"ground.R\" (0x008778E4) into +0x74. Read only: RtsBuildGhost compares +0x68 with +0x6C/+0x70/+0x74 after GetCommand to pick the ghost tint. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsGhostDisplayRender",
+      "address": "0x0049C3E0",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC 83 78 68 00 0F 84 F2 00 00 00 83 3D 74 CF CE 02 00 0F 85 E5 00 00 00",
+      "identity": "ConstructionDisplay::Render, vtable 0x00877900 slot 8 (FUN_0049c3e0, thiscall(camera) ret 4): `cmp dword [this+0x68],0` / `je` (no sprite: nothing drawn), `cmp dword [0x02CECF74],0` (imm32 at +0x18; set to 1 during other render passes by FUN_005d6530/FUN_005dde00, meaning UNVERIFIED) / `jne`; it clears +0x68 again at 0x0049C4E1 (one-shot per frame). Read only: RtsBuildGhost hides the ghost while the flag at +0x18 is set, as the stock quad is. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsGhostTowerSigCheck",
+      "address": "0x0049D360",
+      "expected": "8B 55 D4 8B 82 70 03 00 00 81 78 14 4D 4D 4F 43 74 28 8B 4D D4 8B 91 70 03 00 00 81 7A 14 52 52 55 54 74 16 8B 45 D4 8B 88 70 03 00 00 81 79 14 44 4C 48 53 0F 85 1C 01 00 00",
+      "identity": "ConstructionRig::GetCommand 0x0049D230, the power test gate: class = [this+0x370], `cmp dword [class+0x14], 'COMM' (0x434F4D4D)` / `je`, then 'TURR' (0x54555252) and 'SHLD' (0x53484C44); anything else skips the power test. Read only: RtsPowerRange draws plant rings for these three signatures. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsGhostPreviewResults",
+      "address": "0x0049D4C2",
+      "expected": "8B 15 FC 7A 91 00 52 8B 4D D4 E8 3F E0 03 00 0F B6 C0 85 C0 74 0A B9 D8 86 97 00 E8 AE F3 FF FF B8 08 00 00 00 EB 55 EB 27 8B 0D FC 7A 91 00 51 8B 4D D4 E8 16 E0 03 00 0F B6 D0 85 D2 74 0A B9 D8 86 97 00 E8 A5 F3 FF FF B8 09 00 00 00 EB 2C EB 26 A1 FC 7A 91 00 50 8B 4D D4 E8 EE DF 03 00 0F B6 C8 85 C9 74 0A B9 D8 86 97 00 E8 9D F3 FF FF B8 09 00 00 00",
+      "identity": "ConstructionRig::GetCommand 0x0049D230, its three exits: when `this->IsAlly(userObject [0x00917AFC])` (0x004DB510) the ConstructionDisplay 0x009786D8 colour setter runs, then the return value: 0x0049C890 (ground.G) and `mov eax,8` (CMD_DROPOFF, valid spot); 0x0049C8B0 (ground.Y) and `mov eax,9` (no power in range); 0x0049C8D0 (ground.R) and `mov eax,9` (CanBuildHere failed, entered from 0x0049D34D). Read only: RtsBuildGhost maps result + sprite to the ghost tint (8+G green, 9+Y yellow, 9+R red). Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsGhostMeshName",
+      "address": "0x004E1297",
+      "expected": "6A 08 8B 85 44 FF FF FF 83 C0 28 50 8D 4D DC 51 FF 15 B0 94 86 00",
+      "identity": "GameObjectClass::Build FUN_004e1190: `push 8`, eax = class, `add eax,0x28`, `call [strncpy]` (0x008694B0): the class's model base name is the inline char[8] at +0x28 (ODF baseName, not NUL-terminated at 8). The renderer later builds \"%.*s.mesh\" (format 0x008929D0) from the same 8 bytes in FUN_0067f480 and calls SceneManager::createEntity(name). Read only: RtsBuildGhost loads the same mesh for its ghost entity. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsPowerPlantList",
+      "address": "0x0049D3C5",
+      "expected": "C7 45 BC 7C CE 5C 02 8D 4D C8 E8 9C 4D F8 FF 8D 55 AC 52 8B 4D BC E8 F0 27 F8 FF",
+      "identity": "ConstructionRig::GetCommand 0x0049D230, the power plant walk: `mov [ebp-0x44], 0x025CCE7C` (imm32 at +0x03: the global std::vector<PowerPlant*>, _Myfirst +0 / _Mylast +4; filled by the PowerPlant ctor FUN_005a7500 and erased by its dtor FUN_005a75d0, every team's plants), then `call 0x0041FBD0` (begin). Read only: RtsPowerRange walks the same vector (size and pointers checked under SEH). Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsPowerIsAlly",
+      "address": "0x004DB510",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 74 2A 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 42 04 FF D0 50 8B 4D F8 E8 27 00 00 00 0F B6 C8 85 C9 74 09 C7 45 FC 01 00 00 00 EB 07 C7 45 FC 00 00 00 00 8A 45 FC 8B E5 5D C2 04 00",
+      "identity": "GameObject::IsAlly(GameObject* other) FUN_004db510, thiscall ret 4: null other -> false; team = other->iface(+0x18)->vtbl[1]() (GetTeam), then 0x004DB560 (this team's ally mask). GetCommand calls it per plant at 0x0049D429 with the PowerPlant* from the vector. Called by RtsPowerRange (rig, plant) under SEH, exactly as GetCommand does. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsPowerRadius",
+      "address": "0x0049D47C",
+      "expected": "8B 4D CC 83 C1 18 8B 45 CC 8B 50 18 8B 02 FF D0 F3 0F 10 80 60 01 00 00 F3 0F 11 45 C0 F3 0F 10 45 C0 F3 0F 59 45 C0 0F 2F 45 B8 76 06",
+      "identity": "ConstructionRig::GetCommand 0x0049D230, the power radius test: plant->iface(+0x18)->vtbl[0]() (GetClass), `movss xmm0,[eax+0x160]` (PowerPlantClass powerRadius, ParameterDB read in FUN_005a77f0), squared and compared with the 3D squared distance to the building's sphere centre (`comiss` / `jbe`). Read only: RtsPowerRange draws a ring of this radius (2D; the stock test is 3D). Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsNavSubmenuOpen",
+      "address": "0x004A465A",
+      "expected": "8B 8D BC FD FF FF 8B 91 7C 11 00 00 3B 15 F4 7B 8E 00 0F 85 52 06 00 00",
+      "identity": "ControlPanel::Render 0x004A08E0, the Go To Nav submenu gate: ecx = this, `mov edx,[ecx+0x117C]` (the open submenu id), `cmp edx,[0x008E7BF4]` (imm32 at +0x0E, the nav submenu id, 3 in the image) / `jne` past the nav list. +0x117C is set to -1 by SelectNone 0x004A6D50 (0x004A6DAB). Read only: RtsBuildGhost shows the nav ghosts while it matches. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsNavSlotLoop",
+      "address": "0x004A49BE",
+      "expected": "C7 85 5C FC FF FF 23 00 00 00 C7 85 D8 FA FF FF 2C 00 00 00 C7 85 B8 FD FF FF 00 00 00 00 EB 0F 8B 95 B8 FD FF FF 83 C2 01 89 95 B8 FD FF FF 8B 85 D8 FA FF FF 2B 85 5C FC FF FF 39 85 B8 FD FF FF 0F 8F BA 02 00 00 8B 8D B8 FD FF FF 03 8D 5C FC FF FF 51 8B 8D 80 FD FF FF E8 53 C5 13 00",
+      "identity": "ControlPanel::Render 0x004A08E0, the Go To Nav list: slots from 0x23 to 0x2C (imm32 at +0x06 and +0x10; BZ 1.5 TEAM_SLOT_MIN_BEACON..MAX_BEACON), `push slot`, ecx = [ebp-0x280] (the user Team*, from 0x00462370 at 0x004A1132), `call 0x005E0F70` (Team::GetSlot); null slots are skipped (0x004A4A2A). Read only: RtsBuildGhost lists the same beacons. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsUserTeam",
+      "address": "0x00462370",
+      "expected": "55 8B EC A1 70 7A 91 00 5D C3",
+      "identity": "GetUserTeam FUN_00462370, cdecl: `mov eax,[0x00917A70]` (imm32 at +0x04, the user's Team*, written in FUN_004da0b0 when the user object is set); ret. Read only: RtsBuildGhost reads the global from +0x04. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsTeamGetSlot",
+      "address": "0x005E0F70",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 08 8B 4D FC 8B 04 81 8B E5 5D C2 04 00",
+      "identity": "Team::GetSlot(int slot) FUN_005e0f70, thiscall ret 4: `mov eax,[ecx+eax*4]`, the GameObject* in that slot (not a handle). Read only: RtsBuildGhost reads team + slot*4 for slots 0x23..0x2C under SEH. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsUserFront",
+      "address": "0x00462490",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 80 F4 00 00 00 83 C0 38",
+      "identity": "GameObject front-vector getter FUN_00462490 (thiscall): `mov eax,[this+0xF4]`, `add eax,0x38`: the object's front vector (float[3]) inside its matrix block. GetCommand passes the user's to SetConstructionMatrix 0x0049CF90 (0x0049D2AA) so a building faces the player. Read only: RtsBuildGhost turns the nav ghosts the same way. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsCommandPromote",
+      "address": "0x004DBB40",
+      "expected": "55 8B EC 51 56 57 89 4D FC 8B 45 FC 83 B8 CC 00 00 00 01 75 17 8B 4D FC C7 81 CC 00 00 00 00 00 00 00 B8 01 00 00 00 E9 8B 00 00 00 8B 55 FC 83 BA B4 00 00 00 00 74 12 8B 45 FC 8B 88 B4 00 00 00 51 E8 79 4A F8 FF 83 C4 04 8B 75 FC 81 C6 C8 00 00 00 8B 7D FC 81 C7 A8 00 00 00 B9 08 00 00 00 F3 A5 8B 55 FC C7 82 C8 00 00 00 00 00 00 00 8B 45 FC C7 80 CC 00 00 00 00 00 00 00 8B 4D FC C7 81 D0 00 00 00 00 00 00 00 8B 55 FC C7 82 D4 00 00 00 00 00 00 00",
+      "identity": "GameObject pending-command promote FUN_004dbb40 (thiscall): if [this+0xCC] (pending what) == 1 clear it; else free [this+0xB4] (current AiPath*) via 0x00460600, `rep movsd` 8 dwords from +0xC8 to +0xA8 (the pending record becomes current: 0x20 bytes, priority +0, what +4, who +8, AiPath* +0x0C), then zero +0xC8, +0xCC, +0xD0, +0xD4. Read only: RtsWaypointLines reads what/path of both records. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "RtsAiPathCtor",
+      "address": "0x00460490",
+      "expected": "55 8B EC 83 EC 18 89 4D FC 8B 4D FC 83 C1 14 E8 EC 00 FD FF 8B 45 FC C7 00 00 00 00 00 8B 4D FC C7 41 04 02 00 00 00 33 C9 8B 55 FC 8B 42 04 BA 08 00 00 00 F7 E2 0F 90 C1 F7 D9 0B C8 51 E8 59 D4 3D 00 83 C4 04 89 45 F8 8B 45 FC 8B 4D F8 89 48 08",
+      "identity": "AiPath::AiPath(const VECTOR_3D* from, const VECTOR_3D* to) FUN_00460490, thiscall: `mov [this],0`, `mov [this+4],2` (point count), `operator new(count*8)` stored at +8 (VECTOR_2D points, {x, z} floats). Read only: RtsWaypointLines takes the destination as points[count-1]. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
     },
     {
       "name": "ClassLoadAssetsFlag",

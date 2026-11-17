@@ -2609,6 +2609,133 @@ GroupMemberMenu = 1
 ; Exposed on the OpenShim Settings page as "Group Strip".
 GroupStrip = 1
 
+; RTS command pings (from BZCC/RTS games). Each order the local player gives
+; draws a short ring on the ground: a green ring shrinking onto a Go point, a
+; red ring around an attack target that follows it, a yellow ring for any
+; other order on a point or object. Local visuals only: nothing is sent or
+; saved, so it also works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Command Pings".
+RtsCommandPings = 1
+
+; Artillery range rings. Around every selected own-team howitzer (never
+; the piloted vehicle; the laser sight arc covers that),
+; a ring at its flat-ground maximum range from the ODF shotSpeed and
+; lifeSpan, and a ring at the aim point (cockpit reticle or satellite
+; cursor): green when one of them can reach it allowing for the height
+; difference, red when none can. At most 16 units. Local visuals only.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Artillery Range".
+RtsArtilleryRange = 1
+; RTS command extras (rts_commands.cpp; Docs/RTS_COMMANDS.md). All five rows
+; are on the OpenShim Settings page under Controls > RTS Commands. Orders go
+; through the stock per-unit calls the unit menu itself uses.
+;
+; Remote target. Shift+T (RtsRemoteTargetKey) sets your target to one of
+; your selected units without changing the selection; each press moves on
+; to the next one. Plain T stays the stock frontal target. B
+; (RtsBuildingCycleKey) cycles the target through your buildings (Recycler,
+; Factory and Armory included), newest first. Works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Remote Target".
+RtsRemoteTarget = 1
+
+; Mixed-selection command menu. Stock keeps only the entries every selected
+; unit shares, so a Ctrl+1 group of wingmen, walkers, APCs and howitzers
+; loses Hunt, Follow Close (Formation) and Defend. With this on those stay,
+; and each goes only to the units whose own menu has it; the others keep
+; their current orders. Works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Smart Command Menu".
+RtsSmartCommandMenu = 1
+
+; Get Repair and Get Reload show when any selected unit needs them (stock:
+; only when every unit does) and go only to the units that need them.
+; Works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Smart Repair/Reload".
+RtsSmartRepairReload = 1
+
+; Area select. X (RtsAreaSelectKey) adds your units of the same type as the
+; unit under the reticle (else the first selected unit) within 100 m of it
+; to the selection; Shift+X within 200 m. Works in satellite view (centred
+; on the first selected unit there). Works in multiplayer.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Area Select".
+RtsAreaSelect = 1
+
+; Hold. Z (RtsHoldKey) gives the selected units that have a Defend entry
+; Defend with no target plus the native hold, so they stay put. With 2,
+; holding Shift also makes the unit menu's Defend entry read "Hold" and
+; choosing it (mouse or number key) does the same. If another mod binds
+; Shift+number (BZP's line-up Go does), choose 1 to keep only the key.
+; Single player only: the native hold is not saved and peers never see it.
+;
+; Accepted: 2 (key and Shift menu), 1 (key only), 0 (off). Default: 2.
+; Exposed on the OpenShim Settings page as "Hold".
+RtsHold = 2
+
+; Build at Nav. With a building picked on a selected Construction Rig, the
+; unit menu's Go To Nav entry reads "Build at Nav"; picking a nav checks the
+; spot with the rig's own placement test (slope, overlap, power for guns
+; and the Comm Bunker) and gives the rig BUILD there, facing the way you
+; face. A spot it cannot use buzzes, and when nothing else was ordered the
+; selection stays so you can pick another nav. Other selected units go to
+; the nav as before. Only your own, local rigs; runs in multiplayer
+; (UNVERIFIED live there, see Docs/RTS_COMMANDS.md).
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Build at Nav".
+RtsBuildAtNav = 1
+
+; Build Ghost. While the stock placement square shows for a Construction
+; Rig, a see-through copy of the picked building stands where it would be
+; built, tinted like the square: green when the spot is good, yellow when
+; no power plant reaches it, red when it is blocked. While the Go To Nav
+; list offers Build at Nav, a pale blue copy stands at every listed nav,
+; facing the way you face. Drawn for you only; nothing is sent or saved.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Build Ghost".
+RtsBuildGhost = 1
+
+; Power Range. While a building that needs power (gun towers, the Comm
+; Bunker) is being placed, a ring on the ground around every allied power
+; plant shows its reach, at most 16 rings, nearest first. The stock test
+; measures in 3D, so a spot just inside a ring on a steep slope can still
+; read yellow. Drawn for you only.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Power Range".
+RtsPowerRange = 1
+
+; Waypoint Lines. For up to 16 selected units of yours, a thin line on the
+; ground to where their current order takes them, and a fainter one on to
+; their next order. Idle units and orders without a path draw nothing.
+; Drawn for you only.
+;
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Waypoint Lines".
+RtsWaypointLines = 1
+
+; The RTS action keys. One key each, no modifier; rebind them in Options >
+; Input > RTS Actions, which writes these lines. The remote-target key is
+; used with Shift (Shift+T). Refused, with a log line and a fall back to the
+; default: any modifier, digits, F1-F10, Space, Tab, Alt, Enter, Esc, the
+; Rally Point key, another RTS action's key, and (for the Shift actions) a
+; key that is a Shift-only QuickSave chord.
+; Defaults: T, B, X, Z.
+RtsRemoteTargetKey = T
+RtsBuildingCycleKey = B
+RtsAreaSelectKey = X
+RtsHoldKey = Z
+
 
 [Updater]
 ; Stage a newer OpenShim from the Steam Workshop when the main menu first appears (Steam builds, never in multiplayer); it installs when you quit. 0 = manual "Check for Updates" only. Default: 1.

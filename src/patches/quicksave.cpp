@@ -338,6 +338,8 @@ namespace BZROpenShim::QuickSave
             return reason;
         if (Hooks::RallyKeyClashesWithChord(chord))
             return "Shift plus the rally key clears the rally point";
+        if (Hooks::RtsCommandActionTakingChord(chord) != nullptr)
+            return "an RTS action (Input > RTS Actions) uses it";
         (save ? g_chords.save : g_chords.load) = chord;
         (save ? g_saveText : g_loadText) = text;
         // Decide matches by the new keys only, so a mark left by the old chord

@@ -210,6 +210,10 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Producer Rally Ground Command Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Producer Rally Object Command Hook", false, {} },
             { 0, HookEngine::PatchType::JMP5, {}, "Producer Rally Broadcast Command Hook", false, {} },
+            // RtsMarkers: pass-through on ControlPanel::BroadcastCommand
+            // (what, GameObject*) that notes an order ping for the local
+            // player. Without it, object orders draw no ping.
+            { 0, HookEngine::PatchType::JMP5, {}, "RTS Markers Object Command Hook", false, {} },
             // FastMenuTransitions: main menu, Instant Action, Multiplayer and
             // Custom Campaigns keep their mounts but skip the Modable
             // clear+initialise while the group holds the main set; the mission

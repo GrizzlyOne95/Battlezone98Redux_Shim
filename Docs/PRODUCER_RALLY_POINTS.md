@@ -586,8 +586,8 @@ are attached from that tick, which is the thread `Ensure()` requires.
 `include/offense_overflow_policy.h` (tests:
 `tests/offense_overflow_policy_tests.cpp`). Log tag `[OVERFLOW]`. Single
 player only (FeatureTier::SinglePlayer). BZCC model: units past the slot
-limit live in F1-F7 groups (max 10 per group, one ODF). **UNVERIFIED at
-runtime.**
+limit live in F1-F7 groups (max 10 per group, one ODF). Live-tested
+2026-11-16 on GOG 2.2.301: see "Live test results" below.
 
 ## Behaviour
 
@@ -629,19 +629,43 @@ bind per part: the build gate and both free-slot sites must all go in.
 
 ## Known limits
 
-- **UNVERIFIED:** a unit built with no free team slot. Stock never builds one
-  for the user team; whether it later takes a slot that frees up, and whether
-  every engine path copes with a slotless craft, needs the live test.
+- A unit built with no free team slot takes a slot that frees up (live:
+  the slotless tank moved into slot 5 when that tank died). Whether every
+  other engine path (save/load, scrap-recycle, orders) copes with a slotless
+  craft is UNVERIFIED.
 - Two producers finishing on the same frame can both pass the gate for the
   last place in a group; the second unit then finds no group and stays
   ungrouped and slotless, selectable only by clicking it.
 - Only the user team and only the Offense range (5-14) are extended.
 
+## Live test results (2026-11-16, GOG 2.2.301)
+
+Fixture: ExtendedUnitCap and GroupMemberMenu on, 10 slotted `avtank`, a
+deployed `avmuf` on a Lua-spawned `eggeizr1` geyser (the bench map has
+none), menu keys driven through Frida. Evidence: `[OVERFLOW]`/`[AUTOGROUP]`
+lines in openshim.log and the fixture's `[OVFT]` lines in BZLogger.txt.
+
+- PASS: with 10 offensive units the Factory entries stay enabled
+  (`build gate open: odf='avtank' odfRead=1 canPlace=1`, likewise for
+  avltnk, avrckt, avapc, avhraz, avwalk).
+- PASS: the 11th and 12th tanks build, sit in no team slot and join group
+  index 0 (`started group index 0`, `joined group index 0`).
+- PASS: F1 twice opens the member list (`member list for group index 0`);
+  key 1 then selects the overflow tank.
+- PASS: Ctrl+Offense selects the 10 slotted tanks plus the grouped overflow
+  tank (selectNum 11).
+- PASS: killing a slotted tank moves the slotless tank into the freed slot.
+- Seen: a tank whose pilot was ejected leaves the group (stock drops empty
+  craft); the fixture's re-board step did not run, so re-boarding is
+  UNVERIFIED.
+- Not run: greyed entry with all 7 groups unusable, save/load, multiplayer.
+
 # Group member list
 
 `[Gameplay] GroupMemberMenu`, default ON; Options page Controls, row "Group
 Member Menu". Same source files as "Extended unit cap". Single player only.
-**UNVERIFIED at runtime.**
+Live-tested 2026-11-16 on GOG 2.2.301: see "Live test results" under
+"Extended unit cap".
 
 ## Behaviour
 

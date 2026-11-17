@@ -1,0 +1,391 @@
+// rts_placement_policy.h
+// BZR Open Shim - RTS placement aids (rts_placement.cpp, rts_markers.cpp):
+// the engine-independent rules behind the build ghost, the power range rings
+// and the waypoint lines. Header-only, portable C++14 and free of Windows and
+// Ogre, so the unit tests check the same rules the shim runs. See
+// Docs/RTS_MARKERS.md ("Build Ghost", "Power Range", "Waypoint Lines").
+#pragma once
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <string>
+
+namespace BZROpenShim
+{
+    namespace RtsPlacement
+    {
+        // ---- Stock preview (ConstructionRig::GetCommand 0x0049D230) ---------
+        // GetCommand's return values for a picked building (rows
+        // RtsGhostPreviewResults): 8 = CMD_DROPOFF (the spot is valid), 9 = the
+        // spot is refused (no power in range, or CanBuildHere failed).
+        constexpr int kResultValid = 8;
+        constexpr int kResultRefused = 9;
+
+        // The four ghost tints. Valid/NoPower/Blocked mirror the stock ground
+        // quad's sprite (ground.G / ground.Y / ground.R); Neutral is the nav
+        // ghost, which never asks the engine.
+        enum class Tint : uint8_t
+        {
+            None,
+            Valid,
+            NoPower,
+            Blocked,
+            Neutral,
+        };
+
+        // The tint the stock preview shows after one GetCommand call: the
+        // sprite pointer it left in ConstructionDisplay +0x68 compared with the
+        // three it loaded at +0x6C/+0x70/+0x74. The result must agree with
+        // the sprite (8 with G, 9 with Y or R): GetCommand only sets the sprite
+        // when the rig is the user's ally, so a stale sprite from an earlier
+        // call never paints a different answer.
+        inline Tint TintFor(int result, uintptr_t sprite, uintptr_t green, uintptr_t yellow, uintptr_t red)
+        {
+            if (sprite == 0)
+                return Tint::None;
+            if (result == kResultValid && sprite == green)
+                return Tint::Valid;
+            if (result == kResultRefused && sprite == yellow)
+                return Tint::NoPower;
+            if (result == kResultRefused && sprite == red)
+                return Tint::Blocked;
+            return Tint::None;
+        }
+
+        constexpr const char* kGhostMaterialValid = "openshim_rtsghost_g";
+        constexpr const char* kGhostMaterialNoPower = "openshim_rtsghost_y";
+        constexpr const char* kGhostMaterialBlocked = "openshim_rtsghost_r";
+        constexpr const char* kGhostMaterialNeutral = "openshim_rtsghost_n";
+
+        inline const char* MaterialFor(Tint tint)
+        {
+            switch (tint)
+            {
+            case Tint::Valid:
+                return kGhostMaterialValid;
+            case Tint::NoPower:
+                return kGhostMaterialNoPower;
+            case Tint::Blocked:
+                return kGhostMaterialBlocked;
+            case Tint::Neutral:
+                return kGhostMaterialNeutral;
+            case Tint::None:
+            default:
+                return nullptr;
+            }
+        }
+
+        // The cursor ghost shows while the hook recorded a preview this tick
+        // or the one before (`tickSerial - recordSerial` <= 1, wrap-safe).
+        // `tickSerial` is the serial the hook stamps on records made since
+        // the previous tick (rts_placement.cpp passes its counter minus one,
+        // as it increments at the start of the tick). Also needed: the
+        // option is on, the HUD is shown and the engine is not in its
+        // alternate render pass (DAT_02cecf74, which also suppresses the stock
+        // quad). Ticks with no GetCommand call age the record out.
+        inline bool GhostVisible(bool optionOn, bool hudHidden, bool recorded, uint32_t recordSerial,
+                                 uint32_t tickSerial, bool altPass, Tint tint)
+        {
+            if (!optionOn || hudHidden || !recorded || altPass || tint == Tint::None)
+                return false;
+            return static_cast<uint32_t>(tickSerial - recordSerial) <= 1u;
+        }
+
+        // ---- Class -------------------------------------------------------------
+        // GameObjectClass +0x14 signatures GetCommand gives the power test
+        // (row RtsGhostTowerSigCheck: `cmp dword [eax+14h], imm32`).
+        constexpr uint32_t kSigComm = 0x434F4D4D; // 'COMM'
+        constexpr uint32_t kSigTurr = 0x54555252; // 'TURR'
+        constexpr uint32_t kSigShld = 0x53484C44; // 'SHLD'
+
+        inline bool NeedsPower(uint32_t classSig)
+        {
+            return classSig == kSigComm || classSig == kSigTurr || classSig == kSigShld;
+        }
+
+        // The class's model: GameObjectClass +0x28 is an inline char[8] (the
+        // ODF baseName), not NUL-terminated when all 8 are used. The engine
+        // builds "%.*s.mesh" from it (FUN_0067f480; row RtsGhostMeshName).
+        // Empty when the field is empty or holds a byte outside printable
+        // ASCII (a garbage read).
+        constexpr size_t kMeshBaseLength = 8;
+
+        inline std::string MeshNameFor(const char* base)
+        {
+            if (!base)
+                return std::string();
+            size_t n = 0;
+            while (n < kMeshBaseLength && base[n] != '\0')
+            {
+                const unsigned char c = static_cast<unsigned char>(base[n]);
+                if (c < 0x21 || c > 0x7E)
+                    return std::string();
+                ++n;
+            }
+            if (n == 0)
+                return std::string();
+            char buffer[32] = {};
+            std::snprintf(buffer, sizeof(buffer), "%.*s.mesh", static_cast<int>(n), base);
+            return std::string(buffer);
+        }
+
+        // ---- Nav ghosts --------------------------------------------------------
+        // The Go To Nav submenu lists the user team's beacon slots 0x23..0x2C
+        // (row RtsNavSlotLoop), skipping empty ones.
+        constexpr int kFirstNavSlot = 0x23;
+        constexpr int kLastNavSlot = 0x2C;
+        constexpr size_t kMaxNavGhosts = static_cast<size_t>(kLastNavSlot - kFirstNavSlot + 1);
+
+        // Nav ghosts while the submenu is open (ControlPanel +0x117C equals the
+        // nav menu id, row RtsNavSubmenuOpen), Build at Nav is active and a
+        // selected rig has a building picked.
+        inline bool NavGhostsWanted(bool optionOn, bool hudHidden, bool buildNavActive, int openMenu, int navMenu,
+                                    uint32_t pickedClass)
+        {
+            return optionOn && !hudHidden && buildNavActive && openMenu == navMenu && pickedClass != 0;
+        }
+
+        // ---- Orientation -------------------------------------------------------
+        struct Axes
+        {
+            float x[3];
+            float y[3];
+            float z[3];
+        };
+
+        // Render-space node axes for a sim basis (MAT_3D right/up/front).
+        // Sim -> render flips z; Ogre mesh local -> sim local mirrors z too
+        // (native_chunk_mesh.cpp FragmentOriginShift), so mesh +Z is -front.
+        // False when an axis is not finite or degenerate.
+        inline bool RenderAxesFromSimBasis(const float right[3], const float up[3], const float front[3], Axes& out)
+        {
+            const float* basis[3] = {right, up, front};
+            float unit[3][3] = {};
+            for (int a = 0; a < 3; ++a)
+            {
+                const float* v = basis[a];
+                if (!std::isfinite(v[0]) || !std::isfinite(v[1]) || !std::isfinite(v[2]))
+                    return false;
+                const float length = std::sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+                if (!(length > 1e-4f))
+                    return false;
+                for (int i = 0; i < 3; ++i)
+                    unit[a][i] = v[i] / length;
+            }
+            out.x[0] = unit[0][0];
+            out.x[1] = unit[0][1];
+            out.x[2] = -unit[0][2];
+            out.y[0] = unit[1][0];
+            out.y[1] = unit[1][1];
+            out.y[2] = -unit[1][2];
+            out.z[0] = -unit[2][0];
+            out.z[1] = -unit[2][1];
+            out.z[2] = unit[2][2];
+            return true;
+        }
+
+        // A level sim basis facing the horizontal part of `front` (the
+        // player's heading): right = (fz, 0, -fx), up = +Y. False when the
+        // heading is (nearly) vertical or not finite.
+        inline bool YawBasis(const float front[3], float right[3], float up[3], float flatFront[3])
+        {
+            if (!std::isfinite(front[0]) || !std::isfinite(front[2]))
+                return false;
+            const float length = std::sqrt(front[0] * front[0] + front[2] * front[2]);
+            if (!(length > 1e-3f))
+                return false;
+            const float fx = front[0] / length, fz = front[2] / length;
+            flatFront[0] = fx;
+            flatFront[1] = 0.0f;
+            flatFront[2] = fz;
+            right[0] = fz;
+            right[1] = 0.0f;
+            right[2] = -fx;
+            up[0] = 0.0f;
+            up[1] = 1.0f;
+            up[2] = 0.0f;
+            return true;
+        }
+
+        // ---- Power range -------------------------------------------------------
+        constexpr size_t kMaxPowerRings = 16;
+        // The plant vector is sanity-checked before it is walked; more than
+        // this many entries means a bad read.
+        constexpr size_t kMaxPlantEntries = 1024;
+        constexpr float kMaxPowerRadius = 2000.0f;
+
+        // std::vector<PowerPlant*> (_Myfirst, _Mylast): both null (empty) or
+        // ordered, 4-byte aligned and not absurdly long.
+        inline bool PlantVectorSane(uintptr_t first, uintptr_t last, size_t& count)
+        {
+            count = 0;
+            if (first == 0 && last == 0)
+                return true;
+            if (first < 0x10000 || last < first || ((last - first) % 4u) != 0)
+                return false;
+            const size_t n = static_cast<size_t>((last - first) / 4u);
+            if (n > kMaxPlantEntries)
+                return false;
+            count = n;
+            return true;
+        }
+
+        struct PlantCandidate
+        {
+            bool ally = false; // IsAlly(rig, plant)
+            float pos[3] = {0.0f, 0.0f, 0.0f};
+            float radius = 0.0f; // plant class +0x160 (powerRadius)
+        };
+
+        // Indices of the plants that get a ring: allied, finite position, a
+        // sane radius; the `cap` nearest (2D) to the focus point.
+        inline size_t SelectPowerRings(const PlantCandidate* plants, size_t count, float focusX, float focusZ,
+                                       size_t cap, size_t* outIndices)
+        {
+            if (!plants || !outIndices || cap == 0)
+                return 0;
+            size_t chosen = 0;
+            float chosenDistance[kMaxPowerRings] = {};
+            if (cap > kMaxPowerRings)
+                cap = kMaxPowerRings;
+            for (size_t i = 0; i < count; ++i)
+            {
+                const PlantCandidate& p = plants[i];
+                if (!p.ally || !std::isfinite(p.pos[0]) || !std::isfinite(p.pos[1]) || !std::isfinite(p.pos[2]) ||
+                    !std::isfinite(p.radius) || !(p.radius > 0.0f) || p.radius > kMaxPowerRadius)
+                    continue;
+                const float dx = p.pos[0] - focusX, dz = p.pos[2] - focusZ;
+                const float d = dx * dx + dz * dz;
+                size_t at = chosen;
+                if (chosen == cap)
+                {
+                    if (!(d < chosenDistance[cap - 1]))
+                        continue;
+                    at = cap - 1;
+                }
+                else
+                {
+                    ++chosen;
+                }
+                // Insertion into the sorted list.
+                while (at > 0 && chosenDistance[at - 1] > d)
+                {
+                    chosenDistance[at] = chosenDistance[at - 1];
+                    outIndices[at] = outIndices[at - 1];
+                    --at;
+                }
+                chosenDistance[at] = d;
+                outIndices[at] = i;
+            }
+            return chosen;
+        }
+
+        // ---- Waypoint lines ----------------------------------------------------
+        constexpr size_t kMaxWaypointUnits = 16;
+        // GameObject command records (row RtsCommandPromote): current at
+        // +0xA8, pending at +0xC8, 0x20 bytes each; what at +0x04, the
+        // AiPath* at +0x0C.
+        constexpr size_t kCurrentRecordOffset = 0xA8;
+        constexpr size_t kPendingRecordOffset = 0xC8;
+        constexpr size_t kRecordWhatOffset = 0x04;
+        constexpr size_t kRecordPathOffset = 0x0C;
+        // AiPath (row RtsAiPathCtor): point count at +4, VECTOR_2D* at +8.
+        constexpr size_t kPathCountOffset = 0x04;
+        constexpr size_t kPathPointsOffset = 0x08;
+        constexpr int32_t kMaxPathPoints = 4096;
+        constexpr int kCmdStop = 2;
+        constexpr int kCmdGo = 3;
+        constexpr int kCmdAttack = 4;
+        constexpr int kCmdLast = 26;
+        // A line shorter than this is the unit standing on its destination.
+        constexpr float kMinLineLength = 2.0f;
+
+        // Reads the destination of the command record at `object + record`:
+        // the last point of its AiPath. False for none/select/stop (idle),
+        // unknown command ids, no path or a nonsense path. `read(address,
+        // out, size)` copies engine memory and returns false on a fault.
+        template <typename Reader>
+        bool CommandDestination(Reader&& read, uintptr_t object, size_t record, int& what, float& x, float& z)
+        {
+            what = 0;
+            int32_t value = 0;
+            if (!object || !read(object + record + kRecordWhatOffset, &value, sizeof(value)))
+                return false;
+            what = value;
+            if (what <= kCmdStop || what > kCmdLast)
+                return false;
+            uint32_t path = 0;
+            if (!read(object + record + kRecordPathOffset, &path, sizeof(path)) || path < 0x10000u)
+                return false;
+            int32_t count = 0;
+            uint32_t points = 0;
+            if (!read(static_cast<uintptr_t>(path) + kPathCountOffset, &count, sizeof(count)) || count <= 0 ||
+                count > kMaxPathPoints)
+                return false;
+            if (!read(static_cast<uintptr_t>(path) + kPathPointsOffset, &points, sizeof(points)) || points < 0x10000u)
+                return false;
+            float point[2] = {};
+            if (!read(static_cast<uintptr_t>(points) + 8u * static_cast<uint32_t>(count - 1), point, sizeof(point)))
+                return false;
+            if (!std::isfinite(point[0]) || !std::isfinite(point[1]) || std::fabs(point[0]) > 1.0e6f ||
+                std::fabs(point[1]) > 1.0e6f)
+                return false;
+            x = point[0];
+            z = point[1];
+            return true;
+        }
+
+        struct LineColour
+        {
+            float r = 1.0f;
+            float g = 1.0f;
+            float b = 1.0f;
+            float a = 1.0f;
+        };
+
+        // Go green, Attack red, any other order yellow (the ping colours);
+        // the pending order's line is dimmer.
+        inline LineColour WaypointColour(int what, bool pending)
+        {
+            LineColour c;
+            if (what == kCmdGo)
+                c = {0.30f, 1.00f, 0.40f, 0.70f};
+            else if (what == kCmdAttack)
+                c = {1.00f, 0.22f, 0.16f, 0.70f};
+            else
+                c = {1.00f, 0.86f, 0.30f, 0.70f};
+            if (pending)
+                c.a *= 0.45f;
+            return c;
+        }
+
+        // Draped line: a ribbon sampled every kLineSegmentLength metres, at
+        // most kMaxLineSegments segments (the ring strip's vertex budget).
+        constexpr float kLineSegmentLength = 4.0f;
+        constexpr unsigned kMaxLineSegments = 96;
+        constexpr float kLineWidth = 0.6f;
+
+        inline unsigned LineSegmentsFor(float length)
+        {
+            if (!std::isfinite(length) || !(length > 0.0f))
+                return 1;
+            const float wanted = std::ceil(length / kLineSegmentLength);
+            if (wanted <= 1.0f)
+                return 1;
+            if (wanted >= static_cast<float>(kMaxLineSegments))
+                return kMaxLineSegments;
+            return static_cast<unsigned>(wanted);
+        }
+
+        inline bool ShouldDrawLine(float fromX, float fromZ, float toX, float toZ)
+        {
+            const float dx = toX - fromX, dz = toZ - fromZ;
+            const float length = std::sqrt(dx * dx + dz * dz);
+            return std::isfinite(length) && length >= kMinLineLength;
+        }
+    }
+}
