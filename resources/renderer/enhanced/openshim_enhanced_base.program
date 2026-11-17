@@ -2611,6 +2611,17 @@ fragment_program OSE_BaseENHighNoShadow_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -2637,6 +2648,17 @@ fragment_program OSE_BaseENHighShadow_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -2663,6 +2685,17 @@ fragment_program OSE_BaseENHighPSSM_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3014,6 +3047,17 @@ fragment_program OSE_BaseENMediumNoShadow_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3041,6 +3085,17 @@ fragment_program OSE_BaseENMediumShadow_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3068,6 +3123,17 @@ fragment_program OSE_BaseENMediumPSSM_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3095,6 +3161,17 @@ fragment_program OSE_BaseENLowNoShadow_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3122,6 +3199,17 @@ fragment_program OSE_BaseENLowShadow_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3149,6 +3237,17 @@ fragment_program OSE_BaseENLowPSSM_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3184,6 +3283,17 @@ fragment_program OSE_BaseIBLHighNoShadow_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3210,6 +3320,17 @@ fragment_program OSE_BaseIBLHighShadow_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 
@@ -3236,6 +3357,17 @@ fragment_program OSE_BaseIBLHighPSSM_fragmentHLSL4 hlsl
         param_named surfaceMuzzle1 float4 0 0 0 0
         param_named surfaceBarrel0 float4 0 0 0 0
         param_named surfaceBarrel1 float4 0 0 0 0
+        param_named_auto osMark0 custom 1400
+        param_named_auto osMark1 custom 1401
+        param_named_auto osMark2 custom 1402
+        param_named_auto osMark3 custom 1403
+        param_named_auto osMark4 custom 1404
+        param_named_auto osMark5 custom 1405
+        param_named_auto osMark6 custom 1406
+        param_named_auto osMark7 custom 1407
+        param_named_auto osMarkHeat0 custom 1408
+        param_named_auto osMarkHeat1 custom 1409
+        param_named_auto osMarkKey custom 1410
     }
 }
 

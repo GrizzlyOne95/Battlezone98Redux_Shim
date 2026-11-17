@@ -377,7 +377,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Full-resolution authored terrain tiles, with optional normal/specular maps, from a compatible "
       "pack. DX11 Enhanced only; other profiles keep the original atlas. Restart required." },
-    { "Micro Relief", "Terrain", "TerrainMicroRelief", nullptr, 0,
+    { "Terrain Tessellation", "Terrain", "TerrainMicroRelief", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Experimental shallow ground relief. Visual only; collision is unchanged. "
@@ -854,6 +854,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Decode a new music track's first buffer once instead of twice, shortening the hitch at each track change. Restart required." },
+    { "Music Refill", "Fixes", "MusicRefillCatchUp", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Keep music refills level with playback so missed buffer updates cannot replay stale audio (the skip like a scratched CD). Restart required." },
     { "Builder Cleanup", "Fixes", "ConstructorRemoteBuild", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -1092,7 +1096,7 @@ static const char* const kShimSettingsStockKeepKeys[] =
     "EditorOverheadPlacementOrder", "JumpSnipeCrouch", "AiMultiProducerMakers",
     "SatelliteVisibilityFix", "UnfocusedMouseRelease", "ApcAlliedTargetDeploy", "SplinterUndead",
     "HowitzerUndeployedRetaliation", "SniperEjectAimFix", "TugCargoPostLoad", "ConstructorRecycleStaleTarget",
-    "PreciseTimestep", "MusicSingleFill", "ConstructorRemoteBuild", "RestoreCraftBounds",
+    "PreciseTimestep", "MusicSingleFill", "MusicRefillCatchUp", "ConstructorRemoteBuild", "RestoreCraftBounds",
     "NetImprovements", "ReliableRetryAdaptToPing",
     "ThreadScheduling", "DynamicGeometryPieceReuse", "DynamicGeometryFastSort",
     "AutoStage", "StatsTracking",

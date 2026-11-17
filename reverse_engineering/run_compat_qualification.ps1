@@ -133,8 +133,8 @@ function Get-Metrics([string]$RunDir, [datetime]$Start, $Info) {
         skipped      = @($cl | Where-Object { $_ -match 'skipped shaderless draw|action=skip-draw' }).Count
         declined     = @($cl | Where-Object { $_ -match 'instantiate declined' }).Count
         failed       = @($cl | Where-Object { $_ -match 'instantiate failed' }).Count
-        # "instantiation failed ... action=stock-fallback" follows every "instantiate declined ... excluded-class"
-        # (UI/HUD classes are deliberately left on stock programs); counted apart from real failures.
+        # "instantiation failed ... action=stock-fallback": a non-excluded material fell back to stock programs.
+        # Excluded classes (UI/HUD) log only their Info "declined ... excluded-class" line, so this counts real fallbacks.
         stockFallback = @($cl | Where-Object { $_ -match 'instantiation failed' -and $_ -match 'stock-fallback' }).Count
         instantiationFailedOther = @($cl | Where-Object { $_ -match 'instantiation failed' -and $_ -notmatch 'stock-fallback' }).Count
         guard        = @($cl | Where-Object { $_ -match 'native-input-guard|path=suppress' }).Count

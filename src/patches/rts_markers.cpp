@@ -1148,6 +1148,19 @@ namespace BZROpenShim
                          "[RTSMARKERS] %s: prologue mismatch at 0x%08X; no pings for object orders", kHookName, site);
                 return nullptr;
             }
+            // Verify the ControlPanelBroadcastCommandObj engine row while the
+            // bytes are still stock. ResolveEngineAddress remembers a verified
+            // row for the process, so the RTS commands parts that call this
+            // function (Defend target, Build at Nav) still bind after the
+            // JMP5; otherwise their guard reads the JMP and they stand down.
+            uint32_t rowAddress = 0;
+            if (HookEngine::ResolveEngineAddress("ControlPanelBroadcastCommandObj", rowAddress) !=
+                    HookEngine::EngineAddressStatus::Bound ||
+                rowAddress != site)
+                LogShimA(LogLevel::Warn, kComponent,
+                         "[RTSMARKERS] %s: ControlPanelBroadcastCommandObj row did not verify at 0x%08X (row 0x%08X); "
+                         "RTS commands that call it will stand down",
+                         kHookName, site, rowAddress);
             auto* tramp = static_cast<uint8_t*>(VirtualAlloc(nullptr, 32, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
             if (!tramp)
             {
