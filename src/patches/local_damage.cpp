@@ -109,6 +109,8 @@ namespace BZROpenShim
         // ---- Render state (render thread) ----------------------------------
         std::atomic<bool> g_failed{false};
         std::atomic<bool> g_active{false};
+        // Set by the options menu; consumed by the render-queue tick.
+        std::atomic<bool> g_reloadRequested{false};
         // The Root the listener went into. A different Root singleton (a
         // recreated one) gets the listener again.
         void* g_listenerRoot = nullptr;
@@ -185,7 +187,8 @@ namespace BZROpenShim
         {
             g_configRead = true;
             bool enabled = false;
-            TryGetUserConfigBool(kSection, "Enabled", enabled);
+            if (!TryGetUserConfigBool(kSection, "HullScorch", enabled))
+                TryGetUserConfigBool(kSection, "Enabled", enabled);
             int maxMarks = Policy::kDefaultMaxMarks;
             ReadInt("MaxMarksPerUnit", maxMarks);
             float ember = Policy::kDefaultEmberSeconds;
@@ -807,6 +810,11 @@ namespace BZROpenShim
             return g_enabled.load(std::memory_order_acquire) && GatePasses();
         }
 
+        void RequestReload()
+        {
+            g_reloadRequested.store(true, std::memory_order_release);
+        }
+
         CraftCapture BeforeCraftDamage(void* receiver, void* damage, uint32_t argument, uintptr_t returnAddress) noexcept
         {
             CraftCapture capture;
@@ -928,8 +936,42 @@ namespace BZROpenShim
         LogShimA(LogLevel::Info, kComponent, "[LOCALDMG] active (max marks %d, ember %.1fs)", g_maxMarks, g_emberSeconds);
     }
 
+    namespace
+    {
+        // Render thread. Off: stop capture first, then take the marks off the
+        // scene. On: let the tick below re-run the mission-start evaluation.
+        void ApplyLiveToggle()
+        {
+            const bool wasEnabled = g_enabled.load(std::memory_order_acquire);
+            ReloadConfig();
+            // Other live rows request a reload too; act only on a real flip.
+            if (g_enabled.load(std::memory_order_acquire) == wasEnabled)
+                return;
+            if (!g_enabled.load(std::memory_order_acquire))
+            {
+                if (!g_active.exchange(false))
+                    return;
+                RunGuarded(ZeroMarkedEntities, "toggle-off zeroing");
+                try
+                {
+                    LogMissionSummary();
+                    ReleaseMissionState();
+                }
+                catch (...)
+                {
+                    Disable("fault releasing mission state on toggle off");
+                }
+                return;
+            }
+            if (!g_active.load(std::memory_order_acquire) && !g_awaitTeardown)
+                g_missionEvaluated = false;
+        }
+    }
+
     void LocalDamageRenderFrameTick()
     {
+        if (g_reloadRequested.exchange(false, std::memory_order_acq_rel))
+            ApplyLiveToggle();
         // Started at the first world render of a mission, as GPU skinning.
         if (g_awaitTeardown)
         {

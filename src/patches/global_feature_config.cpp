@@ -38,6 +38,7 @@
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
 #include "screen_flash.h"
+#include "local_damage.h"
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
@@ -918,6 +919,7 @@ namespace BZROpenShim
             SunFlash::ReloadConfig();
             ScreenFlash::ReloadConfig();
             ReloadLaserSightConfig();
+            LocalDamage::RequestReload();
             break;
         case ShimSettingApplyGroup::SteamLauncher:
             SyncSteamLauncherProxy();

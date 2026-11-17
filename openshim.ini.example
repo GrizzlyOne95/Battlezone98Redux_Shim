@@ -1394,6 +1394,8 @@ ShadowFarDistance =
 ; mod-supplied shaders are untouched. Buildings, pilots and collisions are
 ; not marked. See Docs/LOCAL_DAMAGE.md.
 ; Accepted: boolean/integer flag; use 0/1. Default: OFF.
+; Also the Hull Scorch row in Options > OpenShim > Video, which applies live
+; and saves this setting as HullScorch (Enabled is read as the older spelling).
 Enabled = 0
 
 ; Marks kept per unit; the oldest is replaced. Hits close to an existing mark

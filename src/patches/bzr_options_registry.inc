@@ -85,6 +85,9 @@ static const char* const kShimSettingsTargetPolicyAltKeys[] = { "TargetReticle" 
 static const char* const kShimSettingsReticleConvAltKeys[] = { "SmartReticleConvergence" };
 static const char* const kShimSettingsScavengerAltKeys[] = { "ScavengerPathing" };
 static const char* const kShimSettingsBindsUiAltKeys[] = { "CustomBindingUi" };
+// [LocalDamage] Enabled is the older spelling; "Enabled" is also AutoSave's canonical key,
+// and row keys must be unique, so the row writes HullScorch.
+static const char* const kShimSettingsHullScorchAltKeys[] = { "Enabled" };
 static const char* const kShimSettingsRendererValues[] = { "Auto", "DX11", "DX9" };
 static const char* const kShimSettingsRendererLabels[] = { "Auto", "DirectX 11", "DirectX 9" };
 static const char* const kShimSettingsRenderProfileValues[] = { "Retro", "Redux", "Enhanced" };
@@ -382,6 +385,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Experimental shallow ground relief. Visual only; collision is unchanged. "
       "DX11 only. Increases GPU cost. Restart required." },
+    { "Hull Scorch", "LocalDamage", "HullScorch", kShimSettingsHullScorchAltKeys, 1,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::LiveEngineToggle,
+      "Charred, glowing hull marks where weapon hits land. DX11 Enhanced only. Applies live." },
     { "Sun Glare", "Display", "SunFlashbang", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::LiveEngineToggle,
@@ -1052,7 +1059,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "UnitEmptyColor", "Default" },
     { "FieldOfView", "0" }, { "RenderProfile", "Redux" }, { "FXAA", "0" }, { "DxgiFlipModel", "0" },
     { "ShadowFarDistance", "stock" }, { "EnhancedLightSelectionV2", "0" },
-    { "TerrainHdEnabled", "0" }, { "TerrainMicroRelief", "0" },
+    { "TerrainHdEnabled", "0" }, { "TerrainMicroRelief", "0" }, { "HullScorch", "0" },
     // Stock draws the sun flash, so this one is On.
     { "SunFlashbang", "1" }, { "ExplosionFlash", "Stock" }, { "DamageFlash", "Stock" },
     { "UnderAttackAlert", "Normal" }, { "SuppressHopOutAttackAlert", "0" },
