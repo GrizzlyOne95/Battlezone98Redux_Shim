@@ -64,7 +64,7 @@ static const char* const kShimCategoryControls[] = {
     kShimRowRtsCommands };
 static const char* const kShimCategoryRtsCommands[] = {
     "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold",
-    "Build at Nav" };
+    "Build at Nav", "Build Ghost", "Power Range", "Waypoint Lines" };
 static const char* const kShimCategoryGameplay[] = {
     "Target Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
@@ -135,7 +135,8 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
         kShimCategoryEffects),
     // Subpage reached from Controls.
     BZR_SHIM_CATEGORY("RTS Commands", "RTS COMMANDS",
-        "Unit command extras: target your own units and buildings, mixed-selection menus, area select and Hold.",
+        "Unit command extras: target your own units and buildings, mixed-selection menus, area select, Hold, "
+        "building at navs, build ghosts, power range and waypoint lines.",
         kShimCategoryRtsCommands),
 };
 #undef BZR_SHIM_CATEGORY

@@ -1478,6 +1478,10 @@ namespace BZROpenShim
         // Repair/Reload, area select and Hold (Docs/RTS_COMMANDS.md).
         void InstallRtsCommandsIfPossible();
         void ReloadRtsCommandsConfig();
+        // Game thread: the first selected commandable rig with a building
+        // picked (RtsCommandsPolicy::PickedBuildClass) while Build at Nav is
+        // active; false otherwise. Read by the build ghost's nav ghosts.
+        bool RtsBuildAtNavPickedRig(void*& rig, uint32_t& buildClass);
         void RefreshRtsCommandsState();
         void ResetRtsCommands();
         // Frame thread, beside TickOffenseOverflow: key filters (and the

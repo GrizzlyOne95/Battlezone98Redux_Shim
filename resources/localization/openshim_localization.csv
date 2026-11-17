@@ -276,6 +276,12 @@ openshim_opt:RtsHold:label~Hold~~~~~~
 openshim_opt:RtsHold:desc~Z holds the selected units in place. With Shift held the Defend entry reads Hold and does the same; turn that off if Shift+number is bound elsewhere. Single player only.~~~~~~
 openshim_opt:RtsBuildAtNav:label~Build at Nav~~~~~~
 openshim_opt:RtsBuildAtNav:desc~With a building picked on a selected Construction Rig, Go To Nav reads Build at Nav: the rig builds it at the nav you pick, facing your way. A spot it cannot build on buzzes and keeps the selection.~~~~~~
+openshim_opt:RtsBuildGhost:label~Build Ghost~~~~~~
+openshim_opt:RtsBuildGhost:desc~While you place a building, a see-through copy of it shows where it will stand: green when the spot is good, yellow without power, red when blocked. With Build at Nav, the Go To Nav list also shows it at every nav. Only you see it.~~~~~~
+openshim_opt:RtsPowerRange:label~Power Range~~~~~~
+openshim_opt:RtsPowerRange:desc~While you place a building that needs power (gun towers, the Comm Bunker), the reach of every allied power plant shows as a ring on the ground. Only you see it.~~~~~~
+openshim_opt:RtsWaypointLines:label~Waypoint Lines~~~~~~
+openshim_opt:RtsWaypointLines:desc~Selected units show a line on the ground to where their current order takes them, and a fainter one on to their next order. Only you see it.~~~~~~
 openshim_opt:Turbo:label~Global Turbo~Turbo global~Globaler Turbo~Turbo global~Turbo Globale~Îáùèé òóğáî~Turbo Global
 openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~Turbo disponible sur toutes les unités pilotables. Solo uniquement.~Turbo für alle steuerbaren Einheiten verfügbar. Nur Einzelspieler.~Turbo disponible en todas las unidades conducibles. Solo un jugador.~Turbo disponibile su tutte le unità guidabili. Solo giocatore singolo.~Òóğáî äîñòóïíî íà âñåõ óïğàâëÿåìûõ şíèòàõ. Òîëüêî îäèíî÷íàÿ èãğà.~Turbo disponível em todas as unidades pilotáveis. Somente um jogador.
 openshim_opt:NoDamageSlowdown:label~No Damage Slowdown~Sans ralentis. dégâts~Kein Schadenstempo~Sin lentitud por daño~Niente Rallent. Danni~Áåç çàìåäëåíèÿ~Sem Lentidão Dano
@@ -564,7 +570,7 @@ openshim_cat:Effects:title~VISUAL EFFECTS~EFFETS VISUELS~VISUELLE EFFEKTE~EFECTO
 openshim_cat:Effects:blurb~Faction color jets, destruction chunks, muzzle effects, shell casings and person gibs.~Jets aux couleurs du camp, débris de destruction, effets de bouche, douilles et gibs de personnes.~Fraktionsfarbene Jets, Zerstörungsbrocken, Mündungseffekte, Patronenhülsen und Personen-Gibs.~Jets de color de facción, trozos de destrucción, efectos de fogonazo, casquillos y restos de personas.~Getti in colore di fazione, pezzi di distruzione, effetti di bocca, bossoli e frammenti di persone.~Öâåòíîå ïëàìÿ ôğàêöèé, îáëîìêè, äóëüíûå ıôôåêòû, ãèëüçû è ÷àñòè ëşäåé.~Jatos na cor da facção, pedaços de destruição, efeitos de cano, cápsulas vazias e gibs de pessoas.
 openshim_cat:RTSCommands:name~RTS Commands~~~~~~
 openshim_cat:RTSCommands:title~RTS COMMANDS~~~~~~
-openshim_cat:RTSCommands:blurb~Unit command extras: target your own units and buildings, mixed-selection menus, area select and Hold.~~~~~~
+openshim_cat:RTSCommands:blurb~Unit command extras: target your own units and buildings, mixed-selection menus, area select, Hold, building at navs, build ghosts, power range and waypoint lines.~~~~~~
 ~~~~~~~
 openshim_ui:bans_unnamed~(unnamed)~(sans nom)~(unbenannt)~(sin nombre)~(senza nome)~(áåç èìåíè)~(sem nome)
 openshim_ui:bans_confirm~Confirm~Confirmer~Bestätigen~Confirmar~Conferma~Ïîäòâåğäèòü~Confirmar

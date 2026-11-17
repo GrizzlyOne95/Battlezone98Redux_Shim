@@ -43,6 +43,7 @@
 #include "geometry_contact_test.h"
 #include "mesh_impact.h"
 #include "headlight_falloff.h"
+#include "rts_placement.h"
 #include "shadow_far_distance.h"
 #include "sun_flash.h"
 #include "chunk_batch_invalidation.h"
@@ -215,6 +216,7 @@ namespace BZROpenShim
             DestroyShellCasingSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyProducerRallySceneObjects(sceneManager, L"destroyAllEntities");
             DestroyLaserSightSceneObjects(sceneManager, L"destroyAllEntities");
+            DestroyRtsPlacementSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyChunkProxySceneObjects(sceneManager, L"destroyAllEntities");
             SceneMutationDrainSceneTeardown();
             OrdnanceEntityLeakOnSceneEntitiesDestroyed();

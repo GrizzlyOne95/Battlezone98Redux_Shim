@@ -47,6 +47,7 @@
 #include "quicksave_key_policy.h"
 #include "rts_commands_policy.h"
 #include "rts_markers.h"
+#include "rts_placement.h"
 #include "scene_mutation_drain.h"
 #include "shim_log.h"
 
@@ -920,7 +921,11 @@ namespace BZROpenShim::Hooks
                     continue;
                 }
                 int result = 0;
+                // Our own validation call, not the reticle hover: the build
+                // ghost must not record it (its matrix is the nav's).
+                SuppressRtsGhostRecord(true);
                 const bool queried = enabled[i] && havePos && SafeRigGetCommand(obj, pos, result);
+                SuppressRtsGhostRecord(false);
                 const Policy::BuildAtNavVerdict verdict =
                     Policy::DecideBuildAtNav(enabled[i], havePos, queried, result);
                 if (verdict == Policy::BuildAtNavVerdict::Build &&
@@ -1921,6 +1926,33 @@ namespace BZROpenShim::Hooks
         g_PendingHold.store(false);
         g_LogBudget = 48;
         RefreshRtsCommandsState();
+    }
+
+    // Game thread (the build ghost tick): the first selected commandable
+    // rig with a building picked, while Build at Nav is active.
+    bool RtsBuildAtNavPickedRig(void*& rig, uint32_t& buildClass)
+    {
+        rig = nullptr;
+        buildClass = 0;
+        if (!g_BuildNavActive.load(std::memory_order_acquire))
+            return false;
+        uint32_t handles[Policy::kSelectCapacity];
+        const int n = ReadSelection(handles);
+        for (int i = 0; i < n; ++i)
+        {
+            void* const obj = SafeGetObj(handles[i]);
+            Policy::RigPick pick;
+            if (!obj || !SafeCanCommand(obj) || !ReadRigPick(obj, pick))
+                continue;
+            const uint32_t cls = Policy::PickedBuildClass(pick);
+            if (cls != 0)
+            {
+                rig = obj;
+                buildClass = cls;
+                return true;
+            }
+        }
+        return false;
     }
 
     const char* RtsCommandActionTakingChord(const QuickSaveKeyPolicy::Chord& chord)

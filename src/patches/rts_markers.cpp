@@ -34,6 +34,14 @@
 // Driver: TickRtsMarkers, from ChunkEffect::Simulate on the game thread
 // (bzr_hooks.cpp), the same point as the rally beacons; never inside
 // render-queue traversal. Teardown: lifecycle_seams.cpp.
+//
+// The same tick drives the RTS placement aids (rts_placement.cpp): the build
+// ghosts first, then this pool draws their power rings ([Gameplay]
+// RtsPowerRange, slots RtsMarkers::kFirstPowerSlot..) and the waypoint lines
+// ([Gameplay] RtsWaypointLines: a thin draped ribbon from each selected
+// own-team unit to its current order's destination, slots
+// kFirstWaypointSlot.., and a dimmer one on to its pending order's,
+// kFirstPendingSlot..).
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
@@ -44,6 +52,8 @@
 #include "rts_markers.h"
 #include "rts_markers_assets.h"
 #include "rts_markers_policy.h"
+#include "rts_placement.h"
+#include "rts_placement_policy.h"
 #include "scene_mutation_drain.h"
 #include "shell_casing_physics.h"
 #include "shim_log.h"
@@ -559,10 +569,10 @@ namespace BZROpenShim
                 bool sectionCreated = false;
                 bool visible = false;
                 // Last built geometry; equal requests skip the rebuild.
-                float key[8] = {};
+                float key[10] = {};
                 bool keyValid = false;
             };
-            RingSlot g_Slots[RM::kPoolSize];
+            RingSlot g_Slots[RM::kSlotCount];
             bool g_AnyVisible = false;
             bool g_PoolFailed = false; // creation failed in this scene; not retried until it changes
             void* g_PoolSceneManager = nullptr;
@@ -570,9 +580,11 @@ namespace BZROpenShim
             struct RingRequest
             {
                 bool wanted = false;
-                float centre[3] = {}; // sim space
+                float centre[3] = {}; // sim space; a line's start
                 float radius = 0.0f;
                 RM::Colour colour;
+                bool line = false;   // a draped line from centre to end
+                float end[2] = {};   // sim x, z of a line's end
             };
 
             // One ring's strip, built before begin() so nothing between
@@ -606,6 +618,38 @@ namespace BZROpenShim
                     // Sim -> render: x and y keep their sign, z flips.
                     out[n++] = {ix, RM::LocalVertexY(static_cast<float>(hi), request.centre[1]), -iz};
                     out[n++] = {ox, RM::LocalVertexY(static_cast<float>(ho), request.centre[1]), -oz};
+                }
+                return n;
+            }
+
+            static_assert(RtsPlacement::kMaxLineSegments <= RM::kMaxSegments, "a line fits the ring strip budget");
+
+            // A waypoint line: a ribbon kLineWidth wide from centre to end,
+            // sampled every kLineSegmentLength metres along the ground, in the
+            // same node-local frame as a ring.
+            unsigned BuildLineStrip(const RingRequest& request, StripVertex (&out)[kMaxStripVertices])
+            {
+                const float dx = request.end[0] - request.centre[0];
+                const float dz = request.end[1] - request.centre[2];
+                const float length = std::sqrt(dx * dx + dz * dz);
+                if (!std::isfinite(length) || !(length > 0.0f))
+                    return 0;
+                const float half = 0.5f * RtsPlacement::kLineWidth;
+                const float px = -dz / length * half, pz = dx / length * half;
+                const unsigned segments = RtsPlacement::LineSegmentsFor(length);
+                unsigned n = 0;
+                double last = request.centre[1];
+                for (unsigned i = 0; i <= segments; ++i)
+                {
+                    const float t = static_cast<float>(i) / static_cast<float>(segments);
+                    const float x = dx * t, z = dz * t;
+                    double h = last;
+                    if (!TerrainHeightSeh(request.centre[0] + x, request.centre[2] + z, h))
+                        h = last;
+                    last = h;
+                    const float y = RM::LocalVertexY(static_cast<float>(h), request.centre[1]);
+                    out[n++] = {x + px, y, -(z + pz)};
+                    out[n++] = {x - px, y, -(z - pz)};
                 }
                 return n;
             }
@@ -777,12 +821,19 @@ namespace BZROpenShim
                         return false;
                     }
                 }
-                const float key[8] = {request.centre[0], request.centre[1], request.centre[2], request.radius,
-                                      request.colour.r,  request.colour.g,  request.colour.b,  request.colour.a};
+                const float key[10] = {request.centre[0], request.centre[1], request.centre[2],
+                                       request.line ? -1.0f : request.radius,
+                                       request.colour.r,  request.colour.g,  request.colour.b,  request.colour.a,
+                                       request.line ? request.end[0] : 0.0f, request.line ? request.end[1] : 0.0f};
                 if (!slot.keyValid || std::memcmp(key, slot.key, sizeof(key)) != 0)
                 {
                     static StripVertex vertices[kMaxStripVertices];
-                    const unsigned count = BuildStrip(request, vertices);
+                    const unsigned count = request.line ? BuildLineStrip(request, vertices) : BuildStrip(request, vertices);
+                    if (count < 4)
+                    {
+                        HideSlot(slot);
+                        return false;
+                    }
                     if (!EmitStripSeh(api, slot, vertices, count, request.colour))
                     {
                         // The ManualObject may be left mid-section (an AV skips
@@ -884,8 +935,87 @@ namespace BZROpenShim
                        ReadVector(static_cast<uintptr_t>(static_cast<uint32_t>(pointer)), out);
             }
 
-            void BuildRequests(RingRequest (&requests)[RM::kPoolSize])
+            // Every selected own-team unit (never the piloted vehicle), at
+            // most kMaxWaypointLineSlots of them.
+            size_t GatherSelectedOwnUnits(void* (&units)[RM::kMaxWaypointLineSlots])
             {
+                void* const player = SafeGetPlayer();
+                int count = 0;
+                if (!player || !ReadInt(g_Api.panel + kSelectCountOffset, count) || count <= 0)
+                    return 0;
+                if (count > kSelectMax)
+                    count = kSelectMax;
+                size_t found = 0;
+                for (int i = 0; i < count && found < RM::kMaxWaypointLineSlots; ++i)
+                {
+                    int handle = 0;
+                    if (!ReadInt(g_Api.panel + kSelectHandlesOffset + 4 * static_cast<size_t>(i), handle) || !handle)
+                        continue;
+                    void* obj = SafeGetObj(static_cast<uint32_t>(handle));
+                    if (!obj || obj == player || !SameTeam(obj, player))
+                        continue;
+                    units[found++] = obj;
+                }
+                return found;
+            }
+
+            void LineRequest(RingRequest& line, const float from[3], float toX, float toZ, int what, bool pending)
+            {
+                if (!RtsPlacement::ShouldDrawLine(from[0], from[2], toX, toZ))
+                    return;
+                const RtsPlacement::LineColour c = RtsPlacement::WaypointColour(what, pending);
+                line.wanted = true;
+                line.line = true;
+                std::memcpy(line.centre, from, sizeof(line.centre));
+                line.end[0] = toX;
+                line.end[1] = toZ;
+                line.colour.r = c.r;
+                line.colour.g = c.g;
+                line.colour.b = c.b;
+                line.colour.a = c.a;
+            }
+
+            void BuildPlacementRequests(RingRequest (&requests)[RM::kSlotCount])
+            {
+                RtsPowerRing rings[RM::kMaxPowerRingSlots];
+                const size_t ringCount = RtsPowerRingsThisTick(rings, RM::kMaxPowerRingSlots);
+                for (size_t i = 0; i < ringCount; ++i)
+                {
+                    RingRequest& ring = requests[RM::kFirstPowerSlot + i];
+                    ring.wanted = true;
+                    std::memcpy(ring.centre, rings[i].centre, sizeof(ring.centre));
+                    ring.radius = rings[i].radius;
+                    ring.colour = RM::kPowerColour;
+                }
+                if (!RtsWaypointLinesEnabled())
+                    return;
+                void* units[RM::kMaxWaypointLineSlots] = {};
+                const size_t unitCount = GatherSelectedOwnUnits(units);
+                for (size_t i = 0; i < unitCount; ++i)
+                {
+                    float pos[3] = {};
+                    if (!TryGetGameObjectWorldPosition(units[i], pos))
+                        continue;
+                    // The pending line starts where the current one ends.
+                    float from[3] = {pos[0], pos[1], pos[2]};
+                    int what = 0;
+                    float x = 0.0f, z = 0.0f;
+                    if (ReadRtsCommandDestination(units[i], false, what, x, z))
+                    {
+                        LineRequest(requests[RM::kFirstWaypointSlot + i], pos, x, z, what, false);
+                        double ground = pos[1];
+                        from[0] = x;
+                        from[1] = TerrainHeightSeh(x, z, ground) ? static_cast<float>(ground) : pos[1];
+                        from[2] = z;
+                    }
+                    if (ReadRtsCommandDestination(units[i], true, what, x, z))
+                        LineRequest(requests[RM::kFirstPendingSlot + i], from, x, z, what, true);
+                }
+            }
+
+            void BuildRequests(RingRequest (&requests)[RM::kSlotCount])
+            {
+                BuildPlacementRequests(requests);
                 if (g_RangeOn)
                 {
                     ArtilleryUnit units[RM::kMaxArtilleryRings];
@@ -952,6 +1082,7 @@ namespace BZROpenShim
                 {
                     if (g_AnyVisible)
                         HideAll();
+                    HideRtsPlacement();
                     return;
                 }
                 // Never mutate the scene inside render-queue traversal.
@@ -964,6 +1095,7 @@ namespace BZROpenShim
                 {
                     if (g_AnyVisible)
                         HideAll();
+                    HideRtsPlacement();
                     return;
                 }
                 if (g_PoolSceneManager != sceneManager)
@@ -973,10 +1105,14 @@ namespace BZROpenShim
                     g_PoolSceneManager = sceneManager;
                 }
 
-                RingRequest requests[RM::kPoolSize];
+                // The ghosts first: they gather the power rings drawn below.
+                const float renderOrigin[3] = {origin.x, origin.y, origin.z};
+                TickRtsPlacement(sceneManager, renderOrigin);
+
+                RingRequest requests[RM::kSlotCount];
                 BuildRequests(requests);
                 bool anyVisible = false;
-                for (size_t i = 0; i < RM::kPoolSize; ++i)
+                for (size_t i = 0; i < RM::kSlotCount; ++i)
                 {
                     if (requests[i].wanted && DrawRing(api, sceneManager, g_Slots[i], requests[i], origin))
                         anyVisible = true;
@@ -1055,10 +1191,11 @@ namespace BZROpenShim
         {
             if (!g_ConfigLoaded)
                 LoadConfig();
-            if (!g_PingsOn && !g_RangeOn)
+            if (!g_PingsOn && !g_RangeOn && !RtsPlacementAnyEnabled())
             {
                 if (g_AnyVisible)
                     HideAll();
+                HideRtsPlacement();
                 g_Pings.Clear();
                 return;
             }
@@ -1071,11 +1208,13 @@ namespace BZROpenShim
         {
             // Applied on the next tick (game thread), which hides what is off.
             LoadConfig();
+            ReloadRtsPlacementConfig();
         }
 
         void ForgetRtsMarkersSceneResources(const wchar_t* reason)
         {
             ForgetSlots(reason);
+            ForgetRtsPlacementSceneResources(reason);
         }
 
         void DeactivateRtsMarkers(const wchar_t* reason)
@@ -1088,6 +1227,7 @@ namespace BZROpenShim
             g_Pings.Clear();
             g_PoolFailed = false;
             g_PingLogBudget = 16;
+            DeactivateRtsPlacement(reason);
         }
 
         void EnsureRtsMarkerAssets(const std::filesystem::path& cacheRoot,
@@ -1115,6 +1255,8 @@ namespace BZROpenShim
                 const Asset assets[] = {
                     {RM::kShaderFile, RM::ShaderSource()},
                     {RM::kMaterialFile, RM::MaterialScript()},
+                    {RM::kGhostShaderFile, RM::GhostShaderSource()},
+                    {RM::kGhostMaterialFile, RM::GhostMaterialScript()},
                 };
                 for (const Asset& asset : assets)
                 {
