@@ -363,6 +363,15 @@
       "identity": "ControlPanel::BroadcastCommand(AiCommand what, const VECTOR_3D* where) at 0x004A70C0 on GOG Redux 2.2.301, thiscall ret 8 (0x004A7134). Loops i < [this+0x188] (selectNum) over handles [this+0x1C+4*i], GetObj 0x004DA060, CanCommand vtable+0x38, then GameObject::SetCommand 0x004DBE70(what, where, selectNum as int64). Callers (whole-image E8 scan 2026-11-12): ControlPanel::Render 0x004A08E0 menu_press paths 0x004A1EF0 and 0x004A1FB0 (cmdButton what [this+0x111C], where [this+0x1124] = Reticle groundPos, followed by SelectNone 0x004A6D50 on the second), 0x004A2611 (the +0x112C/+0x1134 command) and OverView 0x00588783 (`mov ecx,0x978E20`). ProducerRallyPoints detours the entry (JMP5 over the 6-byte push ebp/mov ebp,esp/sub esp,0Ch prologue, relocated to a trampoline) and consumes a CMD_GO while rally set mode is armed as the rally confirm. Single match in the GOG image (scan 2026-11-12)."
     },
     {
+      "name": "RTS Markers Object Command Hook",
+      "pattern": "55 8B EC 83 EC 0C 89 4D F4 C7 45 FC 00 00 00 00 EB 09 8B 45 FC 83 C0 01 89 45 FC 8B 4D F4 8B 55 FC 3B 91 88 01 00 00 7D 3C 8B 45 FC 8B 4D F4 8B 54 81 1C 52 E8 ?? ?? ?? ?? 83 C4 04 89 45 F8 8B 45 F8 8B 10 8B 4D F8 8B 42 38 FF D0 0F B6 C8 85 C9 74 10 8B 55 0C 52 8B 45 08 50 8B 4D F8 E8",
+      "offset": 0,
+      "expected_size": 6,
+      "fallback": "0x004A7050",
+      "require_unique": true,
+      "identity": "ControlPanel::BroadcastCommand(AiCommand what, GameObject* target) at 0x004A7050 on GOG Redux 2.2.301, thiscall ret 8. Loops i < [this+0x188] (selectNum) over handles [this+0x1C+4*i], GetObj, CanCommand vtable+0x38, then 0x004DBD60(what, target) per unit (FUN_004a7050.c lines 9-13; FUN_004dbd60.c line 21 stores what at +0xCC, line 30 reads target+0x18). Callers (whole-image E8 scan 2026-11-16): ControlPanel::Render 0x004A08E0 at 0x004A1EBA, 0x004A1F0C, 0x004A1F7A, 0x004A1FCC, 0x004A25DB, 0x004A262D, 0x004A3688, 0x004A423A, 0x004A4A75 and OverView at 0x00588769. RtsMarkers detours the entry (JMP5 over the 6-byte push ebp/mov ebp,esp/sub esp,0Ch prologue, relocated to a trampoline) to note a ping, then calls the original unchanged. Single match in the GOG image (scan 2026-11-16)."
+    },
+    {
       "name": "Deferred Modable Rebuild Main Store",
       "pattern": "83 B8 8C 00 00 00 04 75 05 E9 ?? ?? ?? ?? 8B 4D B8 C7 81 8C 00 00 00 04 00 00 00 E8",
       "offset": 17,
@@ -2988,6 +2997,12 @@
       "address": "0x00978E20",
       "kind": "data",
       "identity": "The global ControlPanel on exact GOG Redux 2.2.301: `mov ecx,0x978E20` before every ControlPanel command call from OverView (0x00588184, 0x00588605) and Reticle::Simulate (0x005BAA78, 0x005BAA9E). ControlPanel::BroadcastCommand(VECTOR) 0x004A70C0 loops i < [this+0x188] (selectNum, 0x004A70E1) over handles [this+0x1C+4*i] (0x004A70EF) resolved with GameObject::GetObj 0x004DA060. Read by ProducerRallyPoints. AutoGroupNewUnits appends to its groups: mission save FUN_005c7b90 line 118 (0x005C7E5D `mov ecx,0x978E20`, call 0x004A7440) writes groupNum (+0xFC4, 0x28 bytes) and groupList (+0x18C, 0xE38 bytes = 10 x 0x16C, 91 handles each) (FUN_004a7440 lines 8-10); mission load FUN_005c7510 line 204 (0x005C7A11) reads them back (FUN_004a73a0); BindGroup FUN_004a6f00 lines 7-10 and SelectGroup FUN_004a6dd0 lines 14-24 use the same layout, called with this = ControlPanel from FUN_004a08e0 (vtable slot 6) at 0x004A1D39 and 0x004A1D60."
+    },
+    {
+      "name": "RtsMarkersCursorPointField",
+      "address": "0x004A720F",
+      "expected": "8B 55 FC 8B 45 0C 89 82 24 11 00 00",
+      "identity": "ControlPanel +0x1124, the VECTOR_3D* cursor point, written here by 0x004A71E0 (FUN_004a71e0.c line 12, the ground pointer handed over by Reticle::Simulate). Reticle::Simulate FUN_005ba560.c lines 157-175 refresh it every frame in views 0/1/2/7 (line 115) and leave it null when aiming at the sky; OverView FUN_00587ef0.c lines 158, 163, 169, 285, 288 point it at the satellite cursor and line 74 clears it. Read only, by RtsMarkers for the artillery cursor ring."
     },
     {
       "name": "ControlPanelVtable",
@@ -6334,6 +6349,18 @@
       "address": "0x005CF100",
       "expected": "55 8B EC 83 EC 24 89 4D FC",
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWave::UpdateExtents (FUN_005cf100, __fastcall ecx=this): stores [this+0xE4/E8/EC/F0] = floor/ceil((pos -/+ r) * 1/Grid_Size), r = [[this+0xC]+0x78]. Restore and Simulate walk these inclusive, one delta entry per cell, against a side*side*2 buffer (side = floor(r*2*0.2)+2) allocated in the ctor FUN_005cef80, so the stock extents overrun it. OpenShim post-hooks it (9-byte prologue detour) to clamp the max edges to the buffer."
+    },
+    {
+      "name": "SeismicWaveClassBuildingScaleRead",
+      "address": "0x005CEDE3",
+      "expected": "8B 55 08 51 F3 0F 10 82 C0 00 00 00 F3 0F 11 04 24 8B 45 F0 05 C0 00 00 00 50 68 61 8F 16 02 68 1B E4 F8 7F 8D 4D EC E8 F1 A9 FB FF",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWaveClass ctor (FUN_005cea80, ret 0xC) last ODF read: pushes default [parent+0xC0], out this+0xC0, key 0x02168F61 (FNV-1a \"buildingscale\"), section 0x7FF8E41B (\"seismicwaveclass\"), ecx = local ParameterDB scope [ebp-0x14], then E8 at +0x27 (0x005CEE0A) to ParameterDB::GetFloat 0x00589800 (__thiscall, sscanf %f into out or default on a miss, found in AL, ret 0x10); the scope destructor 0x00589530 follows. Window matched once in the exe. seismic_walker_velocity_scale.cpp redirects that call to read walkerVelocityScale (0xEB72A482) in the same live scope; class = out-0xC0."
+    },
+    {
+      "name": "SeismicWaveSimulateAddVelocityCall",
+      "address": "0x005D08BC",
+      "expected": "8B 8D AC FD FF FF 8B 51 0C F3 0F 59 82 AC 00 00 00 F3 0F 58 45 D4 F3 0F 11 45 D4 8D 45 CC 50 8B 8D A8 FD FF FF E8 CA 6C ED FF",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) SeismicWave Simulate (FUN_005cf510; this stored once at [ebp-0x254] by the prologue at 0x005CF525) linear kick for mobile targets: adds [this+0xC]->shakeVeloc(+0xAC) noise into the velocity delta at [ebp-0x34], pushes it, ecx = target [ebp-0x258] (FUN_004da060 result of the range search), then E8 at +0x25 (0x005D08E1) to GameObject::AddVelocity 0x004A75B0 (__thiscall, ret 4; the GameObjectAddVelocity row). Only AddVelocity call in Simulate (Ghidra xrefs); window matched once in the exe. seismic_walker_velocity_scale.cpp redirects it to a thunk that passes [ebp-0x254] as the wave and scales the delta for 'WALK' targets."
     },
     {
       "name": "DynamicMainAllocVertices",

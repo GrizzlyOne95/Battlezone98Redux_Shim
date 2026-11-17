@@ -214,6 +214,8 @@ namespace BZROpenShim::Hooks
         FnAimGroundCommand g_OrigAimGround = nullptr;
         FnAimObjectCommand g_OrigAimObject = nullptr;
         FnBroadcastCommand g_OrigBroadcast = nullptr;
+        // SetBroadcastCommandListener; read by BroadcastCommandDetour.
+        std::atomic<BroadcastCommandListener> g_BroadcastListener{ nullptr };
         std::atomic<unsigned> g_CommandHooksInstalled{ 0 };
         bool g_SetModeFallbackLogged = false;
         std::atomic<bool> g_Armed{ false };
@@ -625,6 +627,10 @@ namespace BZROpenShim::Hooks
                             applied);
                 return;
             }
+            // A real order: tell the listener (RtsMarkers' command ping), then
+            // issue it. The listener catches its own failures.
+            if (const BroadcastCommandListener listener = g_BroadcastListener.load(std::memory_order_acquire))
+                listener(panel, what, where);
             g_OrigBroadcast(panel, what, where);
         }
 
@@ -2694,6 +2700,11 @@ namespace BZROpenShim::Hooks
         const unsigned mask = g_CommandHooksInstalled.fetch_or(bit, std::memory_order_acq_rel) | bit;
         Log(L"[RALLY] %hs installed%hs\n", kCommandHookNames[index],
             mask == kAllCommandHooks ? "; rally set mode available (V arms, menu_press confirms)" : "");
+    }
+
+    void SetBroadcastCommandListener(BroadcastCommandListener listener)
+    {
+        g_BroadcastListener.store(listener, std::memory_order_release);
     }
 
     void TickProducerRallyMeshes()

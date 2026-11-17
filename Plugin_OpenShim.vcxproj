@@ -196,6 +196,7 @@
     <ClCompile Include="src\patches\skinned_gibs.cpp" />
     <ClCompile Include="src\patches\shell_casings.cpp" />
     <ClCompile Include="src\patches\laser_sight.cpp" />
+    <ClCompile Include="src\patches\rts_markers.cpp" />
     <ClCompile Include="src\patches\scene_mutation_drain.cpp" />
 
     <ClCompile Include="src\patches\path_block.cpp" />
@@ -215,6 +216,7 @@
     <ClCompile Include="src\patches\mp_whitelist_tga.cpp" />
     <ClCompile Include="src\patches\no_damage_slowdown.cpp" />
     <ClCompile Include="src\patches\mp_block_freecam.cpp" />
+    <ClCompile Include="src\patches\seismic_walker_velocity_scale.cpp" />
     <ClCompile Include="src\patches\seismic_wave_extent_clamp.cpp" />
     <ClCompile Include="src\patches\dynamic_alloc_guard.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
