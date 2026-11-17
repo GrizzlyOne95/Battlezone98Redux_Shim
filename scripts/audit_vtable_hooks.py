@@ -83,6 +83,7 @@ HOOKS = [
     ("TurretTankProcessDoAttack", "TurretTankProcessDoAttack",
      [VT(f"TurretTank{s}Vtable", 26) for s in ("Process", "Friend", "Enemy")],
      "shared AiProcess DoAttack; TurretAttackOrders manages turret deploy only"),
+    ("ConstructionRigGetCommand", "ConstructionRigGetCommandPos", [VT("ConstructionRigVtable", 12)]),
 ]
 
 

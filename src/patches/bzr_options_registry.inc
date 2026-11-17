@@ -32,6 +32,8 @@ static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
 static const char* const kShimSettingsInvertedOnOffValues[] = { "0", "1" };
 static const char* const kShimSettingsLegacyTankAiValues[] = { "0", "1", "2" };
 static const char* const kShimSettingsLegacyTankAiLabels[] = { "Off", "All teams", "AI teams only" };
+static const char* const kShimSettingsRtsHoldValues[] = { "2", "1", "0" };
+static const char* const kShimSettingsRtsHoldLabels[] = { "Key + Shift Menu", "Key Only", "Off" };
 static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
 static const char* const kShimSettingsAutoSaveIntervalLabels[] = { "1 min", "2 min", "3 min", "5 min", "10 min" };
 static const char* const kShimSettingsUnderAttackValues[] = { "Normal", "Minimal", "None" };
@@ -676,6 +678,71 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Shows each F1-F7 group that has units in a strip beside the scrap and pilot gauge: "
       "the key, how many units are alive and the first unit's name, with + when the group "
       "mixes types. Read only, so it also works in multiplayer." },
+    // [Gameplay], Controls page next to Group Strip. Ships ON: default "On" (0).
+    { "Command Pings", "Gameplay", "RtsCommandPings", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Each order you give draws a short ring on the ground: green where units go, red "
+      "around an attack target (it follows the target), yellow for other orders. Only you "
+      "see it, so it also works in multiplayer." },
+    // [Gameplay], Controls page next to Command Pings. Ships ON: default "On" (0).
+    { "Artillery Range", "Gameplay", "RtsArtilleryRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Draws the maximum range on the ground around selected howitzers (not your own "
+      "vehicle), and a ring at the aim point: green when one of them "
+      "can reach it, red when none can. Only you see it, so it also works in multiplayer." },
+    // [Gameplay] RTS command extras (rts_commands.cpp), on the RTS Commands
+    // subpage of Controls. All ship ON: default "On" (0) / "Key + Shift Menu".
+    { "Remote Target", "Gameplay", "RtsRemoteTarget", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Shift+T targets your selected units one after another without changing the selection; "
+      "B cycles the target through your buildings, newest first. Keys in Input > RTS Actions." },
+    { "Smart Command Menu", "Gameplay", "RtsSmartCommandMenu", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "A mixed selection keeps Hunt, Follow Close and Defend in the unit menu; each order goes "
+      "only to the units that have it, and the others keep their orders." },
+    { "Smart Repair/Reload", "Gameplay", "RtsSmartRepairReload", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Get Repair and Get Reload show when any selected unit needs them, and go only to the "
+      "units that do." },
+    { "Area Select", "Gameplay", "RtsAreaSelect", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "X adds your units of the same type as the one under the reticle (else the first selected) "
+      "within 100 m to the selection; Shift+X within 200 m." },
+    { "Hold", "Gameplay", "RtsHold", nullptr, 0,
+      kShimSettingsRtsHoldValues, kShimSettingsRtsHoldLabels, 3, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Z holds the selected units in place. With Shift held the Defend entry reads Hold and does "
+      "the same; turn that off if Shift+number is bound elsewhere. Single player only." },
+    { "Build at Nav", "Gameplay", "RtsBuildAtNav", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "With a building picked on a selected Construction Rig, Go To Nav reads Build at Nav: the rig "
+      "builds it at the nav you pick, facing your way. A spot it cannot build on buzzes and keeps "
+      "the selection." },
+    // RTS placement aids (rts_placement.cpp, drawn by rts_markers.cpp), same
+    // subpage. All ship ON.
+    { "Build Ghost", "Gameplay", "RtsBuildGhost", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "While you place a building, a see-through copy of it shows where it will stand: green "
+      "when the spot is good, yellow without power, red when blocked. With Build at Nav, the Go "
+      "To Nav list also shows it at every nav. Only you see it." },
+    { "Power Range", "Gameplay", "RtsPowerRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "While you place a building that needs power (gun towers, the Comm Bunker), the reach of "
+      "every allied power plant shows as a ring on the ground. Only you see it." },
+    { "Waypoint Lines", "Gameplay", "RtsWaypointLines", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Selected units show a line on the ground to where their current order takes them, and a "
+      "fainter one on to their next order. Only you see it." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalTurbo,
@@ -998,7 +1065,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
-    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
