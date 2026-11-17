@@ -427,6 +427,13 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Gameplay/RtsAreaSelect",
     "Gameplay/RtsBuildAtNav",
 
+    # RTS placement aids: local-only ghosts, rings and lines while placing a
+    # building or with units selected. Write nothing the game reads. Default
+    # on by design.
+    "Gameplay/RtsBuildGhost",
+    "Gameplay/RtsPowerRange",
+    "Gameplay/RtsWaypointLines",
+
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
     "Fixes/AiMultiProducerMakers",
@@ -627,6 +634,9 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsAreaSelect" = "1"
     "Gameplay/RtsHold" = "2"
     "Gameplay/RtsBuildAtNav" = "1"
+    "Gameplay/RtsBuildGhost" = "1"
+    "Gameplay/RtsPowerRange" = "1"
+    "Gameplay/RtsWaypointLines" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }
