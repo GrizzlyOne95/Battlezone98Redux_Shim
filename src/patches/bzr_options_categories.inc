@@ -64,7 +64,8 @@ static const char* const kShimCategoryControls[] = {
     kShimRowRtsCommands };
 static const char* const kShimCategoryRtsCommands[] = {
     "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold",
-    "Build at Nav", "Build Ghost", "Pending Build Ghost", "Power Range", "Waypoint Lines" };
+    "Build at Nav", "Build Ghost", "Pending Build Ghost", "Power Range", "Waypoint Lines",
+    "Idle Unit Alert" };
 static const char* const kShimCategoryGameplay[] = {
     "Target Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",

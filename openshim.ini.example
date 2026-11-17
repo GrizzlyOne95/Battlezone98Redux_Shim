@@ -2773,17 +2773,30 @@ RtsPowerRange = 1
 ; Exposed on the OpenShim Settings page as "Waypoint Lines".
 RtsWaypointLines = 1
 
+; Idle Unit Alert. Plays a short stock sound (ping.wav) when one of your
+; units goes from busy to idle: its current and pending orders are both none
+; or Stop. At most one alert every 5 seconds, and none for a unit's first
+; idle state after it spawns or is built. The Select Next Idle Unit key
+; (RtsIdleUnitKey) works whether this is on or off. Works in multiplayer.
+;
+; Accepted: boolean. Default: 0.
+; Exposed on the OpenShim Settings page as "Idle Unit Alert".
+RtsIdleUnitAlert = 0
+
 ; The RTS action keys. One key each, no modifier; rebind them in Options >
 ; Input > RTS Actions, which writes these lines. The remote-target key is
 ; used with Shift (Shift+T). Refused, with a log line and a fall back to the
 ; default: any modifier, digits, F1-F10, Space, Tab, Alt, Enter, Esc, the
 ; Rally Point key, another RTS action's key, and (for the Shift actions) a
 ; key that is a Shift-only QuickSave chord.
-; Defaults: T, B, X, Z.
+; The idle unit key (J) selects the next idle unit of yours, one per press,
+; cycling through them; Shift+J selects all of them. J is unbound in stock.
+; Defaults: T, B, X, Z, J.
 RtsRemoteTargetKey = T
 RtsBuildingCycleKey = B
 RtsAreaSelectKey = X
 RtsHoldKey = Z
+RtsIdleUnitKey = J
 
 
 [Updater]

@@ -1,14 +1,16 @@
 #pragma once
 // rts_commands_policy.h
 // Pure rules for the RTS command extras ([Gameplay] RtsRemoteTarget,
-// RtsSmartCommandMenu, RtsSmartRepairReload, RtsAreaSelect, RtsHold): the
-// mixed-selection command-menu merge, which selected units an order is sent
-// to, unit families, target cycles, the area-select radius filter and the
+// RtsSmartCommandMenu, RtsSmartRepairReload, RtsAreaSelect, RtsHold,
+// RtsIdleUnitAlert): the mixed-selection command-menu merge, which selected
+// units an order is sent to, unit families, target cycles, the area-select
+// radius filter, idle units (definition, cycling, alert policy) and the
 // rebindable keys. No Windows or engine calls, so
 // tests/rts_commands_policy_tests.cpp runs them directly. The engine side is
 // src/patches/rts_commands.cpp; behaviour and evidence: Docs/RTS_COMMANDS.md.
 
 #include "quicksave_key_policy.h"
+#include "rts_placement_policy.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -199,6 +201,7 @@ namespace BZROpenShim
             Minelayer,
             Scavenger,
             Tug,
+            ConstructionRig,
         };
 
         // From the object's most-derived MSVC RTTI type name (".?AVWingman@@").
@@ -218,6 +221,7 @@ namespace BZROpenShim
                 { ".?AVWalker@@", Family::Combat },      { ".?AVTurretTank@@", Family::TurretTank },
                 { ".?AVHowitzer@@", Family::Howitzer },  { ".?AVMinelayer@@", Family::Minelayer },
                 { ".?AVScavenger@@", Family::Scavenger }, { ".?AVTug@@", Family::Tug },
+                { ".?AVConstructionRig@@", Family::ConstructionRig },
             };
             for (const Entry& entry : kEntries)
             {
@@ -240,6 +244,7 @@ namespace BZROpenShim
             case Family::Minelayer: return "minelayer";
             case Family::Scavenger: return "scavenger";
             case Family::Tug: return "tug";
+            case Family::ConstructionRig: return "construction rig";
             default: return "none";
             }
         }
@@ -375,6 +380,183 @@ namespace BZROpenShim
             return n;
         }
 
+        // ---- idle units ---------------------------------------------------------
+
+        // A unit is idle when neither its current command record (+0xA8) nor
+        // its pending one (+0xC8) holds an order: `what` (record +0x04) is 0
+        // (none) or 2 (CMD_STOP, RtsPlacement::kCmdStop). The offsets are the
+        // waypoint-line ones (RtsPlacement::kCurrentRecordOffset,
+        // kPendingRecordOffset, kRecordWhatOffset).
+        constexpr int kCmdNone = 0;
+        // CMD_SELECT (1) counts as idle: selecting a unit writes it to the
+        // pending record until the next AI tick clears it (1.5 decomp,
+        // 00495538_GameObject_GetWhat.c lines 19-21).
+        inline bool IsIdleWhat(int what)
+        {
+            return what == kCmdNone || what == 1 || what == RtsPlacement::kCmdStop;
+        }
+
+        inline bool IsIdle(int currentWhat, int pendingWhat)
+        {
+            return IsIdleWhat(currentWhat) && IsIdleWhat(pendingWhat);
+        }
+
+        // Families the idle key and alert track. Not scavengers: they gather
+        // scrap on their own while both records read 0 (live, 2026-11-17), so
+        // the records cannot tell a working scavenger from an idle one.
+        inline bool IdleTracksFamily(Family family)
+        {
+            return family != Family::None && family != Family::Scavenger;
+        }
+
+        // Ascending handle order: stable whatever order the object list has.
+        inline void SortHandlesAscending(uint32_t* handles, int count)
+        {
+            for (int i = 1; i < count; ++i)
+            {
+                const uint32_t h = handles[i];
+                int j = i - 1;
+                while (j >= 0 && handles[j] > h)
+                {
+                    handles[j + 1] = handles[j];
+                    --j;
+                }
+                handles[j + 1] = h;
+            }
+        }
+
+        // The index to pick after `last` in an ascending list: the next one,
+        // wrapping; 0 when `last` is 0 or no longer in the list; -1 when the
+        // list is empty.
+        inline int NextIdleIndex(const uint32_t* sorted, int count, uint32_t last)
+        {
+            if (!sorted || count <= 0)
+                return -1;
+            if (last == 0)
+                return 0;
+            for (int i = 0; i < count; ++i)
+            {
+                if (sorted[i] == last)
+                    return (i + 1) % count;
+            }
+            return 0;
+        }
+
+        // What one key press selects: the one handle after `last` (cycling),
+        // or with Shift every idle unit, never past `capacity` (and never
+        // past kSelectCapacity). Returns how many were written to `out`.
+        inline int PlanIdleSelect(const uint32_t* sorted, int count, uint32_t last, bool all, uint32_t* out,
+                                  int capacity)
+        {
+            if (!sorted || !out || count <= 0 || capacity <= 0)
+                return 0;
+            if (all)
+            {
+                int limit = capacity < kSelectCapacity ? capacity : kSelectCapacity;
+                if (limit > count)
+                    limit = count;
+                for (int i = 0; i < limit; ++i)
+                    out[i] = sorted[i];
+                return limit;
+            }
+            out[0] = sorted[NextIdleIndex(sorted, count, last)];
+            return 1;
+        }
+
+        // [Gameplay] RtsIdleUnitAlert: one short sound when an own unit goes
+        // from busy to idle. At most one alert per kIdleAlertIntervalMs
+        // overall, and none for a unit's first observed state (it spawned or
+        // was built idle, or the option was just turned on).
+        constexpr int kIdleTrackCapacity = 512;
+        constexpr unsigned long long kIdleAlertIntervalMs = 5000;
+
+        struct IdleObservation
+        {
+            bool first = false;   // the unit was seen for the first time
+            bool changed = false; // an existing unit's idle state flipped
+            bool idle = false;    // the state now
+            bool alert = false;   // a busy->idle flip that is not rate-limited
+        };
+
+        class IdleTracker
+        {
+        public:
+            void Clear()
+            {
+                count_ = 0;
+                alerted_ = false;
+                lastAlertMs_ = 0;
+            }
+
+            // Each scan: BeginPass, Observe every eligible unit, EndPass.
+            // EndPass drops the units that were not observed (gone, dead,
+            // or no longer eligible).
+            void BeginPass()
+            {
+                for (int i = 0; i < count_; ++i)
+                    entries_[i].seen = false;
+            }
+
+            IdleObservation Observe(uint32_t handle, bool idle, unsigned long long nowMs)
+            {
+                IdleObservation result;
+                result.idle = idle;
+                for (int i = 0; i < count_; ++i)
+                {
+                    Entry& e = entries_[i];
+                    if (e.handle != handle)
+                        continue;
+                    e.seen = true;
+                    if (e.idle != idle)
+                    {
+                        result.changed = true;
+                        if (idle && (!alerted_ || nowMs - lastAlertMs_ >= kIdleAlertIntervalMs))
+                        {
+                            result.alert = true;
+                            alerted_ = true;
+                            lastAlertMs_ = nowMs;
+                        }
+                        e.idle = idle;
+                    }
+                    return result;
+                }
+                if (count_ < kIdleTrackCapacity)
+                {
+                    entries_[count_].handle = handle;
+                    entries_[count_].idle = idle;
+                    entries_[count_].seen = true;
+                    ++count_;
+                    result.first = true;
+                }
+                return result;
+            }
+
+            void EndPass()
+            {
+                int kept = 0;
+                for (int i = 0; i < count_; ++i)
+                {
+                    if (entries_[i].seen)
+                        entries_[kept++] = entries_[i];
+                }
+                count_ = kept;
+            }
+
+            int Count() const { return count_; }
+
+        private:
+            struct Entry
+            {
+                uint32_t handle = 0;
+                bool idle = false;
+                bool seen = false;
+            };
+            Entry entries_[kIdleTrackCapacity];
+            int count_ = 0;
+            bool alerted_ = false;
+            unsigned long long lastAlertMs_ = 0;
+        };
+
         // ---- the Shift alternate on the Defend entry --------------------------
 
         // While Shift is held the Defend entry reads "Hold" and choosing it
@@ -392,6 +574,7 @@ namespace BZROpenShim
             BuildingCycle,    // key: cycle the target through own buildings
             AreaSelect,       // key: 100 m, Shift+key: 200 m
             Hold,             // key: Hold the selection
+            IdleUnit,         // key: select the next idle unit, Shift+key: all of them
             Count,
         };
         constexpr int kKeyCount = static_cast<int>(KeyId::Count);
@@ -408,6 +591,10 @@ namespace BZROpenShim
 
         // Stock input.map/gamekey.map: T is frontal_target (no Shift
         // exclusion), Ctrl+B eject, X, Z and plain B unbound; F is pitch_down.
+        // Idle unit: J. Every other letter is taken: input.map binds A-I, K-L,
+        // N, P-T, V-W and gamekey.map M, O, R, U, Y (J appears in neither;
+        // checked against the GOG 2.2.301 install files, read-only), and X
+        // and Z are the area-select and hold keys.
         inline const KeyDef& GetKeyDef(KeyId id)
         {
             static const KeyDef kDefs[kKeyCount] = {
@@ -415,6 +602,7 @@ namespace BZROpenShim
                 { "RtsBuildingCycleKey", "OpenShim:RtsBuildingCycleKey", "Target Next Building", "B", false, false },
                 { "RtsAreaSelectKey", "OpenShim:RtsAreaSelectKey", "Select Same Type Nearby", "X", false, true },
                 { "RtsHoldKey", "OpenShim:RtsHoldKey", "Hold Position", "Z", false, false },
+                { "RtsIdleUnitKey", "OpenShim:RtsIdleUnitKey", "Select Next Idle Unit", "J", false, true },
             };
             const int index = static_cast<int>(id);
             return kDefs[index >= 0 && index < kKeyCount ? index : 0];

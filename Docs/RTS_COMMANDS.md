@@ -13,6 +13,8 @@ RTS Commands. Keys: Options > Input > RTS Actions (written to
 | Repair/Reload for the units that need it | `RtsSmartRepairReload` (on) | stock menu keys | Runs (UNVERIFIED live) |
 | Area select | `RtsAreaSelect` (on) | `RtsAreaSelectKey` (X), Shift+X wide | Runs (UNVERIFIED live) |
 | Hold | `RtsHold` (2) | `RtsHoldKey` (Z); Shift on the Defend entry | Off (single player only) |
+| Select next idle unit | none (always on) | `RtsIdleUnitKey` (J), Shift+J all | Runs (UNVERIFIED live) |
+| Idle unit alert | `RtsIdleUnitAlert` (off) | none (a sound) | Runs (live 2026-11-17: alert, 5 s limit, no start-up alerts) |
 | Build at Nav | `RtsBuildAtNav` (on) | stock menu keys (Go To Nav, then the nav) | Runs for local rigs (UNVERIFIED live) |
 | Build ghost | `RtsBuildGhost` (on) | none (shows while placing) | Local visual (UNVERIFIED live) |
 | Pending build ghost | `RtsPendingBuildGhost` (on) | none (shows until the rig starts building) | Local visual (UNVERIFIED live) |
@@ -112,6 +114,41 @@ The tests pin both cases.
   `ControlPanel::SelectAdd` 0x004A6C70, which has no duplicate or room check.
   So `PlanAreaAdd` skips units already selected and stops at 91
   (`selectList` capacity), and the live count is re-read before each add.
+
+## Idle units (J / Shift+J, and the alert)
+
+- **Idle.** A unit is idle when its current command record (`GameObject
+  +0xA8`) and its pending one (`+0xC8`) both have `what` (record `+0x04`) of
+  0 (none), 1 (CMD_SELECT, which selecting a unit leaves in the pending
+  record until the next AI tick) or 2 (CMD_STOP). The offsets are the waypoint-line ones in
+  `include/rts_placement_policy.h`; `IsIdle` is in `rts_commands_policy.h`.
+  Scavengers are left out: live (2026-11-17) one gathered three scrap
+  pieces with both records at 0, so the records cannot tell it from an idle
+  one. Whether tugs and constructors read 0 while they work is UNVERIFIED;
+  the `idle state` log line (below) is there to check it.
+- **Eligible.** In the `GameObject::objectList` snapshot, on the player's
+  team, commandable (`CanCommand`), not the player's own piloted object, and
+  of a tracked family (`IdleTracksFamily`: Combat, TurretTank, Howitzer,
+  Minelayer, Tug, ConstructionRig), which leaves buildings and scavengers out. "Alive" is
+  only "still in the object list" (UNVERIFIED that a dying unit leaves it
+  at once).
+- **Key.** J selects exactly one idle unit (`SelectNone`, then `SelectAdd`),
+  the next in ascending handle order after the last one picked, wrapping; a
+  last pick that is gone restarts at the first. Shift+J selects every idle
+  unit up to 91. mnu_clik on success, mnu_buzz when none is idle. Why J:
+  `input.map` binds A-I, K, L, N, P-T, V, W and `gamekey.map` M, O, R, U, Y
+  (GOG 2.2.301, read-only), X and Z are area select and Hold, so J is the
+  free letter.
+- **Alert.** With `RtsIdleUnitAlert = 1` (default 0), `ping.wav` (stock
+  `bzone.zfs`) plays when a unit goes from busy to idle. Scanned every
+  250 ms in an interactive world; at most one alert per 5 s overall; a unit's
+  first observed state never alerts, so spawned, built and just-enabled units
+  stay quiet. Units that no longer qualify drop from the 512-entry table.
+- **Log.** `[RTS] idle unit select n=<idle> picked=<handle>
+  shift=<0|1>` per key press; `idle alert handle=<h> what=<cur>/<pending>`
+  per alert; with the alert on, `idle state handle=<h> idle=<0|1>
+  what=<cur>/<pending> family=<name>` once per unit and per flip (budget 300
+  per mission).
 
 ## Hold (Z, and Shift on the Defend entry)
 
@@ -304,7 +341,7 @@ broadcast pings. An order without a target object (Hunt) gets no ping.
   RTS filter takes (the plain key, or Shift+key for Shift+T and Shift+X).
   Binding a stock gamekey action to such a chord saves it with a warning
   that the RTS action takes it in missions.
-- **Stock binds.** Stock binds X, Z and plain B to nothing (gamekey.map,
+- **Stock binds.** Stock binds X, Z, J and plain B to nothing (gamekey.map,
   input.map). F is pitch_down, which is why area select is on X.
 
 ## Live checklist (not yet run)
@@ -331,6 +368,11 @@ broadcast pings. An order without a target object (Hunt) gets no ping.
     the stock submenu (review N8).
 11. Rebinding: the rally key refuses B; QuickSave refuses Shift+X; binding a
     stock action to X saves with the RTS clash warning.
+11a. Idle units: J selects one idle unit and repeated presses cycle; Shift+J
+    selects all; with none idle it buzzes. With `RtsIdleUnitAlert = 1`, a
+    unit finishing a move plays ping.wav at most every 5 s. In
+    `openshim.log`, `idle state` lines show whether tugs and constructors
+    read idle=0 while they work.
 
 ### Build at Nav (not yet run)
 
