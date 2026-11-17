@@ -389,7 +389,10 @@ namespace
               "one slot per ring and per line");
         Check(kFirstTargetRingSlot == kFirstPendingSlot + kMaxWaypointUnits && kMaxTargetRingSlots == kMaxWaypointUnits,
               "a target ring per selected unit after the pending lines");
-        Check(kSlotCount == kPoolSize + kMaxPowerRings + 3 * kMaxWaypointUnits, "pool holds everything at once");
+        Check(kFirstAttackRingSlot == kFirstTargetRingSlot + kMaxTargetRingSlots && kMaxAttackRingSlots == 16,
+              "the under-attack rings follow the target rings");
+        Check(kSlotCount == kPoolSize + kMaxPowerRings + 3 * kMaxWaypointUnits + kMaxAttackRingSlots,
+              "pool holds everything at once");
         Check(2u * (kMaxLineSegments + 1u) <= 2u * (kMaxSegments + 1u), "a line fits the ring strip budget");
     }
 

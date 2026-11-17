@@ -224,6 +224,44 @@ namespace
         Check(kPoolSize == kMaxArtilleryRings + 1 + kMaxPings, "pool holds every ring at once");
     }
 
+    void AttackMarkTests()
+    {
+        float age = -1.0f;
+        Check(AttackMarkAge(10.0f, 10.0f, age) && age == 0.0f, "a hit this instant is age 0");
+        Check(AttackMarkAge(10.0f, 8.0f, age) && age == 2.0f, "the window edge (2.0 s) is still active");
+        Check(!AttackMarkAge(10.0f, 7.9999f, age), "past 2.0 s is over");
+        Check(!AttackMarkAge(10.0001f, 8.0f, age), "2.0001 s is over");
+        Check(AttackMarkAge(10.0f, 10.05f, age) && age == 0.0f, "a stamp just ahead of the clock reads as age 0");
+        Check(!AttackMarkAge(10.0f, 10.5f, age), "a stale future stamp (previous mission) is ignored");
+        Check(!AttackMarkAge(10.0f, 0.0f, age), "zero stamp is not a hit");
+        Check(!AttackMarkAge(10.0f, -1.0e30f, age), "the never-shot sentinel is not a hit");
+        Check(!AttackMarkAge(10.0f, std::nanf(""), age), "NaN stamp is not a hit");
+        Check(!AttackMarkAge(10.0f, INFINITY, age), "infinite stamp is not a hit");
+        Check(!AttackMarkAge(std::nanf(""), 5.0f, age), "NaN clock is not a hit");
+
+        for (float a = 0.0f; a <= 2.0f; a += 0.01f)
+        {
+            const AttackMarkFrame f = AttackMarkStyle(a);
+            Check(f.radiusScale >= 0.85f - 1e-4f && f.radiusScale <= 1.15f + 1e-4f, "pulse stays within +-15%");
+            Check(f.alpha >= 0.0f && f.alpha <= 1.0f, "alpha stays within 0..1");
+        }
+        Check(Near(AttackMarkStyle(0.0f).radiusScale, 1.0f), "the pulse starts at the base radius");
+        Check(Near(AttackMarkStyle(0.125f).radiusScale, 1.15f), "2 Hz peaks at an eighth of a second");
+        Check(Near(AttackMarkStyle(0.375f).radiusScale, 0.85f), "and troughs at three eighths");
+        Check(AttackMarkStyle(0.0f).alpha == 1.0f && AttackMarkStyle(1.5f).alpha == 1.0f, "full alpha until 1.5 s");
+        Check(Near(AttackMarkStyle(1.75f).alpha, 0.5f), "the fade is half way at 1.75 s");
+        Check(AttackMarkStyle(1.6f).alpha > AttackMarkStyle(1.9f).alpha, "the fade falls");
+        Check(AttackMarkStyle(2.0f).alpha == 0.0f && AttackMarkStyle(3.0f).alpha == 0.0f, "gone at 2.0 s");
+        Check(AttackMarkStyle(std::nanf("")).alpha == 1.0f, "an unreadable age draws as fresh, not a crash");
+
+        AttackMarkCandidate items[5] = {{1.5f, 0}, {0.2f, 1}, {1.0f, 2}, {0.2f, 3}, {0.9f, 4}};
+        Check(KeepMostRecent(items, 5, 3) == 3, "the cap keeps three");
+        Check(items[0].id == 1 && items[1].id == 3 && items[2].id == 4, "the most recent, ties in input order");
+        AttackMarkCandidate few[2] = {{1.0f, 0}, {0.5f, 1}};
+        Check(KeepMostRecent(few, 2, 16) == 2 && few[0].id == 1, "under the cap keeps all, newest first");
+        Check(KeepMostRecent(few, 0, 16) == 0, "an empty list stays empty");
+    }
+
     void AssetTests()
     {
         const std::string material = MaterialScript();
@@ -266,6 +304,7 @@ int main(int argc, char** argv)
     ArtilleryTests();
     WeaponFilterTests();
     PoolTests();
+    AttackMarkTests();
     AssetTests();
     return OpenShimTest::ExitCode();
 }

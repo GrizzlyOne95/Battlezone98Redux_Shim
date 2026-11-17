@@ -138,6 +138,18 @@ If any row fails to bind, the feature fails closed:
 - Without the artillery rows there are no range rings.
 - Without the hook there are no object-order pings.
 
+## Attack marks
+
+`[Gameplay] RtsAttackMarks` (Options > Controls > RTS Commands, default **off**) draws a pulsing red ring around each of the local player's own-team objects, units and buildings, for 2 s after an enemy hit it.
+
+- **Detection:** no new hook. Stock damage code writes `GameObject::enemyShot = Get_TimeLocal()` when the damage source is an enemy team (BZ1 1.5 decomp `all_decompiled.c:184486-184489`), and `CockpitRadar::Render` flashes the blip while `enemyShot + 2.0 > now` (`all_decompiled.c:241928`). The offset is `0x1E8` (the same field `satellite_visibility.cpp` reads); "now" is the same game-local clock, the `HudFadeRadarTime` row (not `GetGameTime`, which follows the network time offset in multiplayer).
+- **Scan:** from the per-frame tick, at most every 100 ms, over the engine's object vector (`GameObject::objectList`, at most 4096 entries). An object counts when its team equals the local player's, it is not the piloted object, it is not dead (obj76 flags 0x200), and `0 <= now - enemyShot <= 2.0`. A stamp of 0, non-finite, or more than 0.1 s ahead of the clock (left over from a previous mission) is ignored. Each frame the marked objects' stamps are re-read, so a fresh hit restarts the pulse and an expired one ends at once.
+- **Cap:** at most 16 rings (slots 87-102); with more objects hit, the 16 most recently hit keep theirs.
+- **Style:** the attack colour (`kAttackColour`), the radius of a target ring (the object's bounding radius, clamped to 3-40 m, plus 1 m, never above 41 m), pulsing 1 + 0.15 sin(2 pi * 2 Hz * age). Full alpha to 1.5 s, then a smoothstep to zero at 2.0 s.
+- **Log:** change-only lines, budgeted at 64 per mission: `[RTSMARKERS] attack mark handle=0x%08X on age=%.2f`, `... off`, and one `[RTSMARKERS] attack marks enabled=%d` at config load and when the option state changes. The state is cleared when the mission ends.
+- **Multiplayer:** a local visual with no network gate, like the pings. Whether `enemyShot` is written for remote-owned objects on a multiplayer client is **UNVERIFIED**; rings may only appear for objects the local simulation damaged itself.
+- Pure rules: `AttackMarkAge`, `AttackMarkStyle`, `KeepMostRecent` in `include/rts_markers_policy.h`, tested in `tests/rts_markers_policy_tests.cpp`.
+
 ## Placement aids
 
 Four more local-only features share the tick and the ring pool. Their rows are on Options > Controls > RTS Commands; all ship on, stock value off.
@@ -155,7 +167,7 @@ Where the code lives:
 
 ### Pool slots
 
-The pool grows to `RtsMarkers::kSlotCount` = 87; slots 0-22 keep the layout above.
+The pool grows to `RtsMarkers::kSlotCount` = 103; slots 0-22 keep the layout above.
 
 | Slots | Use |
 |---|---|
@@ -163,6 +175,7 @@ The pool grows to `RtsMarkers::kSlotCount` = 87; slots 0-22 keep the layout abov
 | 39-54 | waypoint lines (current order) |
 | 55-70 | waypoint lines (pending order) |
 | 71-86 | target rings (current order's object) |
+| 87-102 | attack marks (under-attack rings) |
 
 A line is the ring strip's other shape: a triangle strip sampled every 4 m (`LineSegmentsFor`, at most 96 segments, the ring vertex budget), each pair lifted `kLift` above `Terrain::HeightAt`. It uses the ring material, `g_PoolFailed` and the rebuild key (now 10 floats: centre, radius or -1 for a line, colour, end x/z).
 

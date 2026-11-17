@@ -44,6 +44,11 @@
 // kFirstPendingSlot..). An order on an object (attack, follow, defend...)
 // ends its line at the object's live position, and the object gets a ring
 // in the line's colour (slots kFirstTargetRingSlot.., one per object).
+//
+// [Gameplay] RtsAttackMarks (default off): a pulsing red ring around every
+// own-team object (units and buildings) an enemy hit in the last 2 s, the
+// window the stock radar flashes its blip for (slots kFirstAttackRingSlot..).
+// Detection reads the engine's own GameObject::enemyShot stamp; no hook.
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
@@ -130,6 +135,8 @@ namespace BZROpenShim
             bool g_ConfigLoaded = false;
             bool g_PingsOn = true;
             bool g_RangeOn = true;
+            bool g_AttackOn = false;
+            int g_AttackLoggedState = -1; // change-only "enabled" line
 
             void OnGroundCommand(void* panel, int what, const float* where);
 
@@ -139,6 +146,13 @@ namespace BZROpenShim
                 g_PingsOn = TryGetUserConfigBool("Gameplay", "RtsCommandPings", value) ? value : true;
                 value = true;
                 g_RangeOn = TryGetUserConfigBool("Gameplay", "RtsArtilleryRange", value) ? value : true;
+                value = false;
+                g_AttackOn = TryGetUserConfigBool("Gameplay", "RtsAttackMarks", value) ? value : false;
+                if (g_AttackLoggedState != (g_AttackOn ? 1 : 0))
+                {
+                    g_AttackLoggedState = g_AttackOn ? 1 : 0;
+                    LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] attack marks enabled=%d", g_AttackLoggedState);
+                }
                 g_ConfigLoaded = true;
                 // The ground-order listener on the rally detour; registered
                 // whatever the option says (the listener checks it), so turning
@@ -156,6 +170,7 @@ namespace BZROpenShim
             using FnGetHandle = uint32_t(__thiscall*)(void*);
             using FnTerrainHeightAt = double(__cdecl*)(double x, double z);
             using FnObjectBroadcast = void(__thiscall*)(void* panel, int what, void* target);
+            using FnGetTime = float(__cdecl*)(); // game-local clock (row HudFadeRadarTime), as contextual_hud.cpp
 
             struct EngineApi
             {
@@ -167,6 +182,8 @@ namespace BZROpenShim
                 FnTerrainHeightAt heightAt = nullptr;
                 bool cursor = false;    // RtsMarkersCursorPointField bound
                 bool artillery = false; // LaserArc* layout rows bound
+                FnGetTime getTime = nullptr; // null: no attack marks
+                uintptr_t objectList = 0;    // GameObject::objectList; 0: no attack marks
                 bool attempted = false;
                 bool usable = false;
             };
@@ -220,9 +237,24 @@ namespace BZROpenShim
                 g_Api.artillery = HookEngine::BindEngineRows("RTS markers artillery", artilleryRows) && weapon;
                 g_Api.getWeapon = reinterpret_cast<FnGetWeapon>(static_cast<uintptr_t>(weapon));
 
+                // The attack marks walk the object vector and read the
+                // game-local clock (Get_TimeLocal): the one SetDamageFlags
+                // stamps enemyShot with and the radar compares against. The
+                // sim clock (GetGameTime) follows the network offset in MP.
+                uint32_t getTime = 0;
+                const HookEngine::EngineRow timeRows[] = {
+                    {"HudFadeRadarTime", &getTime},
+                };
+                const uint32_t objectList = HookEngine::ResolveNamedAddress("GameObject::objectList");
+                if (HookEngine::BindEngineRows("RTS markers attack marks", timeRows) && objectList)
+                {
+                    g_Api.getTime = reinterpret_cast<FnGetTime>(static_cast<uintptr_t>(getTime));
+                    g_Api.objectList = objectList;
+                }
+
                 g_Api.usable = true;
-                LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] engine rows bound (cursor=%d artillery=%d)",
-                         g_Api.cursor ? 1 : 0, g_Api.artillery ? 1 : 0);
+                LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] engine rows bound (cursor=%d artillery=%d attack=%d)",
+                         g_Api.cursor ? 1 : 0, g_Api.artillery ? 1 : 0, g_Api.getTime ? 1 : 0);
                 return true;
             }
 
@@ -1243,9 +1275,185 @@ namespace BZROpenShim
                     g_LineSource[i] = 0;
             }
 
+            // ---- Under-attack marks ----------------------------------------
+            // GameObject::enemyShot: the sim time of the last damage from an
+            // enemy team (also read by satellite_visibility.cpp).
+            constexpr size_t kGameObjectEnemyShotOffset = 0x1E8;
+            constexpr size_t kObj76FlagsOffset = 0x14; // as rts_placement.cpp: 0x200 = dead
+            constexpr uint32_t kObj76DeadFlag = 0x200;
+            constexpr size_t kMaxObjects = 4096;       // as rts_commands.cpp
+            constexpr ULONGLONG kAttackScanMs = 100;
+
+            uint32_t g_AttackMarks[RM::kMaxAttackRingSlots] = {};
+            size_t g_AttackMarkCount = 0;
+            ULONGLONG g_AttackLastScan = 0;
+            volatile long g_AttackLogBudget = 64;
+
+            float SafeNow()
+            {
+                if (!g_Api.getTime)
+                    return std::nanf("");
+                __try
+                {
+                    return g_Api.getTime();
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return std::nanf("");
+                }
+            }
+
+            // The engine's object vector (GameObject::objectList: _Myfirst at
+            // +0, _Mylast at +4; lua_handle_sync.cpp SnapshotObjects).
+            size_t SnapshotObjects(void** out, size_t capacity)
+            {
+                if (!g_Api.objectList)
+                    return 0;
+                size_t count = 0;
+                __try
+                {
+                    const uint8_t* vec = *reinterpret_cast<uint8_t* const*>(g_Api.objectList);
+                    if (!vec)
+                        return 0;
+                    void* const* first = *reinterpret_cast<void* const* const*>(vec);
+                    void* const* last = *reinterpret_cast<void* const* const*>(vec + 4);
+                    if (!first || last < first || static_cast<size_t>(last - first) > kMaxObjects)
+                        return 0;
+                    const size_t available = static_cast<size_t>(last - first);
+                    for (size_t i = 0; i < available && count < capacity; ++i)
+                        if (reinterpret_cast<uintptr_t>(first[i]) >= 0x10000)
+                            out[count++] = first[i];
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return 0;
+                }
+                return count;
+            }
+
+            // The object's enemyShot stamp; false for a dead or unreadable one.
+            bool ReadEnemyShotSeh(void* obj, float& stamp)
+            {
+                __try
+                {
+                    const uint8_t* const o = static_cast<const uint8_t*>(obj);
+                    const uint8_t* const obj76 = *reinterpret_cast<const uint8_t* const*>(o + kGameObjectObjOffset);
+                    if (obj76 && (*reinterpret_cast<const uint32_t*>(obj76 + kObj76FlagsOffset) & kObj76DeadFlag))
+                        return false;
+                    stamp = *reinterpret_cast<const float*>(o + kGameObjectEnemyShotOffset);
+                    return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+
+            void LogAttackMark(uint32_t handle, bool on, float age)
+            {
+                if (InterlockedDecrement(&g_AttackLogBudget) < 0)
+                    return;
+                if (on)
+                    LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] attack mark handle=0x%08X on age=%.2f", handle, age);
+                else
+                    LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] attack mark handle=0x%08X off", handle);
+            }
+
+            // Walks every object: own team, not the piloted one, hit by an
+            // enemy inside the window. Keeps the 16 most recently hit.
+            void ScanAttackMarks(float now, void* player)
+            {
+                static void* objects[kMaxObjects];
+                static RM::AttackMarkCandidate hits[kMaxObjects];
+                const size_t total = SnapshotObjects(objects, kMaxObjects);
+                size_t hitCount = 0;
+                for (size_t i = 0; i < total; ++i)
+                {
+                    float stamp = 0.0f, age = 0.0f;
+                    if (objects[i] == player || !ReadEnemyShotSeh(objects[i], stamp) ||
+                        !RM::AttackMarkAge(now, stamp, age) || !SameTeam(objects[i], player))
+                        continue;
+                    hits[hitCount].age = age;
+                    hits[hitCount++].id = i;
+                }
+                const size_t kept = RM::KeepMostRecent(hits, hitCount, RM::kMaxAttackRingSlots);
+                uint32_t next[RM::kMaxAttackRingSlots] = {};
+                size_t nextCount = 0;
+                for (size_t i = 0; i < kept; ++i)
+                {
+                    const uint32_t handle = SafeGetHandle(objects[hits[i].id]);
+                    if (!handle)
+                        continue;
+                    bool known = false;
+                    for (size_t j = 0; j < g_AttackMarkCount && !known; ++j)
+                        known = g_AttackMarks[j] == handle;
+                    if (!known)
+                        LogAttackMark(handle, true, hits[i].age);
+                    next[nextCount++] = handle;
+                }
+                for (size_t j = 0; j < g_AttackMarkCount; ++j)
+                {
+                    bool stillMarked = false;
+                    for (size_t i = 0; i < nextCount && !stillMarked; ++i)
+                        stillMarked = next[i] == g_AttackMarks[j];
+                    if (!stillMarked)
+                        LogAttackMark(g_AttackMarks[j], false, 0.0f);
+                }
+                std::memcpy(g_AttackMarks, next, sizeof(next));
+                g_AttackMarkCount = nextCount;
+            }
+
+            void ClearAttackMarks()
+            {
+                g_AttackMarkCount = 0;
+                g_AttackLastScan = 0;
+            }
+
+            void BuildAttackRequests(RingRequest (&requests)[RM::kSlotCount])
+            {
+                const float now = SafeNow();
+                void* const player = SafeGetPlayer();
+                if (!std::isfinite(now) || !player)
+                    return;
+                const ULONGLONG tick = GetTickCount64();
+                if (tick - g_AttackLastScan >= kAttackScanMs)
+                {
+                    g_AttackLastScan = tick;
+                    ScanAttackMarks(now, player);
+                }
+                // Every frame: re-read each marked object's stamp so a fresh
+                // hit restarts the pulse and an expired one ends it at once.
+                size_t kept = 0;
+                for (size_t i = 0; i < g_AttackMarkCount; ++i)
+                {
+                    const uint32_t handle = g_AttackMarks[i];
+                    void* const obj = SafeGetObj(handle);
+                    float stamp = 0.0f, age = 0.0f;
+                    float pos[3] = {};
+                    if (!obj || obj == player || !ReadEnemyShotSeh(obj, stamp) || !RM::AttackMarkAge(now, stamp, age) ||
+                        !TryGetGameObjectWorldPosition(obj, pos))
+                    {
+                        LogAttackMark(handle, false, 0.0f);
+                        continue;
+                    }
+                    g_AttackMarks[kept] = handle;
+                    RingRequest& ring = requests[RM::kFirstAttackRingSlot + kept++];
+                    const RM::AttackMarkFrame frame = RM::AttackMarkStyle(age);
+                    ring.wanted = frame.alpha > 0.0f;
+                    std::memcpy(ring.centre, pos, sizeof(ring.centre));
+                    ring.radius = std::min(RM::kMaxTargetRadius + RM::kTargetRingMargin,
+                                           RM::TargetRingRadius(ReadBoundingRadiusSeh(obj)) * frame.radiusScale);
+                    ring.colour = RM::kAttackColour;
+                    ring.colour.a = RM::kAttackColour.a * frame.alpha;
+                }
+                g_AttackMarkCount = kept;
+            }
+
             void BuildRequests(RingRequest (&requests)[RM::kSlotCount])
             {
                 BuildPlacementRequests(requests);
+                if (g_AttackOn)
+                    BuildAttackRequests(requests);
                 if (g_RangeOn)
                 {
                     ArtilleryUnit units[RM::kMaxArtilleryRings];
@@ -1434,7 +1642,9 @@ namespace BZROpenShim
         {
             if (!g_ConfigLoaded)
                 LoadConfig();
-            if (!g_PingsOn && !g_RangeOn && !RtsPlacementAnyEnabled())
+            if (!g_AttackOn)
+                ClearAttackMarks();
+            if (!g_PingsOn && !g_RangeOn && !g_AttackOn && !RtsPlacementAnyEnabled())
             {
                 if (g_AnyVisible)
                     HideAll();
@@ -1468,6 +1678,8 @@ namespace BZROpenShim
                 LogShimW(LogLevel::Info, kComponent, L"[RTSMARKERS] hid rings (%ls)", reason ? reason : L"unspecified");
             }
             g_Pings.Clear();
+            ClearAttackMarks();
+            g_AttackLogBudget = 64;
             g_PoolFailed = false;
             g_PingLogBudget = 16;
             DeactivateRtsPlacement(reason);

@@ -642,6 +642,7 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsPendingBuildGhost" = "1"
     "Gameplay/RtsPowerRange" = "1"
     "Gameplay/RtsWaypointLines" = "1"
+    "Gameplay/RtsAttackMarks" = "0"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }
