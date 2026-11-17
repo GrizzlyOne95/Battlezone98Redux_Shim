@@ -414,6 +414,29 @@ bool ReadLivePaintHeight(int x, int z, uint16_t& height)
 constexpr int kLivePaintMaxFileZones = 64;
 constexpr unsigned kLivePaintMaxSize = 2048;
 
+// The runtime zone rectangle (zone coordinates) of every observed zone. Shared
+// by live paint and the smoothing lattice; `what` prefixes the errors.
+struct TerrainZoneRect { int minX = 0, minZ = 0, columns = 0, rows = 0; };
+TerrainZoneRect ReadTerrainZoneRect(const char* what)
+{
+    std::set<std::pair<int, int>> zones;
+    int minX = INT_MAX, minZ = INT_MAX, maxX = INT_MIN, maxZ = INT_MIN;
+    for (const auto& zone : g_zoneOrdinals)
+    {
+        int x = 0, z = 0;
+        if (!SafeReadZoneInt(zone.first, kZoneXOffset, x) || !SafeReadZoneInt(zone.first, kZoneZOffset, z))
+            throw std::runtime_error(std::string(what) + " zone identity invalid");
+        zones.emplace(x, z);
+        minX = (std::min)(minX, x); maxX = (std::max)(maxX, x);
+        minZ = (std::min)(minZ, z); maxZ = (std::max)(maxZ, z);
+    }
+    if (zones.empty()) throw std::runtime_error(std::string(what) + " has no zones");
+    const int columns = maxX - minX + 1, rows = maxZ - minZ + 1;
+    if (columns < 2 || rows < 2 || std::size_t(columns) * rows != zones.size())
+        throw std::runtime_error(std::string(what) + " needs a full rectangle of at least 2x2 zones");
+    return {minX, minZ, columns, rows};
+}
+
 // The HG2/MAT rectangle as the engine holds it: one runtime zone more per axis
 // than the file, the file starting at the centre of the lowest zone.
 TerrainLivePaint::Input ReadLivePaintInput(const nlohmann::json& map, const nlohmann::json& recipe)
@@ -422,21 +445,8 @@ TerrainLivePaint::Input ReadLivePaintInput(const nlohmann::json& map, const nloh
     if (!g_heightAt || !g_terrainWordAt || !SafeReadIntAddress(g_terrainOriginXVa, originX) ||
         !SafeReadIntAddress(g_terrainOriginZVa, originZ))
         throw std::runtime_error("live paint terrain readers unavailable");
-    std::set<std::pair<int, int>> zones;
-    int minX = INT_MAX, minZ = INT_MAX, maxX = INT_MIN, maxZ = INT_MIN;
-    for (const auto& zone : g_zoneOrdinals)
-    {
-        int x = 0, z = 0;
-        if (!SafeReadZoneInt(zone.first, kZoneXOffset, x) || !SafeReadZoneInt(zone.first, kZoneZOffset, z))
-            throw std::runtime_error("live paint zone identity invalid");
-        zones.emplace(x, z);
-        minX = (std::min)(minX, x); maxX = (std::max)(maxX, x);
-        minZ = (std::min)(minZ, z); maxZ = (std::max)(maxZ, z);
-    }
-    if (zones.empty()) throw std::runtime_error("live paint has no zones");
-    const int columns = maxX - minX + 1, rows = maxZ - minZ + 1;
-    if (columns < 2 || rows < 2 || std::size_t(columns) * rows != zones.size())
-        throw std::runtime_error("live paint needs a full rectangle of at least 2x2 zones");
+    const TerrainZoneRect rect = ReadTerrainZoneRect("live paint");
+    const int minX = rect.minX, minZ = rect.minZ, columns = rect.columns, rows = rect.rows;
     if ((columns - 1) * (rows - 1) > kLivePaintMaxFileZones)
         throw std::runtime_error("live paint map too large: " + std::to_string(columns - 1) + "x" + std::to_string(rows - 1) + " file zones");
     TerrainLivePaint::Input input;

@@ -32,6 +32,7 @@
 #include "terrain_paint.h"
 #include "terrain_live_paint.h"
 #include "terrain_tess_defines.h"
+#include "terrain_lattice_smoothing.h"
 #include "terrain_mesh_name.h"
 #include "frame_bridge_native_geometry.h"
 #include "frame_bridge_native_mesh.h"
@@ -266,6 +267,11 @@ namespace BZROpenShim
             int tessellationFactor = 2;
             bool microReliefTest = false;
             float microReliefAmplitude = 0.25f;
+            // TerrainTessellationSmoothing: bicubic surface through the height
+            // lattice, at most tessellationSmoothingMax world units from the
+            // stock surface. Needs the relief domain, so off without relief.
+            bool tessellationSmoothing = false;
+            float tessellationSmoothingMax = 4.0f;
             bool semanticCapture = false;
             bool semanticDumpJson = true;
             bool semanticRenderer = false;
@@ -999,6 +1005,15 @@ namespace BZROpenShim
                 config.microReliefAmplitude = reliefAmplitude;
             config.tessellationTest = config.tessellationTest || config.microReliefTest;
             if (config.microReliefAmplitude == 0.0f) config.microReliefTest = false;
+            if (IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING"))
+            {
+                config.tessellationSmoothing = config.microReliefTest;
+                float smoothingMax = TerrainLattice::kDefaultMax;
+                if (ReadEnvFloat("OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING_MAX", smoothingMax))
+                    config.tessellationSmoothingMax = TerrainLattice::ClampMax(smoothingMax);
+                if (!config.tessellationSmoothing)
+                    LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] lattice smoothing off: needs TerrainMicroRelief = 1");
+            }
             // The persistent UI switch uses the visually qualified factor-4
             // relief preset; plain submission tests keep their factor-2 default.
             // It is adaptive by default (screen-space edges scaled by paint
@@ -3799,6 +3814,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         bool PrepareTerrainMicroReliefBounds();
         void RefreshTerrainMicroReliefBounds(void* zone);
         void RestoreTerrainMicroReliefBounds();
+        // TerrainTessellationSmoothing lattice (terrain_lattice_smoothing.inl).
+        bool PrepareTerrainLatticeSmoothing(ID3D11Buffer* source, const RenderOperation& operation,
+            bool shaderSupportsSmoothing, std::string& defines);
+        void ReleaseTerrainLattice();
         void RestoreNativeTerrainHd();
         void RestoreNativeTerrainSurface();
         void ResetNativeTerrainHd();
@@ -5143,6 +5162,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         #include "terrain_microrelief_bounds.inl"
         #include "terrain_paint_capture.inl"
         #include "terrain_native_hd.inl"
+        #include "terrain_lattice_smoothing.inl"
         #include "terrain_surface_normals.inl"
         #include "terrain_atlas_export.inl"
         #include "terrain_geometry_entities.inl"
@@ -5589,9 +5609,14 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             bool heightDirty = false;
             int clusterX = 0;
             int clusterZ = 0;
+            // Smoothing lattice: the original consumes every cluster's dirty
+            // bytes, so all sixteen are read here, before it runs.
+            uint16_t latticeDirty = 0;
+            bool latticeFull = false;
             if (g_active.load(std::memory_order_acquire) && !g_shutdown.load())
             {
                 std::lock_guard<std::mutex> lock(g_mutex);
+                latticeDirty = TerrainLatticeDirtyClusters(zone, latticeFull);
                 if(g_config.geometryLive&&g_proxy.selected&&g_proxy.zone==zone)
                     for(size_t i=0;i<16;++i) {
                         uint8_t full=0,height=0,next=0;
@@ -5649,6 +5674,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             }
             RefreshTerrainMicroReliefBounds(zone);
             RefreshNativeTerrainHd(zone, hdDirty);
+            if (latticeDirty) RefreshTerrainLattice(zone, latticeDirty, latticeFull);
             // The engine can destroy the proxy Entity at any point during a
             // mission change. Detect that by name before anything dereferences
             // the stored pointer, and forget so the next qualifying zone in

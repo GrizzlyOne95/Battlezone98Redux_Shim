@@ -162,6 +162,44 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
             binding.Reset(); restored.Reset(); context->DSGetShaderResources(127,1,&restored);
             check(restored.Get()==foreign.Get(),"mission cleanup failed to restore prior resource");
         }
+        {
+            // TerrainTessellationSmoothing: the lattice view (slot 126, domain
+            // only) alone and together with the height view.
+            BZROpenShim::TerrainHeight::DomainBinding binding;
+            auto lattice=height_texture(device.Get(),5), previousLattice=height_texture(device.Get(),6);
+            auto previousHeight=height_texture(device.Get(),7);
+            auto* raw=previousLattice.Get(); context->DSSetShaderResources(126,1,&raw);
+            raw=previousHeight.Get(); context->DSSetShaderResources(127,1,&raw);
+            context->DSSetShader(domain.Get(),nullptr,0);
+            binding.lattice=lattice; binding.domains.emplace_back(domain.Get());
+            binding.Select(context.Get(),domain.Get());
+            // Bound() reports the height view only (terrain statistics gate).
+            check(!binding.Bound(context.Get()),"a lattice-only binding reports the height view bound");
+            ComPtr<ID3D11ShaderResourceView> current;
+            context->DSGetShaderResources(126,1,&current);
+            check(current.Get()==lattice.Get(),"lattice not on slot 126");
+            current.Reset(); context->DSGetShaderResources(127,1,&current);
+            check(current.Get()==previousHeight.Get(),"lattice-only binding touched the height slot");
+            current.Reset(); context->HSGetShaderResources(126,1,&current);
+            check(!current,"lattice bound to the hull");
+            context->DSSetShader(nullptr,nullptr,0); binding.Select(context.Get(),nullptr);
+            current.Reset(); context->DSGetShaderResources(126,1,&current);
+            check(current.Get()==previousLattice.Get()&&binding.restores==1,"foreign domain did not restore the lattice slot");
+            binding.view=sentinel;
+            context->DSSetShader(domain.Get(),nullptr,0); binding.Select(context.Get(),domain.Get());
+            check(binding.Bound(context.Get()),"height view not bound beside the lattice");
+            current.Reset(); context->DSGetShaderResources(126,1,&current);
+            check(current.Get()==lattice.Get(),"lattice not rebound beside the height view");
+            auto* foreignRaw=previousHeight.Get(); context->DSSetShaderResources(126,1,&foreignRaw);
+            check(binding.Bound(context.Get()),"a foreign lattice-slot writer changed the height-bound report");
+            binding.Reset();
+            current.Reset(); context->DSGetShaderResources(126,1,&current);
+            check(current.Get()==previousHeight.Get(),"lattice restore overwrote a foreign writer");
+            current.Reset(); context->DSGetShaderResources(127,1,&current);
+            check(current.Get()==previousHeight.Get(),"height slot not restored with the lattice");
+            ID3D11ShaderResourceView* none=nullptr;
+            context->DSSetShaderResources(126,1,&none); context->DSSetShaderResources(127,1,&none);
+        }
         unsigned runs=0;
         for (int orientation=0;orientation<4;++orientation)
         for (float eye:{0.f,320.f})

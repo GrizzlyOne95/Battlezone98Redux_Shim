@@ -24,6 +24,23 @@
     defined(OPENSHIM_HEIGHT_TEST) || defined(VERTEX_LIGHTING))
 #error Paint height needs the paint-mode HD interface and owns the domain texture slot
 #endif
+// TerrainTessellationSmoothing (OPENSHIM_LATTICE_SMOOTH): a smooth surface
+// through the 5 m height lattice moves the tessellated terrain at most
+// OPENSHIM_LATTICE_MAX world units up or down. It needs paint-mode world XZ
+// (hdUV) and world Y (tileSlice); the installer only enables it in paint mode.
+#if defined(OPENSHIM_LATTICE_SMOOTH) && (!defined(OPENSHIM_RELIEF_TEST) || !defined(OPENSHIM_TERRAIN_HD) || \
+    defined(VERTEX_LIGHTING) || !defined(OPENSHIM_LATTICE_OFFSET))
+#error Lattice smoothing needs the per-pixel relief interface, paint-mode world XZ and the lattice mapping
+#endif
+#ifndef OPENSHIM_LATTICE_MAX
+#define OPENSHIM_LATTICE_MAX 4.0
+#endif
+// Culling and render bounds sweep the relief and the smoothing together.
+#if defined(OPENSHIM_LATTICE_SMOOTH)
+#define OPENSHIM_RELIEF_SWEEP (OPENSHIM_RELIEF_AMPLITUDE + OPENSHIM_LATTICE_MAX)
+#else
+#define OPENSHIM_RELIEF_SWEEP OPENSHIM_RELIEF_AMPLITUDE
+#endif
 
 #if defined(OPENSHIM_TESS_ADAPTIVE)
 // Ogre ACT_VIEWPORT_SIZE supplies width/height and their reciprocals per pass.
@@ -322,16 +339,47 @@ float3 TerrainPaintRelief(float2 worldXZ)
 
 #if defined(OPENSHIM_TESS_ADAPTIVE)
 // Hull side: how far a vertex's layer mix can displace, from the control
-// maps alone, as a 0..1 tessellation scale. A pure function of world XZ.
-float TerrainPaintReliefScale(float2 worldXZ)
+// maps alone, in metres. A pure function of world XZ; non-finite -> huge.
+float TerrainPaintReliefSpan(float2 worldXZ)
 {
-    if (!all(isfinite(worldXZ))) return 1.0;
+    if (!all(isfinite(worldXZ))) return 1.0e6;
     float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / (OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy);
     float4 banks[OPENSHIM_PAINT_LAYERS / 4];
     [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
         banks[b] = TerrainPaintBilinear(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
     float span = OpenShimPaintDot(OpenShimPaintNormalize(banks), openShimPaintReliefMeters) * OPENSHIM_PAINT_HEIGHT_SCALE;
+    return isfinite(span) ? span : 1.0e6;
+}
+
+// Lattice smoothing on the hull: how far it can move an edge, from the
+// world-Y difference of its two endpoints (tileSlice). Smoothing follows
+// curvature, which needs height change: level ground adds nothing, and a
+// drop of OPENSHIM_TESS_RELIEF_FULL / OPENSHIM_LATTICE_TESS_SLOPE (6 m) or
+// more reaches full scale when the Max allows. Endpoints only, so both
+// patches of a shared edge compute the same factor (no T-junction).
+#ifndef OPENSHIM_LATTICE_TESS_SLOPE
+#define OPENSHIM_LATTICE_TESS_SLOPE 0.25
+#endif
+float TerrainLatticeTessSpan(float y0, float y1)
+{
+#if defined(OPENSHIM_LATTICE_SMOOTH)
+    float range = abs(y0 - y1);
+    return isfinite(range) ? min(OPENSHIM_LATTICE_MAX, OPENSHIM_LATTICE_TESS_SLOPE * range) : OPENSHIM_LATTICE_MAX;
+#else
+    return 0.0;
+#endif
+}
+
+// Relief span in metres -> 0..1 tessellation scale.
+float TerrainReliefScale(float span)
+{
     return isfinite(span) ? lerp(OPENSHIM_TESS_RELIEF_FLAT, 1.0, saturate(span / OPENSHIM_TESS_RELIEF_FULL)) : 1.0;
+}
+
+// One edge's scale: the larger endpoint paint span plus the edge's lattice span.
+float TerrainEdgeReliefScale(float paintA, float paintB, float yA, float yB)
+{
+    return TerrainReliefScale(max(paintA, paintB) + TerrainLatticeTessSpan(yA, yB));
 }
 #endif
 #endif
@@ -383,7 +431,7 @@ struct TerrainTessFactors
 bool TerrainPatchOffscreen(float4 a, float4 b, float4 c)
 {
     if (all(reliefProjection[3] == 0.0)) return false;
-    float4 sweep = mul(reliefProjection, mul(reliefView, float4(0.0, OPENSHIM_RELIEF_AMPLITUDE, 0.0, 0.0)));
+    float4 sweep = mul(reliefProjection, mul(reliefView, float4(0.0, OPENSHIM_RELIEF_SWEEP, 0.0, 0.0)));
     if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(c)) || !all(isfinite(sweep))) return false;
     float4 corner[6] = { a + sweep, a - sweep, b + sweep, b - sweep, c + sweep, c - sweep };
     bool4 sideOut = bool4(true, true, true, true);
@@ -405,11 +453,15 @@ TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
 #if defined(OPENSHIM_TESS_ADAPTIVE)
     float relief[3] = { 1.0, 1.0, 1.0 };
 #if defined(OPENSHIM_PAINT_HEIGHT)
-    [unroll] for (int i = 0; i < 3; ++i) relief[i] = TerrainPaintReliefScale(p[i].hdUV);
+    float paint[3];
+    [unroll] for (int i = 0; i < 3; ++i) paint[i] = TerrainPaintReliefSpan(p[i].hdUV);
+    relief[0] = TerrainEdgeReliefScale(paint[1], paint[2], p[1].tileSlice, p[2].tileSlice);
+    relief[1] = TerrainEdgeReliefScale(paint[2], paint[0], p[2].tileSlice, p[0].tileSlice);
+    relief[2] = TerrainEdgeReliefScale(paint[0], paint[1], p[0].tileSlice, p[1].tileSlice);
 #endif
-    f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy,max(relief[1],relief[2]));
-    f.edge[1] = TerrainAdaptiveEdge(p[2].position,p[0].position,tessViewport.xy,max(relief[2],relief[0]));
-    f.edge[2] = TerrainAdaptiveEdge(p[0].position,p[1].position,tessViewport.xy,max(relief[0],relief[1]));
+    f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy,relief[0]);
+    f.edge[1] = TerrainAdaptiveEdge(p[2].position,p[0].position,tessViewport.xy,relief[1]);
+    f.edge[2] = TerrainAdaptiveEdge(p[0].position,p[1].position,tessViewport.xy,relief[2]);
     f.inside = max(f.edge[0],max(f.edge[1],f.edge[2]));
 #else
     f.edge[0] = f.edge[1] = f.edge[2] = OPENSHIM_TESS_FACTOR;
@@ -436,6 +488,96 @@ TerrainTessVertex TerrainHull(InputPatch<TerrainTessVertex, 3> p,
 {
     return p[id];
 }
+
+#if defined(OPENSHIM_LATTICE_SMOOTH)
+// The whole runtime height lattice in masked 0.1 m units (R16_UINT, mip 0).
+// include/terrain_lattice_smoothing.h is the CPU reference of this curve.
+Texture2D<uint> terrainLattice : register(t126);
+
+struct TerrainLatticeSegment { float h; float slope; int clampedTo; };
+// Catmull-Rom between p1 (t = 0, exact) and p2 (t = 1), clamped to that
+// segment's own range so no 1D pass overshoots.
+TerrainLatticeSegment TerrainLatticeCatmullRom(float p0, float p1, float p2, float p3, float t)
+{
+    float a = (-p0 + 3.0 * p1) + (p3 - 3.0 * p2);
+    float b = (2.0 * p0 - 5.0 * p1) + (4.0 * p2 - p3);
+    float c = p2 - p0;
+    TerrainLatticeSegment s;
+    s.h = 0.5 * (((a * t + b) * t + c) * t) + p1;
+    s.slope = 0.5 * ((3.0 * a * t + 2.0 * b) * t + c);
+    s.clampedTo = 0;
+    float lo = min(p1, p2), hi = max(p1, p2);
+    if (s.h < lo || s.h > hi)
+    {
+        bool low = s.h < lo;
+        s.h = low ? lo : hi;
+        s.clampedTo = (low ? p1 <= p2 : p1 > p2) ? 1 : 2;
+        s.slope = 0.0;
+    }
+    return s;
+}
+
+float TerrainLatticeFetch(int x, int z, int2 size)
+{
+    int2 texel = clamp(int2(x, z), int2(0, 0), size - 1);
+    return float(terrainLattice.Load(int3(texel, 0)) & 0x1FFF) * 0.1;
+}
+
+// float4(height, dh/dX, dh/dZ, valid) in world metres at native world XZ.
+// Separable bicubic: each pass clamps to its own segment, so the height stays
+// within the central 2x2 samples and is continuous across cell borders.
+float4 TerrainLatticeSurface(float2 worldXZ)
+{
+    uint width, height;
+    terrainLattice.GetDimensions(width, height);
+    if (width < 4 || height < 4 || !all(isfinite(worldXZ))) return 0.0;
+    int2 size = int2(width, height);
+    float2 g = float2(worldXZ.x * 0.2 + OPENSHIM_LATTICE_OFFSET.x, OPENSHIM_LATTICE_OFFSET.y - worldXZ.y * 0.2);
+    float2 cell = floor(g);
+    if (any(abs(cell) > 32768.0)) return 0.0;
+    int2 i = int2(cell);
+    float2 t = g - cell;
+    float row[4], rowSlope[4];
+    [unroll] for (int r = 0; r < 4; ++r)
+    {
+        int z = i.y - 1 + r;
+        TerrainLatticeSegment s = TerrainLatticeCatmullRom(TerrainLatticeFetch(i.x - 1, z, size),
+            TerrainLatticeFetch(i.x, z, size), TerrainLatticeFetch(i.x + 1, z, size),
+            TerrainLatticeFetch(i.x + 2, z, size), t.x);
+        row[r] = s.h;
+        rowSlope[r] = s.slope;
+    }
+    TerrainLatticeSegment column = TerrainLatticeCatmullRom(row[0], row[1], row[2], row[3], t.y);
+    float dx;
+    if (column.clampedTo == 1) dx = rowSlope[1];
+    else if (column.clampedTo == 2) dx = rowSlope[2];
+    else
+    {
+        float t2 = t.y * t.y, t3 = t2 * t.y;
+        float4 w = 0.5 * float4(-t.y + 2.0 * t2 - t3, 2.0 - 5.0 * t2 + 3.0 * t3, t.y + 4.0 * t2 - 3.0 * t3, t3 - t2);
+        dx = dot(w, float4(rowSlope[0], rowSlope[1], rowSlope[2], rowSlope[3]));
+    }
+    // Lattice x follows world +X; lattice z runs toward world -Z.
+    float4 result = float4(column.h, dx * 0.2, -column.slope * 0.2, 1.0);
+    return all(isfinite(result)) ? result : 0.0;
+}
+
+// Interpolation from the control points with unfused products summed in a
+// fixed order. On a shared edge the opposite weight is exactly 0, so both
+// patches add the same two rounded products (IEEE addition commutes) and
+// produce the same bits whichever slot each endpoint occupies.
+float2 TerrainLatticeLerp2(float2 a, float2 b, float2 c, float3 w)
+{
+    precise float2 r = (a * w.x + b * w.y) + c * w.z;
+    return r;
+}
+
+float TerrainLatticeLerp1(float a, float b, float c, float3 w)
+{
+    precise float r = (a * w.x + b * w.y) + c * w.z;
+    return r;
+}
+#endif
 
 #define TERRAIN_INTERPOLATE(field) o.field = p[0].field * b.x + p[1].field * b.y + p[2].field * b.z
 [domain("tri")]
@@ -487,6 +629,33 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
     float3 relief = TerrainMicroRelief(TerrainReliefObjectXZ(o.viewPosition, reliefInverseWorldView));
 #endif
     float3 worldNormal = normalize(mul(reliefInverseView, float4(o.normal, 0.0)).xyz);
+    float latticeDelta = 0.0;
+#if defined(OPENSHIM_LATTICE_SMOOTH)
+    // Paint mode: hdUV is native world XZ and tileSlice native world Y, so
+    // the offset depends only on world XZ and the stock (linear) height.
+    // 0 = stock normal/tangent, 1 = the smoothed surface's.
+    float latticeWeight = 0.0;
+    float3 latticeWorldNormal = float3(0.0, 1.0, 0.0);
+    {
+        float2 worldXZ = TerrainLatticeLerp2(p[0].hdUV, p[1].hdUV, p[2].hdUV, b);
+        float linearY = TerrainLatticeLerp1(p[0].tileSlice, p[1].tileSlice, p[2].tileSlice, b);
+        float4 surface = TerrainLatticeSurface(worldXZ);
+        float delta = surface.x - linearY;
+        if (surface.w > 0.0 && isfinite(delta))
+        {
+            latticeDelta = clamp(delta, -OPENSHIM_LATTICE_MAX, OPENSHIM_LATTICE_MAX);
+            // Well inside the bound the surface is the bicubic one: take its
+            // analytic normal. Pinned at the clamp it keeps the stock slope.
+            // Blend over the last quarter of the bound so the clamp line
+            // leaves no shading seam.
+            latticeWeight = saturate((OPENSHIM_LATTICE_MAX - abs(delta)) / (0.25 * OPENSHIM_LATTICE_MAX));
+            latticeWorldNormal = normalize(float3(-surface.y, 1.0, -surface.z));
+            float3 blended = lerp(worldNormal, latticeWorldNormal, latticeWeight);
+            if (latticeWeight > 0.0 && all(isfinite(blended)) && dot(blended, blended) > 1e-12)
+                worldNormal = normalize(blended);
+        }
+    }
+#endif
     // The differential of (x,y,z) -> (x,y+h(x,z),z) transforms the normal
     // by inverse transpose; this preserves native slopes and adds relief.
     worldNormal = normalize(float3(worldNormal.x - worldNormal.y * relief.y,
@@ -494,10 +663,14 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
     o.normal = mul(reliefView, float4(worldNormal, 0.0)).xyz;
 #if defined(NORMALMAP_ENABLED) && defined(VERTEX_TANGENTS)
     float3 worldTangent = mul(reliefInverseView, float4(o.tangent, 0.0)).xyz;
+#if defined(OPENSHIM_LATTICE_SMOOTH)
+    // Lay the stock tangent onto the smoothed surface before the relief slope.
+    worldTangent -= latticeWeight * latticeWorldNormal * dot(worldTangent, latticeWorldNormal);
+#endif
     worldTangent.y += relief.y * worldTangent.x + relief.z * worldTangent.z;
     o.tangent = mul(reliefView, float4(normalize(worldTangent), 0.0)).xyz;
 #endif
-    float4 vertical = float4(0.0, relief.x, 0.0, 0.0);
+    float4 vertical = float4(0.0, relief.x + latticeDelta, 0.0, 0.0);
     o.viewPosition += mul(reliefView, vertical).xyz;
     o.position += mul(reliefProjection, mul(reliefView, vertical));
     o.depth = o.position.z;

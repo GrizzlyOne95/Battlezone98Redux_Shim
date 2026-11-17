@@ -637,7 +637,40 @@ RWStructuredBuffer<float4> testResults : register(u0);
             if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
             ok(compiled);
         }
-        std::cout<<"PASS: eight-layer banks and adaptive hull, close-up parallax, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        // TerrainTessellationSmoothing can move ground whose painted layers
+        // carry no relief, so the adaptive hull adds min(MAX, 0.25 x the
+        // edge's world-Y drop) to the span. On flat paint a level edge keeps
+        // OPENSHIM_TESS_RELIEF_FLAT (0.4); a 1 m drop gives 0.5; a 20 m cliff
+        // edge reaches 1.0 at Max 4 and is capped at 0.64 by Max 0.6.
+        // Without smoothing every edge stays at 0.4.
+        struct Scale { float level, gentle, cliff; };
+        ID3D11ShaderResourceView* scaleViews[]={eightView.Get()};context->CSSetShaderResources(127,1,scaleViews);
+        for (const auto& [smoothing, expectedScale] : {std::pair<const char*, Scale>{"", {0.4f, 0.4f, 0.4f}},
+                 {"#define OPENSHIM_LATTICE_SMOOTH 1\n#define OPENSHIM_LATTICE_MAX 0.6\n#define OPENSHIM_LATTICE_OFFSET float2(0,0)\n", {0.4f, 0.5f, 0.64f}},
+                 {"#define OPENSHIM_LATTICE_SMOOTH 1\n#define OPENSHIM_LATTICE_MAX 4.0\n#define OPENSHIM_LATTICE_OFFSET float2(0,0)\n", {0.4f, 0.5f, 1.0f}}})
+        {
+            const std::string scaleSource = std::string(smoothing) + "#define OPENSHIM_TESS_ADAPTIVE 1\n#define OPENSHIM_TESS_FACTOR 8\n"
+                "static const float openShimPaintReliefMeters[8] = {0,0,0,0,0,0,0,0};\n" + eightTess + R"(
+[numthreads(1,1,1)] void TestReliefScale(uint3 id : SV_DispatchThreadID)
+{ float a = TerrainPaintReliefSpan(float2(0.3 + 0.9 * id.x, 0.7 + 0.4 * id.x));
+  float b = TerrainPaintReliefSpan(float2(0.8 + 0.7 * id.x, 0.2 + 0.5 * id.x));
+  float y = 37.0 + id.x;
+  testResults[id.x] = float4(TerrainEdgeReliefScale(a, b, y, y), TerrainEdgeReliefScale(a, b, y, y - 1.0),
+      TerrainEdgeReliefScale(a, b, y + 20.0, y), 0); }
+)";
+            compiled = D3DCompile(scaleSource.data(),scaleSource.size(),nullptr,nullptr,nullptr,"TestReliefScale","cs_5_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+            ComPtr<ID3D11ComputeShader> scaleShader;
+            ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&scaleShader));
+            context->CSSetShader(scaleShader.Get(),nullptr,0);
+            dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+            for(UINT i=0;i<count;++i)
+                check(std::abs(values[i].r-expectedScale.level)<1e-5f&&std::abs(values[i].g-expectedScale.gentle)<1e-5f&&
+                    std::abs(values[i].b-expectedScale.cliff)<1e-5f,"adaptive hull edge scale does not follow the lattice smoothing span");
+            context->Unmap(staging.Get(),0);
+        }
+        std::cout<<"PASS: eight-layer banks and adaptive hull (smoothing-aware relief scale), close-up parallax, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

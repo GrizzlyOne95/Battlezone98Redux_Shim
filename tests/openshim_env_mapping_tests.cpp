@@ -416,6 +416,30 @@ namespace
         Check(Lookup(name, &ini, env) == "<unset>", "invalid relief setting does not opt in");
     }
 
+    void TestTerrainTessellationSmoothingMapping()
+    {
+        FakeIni ini;
+        FakeEnv env;
+        constexpr const char* name = "OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING";
+        constexpr const char* maxName = "OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING_MAX";
+        Check(Lookup(name, &ini, env) == "<unset>", "absent smoothing setting is not mapped (off)");
+        Check(Lookup(maxName, &ini, env) == "<unset>", "absent smoothing max falls back to the default");
+        ini.Set("Terrain", "TerrainTessellationSmoothing", "1");
+        ini.Set("Terrain", "TerrainTessellationSmoothingMax", "6.5");
+        Check(Lookup(name, &ini, env) == "1", "INI enables smoothing");
+        Check(Lookup(maxName, &ini, env) == "6.5", "INI smoothing max is passed through");
+        ini.Set("Terrain", "TerrainTessellationSmoothing", "0");
+        Check(Lookup(name, &ini, env) == "0", "INI 0 disables smoothing");
+        env.values[name] = "1";
+        env.values[maxName] = "2.0";
+        Check(Lookup(name, &ini, env) == "1", "smoothing harness overrides saved Off");
+        Check(Lookup(maxName, &ini, env) == "2.0", "smoothing max harness overrides the INI");
+        Check(IsCaptureOverrideName(name) && IsCaptureOverrideName(maxName), "smoothing keys are capture names");
+        env.values.clear();
+        ini.Set("Terrain", "TerrainTessellationSmoothing", "invalid");
+        Check(Lookup(name, &ini, env) == "<unset>", "invalid smoothing setting does not opt in");
+    }
+
     void TestEmptyNamesPassThrough()
     {
         FakeIni ini;
@@ -468,6 +492,7 @@ int main()
     TestShellCasingsDefaultOff();
     TestCaptureNamesLetTheEnvironmentWin();
     TestTerrainReliefUiAndHarnessPrecedence();
+    TestTerrainTessellationSmoothingMapping();
     TestEmptyNamesPassThrough();
     TestCopyContract();
 

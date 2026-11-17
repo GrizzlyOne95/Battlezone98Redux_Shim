@@ -11,7 +11,7 @@ void RestoreTerrainHeightTexture()
     std::lock_guard<std::mutex> lock(g_heightMutex);
     g_heightActive.store(false);
     g_heightBinding.RestoreSlot();
-    if (g_heightBinding.view)
+    if (g_heightBinding.view || g_heightBinding.lattice)
         LogShimA(LogLevel::Info, "terrain-height", "[TERRAIN-HEIGHT] released domains=%zu binds=%llu restores=%llu", g_heightBinding.domains.size(), g_heightBinding.binds, g_heightBinding.restores);
     g_heightBinding.Reset();
 }

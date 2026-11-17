@@ -104,8 +104,39 @@ def main():
                                 '/D', 'OPENSHIM_HEIGHT_TEST=1', '/D', 'OPENSHIM_RELIEF_AMPLITUDE=1'])
         for tag in (b'ISGN', b'OSGN'):
             assert signature(height, tag, tag == b'ISGN') == expected, (defines, 'height', tag)
+        # TerrainTessellationSmoothing runs only in paint mode (OPENSHIM_TERRAIN_HD
+        # world XZ). The HD vertex shader is generated at runtime (and audited
+        # there), so here the smoothed HS/DS must keep the HD relief interface
+        # bit for bit, and HS output must feed DS input.
+        hd = ["/D", "OPENSHIM_TERRAIN_HD=1", "/D", "OPENSHIM_RELIEF_TEST=1", "/D", "OPENSHIM_RELIEF_AMPLITUDE=0.25"]
+        lattice = ["/D", "OPENSHIM_LATTICE_SMOOTH=1", "/D", "OPENSHIM_LATTICE_MAX=4.0",
+                   "/D", "OPENSHIM_LATTICE_OFFSET=float2(512,384)"]
+        for adaptive in (False, True):
+            tess = ["/D", "OPENSHIM_TESS_FACTOR=4"] + (
+                ["/D", "OPENSHIM_TESS_ADAPTIVE=1", "/D", "OPENSHIM_TESS_TARGET_PIXELS=12"] if adaptive else [])
+            mode = 'adaptive' if adaptive else 'fixed'
+            files = {}
+            for smooth in (False, True):
+                for stage, entry in (("hs", "TerrainHull"), ("ds", "TerrainDomain")):
+                    files[smooth, stage] = compile_shader(
+                        "openshim_terrain_tessellation_test.hlsl", stage + "_5_0", entry,
+                        f"{index}-hd-{'lattice' if smooth else 'relief'}-{mode}-{stage}",
+                        hd + tess + (lattice if smooth else []))
+            hd_interface = signature(files[False, "hs"], b"ISGN")
+            for smooth in (False, True):
+                for stage in ("hs", "ds"):
+                    for tag in (b"ISGN", b"OSGN"):
+                        actual = signature(files[smooth, stage], tag, (stage, tag) in (("hs", b"OSGN"), ("ds", b"ISGN")))
+                        assert actual == hd_interface, (defines, mode, smooth, stage, tag, hd_interface, actual)
+    # The lattice needs paint-mode world XZ: without OPENSHIM_TERRAIN_HD the
+    # shader must refuse to compile rather than smooth cluster-local positions.
+    refused = subprocess.run([str(fxc), "/nologo", "/T", "ds_5_0", "/E", "TerrainDomain",
+                              "/D", "OPENSHIM_RELIEF_TEST=1", "/D", "OPENSHIM_LATTICE_SMOOTH=1",
+                              "/D", "OPENSHIM_LATTICE_OFFSET=float2(512,384)", "/Fo", str(out / "lattice-refused.cso"),
+                              str(payload / "openshim_terrain_tessellation_test.hlsl")], capture_output=True, text=True)
+    assert refused.returncode != 0 and "Lattice smoothing needs" in (refused.stdout + refused.stderr),         "lattice smoothing compiled without the paint-mode HD interface"
     print(f"PASS: {compiled} shaders; {len(variants)} terrain permutations; "
-          "factors 1/2/4, adaptive, micro-relief and candidate texture-height DS; VS -> HS -> DS signatures and registers match.")
+          "factors 1/2/4, adaptive, micro-relief, candidate texture-height DS and HD lattice smoothing; VS -> HS -> DS signatures and registers match.")
 
 
 if __name__ == "__main__":

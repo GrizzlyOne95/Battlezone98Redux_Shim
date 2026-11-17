@@ -172,6 +172,7 @@ std::string TerrainProgramSignature(void* program, const char* tag, bool control
 void RestoreNativeTerrainTessellationTest()
 {
     RestoreTerrainHeightTexture();
+    ReleaseTerrainLattice();
     if (g_TessSourceMaterial.empty())
     {
         RestoreTerrainMicroReliefBounds();
@@ -263,6 +264,8 @@ bool InstallNativeTerrainTessellationTest()
         std::string source((std::istreambuf_iterator<char>(input)), {});
         if (source.empty() || source.size() > 64 * 1024)
             throw std::runtime_error("test shader missing/invalid");
+        // A deployed .hlsl older than the DLL cannot smooth; decline only that.
+        const bool shaderSupportsSmoothing = source.find("OPENSHIM_LATTICE_SMOOTH") != std::string::npos;
         source = "#define OPENSHIM_TESS_FACTOR " + std::to_string(g_config.tessellationFactor) + "\n" + source;
         if (g_config.tessellationAdaptive)
             source = "#define OPENSHIM_TESS_ADAPTIVE 1\n#define OPENSHIM_TESS_TARGET_PIXELS " +
@@ -324,7 +327,20 @@ bool InstallNativeTerrainTessellationTest()
             source = defines.str() + TerrainPaint::LayerHlsl(g_HdPaint) + TerrainPaint::DetileHlsl() +
                 TerrainPaint::CraterHlsl() + source;
         }
-        const bool domainTexture = textureHeight || paintHeight;
+        // After the relief define: the lattice delta stacks on the relief and
+        // widens the cull sweep (shader) and render bounds by its clamp.
+        bool latticeSmoothing = false;
+        if (g_config.tessellationSmoothing)
+        {
+            std::string latticeDefines;
+            latticeSmoothing = PrepareTerrainLatticeSmoothing(buffer, operation, shaderSupportsSmoothing, latticeDefines);
+            if (latticeSmoothing)
+            {
+                source = latticeDefines + source;
+                g_activeTerrainReliefAmplitude += g_config.tessellationSmoothingMax;
+            }
+        }
+        const bool domainTexture = textureHeight || paintHeight || latticeSmoothing;
         void* materialManager = g_ogre.getMaterialManager();
         void* programManager = g_ogre.getHighLevelProgramManager();
         if (!materialManager || !programManager)

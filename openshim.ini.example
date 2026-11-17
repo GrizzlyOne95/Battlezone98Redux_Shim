@@ -1132,6 +1132,21 @@ ShadowFarDistance = 256
 ; game restart. Unsupported renderer/build/terrain contracts retain native terrain.
 TerrainMicroRelief = 0
 
+; Experimental lattice smoothing for the micro-relief tessellation. Not in the
+; settings page. With tessellation on, each tessellated point takes its height
+; from a smooth (clamped Catmull-Rom bicubic) surface through the 5 m height
+; lattice instead of the flat stock triangle, so cliffs and ridges lose their
+; faceting. Vertical only and visual only: collision, placement and gameplay
+; heights are unchanged. Needs TerrainMicroRelief = 1 and an installed HD paint
+; pack (the only mode that carries world positions into the domain shader);
+; otherwise it stays off with one log line. Restart required.
+; Accepted: 0/1. Default: 0. Env: OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING.
+TerrainTessellationSmoothing = 0
+; Largest smoothing offset from the stock surface, in world units.
+; Accepted: 0.5 to 12 (clamped). Default: 4.0.
+; Env: OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING_MAX.
+TerrainTessellationSmoothingMax = 4.0
+
 
 ; NOTE: terrain booleans below are integer flags; use 0/1.
 

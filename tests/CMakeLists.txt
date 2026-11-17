@@ -253,6 +253,7 @@ openshim_add_test(unit_damage_tests STD 20 SOURCES unit_damage_tests.cpp)
 openshim_add_test(terrain_paint_tests STD 17 SOURCES terrain_paint_tests.cpp)
 openshim_add_test(terrain_live_paint_tests STD 17 SOURCES terrain_live_paint_tests.cpp)
 openshim_add_test(terrain_tess_defines_tests STD 17 SOURCES terrain_tess_defines_tests.cpp)
+openshim_add_test(terrain_lattice_smoothing_tests STD 17 SOURCES terrain_lattice_smoothing_tests.cpp)
 openshim_add_test(terrain_mesh_name_tests STD 17 SOURCES terrain_mesh_name_tests.cpp)
 openshim_add_test(options_ui_l10n_tests STD 17 SOURCES options_ui_l10n_tests.cpp ../src/patches/options_ui_l10n.cpp)
 target_compile_definitions(options_ui_l10n_tests PRIVATE
@@ -277,6 +278,10 @@ if(WIN32)
     target_link_libraries(terrain_height_domain_gpu_tests PRIVATE d3d11 d3dcompiler dxguid)
     openshim_add_test(terrain_height_hook_abi_tests STD 17 SOURCES terrain_height_hook_abi_tests.cpp)
     target_compile_definitions(terrain_height_domain_gpu_tests PRIVATE
+        TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
+    openshim_add_test(terrain_smoothing_gpu_tests STD 17 SOURCES terrain_smoothing_gpu_tests.cpp)
+    target_link_libraries(terrain_smoothing_gpu_tests PRIVATE d3d11 d3dcompiler dxguid)
+    target_compile_definitions(terrain_smoothing_gpu_tests PRIVATE
         TERRAIN_TESS_SHADER_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../resources/renderer/enhanced/openshim_terrain_tessellation_test.hlsl")
 endif()
 

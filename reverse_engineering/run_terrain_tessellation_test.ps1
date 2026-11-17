@@ -8,6 +8,9 @@ param(
     [switch]$HdTiles,
     [string]$HdManifest = 'terrain_hd_tiles.json',
     [ValidateRange(0, 1)][float]$ReliefAmplitude = 0.25,
+    # Lattice smoothing (needs -MicroRelief and an HD paint pack).
+    [switch]$Smoothing,
+    [ValidateRange(0.5, 12)][float]$SmoothingMax = 4.0,
     [switch]$Editor,
     [ValidateRange(10, 120)][int]$RunSeconds = 45,
     [switch]$Deploy
@@ -31,6 +34,8 @@ $variables = @{
     OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME = $(if ($Wireframe) { '1' } else { '0' })
     OPENSHIM_TERRAIN_MICRO_RELIEF_TEST = $(if ($MicroRelief) { '1' } else { '0' })
     OPENSHIM_TERRAIN_MICRO_RELIEF_AMPLITUDE = $ReliefAmplitude.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
+    OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING = $(if ($Smoothing) { '1' } else { '0' })
+    OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING_MAX = $SmoothingMax.ToString('R', [Globalization.CultureInfo]::InvariantCulture)
 }
 $saved = @{}
 $process = $null

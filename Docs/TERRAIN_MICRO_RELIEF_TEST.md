@@ -54,6 +54,84 @@ looks up meshes by resource name and requires matching identity and owned
 expanded bounds; it preserves independently changed native bounds. A failed
 bounds refresh retires displacement before subsequent terrain rendering.
 
+## Lattice smoothing (TerrainTessellationSmoothing)
+
+Opt-in, not in the settings page: `[Terrain] TerrainTessellationSmoothing = 1`
+(env `OPENSHIM_TERRAIN_TESSELLATION_SMOOTHING`) and
+`TerrainTessellationSmoothingMax = 4.0` (env `..._SMOOTHING_MAX`, clamped to
+0.5..12 world units). Both are capture overrides, so a harness value beats the
+INI. Each tessellated point takes its height from a smooth surface through the
+native 5 m height lattice instead of the flat stock triangle; the offset from
+the stock surface is vertical only, clamped to the Max, and stacks under the
+micro relief. Visual only: collision and gameplay heights are unchanged.
+
+Requirements, each failing closed with one `[TERRAIN-TESS] lattice smoothing
+off: ...` log line and the rest of the terrain unchanged:
+
+- `TerrainMicroRelief = 1` with a qualified DX11 relief variant.
+- An installed HD paint pack. Redux renders camera-relative, so the domain
+  stage has no absolute position except in paint mode, where `hdUV` carries
+  native world XZ and `tileSlice` native world Y. Other relief variants
+  (noise, HD tiles, height textures) do not smooth.
+- A deployed `openshim\renderer\enhanced\openshim_terrain_tessellation_test.hlsl`
+  that contains `OPENSHIM_LATTICE_SMOOTH`; an older file logs a Warn line.
+- A lattice <-> world mapping check: one cluster's native vertex positions and
+  heights must land on the lattice texels they are mapped to (at most 1% off,
+  0.02 m), using the source cluster or up to 24 others until one has 2 m of
+  relief. A flat-only map declines rather than smooth unverified.
+
+Data: `include/terrain_lattice_smoothing.h` holds the mapping and the CPU
+reference of the shader curve. The whole runtime zone rectangle (the same rect
+live paint reads, one zone more per axis than the file) is read through the
+engine height reader into an `R16_UINT` DEFAULT texture of masked 0.1 m units
+(exact integers, half the size of R32_FLOAT; 1280x1280 is 3.2 MB). Texel
+(tx, tz) is storage sample (baseX + tx, baseZ + tz), baseX = minZoneX * 256 +
+originX - 128, at world X = 5 (tx - 128 columns), Z = -5 (tz - 128 rows). The
+two offsets are per-map `#define OPENSHIM_LATTICE_OFFSET`; programs are named by
+source hash and installed per mission, so this is the same pattern as the paint
+bounds defines. The view binds on DS slot `t126` through
+`TerrainHeight::DomainBinding` (second view next to the height slot 127, saved
+and restored per owned domain, never on the hull or pixel stages).
+
+Curve: separable Catmull-Rom over the 4x4 neighbourhood, rows along x and then
+the column along z. Each 1D pass is clamped to its own segment, so the surface
+stays within the central 2x2 samples (no overshoot at cliff lips), is exact at
+the samples and continuous across cells. Where a clamp engages the surface is
+C0 only (a slope kink at the clamp line). The normal is the analytic bicubic
+gradient; pinned at the Max clamp it keeps the stock normal; relief slope
+correction stacks on either. World XZ and the stock height are re-interpolated
+from the control points with `precise` unfused products, so both patches of a
+shared edge compute bit-identical results (WARP test).
+
+Bounds: the hull cull sweep (`OPENSHIM_RELIEF_SWEEP`) and the padded render
+bounds both grow by the Max. The adaptive hull adds `min(Max, 0.25 x the
+edge's world-Y drop)` to each edge's painted relief span, so level ground
+stays thin and cliff edges (6 m drop or more) reach full scale. Endpoints
+only, so both patches of an edge agree (`terrain_paint_gpu_tests`). Normals
+blend from the smoothed to the stock normal over the last quarter of the
+bound, so the clamp line leaves no shading seam.
+
+Deformation: the zone-process hook reads every cluster's height (0x250),
+next-height (0x260) and full (0x270) dirty byte before the original consumes
+them. After it, each dirty cluster's 65x65 window plus a 16-sample margin is
+re-read through the height reader, compared, and only a changed bounding
+rectangle is uploaded with `UpdateSubresource`. A full-dirty byte refreshes that
+zone's whole window; a map-wide rebuild arrives as every zone. Device recovery
+and mission teardown release the lattice through the tessellation restore path,
+and the next install rebuilds it.
+
+Logs: `[TERRAIN-TESS] lattice smoothing installed size=WxH max=M`, a mapping
+line (zones, base, offsets, format, slot), a 2 s rate-limited Debug refresh
+line, and a release line with batch/upload counts.
+
+Tests: `terrain_lattice_smoothing_tests` (CPU curve: exact at samples, no
+overshoot, symmetric, continuous, slopes, mapping, dirty windows),
+`terrain_smoothing_gpu_tests` (WARP: shared edge bit-identical, matches the CPU
+reference, clamp engaged, flat lattice does not move),
+`terrain_height_domain_gpu_tests` (lattice slot bind/restore) and the HD
+smoothing variants in `scripts/Test-TerrainTessellationShaders.py`. Harness:
+`run_terrain_tessellation_test.ps1 -MicroRelief -Smoothing [-SmoothingMax 4]`.
+
 ## Run and validation
 
 Build Release/Win32 and deploy with the normal full-load-chain harness:
