@@ -42,6 +42,7 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "rts_placement.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -2643,6 +2644,7 @@ namespace BZROpenShim
             InstallAutoGroupNewUnitsIfPossible();
             InstallOffenseOverflowIfPossible();
             InstallRtsCommandsIfPossible();
+            InstallRtsPlacementIfPossible();
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();

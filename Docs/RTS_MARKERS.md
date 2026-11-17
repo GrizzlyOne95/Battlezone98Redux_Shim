@@ -138,6 +138,113 @@ If any row fails to bind, the feature fails closed:
 - Without the artillery rows there are no range rings.
 - Without the hook there are no object-order pings.
 
+## Placement aids
+
+Three more local-only features share the tick and the ring pool. Their rows are on Options > Controls > RTS Commands; all ship on, stock value off.
+
+- **Build Ghost** (`[Gameplay] RtsBuildGhost`). While the stock placement square shows, a see-through copy of the picked building's own mesh stands at the rig's drop matrix, tinted like the square: green valid, yellow no power, red blocked. While the Go To Nav submenu is open and Build at Nav is active for a selected rig with a building picked, a neutral blue-white copy stands at every listed nav (at most 10), on the terrain, facing the player's heading.
+- **Power Range** (`[Gameplay] RtsPowerRange`). While a ghost of a `COMM`, `TURR` or `SHLD` class shows (cursor or nav), a yellow ground ring of `powerRadius` around each allied power plant, nearest 16 first. This works with Build Ghost off.
+- **Waypoint Lines** (`[Gameplay] RtsWaypointLines`). For each selected own-team unit (at most 16, never the piloted vehicle), a 0.6 m draped ribbon from the unit to its current order's destination (green Go, red Attack, yellow anything else), and a dimmer one (alpha x0.45) from there to its pending order's destination. Idle units and orders without a path draw nothing.
+
+Where the code lives:
+
+- Code: `src/patches/rts_placement.cpp` (ghosts, preview record, plant and command reads); the rings and lines are drawn by `rts_markers.cpp`.
+- Pure logic: `include/rts_placement_policy.h`; ghost materials in `include/rts_markers_assets.h`.
+- Tests: `tests/rts_placement_policy_tests.cpp`.
+
+### Pool slots
+
+The pool grows to `RtsMarkers::kSlotCount` = 71; slots 0-22 keep the layout above.
+
+| Slots | Use |
+|---|---|
+| 23-38 | power rings |
+| 39-54 | waypoint lines (current order) |
+| 55-70 | waypoint lines (pending order) |
+
+A line is the ring strip's other shape: a triangle strip sampled every 4 m (`LineSegmentsFor`, at most 96 segments, the ring vertex budget), each pair lifted `kLift` above `Terrain::HeightAt`. It uses the ring material, `g_PoolFailed` and the rebuild key (now 10 floats: centre, radius or -1 for a line, colour, end x/z).
+
+### How the preview is read
+
+The ghost never drives the preview; it copies what the stock code already decided.
+
+- `ConstructionRig::GetCommand(const VECTOR_3D*)` 0x0049D230 is ConstructionRig vtable 0x00877994 slot 12 (`scripts/audit_vtable_hooks.py`: the slot is its only copy in the image). OpenShim replaces the slot with a pass-through post-hook after checking the RTTI name `.?AVConstructionRig@@` and that the slot still holds 0x0049D230; otherwise nothing is patched and the three rows read Unavailable.
+- After the stock call returns, the hook records the rig, the class at rig+0x370, the 64-byte drop matrix at rig+0x378, the result and the tick number. It records only result 8 with the green sprite, or result 9 with the yellow or red sprite. The sprite comes from the global ConstructionDisplay 0x009786D8: +0x68 is the sprite the quad will draw this frame, +0x6C/+0x70/+0x74 the G/Y/R sprites (Init `FUN_0049c390` D lines 7-13). GetCommand sets +0x68 only for a rig allied to the user object (`FUN_0049d230` D lines 50-52, 91-99), so a foreign rig never makes a ghost.
+- ConstructionDisplay::Render `FUN_0049c3e0` clears +0x68 after drawing (0x0049C4E1), so the stock quad is one-shot per frame. The ghost does the same: it shows only while the record is from this tick or the last, and never while the flag at 0x02CECF74 is set (Render skips the quad then).
+- Build at Nav's own validation call (`NavPickHook`, through the bound function pointer, not the slot) runs inside `SuppressRtsGhostRecord(true/false)`, so it never moves the ghost.
+- Mesh: `GameObjectClass::Build` `FUN_004e1190` copies the 8-byte base name at class+0x28 (D lines 80-82), and `FUN_0067f480` creates the entity from `"%.*s.mesh"` of the same bytes (D lines 26-38). The ghost does the same (`MeshNameFor`, printable bytes only) with `SceneManager::createEntity`, then `Entity::setMaterialName` with one of `openshim_rtsghost_g/_y/_r/_n`. The mesh's own materials are never touched. A mesh that fails to load is logged once and not retried until the scene's entities are destroyed or the simulation ends (64 remembered classes).
+- Before the first ghost in a scene, all four ghost materials must exist (`MaterialManager` `resourceExists`). Ogre 1.10 `setMaterialName` silently falls back to BaseWhite, so a missing material would draw an opaque white building; instead the ghost stays off for that scene, with one log line.
+- Teardown: on `clearScene` and `destroyAllMovableObjects` the pointers are dropped without an Ogre call. On `SceneManager::destroyAllEntities` (mission change, load, replay; the exe keeps one SceneManager per process) `DestroyRtsPlacementSceneObjects` destroys the ghost entities before the original runs and keeps their nodes (lifecycle_seams.cpp, next to LaserSight). The remembered failed classes are cleared there and when leaving the simulation.
+- Entities: up to 8 cached cursor ghosts, one per class, one visible at a time (least recently shown is destroyed when a ninth class appears); 10 nav ghosts, rebuilt only when the picked class changes. Names come from Ogre's auto-named `createEntity` overload, so they are unique.
+- Materials `openshim_rtsghost.material` and `openshim_rtsghost-sm4.hlsl` are written next to the ring assets. Technique 0 (DX11): an SM4 shader returning the material's `tint`, brightened (x1.15 + 0.05). Technique 1 (DX9): fixed function with ambient, diffuse and specular black and the same brightened colour as emissive, so no scene light changes it. Both: `alpha_blend`, `depth_write off`, `depth_check on`, no fog, back faces culled.
+
+Nav ghosts:
+
+- The submenu is open when ControlPanel+0x117C equals the nav menu id at 0x008E7BF4 (`ControlPanel::Render` `FUN_004a08e0`, gate at 0x004A465A).
+- The navs are the user team's slots 0x23..0x2C (`FUN_004a08e0` D lines ~1255-1260; `Team::GetSlot` 0x005E0F70 reads `team + slot*4`, a GameObject*). The user team is the global read by `FUN_00462370`. Empty slots are skipped. GetCommand is never called for them.
+- The heading is the player's front vector (GameObject+0xF4, +0x38: `FUN_00462490`), flattened; GetCommand turns a building the same way.
+
+Power rings:
+
+- The plant list is the global `std::vector<PowerPlant*>` at 0x025CCE7C (begin +0, end +4; filled by the PowerPlant ctor `FUN_005a7500`, erased by its dtor `FUN_005a75d0`; every team's plants). The read checks alignment, order and at most 1024 entries.
+- Each plant must pass `GameObject::IsAlly(rig, plant)` 0x004DB510, called under SEH exactly as GetCommand does (0x0049D429).
+- The radius is the plant class's +0x160 (`powerRadius`, read by `FUN_005a77f0`); rings with a radius outside (0, 2000] are dropped.
+- The tower test is the class signature at +0x14 against COMM/TURR/SHLD (0x0049D369-0x0049D38D).
+
+Waypoint lines:
+
+- Each GameObject has two 0x20-byte command records: current at +0xA8 and pending at +0xC8 (promote `FUN_004dbb40` copies one over the other; D lines 10-31). `what` is at +0x04 and the AiPath* at +0x0C.
+- An AiPath has its point count at +0x04 and `{x, z}` float pairs at +0x08 (ctor `FUN_00460490`). The destination is the last point; its height comes from the terrain.
+- `what` 0-2 (none, select, stop) or above 26 draws nothing; so does a count of 0 or above 4096, or a non-finite point.
+
+### Rows
+
+| Row | Address | Used for |
+|---|---|---|
+| `ConstructionRigVtable`, `ConstructionRigGetCommandPos` | 0x00877994, 0x0049D230 | slot 12 post-hook (shared with Build at Nav) |
+| `RtsGhostDisplaySetBox` | 0x0049D328 | ConstructionDisplay address (imm32 at +0x0E), matrix offset 0x378 |
+| `RtsGhostDisplayInit` | 0x0049C390 | sprite fields +0x68..+0x74 |
+| `RtsGhostDisplayRender` | 0x0049C3E0 | +0x68 one-shot, the 0x02CECF74 flag (imm32 at +0x18) |
+| `RtsGhostPreviewResults` | 0x0049D4C2 | result 8/9 and sprite pairing |
+| `RtsGhostMeshName` | 0x004E1297 | class+0x28 base name, 8 bytes |
+| `RtsGhostTowerSigCheck` | 0x0049D360 | COMM/TURR/SHLD at class+0x14; class at rig+0x370 |
+| `RtsPowerPlantList` | 0x0049D3C5 | plant vector address (imm32 at +0x03) |
+| `RtsPowerIsAlly` | 0x004DB510 | IsAlly, called |
+| `RtsPowerRadius` | 0x0049D47C | plant class +0x160 |
+| `RtsNavSubmenuOpen` | 0x004A465A | +0x117C and the menu id address (imm32 at +0x0E) |
+| `RtsNavSlotLoop` | 0x004A49BE | slots 0x23..0x2C |
+| `RtsUserTeam` | 0x00462370 | user Team* global (imm32 at +0x04) |
+| `RtsTeamGetSlot` | 0x005E0F70 | team + slot*4 |
+| `RtsUserFront` | 0x00462490 | +0xF4, +0x38 front vector |
+| `RtsCommandPromote` | 0x004DBB40 | record offsets 0xA8/0xC8, what/path |
+| `RtsAiPathCtor` | 0x00460490 | AiPath count +4, points +8 |
+
+Each group binds once on the patch thread (all or nothing, byte-checked); every engine read and call runs under SEH. Without the core rows or the slot there is no ghost and no power ring; without the nav rows no nav ghosts; without the power rows no power rings; without the two waypoint rows no lines.
+
+### Not verified
+
+- UNVERIFIED: which per-frame caller runs GetCommand(VECTOR), and whether it runs before or after ConstructionDisplay::Render. The two-tick window covers either order, at the cost of the ghost lingering one frame after the quad.
+- UNVERIFIED: the meaning of the flag at 0x02CECF74 (it looks like an alternate render pass guard).
+- UNVERIFIED: the default `powerRadius` (100 in older notes).
+- UNVERIFIED: record bytes +0x10/+0x14 (never read here).
+- UNVERIFIED: multiplayer. Everything is local and reads only the local player's own selection and rigs, but nothing was run in a network game.
+- The power ring is flat (2D); the stock test is 3D distance from the plant to the building's sphere centre, so on slopes a spot just inside a ring can still be yellow.
+- Animated or skinned building meshes show in bind pose.
+
+### Live checklist (not yet run)
+
+1. Select a Construction Rig, pick a gun tower: the green ghost follows the reticle over open ground, matches the stock square's footprint and faces the same way.
+2. Move it away from every power plant: the ghost and square turn yellow together. Onto a cliff or another building: red.
+3. Power Range: with the gun tower picked, a yellow ring shows around each allied power plant; an enemy plant has none. Pick a non-powered building (a factory): no rings.
+4. Deselect the rig, cancel the pick, or switch to another unit: the ghost and rings vanish the same frame as the square.
+5. Pick a Comm Bunker on a rig and open Go To Nav with Build at Nav active: a pale blue ghost at every nav, on the ground, facing your way; power rings show too. Close the menu: they go. Pick a nav: the cursor ghost does not jump to the nav.
+6. Pick a building whose mesh does not exist (a mod class with a bad baseName): no ghost, one warning in openshim.log, no repeat.
+7. Waypoint Lines: select three units, Go to a far point: three green lines on the ground, following hills. Queue an order with a pending record (Shift-queue, if the mod has it): a dimmer second line from the first destination. Idle units: no line.
+8. Hide the HUD (Ctrl+=): ghosts, rings and lines all hide.
+9. DX9 and DX11: ghosts are see-through, unlit, unaffected by fog, and hidden behind hills.
+10. Turn each option off in Options > Controls > RTS Commands: its visuals go on the next frame; the others stay.
+11. Multiplayer: repeat 1-7 as a client and as the host; nothing appears for other players.
+
 ## Known limits
 
 - The cursor point is only refreshed in the views listed above. In other camera views it can be stale. UNVERIFIED.
