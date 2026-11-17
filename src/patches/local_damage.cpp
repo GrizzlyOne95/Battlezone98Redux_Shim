@@ -11,9 +11,10 @@
 // each hit into a point in the craft's root Entity space (the space the
 // Enhanced shader reconstructs with surfaceViewToLocal), keeps up to eight
 // marks per unit with cooling ember heat, and writes them as Renderable
-// custom parameters 1400..1410 on every SubEntity. Custom parameters that a
-// Renderable has never set leave the shared pass constants untouched, so
-// every Entity the walk reaches is zeroed once before any mark can show.
+// custom parameters 1400..1410 on every SubEntity. Only marked units and the
+// objects of the frame's hits are resolved. A Renderable that never set the
+// parameters inherits the pass constants of the last draw, whose camera key
+// (1410) fails the shader's test, so nothing else is zeroed.
 // Render only: no gameplay, sim or network state is written.
 #include "local_damage.h"
 #include "local_damage_policy.h"
@@ -117,20 +118,8 @@ namespace BZROpenShim
         uint32_t g_awaitStartedFrames = 0;
         uint32_t g_frame = 0;
         LARGE_INTEGER g_lastCounter{};
-        // Set by the first hit of the session. Until then no Renderable has
-        // a mark, so the walk (and its zeroing) does not run at all. It is
-        // never reset: pass constants outlive a mission, and a Renderable
-        // that never set the parameters would show the last value written.
-        bool g_anyMarks = false;
-
-        struct EntityRecord
-        {
-            uint32_t seenFrame = 0;
-            uint32_t zeroedFrame = 0;
-            unsigned subCount = 0;
-            void* firstSub = nullptr;
-        };
-        std::unordered_map<void*, EntityRecord> g_entities;
+        // Only the units that carry marks and the objects of this frame's
+        // hits are resolved; nothing walks the arena.
         OgreEntityLiveness::RootEntityCache g_rootProbes;
 
         struct Unit
@@ -139,13 +128,18 @@ namespace BZROpenShim
             void* object = nullptr;
             int handle = 0;
             void* entity = nullptr;
-            uint32_t seenFrame = 0;
+            // g_frame the entity was last resolved (and checked) in; keys
+            // are written only for an entity resolved this frame.
+            uint32_t entityFrame = 0;
+            unsigned subCount = 0;
+            void* firstSub = nullptr;
             float lastHealth = 1.0f;
             float localPerMetre = 1.0f;
             bool dirty = false;
             Policy::UnitMarks marks;
         };
         Unit g_units[Policy::kMaxUnits];
+        int g_unitCount = 0;
         std::unordered_map<void*, int> g_unitByObject;
 
         struct Stats
@@ -340,22 +334,20 @@ namespace BZROpenShim
                     g_ogre.setCustomParameter(sub, static_cast<size_t>(Policy::kKeyParameter), key);
         }
 
-        void ZeroEntity(void* entity, EntityRecord& record)
+        void ZeroEntity(void* entity)
         {
             static const float zero[Policy::kParameterCount][4] = {};
             static const float noKey[4] = {};
             WriteParameters(entity, zero);
             WriteKey(entity, noKey);
-            record.subCount = g_ogre.subEntityCount(entity);
-            record.firstSub = record.subCount ? g_ogre.subEntityAt(entity, 0) : nullptr;
-            record.zeroedFrame = g_frame;
             ++g_stats.zeroed;
         }
 
-        // The Entity a GameObject's marks go on, zeroing every Entity reached
-        // for the first time (or whose sub-entities changed). Null when no
-        // candidate is a live, proven Entity.
-        void* WalkObject(void* sceneManager, void* obj76, bool provePass)
+        // The Entity a GameObject's marks go on: the first bridge root whose
+        // Entity passes the RTTI check and, unless it is `known` (proven in
+        // an earlier frame) outside a prove pass, the SceneManager proof.
+        // Null when no candidate is a live Entity.
+        void* ResolveEntity(void* sceneManager, void* obj76, bool provePass, void* known)
         {
             void* directRoot = nullptr;
             void* ownerRoot = nullptr;
@@ -364,45 +356,23 @@ namespace BZROpenShim
                 g_rootProbes.Resolve(directRoot, g_frame, provePass),
                 g_rootProbes.Resolve(ownerRoot, g_frame, provePass),
             };
-            void* primary = nullptr;
+            g_stage = "entity";
             for (void* entity : candidates)
             {
-                if (!entity)
+                if (!entity || !OgreEntityLiveness::IsOgreEntityObject(entity))
                     continue;
-                auto found = g_entities.find(entity);
-                if (found != g_entities.end() && found->second.seenFrame == g_frame)
-                {
-                    if (!primary) primary = entity;
-                    continue;
-                }
-                g_stage = "entity";
-                if (!OgreEntityLiveness::IsOgreEntityObject(entity))
-                {
-                    if (found != g_entities.end()) g_entities.erase(found);
-                    continue;
-                }
-                if (found == g_entities.end())
-                {
-                    if (!OgreEntityLiveness::EntityProvenLive(sceneManager, entity))
-                        continue;
-                    g_stage = "zero";
-                    found = g_entities.emplace(entity, EntityRecord{}).first;
-                    ZeroEntity(entity, found->second);
-                }
-                else
-                {
-                    const unsigned count = g_ogre.subEntityCount(entity);
-                    void* const first = count ? g_ogre.subEntityAt(entity, 0) : nullptr;
-                    if (count != found->second.subCount || first != found->second.firstSub)
-                    {
-                        g_stage = "rezero";
-                        ZeroEntity(entity, found->second);
-                    }
-                }
-                found->second.seenFrame = g_frame;
-                if (!primary) primary = entity;
+                if ((entity == known && !provePass) || OgreEntityLiveness::EntityProvenLive(sceneManager, entity))
+                    return entity;
             }
-            return primary;
+            return nullptr;
+        }
+
+        void* ResolveObjectEntity(void* sceneManager, void* object, bool provePass, void* known)
+        {
+            void* obj76 = nullptr;
+            if (!Hooks::TryGetGameObjectObj76(object, obj76) || !obj76)
+                return nullptr;
+            return ResolveEntity(sceneManager, obj76, provePass, known);
         }
 
         struct NodePose
@@ -445,7 +415,10 @@ namespace BZROpenShim
                 return false;
             localPerMetre = Policy::LocalPerMetre(pose.scale);
             // Entity::getBoundingRadius is the mesh's own sphere (local
-            // units, unscaled); the metre fallback is converted.
+            // units, unscaled); the metre fallback is converted. It only
+            // pulls in far points (splash centres): the sim's hit point
+            // sits on its collision box, off the hull, and the shader's
+            // radial-cylinder test makes that depth error harmless.
             float hull = g_ogre.boundingRadius(entity);
             hull = (std::isfinite(hull) && hull > 0.0f) ? hull * Policy::kHullFraction
                                                         : Policy::kFallbackHullRadius * localPerMetre;
@@ -473,24 +446,25 @@ namespace BZROpenShim
                 g_units[i].used = true;
                 g_units[i].object = object;
                 g_units[i].handle = handle;
-                g_units[i].seenFrame = g_frame;
                 g_unitByObject[object] = i;
+                ++g_unitCount;
                 return i;
             }
             return -1;
         }
 
-        void ReleaseUnit(int index, bool zeroEntity)
+        // A released unit's Entity is zeroed only while the live scene still
+        // owns it; one that is gone is forgotten without being touched.
+        void ReleaseUnit(int index, void* sceneManager)
         {
             Unit& unit = g_units[index];
-            if (zeroEntity && unit.entity)
-            {
-                const auto record = g_entities.find(unit.entity);
-                if (record != g_entities.end() && record->second.seenFrame == g_frame)
-                    ZeroEntity(unit.entity, record->second);
-            }
+            if (sceneManager && unit.entity && unit.marks.Any() &&
+                OgreEntityLiveness::IsOgreEntityObject(unit.entity) &&
+                OgreEntityLiveness::EntityProvenLive(sceneManager, unit.entity))
+                ZeroEntity(unit.entity);
             g_unitByObject.erase(unit.object);
             unit = Unit{};
+            --g_unitCount;
         }
 
         float FrameSeconds()
@@ -520,7 +494,7 @@ namespace BZROpenShim
             ReleaseSRWLockExclusive(&g_queueLock);
 
             const float dt = FrameSeconds();
-            if (!g_anyMarks && eventCount == 0)
+            if (g_unitCount == 0 && eventCount == 0)
                 return;
             // Entities are proven against this scene before they are touched;
             // without one the frame is skipped (the events with it).
@@ -530,61 +504,71 @@ namespace BZROpenShim
 
             ++g_frame;
             const bool provePass = (g_frame % kProveIntervalFrames) == 0;
-            static std::unordered_map<void*, void*> s_eventEntity;
-            s_eventEntity.clear();
-            for (size_t i = 0; i < eventCount; ++i)
-                s_eventEntity.emplace(s_events[i].object, nullptr);
 
-            g_stage = "arena";
-            static void* s_objects[Hooks::kGameObjectArenaSlotCapacity];
-            const size_t total = Hooks::CollectLiveGameObjectsFromArena(s_objects, Hooks::kGameObjectArenaSlotCapacity);
-            for (size_t index = 0; index < total; ++index)
-            {
-                void* const object = s_objects[index];
-                void* obj76 = nullptr;
-                if (!Hooks::TryGetGameObjectObj76(object, obj76) || !obj76)
-                    continue;
-                void* const entity = WalkObject(sceneManager, obj76, provePass);
-                const auto unit = g_unitByObject.find(object);
-                if (unit != g_unitByObject.end())
-                {
-                    Unit& u = g_units[unit->second];
-                    u.seenFrame = g_frame;
-                    if (entity != u.entity)
-                        u.dirty = true;
-                    else if (entity)
-                    {
-                        const auto record = g_entities.find(entity);
-                        if (record != g_entities.end() && record->second.zeroedFrame == g_frame)
-                            u.dirty = true;
-                    }
-                    u.entity = entity;
-                }
-                const auto pending = s_eventEntity.find(object);
-                if (pending != s_eventEntity.end())
-                    pending->second = entity;
-            }
-
-            g_stage = "release";
+            // Marked units: drop the dead, re-resolve the rest. An Entity
+            // seen before skips the SceneManager proof except on prove passes.
+            g_stage = "units";
             for (int i = 0; i < Policy::kMaxUnits; ++i)
             {
                 Unit& unit = g_units[i];
                 if (!unit.used)
                     continue;
-                if (unit.seenFrame != g_frame || GameObjectFromHandleGog(unit.handle) != unit.object)
-                    ReleaseUnit(i, true);
+                if (GameObjectFromHandleGog(unit.handle) != unit.object)
+                {
+                    ReleaseUnit(i, sceneManager);
+                    continue;
+                }
+                void* const entity = ResolveObjectEntity(sceneManager, unit.object, provePass, unit.entity);
+                if (!entity)
+                {
+                    unit.entity = nullptr;
+                    continue;
+                }
+                const unsigned count = g_ogre.subEntityCount(entity);
+                void* const first = count ? g_ogre.subEntityAt(entity, 0) : nullptr;
+                // A new Entity, or new sub-entities, carry none of the marks.
+                if (entity != unit.entity || count != unit.subCount || first != unit.firstSub)
+                    unit.dirty = true;
+                unit.entity = entity;
+                unit.entityFrame = g_frame;
+                unit.subCount = count;
+                unit.firstSub = first;
             }
-            for (auto it = g_entities.begin(); it != g_entities.end();)
-                it = it->second.seenFrame == g_frame ? std::next(it) : g_entities.erase(it);
+
+            // This frame's hits: one resolve per struck object.
+            g_stage = "events";
+            static void* s_eventEntity[kQueueCapacity];
+            for (size_t i = 0; i < eventCount; ++i)
+            {
+                const HitEvent& event = s_events[i];
+                s_eventEntity[i] = nullptr;
+                if (GameObjectFromHandleGog(event.handle) != event.object)
+                    continue;
+                bool reused = false;
+                for (size_t j = 0; j < i && !reused; ++j)
+                    if (s_events[j].object == event.object && s_events[j].handle == event.handle &&
+                        s_eventEntity[j])
+                    {
+                        s_eventEntity[i] = s_eventEntity[j];
+                        reused = true;
+                    }
+                if (reused)
+                    continue;
+                const auto known = g_unitByObject.find(event.object);
+                const Unit* const unit = known != g_unitByObject.end() ? &g_units[known->second] : nullptr;
+                if (unit && unit->entity && unit->entityFrame == g_frame)
+                    s_eventEntity[i] = unit->entity;
+                else
+                    s_eventEntity[i] = ResolveObjectEntity(sceneManager, event.object, provePass, nullptr);
+            }
             g_rootProbes.PruneUnseen(g_frame);
 
             g_stage = "hits";
             for (size_t i = 0; i < eventCount; ++i)
             {
                 const HitEvent& event = s_events[i];
-                const auto pending = s_eventEntity.find(event.object);
-                void* const entity = pending != s_eventEntity.end() ? pending->second : nullptr;
-                if (!entity || GameObjectFromHandleGog(event.handle) != event.object)
+                void* const entity = s_eventEntity[i];
+                if (!entity)
                     continue;
                 float local[3];
                 float localPerMetre = 1.0f;
@@ -597,19 +581,25 @@ namespace BZROpenShim
                     continue;
                 }
                 Unit& unit = g_units[slot];
-                unit.entity = entity;
+                if (unit.entity != entity || unit.entityFrame != g_frame)
+                {
+                    unit.entity = entity;
+                    unit.entityFrame = g_frame;
+                    unit.subCount = g_ogre.subEntityCount(entity);
+                    unit.firstSub = unit.subCount ? g_ogre.subEntityAt(entity, 0) : nullptr;
+                }
                 unit.lastHealth = event.after;
                 unit.localPerMetre = localPerMetre;
                 if (Policy::AddMark(unit.marks, local, event.radius, g_maxMarks, localPerMetre))
                     ++g_stats.merged;
                 ++g_stats.hits;
                 unit.dirty = true;
-                g_anyMarks = true;
             }
 
             g_stage = "write";
-            for (Unit& unit : g_units)
+            for (int i = 0; i < Policy::kMaxUnits; ++i)
             {
+                Unit& unit = g_units[i];
                 if (!unit.used)
                     continue;
                 const float health = ReadHealthRatio(unit.object);
@@ -622,12 +612,22 @@ namespace BZROpenShim
                     unit.lastHealth = health;
                 if (Policy::DecayHeat(unit.marks, dt, g_emberSeconds))
                     unit.dirty = true;
-                if (!unit.dirty || !unit.entity)
+                if (!unit.entity || unit.entityFrame != g_frame)
                     continue;
-                float values[Policy::kParameterCount][4];
-                Policy::PackParameters(unit.marks, g_maxMarks, values, unit.localPerMetre);
-                WriteParameters(unit.entity, values);
-                unit.dirty = false;
+                if (unit.dirty)
+                {
+                    float values[Policy::kParameterCount][4];
+                    Policy::PackParameters(unit.marks, g_maxMarks, values, unit.localPerMetre);
+                    WriteParameters(unit.entity, values);
+                    unit.dirty = false;
+                }
+                // Repaired: the zeros are written, nothing is left to track.
+                if (!unit.marks.Any())
+                {
+                    g_unitByObject.erase(unit.object);
+                    unit = Unit{};
+                    --g_unitCount;
+                }
             }
             g_stage = "idle";
         }
@@ -638,7 +638,7 @@ namespace BZROpenShim
             for (Unit& unit : g_units)
                 unit = Unit{};
             g_unitByObject.clear();
-            g_entities.clear();
+            g_unitCount = 0;
             g_rootProbes.Clear();
             g_lastCounter.QuadPart = 0;
             ClearQueue();
@@ -675,9 +675,9 @@ namespace BZROpenShim
             {
                 if (!unit.used || !unit.entity || !unit.marks.Any())
                     continue;
-                const auto record = g_entities.find(unit.entity);
-                if (record == g_entities.end() || record->second.seenFrame != g_frame ||
-                    !OgreEntityLiveness::IsOgreEntityObject(unit.entity))
+                // Resolved and RTTI-checked at this frame's frameStarted;
+                // Entities are destroyed by the sim, never inside the render.
+                if (unit.entityFrame != g_frame)
                     continue;
                 NodePose pose;
                 if (!ReadNodePose(unit.entity, pose))
@@ -704,8 +704,7 @@ namespace BZROpenShim
                     !OgreEntityLiveness::IsOgreEntityObject(unit.entity) ||
                     !OgreEntityLiveness::EntityProvenLive(sceneManager, unit.entity))
                     continue;
-                EntityRecord record;
-                ZeroEntity(unit.entity, record);
+                ZeroEntity(unit.entity);
                 unit.marks.Clear();
             }
             g_stage = "idle";
@@ -955,7 +954,7 @@ namespace BZROpenShim
             g_ogre.addFrameListener(root, &g_listener);
             LogShimA(LogLevel::Info, kComponent, "[LOCALDMG] frame listener installed");
         }
-        if (g_anyMarks)
+        if (g_unitCount > 0)
             RunGuarded(WriteKeys, "key update");
     }
 }

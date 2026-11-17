@@ -397,7 +397,7 @@ float ose_scorch_value(float3 p)
 // Char and cooling embers where weapons hit the hull. A blotchy core
 // darkened to about a tenth and desaturated, a ragged brown ring at the
 // edge, and flickering orange-red emission while a mark is still hot.
-// Every radius zero (no hit, or an Entity the walk zeroed) returns early, and
+// Every radius zero (no hit, or a released Entity) returns early, and
 // so does a key that does not match this draw's camera (see OSE_SCORCH_ARGUMENTS).
 float3 ose_local_scorch(float3 source, float3 viewPos, inout float3 glow,
                         float4 mark0, float4 mark1, float4 mark2, float4 mark3,
@@ -418,8 +418,17 @@ float3 ose_local_scorch(float3 source, float3 viewPos, inout float3 glow,
     float charred = 0.0, ring = 0.0, ember = 0.0;
     [unroll] for (int i = 0; i < 8; ++i)
     {
-        float live = step(0.001, marks[i].w);
-        float r = length(local - marks[i].xyz) / max(marks[i].w, 0.001) + (blotch - 0.5) * 0.45;
+        // A cylinder of the mark's radius from the node centre out through
+        // the mark, ending one radius past it: the sim reports hits on its
+        // collision box, off the visible hull, so only the lateral offset is
+        // trusted, not the depth. The far side (behind the centre) is not hit.
+        float3 axis = marks[i].xyz;
+        float axisLength = length(axis);
+        axis = axisLength > 0.0001 ? axis / axisLength : float3(0.0, 1.0, 0.0);
+        float3 offset = local - marks[i].xyz;
+        float along = dot(offset, axis);
+        float live = step(0.001, marks[i].w) * step(-axisLength, along) * step(along, marks[i].w);
+        float r = length(offset - along * axis) / max(marks[i].w, 0.001) + (blotch - 0.5) * 0.45;
         float core = (1.0 - smoothstep(0.25, 0.85, r)) * live;
         float edge = smoothstep(0.55, 0.85, r) * (1.0 - smoothstep(0.85, 1.05, r)) * live;
         charred = max(charred, core);

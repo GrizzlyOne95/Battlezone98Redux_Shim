@@ -58,9 +58,20 @@ multiplayer.
   pilots and powerups are not marked.
 - Each player sees the hits their own game applied; nothing is sent over the
   network.
-- Hit points are pulled onto a sphere of 0.6 x the Entity's bounding radius
-  (3 m when unknown), entering along the impact direction, so a mark lands on
-  the side facing the hit but not exactly on the hull surface.
+- A mark is a cylinder of its radius from the node centre out through the
+  hit point, ending one radius past it, not a sphere around the hit point.
+  Hits on a strongly concave part can mark the face nearer the centre too.
+  Why (live, 2026-11-16): the sim reports a hit on its collision box, not
+  the mesh. On svtank00 bullets struck the side at local x = -3.6 m (the
+  same x for points 1.6 m apart along the hull, so a box face, not a sphere),
+  while the visible side is nearer the centre; the mesh AABB is no help (it
+  is padded to +-8.7 m, bounding radius 13.8 m). With a sphere test no
+  surface pixel fell inside any mark although the shader received the marks
+  and the key matched (diagnostic colour shader: the tank keyed green, no
+  pixel inside a mark).
+- Hit points further out than 0.6 x the Entity's bounding radius (3 m when
+  unknown) are first pulled onto that sphere along the impact direction
+  (splash centres in the air).
 - GPU instancing (`[Experimental] GpuInstancing`): an instanced group takes
   the leader's parameters, so marks can show on the wrong instances.
 - GPU skinning: the fragment shader's `inverse_worldview_matrix` is bone 0's
@@ -85,16 +96,22 @@ multiplayer.
    No heap and no Ogre calls on this side. HudFeedback installs the adapters
    whenever `[LocalDamage] Enabled = 1`, even with its own features off.
 2. Render (frame listener, `frameStarted`). Starts at the first world render
-   of a mission (the same gate and teardown wait as GPU skinning). Drains the
-   ring, walks the GameObject arena to each object's root Entity (bridge
-   roots proven against the live SceneManager), converts each hit sim world
-   -> render world (`x - ox, y - oy, -z - oz`) -> the Entity's parent node
-   space (EXU `SurfacePointMath::ToLocal` port), places it on the hull sphere,
-   and updates the unit's ring.
+   of a mission (the same gate and teardown wait as GPU skinning). Returns at once
+   while no unit has a mark and no hit is queued. Otherwise it drains the
+   ring and resolves only the units that carry marks plus the objects of the
+   frame's hits, each to its root Entity (bridge roots, RTTI check every
+   frame; the SceneManager name proof when the Entity is new and every 15th
+   frame). A unit whose handle no longer maps to its object is released. It
+   converts each hit sim world -> render world (`x - ox, y - oy, -z - oz`)
+   -> the Entity's parent node space (EXU `SurfacePointMath::ToLocal` port),
+   places it on the hull sphere, and updates the unit's ring. Nothing walks
+   the GameObject arena, so the cost scales with marked units, not the
+   scene.
 3. Write. `Renderable::setCustomParameter` on every SubEntity: indices
    1400..1407 = `osMark0..7` (local xyz, radius), 1408..1409 =
    `osMarkHeat0..1` (heat of marks 0-3, 4-7). Written only when a unit's
-   marks changed or are still warm.
+   marks changed, are still warm, or its Entity or sub-entities changed. A
+   repaired unit (every mark cleared) gets its zeros written and is dropped.
 4. Stale values. A Renderable that never set a custom parameter leaves the
    shared pass constant as the last Renderable wrote it. Two defences:
    - Key (index 1410, `osMarkKey`): for every unit with a mark, the main view
@@ -106,11 +123,16 @@ multiplayer.
      values carried over to debris, child Entities or anything else the walk
      never reaches, or left behind after mission end or a Disable, fail the
      test. The 0.2% tolerance is about 3 m at 1.5 km, far above float error.
-   - Zeroing: from the first hit of the session on, every Entity the walk
-     reaches is zeroed once (marks and key; again when its sub-entities
-     change or its pointer is reused) before any mark is written, and marked
-     Entities are zeroed again (each proven live) at mission end and on
-     Disable.
+   - No zero-on-first-sight walk. An earlier build zeroed every Entity in
+     the arena once marks existed; the key makes that redundant. A
+     Renderable that never set 1400..1410 inherits the values of the last
+     draw of the same pass, and with them that object's key. The key matches
+     only where the camera sits at the same local position relative to that
+     other Entity's node, so the inherited marks show only on geometry at
+     the same pose as the marked Entity: in practice its own Entities on the
+     same node, where the marks belong anyway. An inherited zero key (w = 0)
+     never matches. Marked Entities are still zeroed (each proven live) when
+     their unit is released, at mission end and on Disable.
    Mark radii are kept in metres and divided by the node's largest scale on
    the way out; the bounding radius is already in mesh units.
 5. Shader. `ose_local_scorch` runs after `ose_surface_finish` in
@@ -156,4 +178,5 @@ to be checked by the Phase 0 live probe):
 - Any mark visible on gibs, cockpit or other entities nobody hit? Do marks
   flicker off on fast craft (key written too early for the draw)?
 - Do marks show on GPU-skinned craft (bone 0 versus node space)?
-- Cost of the arena walk once marks exist, with GPU skinning on and off.
+- Cost once marks exist (now per marked unit, no arena walk), with GPU
+  skinning on and off.
