@@ -416,10 +416,18 @@ namespace
         Check(!IsIdle(0, 19) && !IsIdle(4, 4), "any live order is busy");
         Check(IsIdle(0, 1) && IsIdle(1, 0), "a selection (CMD_SELECT) is not an order");
         Check(IdleTracksFamily(Family::Combat) && IdleTracksFamily(Family::Tug) &&
-                  IdleTracksFamily(Family::ConstructionRig),
-              "combat, tugs and rigs are tracked");
-        Check(!IdleTracksFamily(Family::Scavenger) && !IdleTracksFamily(Family::None),
-              "scavengers (self-directed) and non-units are not");
+                  IdleTracksFamily(Family::ConstructionRig) && IdleTracksFamily(Family::Scavenger),
+              "every unit family is tracked");
+        Check(!IdleTracksFamily(Family::None), "non-units are not");
+        Check(ScavengerGathering(4, true, 0) && ScavengerGathering(4, true, 1) && ScavengerGathering(4, true, 2) &&
+                  ScavengerGathering(4, true, 3) && ScavengerGathering(4, true, 4),
+              "RECYCLE new, searching, to scrap, to drop-off, to repair is gathering");
+        Check(!ScavengerGathering(4, true, 5) && !ScavengerGathering(4, true, 6) && !ScavengerGathering(4, true, 7),
+              "waiting, done and stuck are idle");
+        Check(!ScavengerGathering(1, true, 2), "a stale task outside RECYCLE is idle");
+        Check(!ScavengerGathering(1, false, -1) && !ScavengerGathering(0, false, -1),
+              "WAIT and START are idle");
+        Check(!ScavengerGathering(4, false, 2), "no RecycleTask: idle");
 
         uint32_t list[5] = { 0x30, 0x10, 0x50, 0x20, 0x40 };
         SortHandlesAscending(list, 5);
