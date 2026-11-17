@@ -28,6 +28,20 @@
 // Paths are matched after lower-casing and folding '/' to '\'. A stat whose
 // spelling differs from the enumeration (relative vs absolute, "..") simply
 // misses and goes to the OS.
+//
+// Shell scopes (BeginResourceWalkStatScope) also note each Ogre script file the
+// walk enumerates and, when the scope closes, hand the ones not seen before to
+// one background-priority thread that opens and reads them. The first open of a
+// file since boot is slow (measured 2026-11-16: 5075 script files took 11.4 s
+// cold, 0.3 s warm; the bytes are only 9 MB, so it is per-open cost, likely the
+// on-access scan). The game-room rebuild opens ~2100 of them on the main
+// thread, so reading them early, while the player is in the menus, takes that
+// cost off the hang. The lounge scope comes only ~5 s before the room, too
+// late to finish, so the files read are saved to
+// openshim\cache\shell_script_prefetch.txt and the first shell scope of the
+// next run (the main menu) queues that list. Read only: the files and what the engine loads are
+// unchanged. Paths keep their enumerated spelling (case-sensitive filesystems
+// under Proton/Wine). OPENSHIM_DISABLE_SHELL_SCRIPT_PREFETCH=1 turns it off.
 
 #include "resource_walk_stat_cache.h"
 #include "bzr_options_ui.h"
@@ -39,8 +53,12 @@
 
 #include <cstdint>
 #include <cwctype>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -48,6 +66,7 @@ namespace BZROpenShim
     {
         constexpr char kComponent[] = "walk-stat-cache";
         constexpr char kDisableSwitch[] = "OPENSHIM_DISABLE_RESOURCE_WALK_STAT_CACHE";
+        constexpr char kPrefetchDisableSwitch[] = "OPENSHIM_DISABLE_SHELL_SCRIPT_PREFETCH";
         constexpr char kEngineAddressName[] = "BuildSingleIAResource";
         constexpr uint8_t kExpectedPrologue[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
 
@@ -71,11 +90,19 @@ namespace BZROpenShim
         bool g_FailureLogged = false;
         bool g_DisabledLogged = false;
 
+        struct OpenEnum
+        {
+            std::wstring key;        // normalised directory
+            std::wstring spelling;   // directory as the walk spelled it
+        };
+
         struct Scope
         {
             int depth = 0;
-            std::unordered_map<HANDLE, std::wstring> openEnums;   // handle -> directory key
+            bool collectScripts = false;   // a shell scope: note script files for prefetch
+            std::unordered_map<HANDLE, OpenEnum> openEnums;
             std::unordered_map<std::wstring, WIN32_FILE_ATTRIBUTE_DATA> entries;
+            std::vector<std::wstring> scripts;   // enumerated script paths, walk spelling
             uint32_t hits = 0;
             uint32_t misses = 0;
             uint64_t startTick = 0;
@@ -99,7 +126,7 @@ namespace BZROpenShim
         }
 
         // "dir/*" or "dir\*.*" -> normalised "dir"; nothing for a bare pattern.
-        bool DirectoryOfPattern(LPCWSTR pattern, std::wstring& out)
+        bool DirectoryOfPattern(LPCWSTR pattern, OpenEnum& out)
         {
             if (!pattern)
                 return false;
@@ -107,16 +134,41 @@ namespace BZROpenShim
             const size_t sep = text.find_last_of(L"\\/");
             if (sep == std::wstring::npos || sep == 0)
                 return false;
-            out = Normalise(text.c_str(), sep);
+            out.key = Normalise(text.c_str(), sep);
+            out.spelling.assign(text, 0, sep);
             return true;
         }
 
-        void Remember(const std::wstring& directory, const WIN32_FIND_DATAW& data)
+        // The Ogre script types the Modable rebuild parses.
+        bool IsScriptName(const wchar_t* name)
+        {
+            static const wchar_t* const kExtensions[] = {
+                L".material", L".program", L".particle", L".compositor",
+                L".overlay", L".fontdef", L".os",
+            };
+            const wchar_t* dot = wcsrchr(name, L'.');
+            if (!dot)
+                return false;
+            for (const wchar_t* ext : kExtensions)
+                if (_wcsicmp(dot, ext) == 0)
+                    return true;
+            return false;
+        }
+
+        void Remember(const OpenEnum& directory, const WIN32_FIND_DATAW& data)
         {
             const wchar_t* name = data.cFileName;
             if (name[0] == L'.' && (name[1] == 0 || (name[1] == L'.' && name[2] == 0)))
                 return;
-            std::wstring key = directory;
+            if (t_Scope.collectScripts && !(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                IsScriptName(name))
+            {
+                std::wstring path = directory.spelling;
+                path.push_back(L'\\');
+                path += name;
+                t_Scope.scripts.push_back(std::move(path));
+            }
+            std::wstring key = directory.key;
             key.push_back(L'\\');
             key += Normalise(name, wcslen(name));
             WIN32_FILE_ATTRIBUTE_DATA attributes = {};
@@ -148,7 +200,7 @@ namespace BZROpenShim
             HANDLE handle = g_RealFindFirstFileW(pattern, data);
             if (t_Scope.depth > 0 && handle != INVALID_HANDLE_VALUE && data)
             {
-                std::wstring directory;
+                OpenEnum directory;
                 if (DirectoryOfPattern(pattern, directory))
                 {
                     Remember(directory, *data);
@@ -204,6 +256,315 @@ namespace BZROpenShim
             return g_RealGetFileAttributesExW(path, level, info);
         }
 
+        // ---- background prefetch of shell script files -------------------
+        // One worker at a time reads the queue. When a walk this run enumerated
+        // a script file not confirmed before, the files that opened are written
+        // to openshim\cache\shell_script_prefetch.txt, and the first shell scope
+        // of the next run queues that saved list, so the cold opens happen at
+        // the main menu, long before the game room needs them. Each line is
+        // "<misses>|<path>": misses counts the runs in a row in which no walk
+        // enumerated the file. A saved file that still opens is kept (a run that
+        // stops at the main menu must not drop the game-room files) until it
+        // passes kMaxPrefetchMisses, so files of mods no longer used age out.
+        constexpr uint32_t kMaxPrefetchMisses = 8;
+
+        struct PrefetchItem
+        {
+            std::wstring path;
+            bool fromSavedList = false;
+            uint32_t misses = 0;   // from the saved list
+        };
+
+        SRWLOCK g_PrefetchLock = SRWLOCK_INIT;
+        std::vector<PrefetchItem> g_PrefetchQueue;          // guarded by g_PrefetchLock
+        std::unordered_set<std::wstring> g_PrefetchSeen;    // normalised; guarded
+        std::vector<PrefetchItem> g_PrefetchOpened;         // walk spelling; guarded
+        // Normalised paths a walk enumerated this run (their misses reset to 0).
+        std::unordered_set<std::wstring> g_PrefetchConfirmed;   // guarded
+        bool g_PrefetchListChanged = false;                 // guarded
+        bool g_PrefetchLoadSaved = false;                   // guarded
+        bool g_PrefetchWorkerRunning = false;               // guarded
+        bool g_PrefetchDisabled = false;                    // set once at install
+        bool g_PrefetchSavedRequested = false;              // main thread only
+
+        std::filesystem::path PrefetchListPath()
+        {
+            return GetMainModuleDirectory() / "openshim" / "cache" / "shell_script_prefetch.txt";
+        }
+
+        // Caller holds g_PrefetchLock.
+        void AddUnseenLocked(std::wstring&& path, bool fromSavedList, uint32_t misses, uint32_t& added)
+        {
+            if (path.empty())
+                return;
+            std::wstring key = Normalise(path.c_str(), path.size());
+            if (!fromSavedList && g_PrefetchConfirmed.insert(key).second)
+                g_PrefetchListChanged = true;
+            if (!g_PrefetchSeen.insert(std::move(key)).second)
+                return;
+            g_PrefetchQueue.push_back({std::move(path), fromSavedList, misses});
+            ++added;
+        }
+
+        // Worker thread. UTF-8, one "<misses>|<path>" per line ('|' cannot
+        // appear in a Windows path; a line without the prefix counts as 0).
+        uint32_t QueueSavedList()
+        {
+            std::vector<std::pair<std::wstring, uint32_t>> paths;
+            if (GetMainModuleDirectory().empty())
+                return 0;
+            // Share delete so another instance can still rename its save over it.
+            HANDLE file = CreateFileW(PrefetchListPath().c_str(), GENERIC_READ,
+                                      FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING,
+                                      FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+                return 0;
+            LARGE_INTEGER size = {};
+            std::string text;
+            if (GetFileSizeEx(file, &size) && size.QuadPart > 0 && size.QuadPart < (16 << 20))
+            {
+                text.resize(static_cast<size_t>(size.QuadPart));
+                DWORD got = 0;
+                if (!ReadFile(file, &text[0], static_cast<DWORD>(text.size()), &got, nullptr))
+                    got = 0;
+                text.resize(got);
+            }
+            CloseHandle(file);
+            size_t begin = 0;
+            while (begin < text.size())
+            {
+                size_t end = text.find('\n', begin);
+                if (end == std::string::npos)
+                    end = text.size();
+                size_t stop = end;
+                if (stop > begin && text[stop - 1] == '\r')
+                    --stop;
+                uint32_t misses = 0;
+                size_t digit = begin;
+                while (digit < stop && digit - begin < 4 && text[digit] >= '0' && text[digit] <= '9')
+                    misses = misses * 10 + static_cast<uint32_t>(text[digit++] - '0');
+                if (digit > begin && digit < stop && text[digit] == '|')
+                    begin = digit + 1;
+                else
+                    misses = 0;
+                const int chars = static_cast<int>(stop - begin);
+                if (chars > 0)
+                {
+                    std::wstring path(static_cast<size_t>(chars), L'\0');
+                    const int wrote = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data() + begin,
+                                                          chars, &path[0], chars);
+                    if (wrote > 0)
+                    {
+                        path.resize(static_cast<size_t>(wrote));
+                        paths.emplace_back(std::move(path), misses);
+                    }
+                }
+                begin = end + 1;
+            }
+            uint32_t added = 0;
+            AcquireSRWLockExclusive(&g_PrefetchLock);
+            for (auto& entry : paths)
+                AddUnseenLocked(std::move(entry.first), true, entry.second, added);
+            ReleaseSRWLockExclusive(&g_PrefetchLock);
+            return added;
+        }
+
+        // Worker thread, while it holds the running claim (so saves never
+        // overlap). Written to a temporary file and moved over the old one.
+        void SaveList(const std::vector<PrefetchItem>& items)
+        {
+            if (GetMainModuleDirectory().empty())
+                return;   // no module path: never write into the working directory
+            const std::filesystem::path target = PrefetchListPath();
+            std::error_code ec;
+            std::filesystem::create_directories(target.parent_path(), ec);
+            std::string text;
+            for (const PrefetchItem& item : items)
+            {
+                const std::wstring& path = item.path;
+                // Skip names that are not valid UTF-16 (lone surrogates) rather than mangle them.
+                const int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, path.c_str(),
+                                                      static_cast<int>(path.size()), nullptr, 0, nullptr, nullptr);
+                if (bytes <= 0)
+                    continue;
+                text += std::to_string(item.misses);
+                text += '|';
+                const size_t at = text.size();
+                text.resize(at + static_cast<size_t>(bytes));
+                WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, path.c_str(), static_cast<int>(path.size()),
+                                    &text[at], bytes, nullptr, nullptr);
+                text += "\r\n";
+            }
+            std::filesystem::path temp = target;
+            temp += L".tmp";
+            HANDLE file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+                return;
+            DWORD wrote = 0;
+            const BOOL ok = WriteFile(file, text.data(), static_cast<DWORD>(text.size()), &wrote, nullptr) &&
+                            wrote == text.size();
+            CloseHandle(file);
+            if (!ok || !MoveFileExW(temp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING))
+            {
+                DeleteFileW(temp.c_str());
+                return;
+            }
+            LogShimA(LogLevel::Info, kComponent, "[PREFETCH] saved %u script paths for the next run",
+                     static_cast<unsigned>(items.size()));
+        }
+
+        DWORD WINAPI PrefetchWorker(LPVOID)
+        {
+            // Background mode lowers I/O priority too; Wine may refuse it.
+            if (!SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN))
+                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+            static char buffer[64 * 1024];   // only one worker runs at a time
+            uint32_t files = 0;
+            uint32_t failed = 0;
+            uint64_t bytes = 0;
+            const uint64_t start = GetTickCount64();
+            for (;;)
+            {
+                AcquireSRWLockExclusive(&g_PrefetchLock);
+                const bool loadSaved = g_PrefetchLoadSaved;
+                g_PrefetchLoadSaved = false;
+                ReleaseSRWLockExclusive(&g_PrefetchLock);
+                if (loadSaved)
+                {
+                    const uint32_t added = QueueSavedList();
+                    if (added)
+                        LogShimA(LogLevel::Info, kComponent, "[PREFETCH] saved list queued %u script files",
+                                 added);
+                }
+
+                std::vector<PrefetchItem> batch;
+                std::vector<PrefetchItem> save;
+                bool done = false;
+                AcquireSRWLockExclusive(&g_PrefetchLock);
+                batch.swap(g_PrefetchQueue);
+                if (batch.empty() && !g_PrefetchLoadSaved)
+                {
+                    if (g_PrefetchListChanged)
+                    {
+                        // Every file that opened: confirmed this run -> 0 misses,
+                        // otherwise one more miss, dropped past the limit.
+                        for (const PrefetchItem& item : g_PrefetchOpened)
+                        {
+                            PrefetchItem entry = item;
+                            if (g_PrefetchConfirmed.count(Normalise(item.path.c_str(), item.path.size())))
+                                entry.misses = 0;
+                            else if (++entry.misses > kMaxPrefetchMisses)
+                                continue;
+                            save.push_back(std::move(entry));
+                        }
+                        g_PrefetchListChanged = false;
+                    }
+                    // Release the claim only when there is nothing left to do,
+                    // so a later queue starts a new worker and saves never overlap.
+                    if (save.empty())
+                    {
+                        g_PrefetchWorkerRunning = false;
+                        done = true;
+                    }
+                }
+                ReleaseSRWLockExclusive(&g_PrefetchLock);
+                if (done)
+                    break;
+                if (batch.empty())
+                {
+                    if (!save.empty())
+                        SaveList(save);
+                    continue;   // re-check the queue before giving up the claim
+                }
+                for (PrefetchItem& item : batch)
+                {
+                    HANDLE file = CreateFileW(item.path.c_str(), GENERIC_READ,
+                                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                              nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+                    if (file == INVALID_HANDLE_VALUE)
+                    {
+                        ++failed;   // not in g_PrefetchOpened, so it leaves the saved list
+                        continue;
+                    }
+                    DWORD got = 0;
+                    while (ReadFile(file, buffer, sizeof(buffer), &got, nullptr) && got != 0)
+                        bytes += got;
+                    CloseHandle(file);
+                    ++files;
+                    AcquireSRWLockExclusive(&g_PrefetchLock);
+                    g_PrefetchOpened.push_back(std::move(item));
+                    ReleaseSRWLockExclusive(&g_PrefetchLock);
+                }
+            }
+            if (files || failed)
+                LogShimA(LogLevel::Info, kComponent,
+                         "[PREFETCH] read %u script files (%llu KB) in %llu ms, %u could not be opened",
+                         files, static_cast<unsigned long long>(bytes / 1024),
+                         static_cast<unsigned long long>(GetTickCount64() - start), failed);
+            return 0;
+        }
+
+        // Caller holds g_PrefetchLock. True when the caller must start a worker.
+        bool ClaimWorkerLocked()
+        {
+            if (g_PrefetchWorkerRunning)
+                return false;
+            g_PrefetchWorkerRunning = true;
+            return true;
+        }
+
+        void StartWorker()
+        {
+            HANDLE worker = CreateThread(nullptr, 0, PrefetchWorker, nullptr, 0, nullptr);
+            if (worker)
+            {
+                CloseHandle(worker);
+                return;
+            }
+            // No thread: drop the queue; the engine reads the files itself as before.
+            const DWORD error = GetLastError();
+            AcquireSRWLockExclusive(&g_PrefetchLock);
+            g_PrefetchQueue.clear();
+            g_PrefetchLoadSaved = false;
+            g_PrefetchWorkerRunning = false;
+            ReleaseSRWLockExclusive(&g_PrefetchLock);
+            LogShimA(LogLevel::Warn, kComponent, "[PREFETCH] worker thread could not start (%lu)", error);
+        }
+
+        // Main thread, first shell scope of the run: read last run's list.
+        void RequestSavedList()
+        {
+            if (g_PrefetchSavedRequested || g_PrefetchDisabled)
+                return;
+            g_PrefetchSavedRequested = true;
+            AcquireSRWLockExclusive(&g_PrefetchLock);
+            g_PrefetchLoadSaved = true;
+            const bool start = ClaimWorkerLocked();
+            ReleaseSRWLockExclusive(&g_PrefetchLock);
+            if (start)
+                StartWorker();
+        }
+
+        void QueuePrefetch(std::vector<std::wstring>& paths, const char* label)
+        {
+            if (paths.empty() || g_PrefetchDisabled)
+                return;
+            uint32_t added = 0;
+            bool start = false;
+            AcquireSRWLockExclusive(&g_PrefetchLock);
+            for (std::wstring& path : paths)
+                AddUnseenLocked(std::move(path), false, 0, added);
+            // A walk that only confirmed saved entries still needs a worker to save.
+            if (added || g_PrefetchListChanged)
+                start = ClaimWorkerLocked();
+            ReleaseSRWLockExclusive(&g_PrefetchLock);
+            if (added)
+                LogShimA(LogLevel::Info, kComponent, "[PREFETCH] %s queued %u new script files", label, added);
+            if (start)
+                StartWorker();
+        }
+
         void EnterScope()
         {
             if (t_Scope.depth++ == 0)
@@ -224,6 +585,10 @@ namespace BZROpenShim
                          static_cast<unsigned long long>(GetTickCount64() - t_Scope.startTick),
                          t_Scope.hits, t_Scope.misses,
                          static_cast<unsigned>(t_Scope.entries.size()));
+            if (t_Scope.collectScripts)
+                QueuePrefetch(t_Scope.scripts, label);
+            t_Scope.collectScripts = false;
+            t_Scope.scripts.clear();
             t_Scope.entries.clear();
             t_Scope.openEnums.clear();
             t_Scope.hits = t_Scope.misses = 0;
@@ -239,10 +604,10 @@ namespace BZROpenShim
             g_BuildOriginal(self, request);
         }
 
-        bool DisabledByEnvironment()
+        bool DisabledByEnvironment(const char* name = kDisableSwitch)
         {
             char value[16] = {};
-            const DWORD len = GetEnvironmentVariableA(kDisableSwitch, value, sizeof(value));
+            const DWORD len = GetEnvironmentVariableA(name, value, sizeof(value));
             if (len == 0 || len >= sizeof(value))
                 return false;
             return !(value[0] == '0' && value[1] == '\0');
@@ -321,6 +686,12 @@ namespace BZROpenShim
     {
         if (!g_ImportsPatched)
             return false;
+        // Only the outermost scope decides; a nested one changes nothing.
+        if (t_Scope.depth == 0)
+        {
+            t_Scope.collectScripts = !g_PrefetchDisabled;
+            RequestSavedList();
+        }
         EnterScope();
         return true;
     }
@@ -358,6 +729,10 @@ namespace BZROpenShim
             LogFailureOnce("unexpected buildSingleIAResource prologue");
             return;
         }
+
+        g_PrefetchDisabled = DisabledByEnvironment(kPrefetchDisableSwitch);
+        if (g_PrefetchDisabled)
+            LogShimA(LogLevel::Info, kComponent, "[PREFETCH] disabled by %s", kPrefetchDisableSwitch);
 
         // Imports first: until the detour opens a scope the hooks only pass through.
         if (!g_ImportsPatched)
