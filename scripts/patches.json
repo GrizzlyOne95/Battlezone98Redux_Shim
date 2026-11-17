@@ -486,7 +486,7 @@
       "expected_size": 4,
       "fallback": "0x004EEED6",
       "require_unique": true,
-      "identity": "Turbo-sound stop branch of HoverCraft::UpdateSounds (0x004EEA20; called at 0x004EE855 right after HoverCraft::Simulate 0x004EA300). The function starts three looping sounds and caches them on the craft: thrust at +0x2C0 (class+0x5A0 soundThrust), turbo at +0x2C4 (class+0x5B0 soundTurbo), third at +0x2CC. When the smoothed throttle at +0x2BC drops under the turbo gate it does not stop its cached +0x2C4 sound: it calls Sound::Find(soundTurbo, craft+0xF4 owner) at 0x004EEED5, stops whatever that returns (0x004EEEEA) and nulls +0x2C4. Sound::Find returns the first live sound with that owner and filename, so an ODF whose soundThrust and soundTurbo name the same wav (ISDF Chronicles ivmisl.odf: itank01h.wav for both, and about 40 other ISDFC units) gets its THRUST loop freed while +0x2C0 still points at it. The orphaned turbo loop keeps playing, and every later frame 0x004EECEF calls SetSoundParams (0x0043AE50) on the freed +0x2C0 record, writing volume to +0x40, flags|=0x40/0x80 at +0x14 and frequency to +0x48. Observed on GOG Redux 2.2.301 in ISDFC isdfms01 (dump battlezone98redux.exe.6812.dmp): the freed 0x84-byte sound block was reused for a fresh Ogre SubMesh, whose parent at +0x40 became 9, and the render path faulted reading [9+0x19D] in OgreMain; the wingman had +0x2C0 dangling, +0x2C4 null and exactly one live itank01h.wav loop (flags 0x4803) owned by it. The pattern anchors on the E8 opcode's rel32 operand (offset 27) and spans the whole branch from mov eax,[ebp-0xE0] (the craft this) to the +0x2C4 null store; the hook reads the craft from [ebp-0xE0] of this frame. Pattern verified single-match by whole-image scan on 2026-09-27."
+      "identity": "Turbo-sound stop branch of HoverCraft::UpdateSounds (0x004EEA20; called at 0x004EE855 in HoverCraft::PostSimulate 0x004EE780, right after HoverCraft::UpdateGimbals 0x004EA300 at 0x004EE842). The function starts three looping sounds and caches them on the craft: thrust at +0x2C0 (class+0x5A0 soundThrust), turbo at +0x2C4 (class+0x5B0 soundTurbo), third at +0x2CC. When the smoothed throttle at +0x2BC drops under the turbo gate it does not stop its cached +0x2C4 sound: it calls Sound::Find(soundTurbo, craft+0xF4 owner) at 0x004EEED5, stops whatever that returns (0x004EEEEA) and nulls +0x2C4. Sound::Find returns the first live sound with that owner and filename, so an ODF whose soundThrust and soundTurbo name the same wav (ISDF Chronicles ivmisl.odf: itank01h.wav for both, and about 40 other ISDFC units) gets its THRUST loop freed while +0x2C0 still points at it. The orphaned turbo loop keeps playing, and every later frame 0x004EECEF calls SetSoundParams (0x0043AE50) on the freed +0x2C0 record, writing volume to +0x40, flags|=0x40/0x80 at +0x14 and frequency to +0x48. Observed on GOG Redux 2.2.301 in ISDFC isdfms01 (dump battlezone98redux.exe.6812.dmp): the freed 0x84-byte sound block was reused for a fresh Ogre SubMesh, whose parent at +0x40 became 9, and the render path faulted reading [9+0x19D] in OgreMain; the wingman had +0x2C0 dangling, +0x2C4 null and exactly one live itank01h.wav loop (flags 0x4803) owned by it. The pattern anchors on the E8 opcode's rel32 operand (offset 27) and spans the whole branch from mov eax,[ebp-0xE0] (the craft this) to the +0x2C4 null store; the hook reads the craft from [ebp-0xE0] of this frame. Pattern verified single-match by whole-image scan on 2026-09-27."
     },
     {
       "name": "HoverCraft Nacelle Array Cap",
@@ -1194,7 +1194,7 @@
       "mode": "rel32_target",
       "prefer": "fallback",
       "fallback": "0x004C8800",
-      "identity": "First HoverCraft::Simulate (0x004EA300) exhaust emit site; the CALL at 0x004EAD77 targets EngineFlame::AddFlame 0x004C8800, cross-checked against the EngineFlame vtable at 0x0087918C in reverse_engineering/engine_flame_color_notes.md. The anchor is the E8 opcode, not its rel32 operand."
+      "identity": "First HoverCraft::UpdateGimbals (0x004EA300, called from HoverCraft::PostSimulate 0x004EE780 at 0x004EE842) exhaust emit site; the CALL at 0x004EAD77 targets EngineFlame::AddFlame 0x004C8800, cross-checked against the EngineFlame vtable at 0x0087918C in reverse_engineering/engine_flame_color_notes.md. The anchor is the E8 opcode, not its rel32 operand."
     },
     {
       "name": "EngineFlame::SpriteColour",
@@ -1285,6 +1285,16 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Released terrain height sampler, double __cdecl(double x, double z), at 0x007855E0 on GOG Redux 2.2.301. Stock ProximityMine::Simulate's detonation block (FUN_005B0E40, call at 0x005B1189) stores its return into obj+0x50 (the y of the posit triple at obj+0x48/+0x50/+0x58) before building the explosion, as team_filter_mines.cpp reproduces; it has 50+ callers, including the Person ground-follow code at 0x005A05BE-0x005A071C. The body scales both world coordinates by the float at 0x02CC50E4, floors them through 0x0046EAF0 and bilinearly blends four grid heights fetched through 0x00784100. The pattern (entry, both coordinate scalings, first floor call) matches once in the GOG image. Used by SkinnedGibs for gib ground contact only; it reads terrain and writes nothing."
+    },
+    {
+      "name": "Terrain::FloorQuery",
+      "pattern": "55 8B EC 83 EC 7C A1 ?? ?? ?? ?? 33 C5 89 45 FC F2 0F 5A 45 0C F3 0F 11 45 94 F2 0F 5A 45 1C F3 0F 11 45 98 8D 45 F0 50 8D 4D B8 51 83 EC 08 F2 0F 10 45 1C F2 0F 11 04 24 83 EC 08 F2 0F 10 45 0C F2 0F 11 04 24 E8 ?? ?? ?? ?? 83 C4 18 C7 45 AC 00 00 00 00 8B 15",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00444F70",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Floor query (terrain plus object floors) on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): void __cdecl(int ignoreEntity, double x, double y, double z, float* floorY, Vec3* normal, int* floorObject), caller cleans 0x28 bytes. Stock HoverCraft::Simulate calls it at 0x004EC631 and 0x004EDDE6 with ignoreEntity = obj+0xF0 and the craft posit, then forms obj76+0xB4 + posit.y - 0.2 - floorY as its unpiloted ground clearance (0x004EDDFA-0x004EDE25). The body first samples terrain height and normal through 0x00785730 (call at 0x00444FB6), then tests object floors below y + 1; 0x004451D0 wraps it with ignoreEntity = 0. tracked_vehicle_class.cpp calls it, read-only, for each tread contact. Unique by whole-image scan 2026-11-16."
     },
     {
       "name": "CollisionGrid::Objects",
@@ -2221,6 +2231,86 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "GOG Redux 2.2.301 SHA256 8D71F56C...3377413: the m32 of `mov [m32],edx` at 0x0078E759 in the cUI_MainScreen ctor FUN_0078e670 (decomp line 31: DAT_0094551c = this). The dtor FUN_0078eca0 clears it (line 21), and FUN_0078df10 nulls the banner at +0x15C when it destroys it. Unique match 2026-11-08."
+    },
+    {
+      "name": "HoverCraftClass::BuildClass",
+      "pattern": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 10 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 89 4D E8 68 F0 05 00 00 FF 15 ?? ?? ?? ?? 83 C4 04 89 45 F0 C7 45 FC 00 00 00 00 83 7D F0 00 74 19 8B 45 0C 50 8B 4D 08 51 8B 55 E8 52 8B 4D F0 E8 A6 F6 FF FF",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004F0A30",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "HoverCraftClass virtual BuildClass on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): slot +8 of the HoverCraftClass descriptor vtable at 0x0087ACE4 (entry at 0x0087ACEC), allocates exactly 0x5F0 bytes and calls the HoverCraftClass ODF constructor 0x004F0130 with the two packed ODF-name arguments, ret 8 (__thiscall). GameObjectClass::Find calls this slot right after matching classLabel hover. tracked_vehicle_class.cpp detours its 55 8B EC 6A FF prologue to stamp classLabel=tracked classes after the stock constructor. The pattern pins the 0x5F0 size and the constructor rel32; without that rel32 it also matches 0x006137C0. Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "HoverCraftClass::Build",
+      "pattern": "55 8B EC 6A FF 68 ?? ?? ?? ?? 64 A1 00 00 00 00 50 83 EC 10 A1 ?? ?? ?? ?? 33 C5 50 8D 45 F4 64 A3 00 00 00 00 89 4D E8 68 00 03 00 00 E8 ?? ?? ?? ?? 83 C4 04 89 45 F0 C7 45 FC 00 00 00 00 83 7D F0 00 74 15 8B 45 E8 50 8B 4D 08 51 8B 4D F0 E8 DB 8C FF FF",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004F09A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "HoverCraftClass virtual Build on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): slot +4 of the HoverCraftClass descriptor vtable at 0x0087ACE4 (entry at 0x0087ACE8), allocates 0x300 bytes through 0x004D9F90 and calls the HoverCraft object constructor 0x004E96D0 (which stores vptr 0x0087ABE4 at 0x004E9723), returns the object, ret 4 (__thiscall, ecx = class). tracked_vehicle_class.cpp detours its 55 8B EC 6A FF prologue to point classLabel=tracked objects at its HoverCraft vtable copy. The constructor rel32 makes it unique (without it the shape also matches 0x00511F30 and 0x00613850). Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "HoverCraft::Simulate",
+      "pattern": "55 8B EC 81 EC 88 05 00 00 A1 ?? ?? ?? ?? 33 C5 89 45 FC 89 8D A0 FD FF FF 8B 85 A0 FD FF FF 8B 88 30 02 00 00 81 C1 14 01 00 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x004EBFD0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "HoverCraft::Simulate on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): HoverCraftVtable 0x0087ABE4 slot 15 (entry 0x0087AC20; also inherited by the Minelayer and Wingman vtables). __thiscall(this, float dt), ret 4, 0x588-byte frame, reads the control block through this+0x230 (+0x114 is the first field it addresses). Not patched: tracked_vehicle_class.cpp checks that slot 15 of the live HoverCraftVtable is this address before building its vtable copy, and calls it as the fallback when a tracked object cannot be simulated. 0x004EA300 is HoverCraft::UpdateGimbals, not Simulate. Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "HoverCraft::UpdateEyepoint",
+      "pattern": "8B 8D A0 FD FF FF 8B 91 30 02 00 00 83 BA FC 00 00 00 00 74 16 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D A0 FD FF FF E8 ?? ?? ?? ?? 8B 85 A0 FD FF FF 8B 88 30 02 00 00 F3 0F 10 05 ?? ?? ?? ?? F3 0F 59 81 C8 00 00 00 8B 95 A0 FD FF FF F3 0F 11 82 80 02 00 00 8B 85 A0 FD FF FF 8B 88 F4 00 00 00 8B 51 14 83 E2 10 74 09 E8 ?? ?? ?? ?? 85 C0 75 2E 8B 8D A0 FD FF FF 83 C1 18 E8 ?? ?? ?? ?? 0F B6 C0 85 C0 74 40 8B 8D A0 FD FF FF 8B 91 30 02 00 00 8B 82 14 01 00 00 25 00 10 00 00 74 27 8B 8D A0 FD FF FF 8B 95 88 FD FF FF F3 0F 10 81 80 02 00 00 F3 0F 5C 42 1C 8B 85 A0 FD FF FF F3 0F 11 80 80 02 00 00 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D A0 FD FF FF E8 ?? ?? ?? ??",
+      "offset": 38,
+      "mode": "rel32_target",
+      "fallback": "0x004EB7E0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The stock tail of HoverCraft::Simulate on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), from 0x004EE68B: when control-block +0xFC is set it calls 0x004EB7E0 (this, dt) at 0x004EE6B1 (__thiscall, ret 4). The same pattern anchors the two aim-pitch gates and Craft::Simulate; tracked_vehicle_class.cpp repeats this tail after its contact model. Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "HoverCraft::AimPitchGlobalGate",
+      "pattern": "8B 8D A0 FD FF FF 8B 91 30 02 00 00 83 BA FC 00 00 00 00 74 16 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D A0 FD FF FF E8 ?? ?? ?? ?? 8B 85 A0 FD FF FF 8B 88 30 02 00 00 F3 0F 10 05 ?? ?? ?? ?? F3 0F 59 81 C8 00 00 00 8B 95 A0 FD FF FF F3 0F 11 82 80 02 00 00 8B 85 A0 FD FF FF 8B 88 F4 00 00 00 8B 51 14 83 E2 10 74 09 E8 ?? ?? ?? ?? 85 C0 75 2E 8B 8D A0 FD FF FF 83 C1 18 E8 ?? ?? ?? ?? 0F B6 C0 85 C0 74 40 8B 8D A0 FD FF FF 8B 91 30 02 00 00 8B 82 14 01 00 00 25 00 10 00 00 74 27 8B 8D A0 FD FF FF 8B 95 88 FD FF FF F3 0F 10 81 80 02 00 00 F3 0F 5C 42 1C 8B 85 A0 FD FF FF F3 0F 11 80 80 02 00 00 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D A0 FD FF FF E8 ?? ?? ?? ??",
+      "offset": 105,
+      "mode": "rel32_target",
+      "fallback": "0x004E96A0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "First aim-pitch gate in the HoverCraft::Simulate tail on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): after storing 0.5 * control pitch at this+0x280, the tail calls 0x004E96A0 at 0x004EE6F4 when obj76+0x14 has bit 0x10; the target is __cdecl with no arguments and returns 1 when [[0x0094672C]+0x30] has bit 0x10. A nonzero result subtracts front.y (obj76+0x3C) from +0x280. Called, never patched, by tracked_vehicle_class.cpp. Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "HoverCraft::AimPitchModeGate",
+      "pattern": "8B 8D A0 FD FF FF 8B 91 30 02 00 00 83 BA FC 00 00 00 00 74 16 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D A0 FD FF FF E8 ?? ?? ?? ?? 8B 85 A0 FD FF FF 8B 88 30 02 00 00 F3 0F 10 05 ?? ?? ?? ?? F3 0F 59 81 C8 00 00 00 8B 95 A0 FD FF FF F3 0F 11 82 80 02 00 00 8B 85 A0 FD FF FF 8B 88 F4 00 00 00 8B 51 14 83 E2 10 74 09 E8 ?? ?? ?? ?? 85 C0 75 2E 8B 8D A0 FD FF FF 83 C1 18 E8 ?? ?? ?? ?? 0F B6 C0 85 C0 74 40 8B 8D A0 FD FF FF 8B 91 30 02 00 00 8B 82 14 01 00 00 25 00 10 00 00 74 27 8B 8D A0 FD FF FF 8B 95 88 FD FF FF F3 0F 10 81 80 02 00 00 F3 0F 5C 42 1C 8B 85 A0 FD FF FF F3 0F 11 80 80 02 00 00 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D A0 FD FF FF E8 ?? ?? ?? ??",
+      "offset": 123,
+      "mode": "rel32_target",
+      "fallback": "0x004B9830",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Second aim-pitch gate in the HoverCraft::Simulate tail on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): the call at 0x004EE706 with ecx = this+0x18 targets 0x004B9830, a __thiscall leaf returning byte [ecx+0x68] == 2. Nonzero with control-block +0x114 bit 0x1000 also subtracts front.y from +0x280. Called, never patched, by tracked_vehicle_class.cpp. Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "Craft::Simulate",
+      "pattern": "8B 8D A0 FD FF FF 8B 91 30 02 00 00 83 BA FC 00 00 00 00 74 16 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D A0 FD FF FF E8 ?? ?? ?? ?? 8B 85 A0 FD FF FF 8B 88 30 02 00 00 F3 0F 10 05 ?? ?? ?? ?? F3 0F 59 81 C8 00 00 00 8B 95 A0 FD FF FF F3 0F 11 82 80 02 00 00 8B 85 A0 FD FF FF 8B 88 F4 00 00 00 8B 51 14 83 E2 10 74 09 E8 ?? ?? ?? ?? 85 C0 75 2E 8B 8D A0 FD FF FF 83 C1 18 E8 ?? ?? ?? ?? 0F B6 C0 85 C0 74 40 8B 8D A0 FD FF FF 8B 91 30 02 00 00 8B 82 14 01 00 00 25 00 10 00 00 74 27 8B 8D A0 FD FF FF 8B 95 88 FD FF FF F3 0F 10 81 80 02 00 00 F3 0F 5C 42 1C 8B 85 A0 FD FF FF F3 0F 11 80 80 02 00 00 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D A0 FD FF FF E8 ?? ?? ?? ??",
+      "offset": 216,
+      "mode": "rel32_target",
+      "fallback": "0x004AB380",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The last call of HoverCraft::Simulate on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): push dt; call 0x004AB380 at 0x004EE763 with ecx = this (__thiscall(this, float dt), ret 4, 0x268-byte frame). tracked_vehicle_class.cpp tail-calls it after its own force model, exactly as the hover tail does. Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "ParameterDB::OpenScope",
+      "pattern": "8D 45 E0 50 8D 4D C4 E8 ?? ?? ?? ?? C7 45 FC 00 00 00 00 6A 00 8D 4D D0 51 68 27 47 D0 92 68 EC 9C DD D3",
+      "offset": 7,
+      "mode": "rel32_target",
+      "fallback": "0x00589430",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "ParameterDB scope open on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), reached from GameObjectClass::Find at 0x004E107F: lea eax,[ebp-0x20] (the %.8s.odf name sprintf'd at 0x004E1047); lea ecx,[ebp-0x3C]; call 0x00589430, followed by the classLabel read (section 0xD3DD9CEC, key 0x92D04727). The target is __thiscall(scope holder, const char* file), ret 4: it FNV-hashes the name, takes a cached database with refcount + 1 or loads and caches a new one, and stores it in the 4-byte holder. Pair with WeaponPresentation::PopScope. tracked_vehicle_class.cpp opens a second scope on the ODF Find already holds, to read [TrackedClass]. Unique by whole-image scan 2026-11-16."
     }
   ],
   "engine_addresses": [

@@ -63,6 +63,7 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "tracked_vehicle_class.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -1711,6 +1712,7 @@ namespace BZROpenShim
         // the second caller finds the first one's work done.
         HookEngine::CodePatchLock lock;
         InstallPondClassLabelSupportIfPossible();
+        InstallTrackedVehicleClassIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallD3D11ConstantLookupCacheIfPossible();
         InstallD3DCompileCacheIfPossible();

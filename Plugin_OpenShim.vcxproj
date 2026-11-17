@@ -383,6 +383,7 @@
     </ClCompile>
     <ClCompile Include="src\patches\planet_environment.cpp" />
     <ClCompile Include="src\patches\pond_class_label.cpp" />
+    <ClCompile Include="src\patches\tracked_vehicle_class.cpp" />
     <ClCompile Include="src\patches\redux_compatibility.cpp" />
     <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
@@ -462,6 +463,8 @@
     <ClInclude Include="include\weapon_presentation_native_policy.h" />
     <ClInclude Include="include\weapon_presentation_call_bridges.h" />
     <ClInclude Include="include\pond_class_label.h" />
+    <ClInclude Include="include\tracked_vehicle_class.h" />
+    <ClInclude Include="include\tracked_vehicle_physics.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\steam_launcher_skip.h" />
     <ClInclude Include="include\launcher_proxy_logic.h" />

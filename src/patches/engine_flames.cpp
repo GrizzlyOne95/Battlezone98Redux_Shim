@@ -83,7 +83,7 @@ namespace BZROpenShim
         bool g_EngineFlameVariantsInitialized = false;
         bool g_EngineFlameVariantsInitAttempted = false;
         // The secondary manager is only seen once a craft emits through the
-        // second HoverCraft::Simulate AddFlame site, which needs a ray hit, so
+        // second HoverCraft::UpdateGimbals AddFlame site, which needs a ray hit, so
         // some maps never reach it. Its clones are made when it shows up.
         bool g_EngineFlameSecondaryVariantsCloned = false;
         bool g_EngineFlameVtableHooksInstalled = false;
