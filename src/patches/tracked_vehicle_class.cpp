@@ -2,8 +2,10 @@
 
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
+#include "net_tag_dispatch.h"
 #include "pond_class_label.h"
 #include "shim_log.h"
+#include "tracked_vehicle_net.h"
 #include "tracked_vehicle_physics.h"
 #include "tracked_vehicle_treads.h"
 #include "tracked_vehicle_turret.h"
@@ -54,6 +56,18 @@
 // hull frame from strafe/throttle (player) or from the AI's move intent,
 // and re-poses the root's direct children and the turret node through the
 // model-node sync 0x00681A00, as the stock TurretTank Simulate does.
+//
+// Multiplayer (phase 3): the owner runs everything above. On a remote
+// replica (network game and DistributedObject::IsRemote) the stock
+// GameObject::Simulate 0x004DEEC0 calls slot 15 in up to five net-dt
+// sub-steps from the last received pose; there the contact model and the
+// hull rule are skipped, accel and alpha are zeroed and the stock tail
+// integrates the replicated veloc/omega (dead reckoning). Tread speeds come
+// from that motion on the hull frame. The turret angle is not replicated by
+// the engine: the owner queues it per object (PostSimulate, frame dt) and
+// broadcasts one 'T','Y' batch per frame, records keyed by the stock
+// dwLocalID (tracked_vehicle_net.h); a replica slews its displayed angle
+// toward the received one.
 
 namespace BZROpenShim
 {
@@ -68,6 +82,7 @@ namespace BZROpenShim
         namespace TP = TrackedPhysics;
         namespace TT = TrackedTreads;
         namespace TU = TrackedTurret;
+        namespace TN = TrackedNet;
 
         constexpr char kTrackedClassLabel[] = "tracked";
         constexpr char kHoverClassLabel[] = "hover";
@@ -227,6 +242,13 @@ namespace BZROpenShim
         using FnSkeletonGetBlend = int (__thiscall*)(void*);
         using FnSkeletonSetBlend = void (__thiscall*)(void*, int);
 
+        // Multiplayer. DistributedObject::IsRemote 0x004B9830 and
+        // DistributedObject::GetLocalID 0x004B9A90 are __thiscall on the
+        // DistributedObject subobject (GameObject + 0x18). Net::BroadcastSend
+        // 0x00575890 is called (buf, len, 1, 1) as mp_splinter_sync.cpp does.
+        using FnIdThis = uint32_t (__thiscall*)(void*);
+        using FnBroadcastSend = char (__cdecl*)(const void* buf, unsigned len, int p3, char p4);
+
         InlineDetour32 g_BuildClassDetour;
         InlineDetour32 g_BuildDetour;
         FnBuildClass g_OriginalBuildClass = nullptr;
@@ -264,6 +286,20 @@ namespace BZROpenShim
         uintptr_t g_OgreEntityVtable = 0;
         bool g_TreadsReady = false;
         volatile long g_TreadFaultLogged = 0;
+
+        // Remote gate: both or none (g_RemoteGateReady); without it every
+        // object runs the owner model, as before phase 3.
+        FnByteThis g_IsRemote = nullptr;
+        uintptr_t g_NetGameFlag = 0;
+        bool g_RemoteGateReady = false;
+        // Turret sync: needs the remote gate, Obj76::SyncNode, the id
+        // accessor, the send and the 'T','Y' receive handler.
+        FnIdThis g_GetLocalId = nullptr;
+        FnBroadcastSend g_BroadcastSend = nullptr;
+        bool g_TurretSyncReady = false;
+        volatile long g_NetLogBudget = 200;
+        volatile long g_ReplicaTraceBudget = 400;
+        volatile long g_ReplicaTraceCounter = 0;
 
         // Clip names follow BZCC's tread_L / tread_R (Ogre names are
         // case-sensitive). Globals: the __try callers cannot hold objects
@@ -330,6 +366,8 @@ namespace BZROpenShim
         {
             float delta = 0.0f;   // turret yaw relative to the hull, + left
             float rate = 0.0f;    // its slew rate, rad/s
+            TN::SendState send;   // owner: last 'T','Y' broadcast
+            bool netApplied = false;  // replica: a received angle was used
             float applied = 0.0f; // delta the nodes were last posed at
             bool posed = false;
             int status = kTurretUnseen;
@@ -1070,9 +1108,13 @@ namespace BZROpenShim
         {
             const float delta = state.delta;
             const float rate = state.rate;
+            const TN::SendState send = state.send;
+            const bool netApplied = state.netApplied;
             state = TurretState{};
             state.delta = delta;
             state.rate = rate;
+            state.send = send;
+            state.netApplied = netApplied;
             state.root = root;
             state.status = kTurretMissing;
             why = "node not in the model";
@@ -1258,6 +1300,300 @@ namespace BZROpenShim
             ReleaseSRWLockExclusive(&g_TurretLock);
         }
 
+        // ---- multiplayer -------------------------------------------------------
+
+        bool TakeNetLogLine()
+        {
+            return g_NetLogBudget > 0 && InterlockedDecrement(&g_NetLogBudget) >= 0;
+        }
+
+        bool IsNetGame()
+        {
+            if (!g_RemoteGateReady)
+                return false;
+            __try
+            {
+                return *reinterpret_cast<const volatile uint8_t*>(g_NetGameFlag) != 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // A replica another peer owns. False (the owner model) when the gate
+        // did not resolve or the call faults. Trade-off: a fault makes a
+        // replica run the owner model (contact physics on stale input, and a
+        // turret broadcast under the owner's id) for that frame, rather than
+        // leaving it unsimulated; the replicated pose still corrects it.
+        bool IsRemoteReplica(uint8_t* self)
+        {
+            if (!IsNetGame())
+                return false;
+            __try
+            {
+                return g_IsRemote(self + kObjInterface) != 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // The stock dwLocalID, the key a Lua handle crosses the network with
+        // (lua_handle_sync.cpp): the owner's local map and every replica's
+        // remote map hold the object under it. 0: none, or a fault.
+        uint32_t ObjectNetId(uint8_t* self)
+        {
+            if (!g_GetLocalId)
+                return 0;
+            __try
+            {
+                return g_GetLocalId(self + kObjInterface);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        bool SafeBroadcast(const uint8_t* packet, unsigned len)
+        {
+            __try
+            {
+                g_BroadcastSend(packet, len, 1, 1);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Received turret angles by object id. Filled on the Net::Receive
+        // thread and read by the replica's PostSimulate, so the receive side
+        // never touches an engine object. A fixed table: storing never
+        // allocates, so nothing can throw while the lock is held.
+        SRWLOCK g_NetTurretLock = SRWLOCK_INIT;
+        TN::ReceivedTable g_NetTurrets;
+        bool g_WasNetGame = false;  // main thread: the flag at the last tracked frame
+
+        void StoreNetTurret(uint32_t id, float delta, float rate, uint64_t now)
+        {
+            AcquireSRWLockExclusive(&g_NetTurretLock);
+            g_NetTurrets.Store(id, delta, rate, now);
+            ReleaseSRWLockExclusive(&g_NetTurretLock);
+        }
+
+        bool LookupNetTurret(uint32_t id, uint64_t now, uint64_t maxAgeMs, TN::ReceivedTurret& out)
+        {
+            AcquireSRWLockShared(&g_NetTurretLock);
+            const bool found = g_NetTurrets.Lookup(id, now, maxAgeMs, out);
+            ReleaseSRWLockShared(&g_NetTurretLock);
+            return found;
+        }
+
+        // Outgoing batch, main thread only (PostSimulate).
+        TN::SendBatch g_SendBatch;
+
+        void FlushSendRecords()
+        {
+            if (g_SendBatch.count == 0)
+                return;
+            uint8_t buf[TN::kMaxPacketLen];
+            const unsigned len = TN::Pack(g_SendBatch.records, g_SendBatch.count, buf);
+            const unsigned count = g_SendBatch.count;
+            g_SendBatch.ClearRecords();
+            if (len && !SafeBroadcast(buf, len) && TakeNetLogLine())
+                LogShimA(LogLevel::Warn, kComponent, "turret batch send faulted (%u records)", count);
+        }
+
+        // Called at every tracked PostSimulate. When the network-game flag
+        // drops (the session ended) the received angles and any unsent batch
+        // are dropped, so a later session cannot read them. With no tracked
+        // frame between two sessions, the kStaleMs age gate covers it: a
+        // mission load takes longer than that.
+        void NoteNetGame(bool net)
+        {
+            if (g_WasNetGame && !net)
+            {
+                AcquireSRWLockExclusive(&g_NetTurretLock);
+                g_NetTurrets.Clear();
+                ReleaseSRWLockExclusive(&g_NetTurretLock);
+                g_SendBatch.Reset();
+            }
+            g_WasNetGame = net;
+        }
+
+        bool OnTurretMessage(unsigned senderId, const unsigned char* buf, unsigned len)
+        {
+            TN::TurretBatch batch;
+            const TN::UnpackResult result = TN::Unpack(buf, len, batch);
+            if (result == TN::UnpackResult::NotOurs)
+                return false;
+            if (result == TN::UnpackResult::Invalid || batch.rejected)
+            {
+                if (TakeNetLogLine())
+                    LogShimA(LogLevel::Warn, kComponent, "turret message from player %u: %s ignored",
+                             senderId & 0xFFFF,
+                             result == TN::UnpackResult::Invalid ? "bad header," : "records with a bad value");
+                if (result == TN::UnpackResult::Invalid)
+                    return true;
+            }
+            if (g_TurretSyncReady)
+            {
+                const uint64_t now = GetTickCount64();
+                for (unsigned i = 0; i < batch.count; ++i)
+                    StoreNetTurret(batch.records[i].id, batch.records[i].delta, batch.records[i].rate, now);
+            }
+            return true;
+        }
+
+        // Replica Simulate: the stock tail on the replicated veloc/omega with
+        // no force, and tread speeds from that motion. False on a fault.
+        bool PrepareReplica(uint8_t* self, const TrackedClassData& data, float delta, float turretRate,
+                            TN::TreadSpeeds& treads)
+        {
+            __try
+            {
+                const uint8_t* obj76 = *reinterpret_cast<uint8_t* const*>(self + kObjObj76);
+                if (!obj76 || !*reinterpret_cast<void* const*>(self + kObjControls))
+                    return false;
+                const TP::Vec3 zero{ 0.0f, 0.0f, 0.0f };
+                WriteVec(self, kObjAccel, zero);
+                WriteVec(self, kObjAlpha, zero);
+                treads = TN::ReplicaTreadSpeeds(ReadVec(self, kObjVeloc), ReadVec(obj76, kObj76Right),
+                                                ReadVec(obj76, kObj76Front), ReadVec(self, kObjOmega).y,
+                                                delta, turretRate, data.footprint.halfWidth);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        void SimulateReplica(void* thisPtr, float dt, const TrackedClassData& data)
+        {
+            auto* self = static_cast<uint8_t*>(thisPtr);
+            float delta = 0.0f;
+            float turretRate = 0.0f;
+            if (data.turretName[0])
+            {
+                TurretState state;
+                if (LoadTurret(self, data.turretName, state))
+                    delta = state.delta;
+                // The owner's slew rate, not the replica's catch-up rate: the
+                // catch-up is display only and must not read as hull turn.
+                TN::ReceivedTurret received;
+                if (g_TurretSyncReady &&
+                    LookupNetTurret(ObjectNetId(self), GetTickCount64(), TN::kRateMaxAgeMs, received))
+                {
+                    turretRate = received.rate;
+                }
+            }
+            TN::TreadSpeeds treads;
+            if (!PrepareReplica(self, data, delta, turretRate, treads))
+            {
+                if (g_TreadsReady)
+                    SetTreadCommand(self, 0.0f, 0.0f);
+                g_StockSimulate(thisPtr, dt);
+                return;
+            }
+            if (g_TreadsReady)
+                SetTreadCommand(self, treads.left, treads.right);
+            FinishSimulate(self, dt);
+
+            if (g_ReplicaTraceBudget > 0 &&
+                (InterlockedIncrement(&g_ReplicaTraceCounter) % kTraceEvery) == 1 &&
+                InterlockedDecrement(&g_ReplicaTraceBudget) >= 0)
+            {
+                LogShimA(LogLevel::Debug, kComponent,
+                    "replica obj=%p id=0x%08X dt=%.4f treads=(%.2f,%.2f) delta=%.3f",
+                    thisPtr, ObjectNetId(self), dt, treads.left, treads.right, delta);
+            }
+        }
+
+        // Once per frame (PostSimulate, frame dt) for a turret object in a
+        // network game: the owner broadcasts its angle; a replica slews its
+        // displayed angle toward the last one received and poses the nodes.
+        void TurretNetFrame(uint8_t* self, float dt)
+        {
+            const bool net = IsNetGame();
+            NoteNetGame(net);
+            if (!g_TurretSyncReady || !net)
+                return;
+            TrackedClassData data{};
+            if (!LookupClassData(self, data) || !data.turretName[0])
+                return;
+            const uint32_t id = ObjectNetId(self);
+            if (!id)
+                return;  // not networked: every peer runs its own copy
+            TurretState state;
+            if (!LoadTurret(self, data.turretName, state))
+                return;
+            const uint64_t now = GetTickCount64();
+
+            if (!IsRemoteReplica(self))
+            {
+                // A second visit since the last flush is a new frame: send
+                // what the previous frame queued, one message for all.
+                if (g_SendBatch.NoteVisit(self))
+                {
+                    FlushSendRecords();
+                    g_SendBatch.Reset();
+                    g_SendBatch.NoteVisit(self);
+                }
+                if (!TN::ShouldSend(state.send, state.delta, state.rate, now))
+                    return;
+                TN::TurretRecord record;
+                record.id = id;
+                record.delta = state.delta;
+                record.rate = state.rate;
+                if (!g_SendBatch.Add(record))
+                {
+                    FlushSendRecords();
+                    g_SendBatch.Add(record);
+                }
+                if (!state.send.sent && TakeNetLogLine())
+                    LogShimA(LogLevel::Info, kComponent, "obj=%p id=0x%08X first turret angle queued delta=%.3f",
+                             self, id, state.delta);
+                TN::MarkSent(state.send, state.delta, state.rate, now);
+                StoreTurret(self, state);
+                return;
+            }
+
+            TN::ReceivedTurret target;
+            const float before = state.delta;
+            if (LookupNetTurret(id, now, TN::kStaleMs, target))
+            {
+                const float age = static_cast<float>(now - target.tickMs) / 1000.0f;
+                const float goal = TN::ReplicaTarget(data.turret, target.delta, target.rate, age);
+                state.delta = TN::SlewToward(data.turret, state.delta, goal, dt);
+                if (!state.netApplied)
+                {
+                    state.netApplied = true;
+                    if (TakeNetLogLine())
+                        LogShimA(LogLevel::Info, kComponent,
+                                 "obj=%p id=0x%08X replica turret follows the owner (received delta=%.3f)",
+                                 self, id, target.delta);
+                }
+            }
+            state.rate = dt > 0.0f ? TU::WrapAngle(state.delta - before) / dt : 0.0f;
+            if (!PoseTurret(state))
+            {
+                state.status = kTurretMissing;
+                state.delta = 0.0f;
+                state.rate = 0.0f;
+                if (TakeTurretLogLine())
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "obj=%p turret node %s could not be posed; plain tracked", self, data.turretName);
+                }
+            }
+            StoreTurret(self, state);
+        }
+
         volatile long g_TurretTraceBudget = 4000;
         volatile long g_TurretTraceCounter = 0;
         constexpr long kTurretTraceEvery = 7;
@@ -1271,6 +1607,11 @@ namespace BZROpenShim
             TurretStep step;
             bool turret = false;
             const bool tracked = LookupClassData(self, data);
+            if (tracked && IsRemoteReplica(self))
+            {
+                SimulateReplica(thisPtr, dt, data);
+                return;
+            }
             if (tracked && data.turretName[0])
             {
                 turret = LoadTurret(self, data.turretName, turretState);
@@ -1685,10 +2026,14 @@ namespace BZROpenShim
             return reinterpret_cast<FnThisVoid>(g_Thunks + Slot * kThunkStride);
         }
 
+        // Hooked when treads or the turret are available; each part checks
+        // its own readiness.
         void __fastcall TrackedPostSimulateHook(void* thisPtr, void* /*edx*/, float dt)
         {
+            TurretNetFrame(static_cast<uint8_t*>(thisPtr), dt);
             reinterpret_cast<FnSimulate>(g_Thunks + kPostSimulateSlot * kThunkStride)(thisPtr, dt);
-            UpdateTreads(static_cast<const uint8_t*>(thisPtr), dt);
+            if (g_TreadsReady)
+                UpdateTreads(static_cast<const uint8_t*>(thisPtr), dt);
         }
 
         void __fastcall TrackedCleanupHookA(void* thisPtr, void* /*edx*/)
@@ -1783,7 +2128,8 @@ namespace BZROpenShim
 
         // ---- install ---------------------------------------------------------
 
-        bool BuildTrackedVtable(uintptr_t stockVtable, bool treads)
+        // postSimulate: hook slot 16 (treads, or the multiplayer turret sync).
+        bool BuildTrackedVtable(uintptr_t stockVtable, bool treads, bool postSimulate)
         {
             void* stock[kHoverVtableSlots + 2] = {};
             if (!HookEngine::ReadMemory(static_cast<uint32_t>(stockVtable - sizeof(void*)), stock, sizeof(stock)))
@@ -1837,8 +2183,9 @@ namespace BZROpenShim
             {
                 g_TrackedVtable[1 + kCleanupSlotA] = reinterpret_cast<void*>(&TrackedCleanupHookA);
                 g_TrackedVtable[1 + kCleanupSlotB] = reinterpret_cast<void*>(&TrackedCleanupHookB);
-                g_TrackedVtable[1 + kPostSimulateSlot] = reinterpret_cast<void*>(&TrackedPostSimulateHook);
             }
+            if (postSimulate)
+                g_TrackedVtable[1 + kPostSimulateSlot] = reinterpret_cast<void*>(&TrackedPostSimulateHook);
             return true;
         }
 
@@ -1923,7 +2270,29 @@ namespace BZROpenShim
                 "tread clips and sound off (%s did not resolve); tracked physics unaffected", treadMissing);
         }
 
-        if (!BuildTrackedVtable(hoverVtable, treads))
+        // Multiplayer, optional. Without the remote gate every object runs
+        // the owner model (as before phase 3); without the rest, replicas
+        // dead-reckon with the turret held at delta 0.
+        const uintptr_t isRemote = HookEngine::EngineAddress("DistributedObjectIsRemote");
+        const uintptr_t netGameFlag = HookEngine::EngineAddress("IsNetGameFlag");
+        const uintptr_t getLocalId = HookEngine::ResolveNamedAddress("DistributedObject::GetLocalID");
+        const uintptr_t broadcastSend = HookEngine::ResolveNamedAddress("Net::BroadcastSend");
+        const bool remoteGate = isRemote && netGameFlag;
+        const bool turretSync = remoteGate && g_SyncNode && getLocalId && broadcastSend;
+        if (!remoteGate)
+        {
+            LogShimA(LogLevel::Warn, kComponent,
+                "multiplayer replicas off (DistributedObjectIsRemote or IsNetGameFlag did not resolve); "
+                "every tracked object runs the owner model");
+        }
+        else if (g_SyncNode && !turretSync)
+        {
+            LogShimA(LogLevel::Warn, kComponent,
+                "multiplayer turret sync off (%s did not resolve); replica turrets stay at delta 0",
+                !getLocalId ? "DistributedObject::GetLocalID" : "Net::BroadcastSend");
+        }
+
+        if (!BuildTrackedVtable(hoverVtable, treads, treads || turretSync))
         {
             LogInstallFailure("HoverCraftVtable is not the expected 42-slot table with Simulate in slot 15");
             return;
@@ -1949,6 +2318,29 @@ namespace BZROpenShim
         }
         g_OriginalBuild = reinterpret_cast<FnBuild>(g_BuildDetour.trampoline);
 
+        if (remoteGate)
+        {
+            g_IsRemote = reinterpret_cast<FnByteThis>(isRemote);
+            g_NetGameFlag = netGameFlag;
+            g_RemoteGateReady = true;
+        }
+        if (turretSync)
+        {
+            g_GetLocalId = reinterpret_cast<FnIdThis>(getLocalId);
+            g_BroadcastSend = reinterpret_cast<FnBroadcastSend>(broadcastSend);
+            // Registered once: g_Installed stops any later retry.
+            if (NetTagDispatch::RegisterNetTagHandler(TN::kTagTurret, &OnTurretMessage))
+            {
+                g_TurretSyncReady = true;
+            }
+            else
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "multiplayer turret sync off ('T','Y' receive handler not registered); "
+                    "replica turrets stay at delta 0");
+            }
+        }
+
         g_TreadsReady = treads;
         g_Installed = true;
         LogShimA(LogLevel::Info, kComponent,
@@ -1962,6 +2354,8 @@ namespace BZROpenShim
                 static_cast<unsigned>(kPostSimulateSlot), static_cast<unsigned>(kDestructorSlot),
                 static_cast<unsigned>(kCleanupSlotA), static_cast<unsigned>(kCleanupSlotB));
         }
+        LogShimA(LogLevel::Info, kComponent, "multiplayer: replica dead reckoning %s, turret sync %s",
+            g_RemoteGateReady ? "on" : "off", g_TurretSyncReady ? "on ('T','Y')" : "off");
     }
 
     bool IsTrackedVehicleClassInstalled()

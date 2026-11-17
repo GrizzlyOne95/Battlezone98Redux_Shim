@@ -3,6 +3,9 @@
 //  * [Gameplay] RtsBuildGhost: a see-through copy of the picked building where
 //    the stock placement quad shows, tinted like it; plus neutral ghosts at
 //    every listed nav while the Go To Nav submenu offers Build at Nav.
+//  * [Gameplay] RtsPendingBuildGhost: a dim neutral ghost where each of
+//    the local player's rigs will build an ordered building, until
+//    construction starts (at most eight).
 //  * [Gameplay] RtsPowerRange: while a ghost of a COMM/TURR/SHLD class shows,
 //    the power radius of every allied power plant (drawn by rts_markers.cpp).
 //  * [Gameplay] RtsWaypointLines: the destination reader for the waypoint
@@ -43,7 +46,7 @@ namespace BZROpenShim
         void DestroyRtsPlacementSceneObjects(void* sceneManager, const wchar_t* reason);
         // Leaving the simulation: hide and forget the last preview.
         void DeactivateRtsPlacement(const wchar_t* reason);
-        // Any of the three options on (the marker tick runs for them too).
+        // Any of the four options on (the marker tick runs for them too).
         bool RtsPlacementAnyEnabled();
         bool RtsWaypointLinesEnabled();
 

@@ -68,6 +68,14 @@ namespace
         Check(!NavGhostsWanted(false, false, true, 3, 3, 0x1234), "option off: none");
         Check(!NavGhostsWanted(true, true, true, 3, 3, 0x1234), "HUD hidden: none");
         Check(kMaxNavGhosts == 10 && kFirstNavSlot == 0x23 && kLastNavSlot == 0x2C, "beacon slots 35..44");
+
+        Check(PendingBuildShows(0, 0, 0), "travelling: pending ghost");
+        Check(PendingBuildShows(0, 0, 1) && PendingBuildShows(0, 0, 4), "final approach: pending ghost");
+        Check(PendingBuildShows(0, 0, 2), "deploying: pending ghost");
+        Check(!PendingBuildShows(0, 0, 3), "construction started: hidden");
+        Check(!PendingBuildShows(kTaskDone, 0, 0) && !PendingBuildShows(0, kTaskDone, 1), "task finished: hidden");
+        Check(!PendingBuildShows(0, 0, -1) && !PendingBuildShows(0, 0, 5), "unknown stage: hidden");
+        Check(kMaxPendingGhosts == 8, "eight pending ghosts at most");
     }
 
     void SignatureTests()

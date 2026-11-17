@@ -8,6 +8,13 @@ namespace BZROpenShim
     // network message. Net::Receive's prologue can be inline-detoured only
     // once (a second detour fails its byte guard), so features register a
     // handler for their own two-byte tag instead of detouring it themselves.
+    //
+    // OpenShim tags in use (check stock Net::Receive's tags too before adding
+    // one; at most 8 handlers):
+    //   'M','E' 0x454D  mission end            mp_mission_end_sync.cpp
+    //   'S','D' 0x4453  splinter deploy        mp_splinter_sync.cpp
+    //   'S','K' 0x4B53  splinter kill          mp_splinter_sync.cpp
+    //   'T','Y' 0x5954  tracked turret batch   tracked_vehicle_class.cpp
     namespace NetTagDispatch
     {
         // Called on the thread that runs Net::Receive. `buf` holds at least
