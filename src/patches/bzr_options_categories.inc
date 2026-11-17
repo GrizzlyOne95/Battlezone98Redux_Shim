@@ -32,7 +32,7 @@ static const char* const kShimCategoryLighting[] = {
     "Explosion Flash", "Sun Glare", "Fog Culling", "Scrap Shadows",
     "Scrap Glow", "Scrap Draw Distance" };
 static const char* const kShimCategoryAudio[] = {
-    "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
+    "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix", "Music Refill" };
 static const char* const kShimCategoryHud[] = {
     "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
     "MP Vehicle Flags", "Kill Ticker", "Command Pings", "Artillery Range", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
