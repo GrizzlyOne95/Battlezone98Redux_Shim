@@ -1166,6 +1166,18 @@ namespace BZROpenShim
                     static_cast<uint32_t>(reinterpret_cast<uintptr_t>(detour)), 6);
                 continue;
             }
+            // RtsMarkers object-order pings: same trampoline pattern; a
+            // prologue mismatch leaves the site stock.
+            if (Hooks::IsRtsMarkersObjectCommandHook(p.name.c_str())) {
+                void* detour = Hooks::PrepareRtsMarkersObjectCommandHook(p.address);
+                if (!detour) {
+                    p.verified = false;
+                    continue;
+                }
+                p.payload = HookEngine::MakeJmp5Payload(p.address,
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(detour)), 6);
+                continue;
+            }
             for (auto& x : m) {
                 if (p.name == x.n) {
                     size_t l = (p.name.find("Turret") != std::string::npos && p.name.find("Pitch") != std::string::npos) ? 8 : (p.name.find("Reveal") != std::string::npos ? 12 : (p.name.find("Volley") != std::string::npos ? 6 : (p.name.find("Attack Alert") != std::string::npos ? 52 : 5)));
@@ -1730,6 +1742,8 @@ namespace BZROpenShim
                 if (p.name == "TRO Banner Mode Refresh 2/2") NoteTroModeRefreshHookInstalled(1);
                 if (const int rallyHook = Hooks::ProducerRallyCommandHookIndex(p.name.c_str()); rallyHook >= 0)
                     Hooks::NoteProducerRallyCommandHookInstalled(rallyHook);
+                if (Hooks::IsRtsMarkersObjectCommandHook(p.name.c_str()))
+                    Hooks::NoteRtsMarkersObjectCommandHookInstalled();
                 if (ScreenFlash::CallSiteIndex(p.name.c_str()) >= 0)
                     ScreenFlash::SetPatchInstalled(static_cast<unsigned long>(ScreenFlash::CallSiteIndex(p.name.c_str())));
                 Log(L"[OK]   %hs wrote %u bytes to 0x%08X\n", p.name.c_str(), static_cast<unsigned>(p.payload.size()), p.address);
