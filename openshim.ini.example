@@ -2800,8 +2800,8 @@ RtsIdleUnitAlert = 0
 ; Exposed on the OpenShim Settings page as "Attack Marks".
 RtsAttackMarks = 0
 
-; Queue Orders. While the multi-select modifier (stock Shift, read from the
-; game's own input so a rebind is respected) is held with units selected, the
+; Queue Orders. While Shift is held (without Ctrl, the stock multi-select
+; modifier) with units selected, the
 ; Space and Alt command labels read "Queue Go To", "Queue Defend" and so on
 ; for Go, Attack, Follow, Defend, Pickup, Dropoff and Get Repair/Reload.
 ; Pressing the key then gives each selected idle unit the order now and

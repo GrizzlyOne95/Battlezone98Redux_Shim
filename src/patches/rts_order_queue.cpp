@@ -83,6 +83,7 @@ namespace BZROpenShim::Hooks
         uint32_t g_SelectNoneAddr = 0;
         uint32_t g_LocalizeAddr = 0;
         uint32_t g_MultiAddr = 0; // cmd_multi byte
+        uint32_t g_HeldModsAddr = 0; // the game's held-key dword with the modifier bits
         uint32_t g_ObjPressRow = 0;
         uint32_t g_WherePressRow = 0;
         uint32_t g_SelectNoneRow = 0;
@@ -264,12 +265,15 @@ namespace BZROpenShim::Hooks
             return ReadBytes(g_ControlPanelAddr + kSelectListOffset, handles, static_cast<size_t>(n) * 4) ? n : 0;
         }
 
-        // Shift queues (as RtsHold and the RTS keys read it: GetKeyState on the game
-        // thread). The stock multi-select modifier (cmd_multi, Ctrl by default) keeps
-        // its stock meaning, so Ctrl+Shift is not a queue press.
+        // Shift queues: the game's own held-key state (either Shift key sets 0x400000
+        // in the 4th held dword, FUN_00434bf0 cases 0x2A/0x36), so it follows what the
+        // game's input has seen. The stock multi-select modifier (cmd_multi, Ctrl by
+        // default) keeps its stock meaning, so Ctrl+Shift is not a queue press.
+        constexpr uint32_t kHeldShiftBit = 0x400000;
         bool ModifierHeld()
         {
-            if (GetKeyState(VK_SHIFT) >= 0)
+            uint32_t held = 0;
+            if (g_HeldModsAddr == 0 || !ReadBytes(g_HeldModsAddr, &held, 4) || (held & kHeldShiftBit) == 0)
                 return false;
             uint8_t multi = 0;
             return g_MultiAddr != 0 && ReadBytes(g_MultiAddr, &multi, 1) && multi == 0;
@@ -639,6 +643,7 @@ namespace BZROpenShim::Hooks
                     { "ControlPanelSelectNone", &g_SelectNoneAddr },
                     { "UiLocalize", &g_LocalizeAddr },
                     { "CommandMenuUnitBranchInput", &g_MultiAddr },
+                    { "InputHeldModifierKeys", &g_HeldModsAddr },
                     { "ControlPanelCmdObjBroadcastCall", &g_ObjPressRow },
                     { "ControlPanelCmdWhereBroadcastCall", &g_WherePressRow },
                     { "ControlPanelCmdSelectNoneCall", &g_SelectNoneRow },

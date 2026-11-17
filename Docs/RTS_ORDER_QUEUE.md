@@ -66,7 +66,7 @@ stock broadcast is not drawn for queued entries.
 
 - OverView (satellite) orders: not hooked (Shift is not read there); a plain order from
   it clears queues through the broadcast listener.
-- The digit-key submenus (Defend / Attack / Go To Nav target picks, the unit menu): stock Shift
+- The digit-key submenus (Defend / Attack / Go To Nav target picks, the unit menu): stock Ctrl (`cmd_multi`)
   already skips the unit branch of the digit menu; their picks are plain orders (clear).
 - Other commands (Stop, Build, Hunt, Patrol, Recycle...), Select, null-target broadcasts.
 
@@ -99,8 +99,11 @@ read from the shipped exe and disassembled on 2026-11-17.
   ProducerRallyPoints; the queue chains in its hook), ALT at **0x004A26C1** (`E8 7A A4 37 00`,
   lines 604 and 677). Returning a pointer to a static buffer is safe: the string is held in a
   frame local and drawn at once (lines 604-612), never freed.
-- Modifier: Shift via `GetKeyState(VK_SHIFT)` on the game thread, as RtsHold and the RTS keys
-  read it (Battlezone Platform also queues on Shift+Space). The stock multi-select byte `cmd_multi`
+- Modifier: Shift from the game's own held-key state (`InputHeldModifierKeys` 0x0260C250 bit
+  0x400000, set by FUN_00434bf0 for scancodes 0x2A/0x36; Battlezone Platform also queues on
+  Shift+Space). Stock binds LeftShift to the menu-cursor keys (`menu_pos`, `menu_next`, ...) and
+  blocks `weapon_fire` while it is down, so aim first, then hold Shift and press Space; Shift+Alt
+  is also the default Windows keyboard-layout switch, so Shift+Space is the safer habit. The stock multi-select byte `cmd_multi`
   at 0x00919875 (`keyboard Control` in the shipped `input.map` lines 46-50; engine row
   `CommandMenuUnitBranchInput`) must be clear, so Ctrl+Shift keeps its stock meaning. That byte is
   the one Render, OverView and `Reticle::Simulate` read; Shift is not, so it does not change
@@ -111,7 +114,8 @@ read from the shipped exe and disassembled on 2026-11-17.
 - Idle: `GameObject` current command record +0xA8 and pending +0xC8, `what` at +4; idle means both
   none, select or stop (`RtsCommandsPolicy::IsIdle`). The helper (`RtsCommandsUnitIdle`) does not
   apply the idle alert's `ScavengerBusy` test, so a self-harvesting scavenger reads idle and a
-  Shift press issues at once (stock-like) instead of queueing. SetCommand writes the pending record immediately, so a unit just ordered reads busy at once
+  Shift press issues at once (stock-like) instead of queueing. SetCommand writes the pending
+  record immediately, so a unit just ordered reads busy at once
   (matches the alert's behaviour; no separate in-flight tracking is kept).
 - Thread: `RunDeferredSceneMutations` is the Ogre frameStarted listener on the game's main thread;
   `rts_commands.cpp` already issues `SetCommand` (Hold) and `SelectAdd` from it.

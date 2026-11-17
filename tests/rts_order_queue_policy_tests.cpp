@@ -48,7 +48,7 @@ namespace
         Check(!QueueArmed(false, true, 1, kCmdDefend), "option off");
         Check(!QueueArmed(true, false, 1, kCmdDefend), "modifier not held");
         Check(!QueueArmed(true, true, 0, kCmdDefend), "nothing selected");
-        Check(!QueueArmed(true, true, 1, kCmdSelect), "Shift+Space on a select button stays stock");
+        Check(!QueueArmed(true, true, 1, kCmdSelect), "Ctrl+Space on a select button stays stock");
         Check(!QueueArmed(true, true, 1, kCmdNoDropoff), "no-dropoff stays stock");
         Check(ShouldQueuePress(true, true, 2, kCmdGo, false, true), "a queueable press queues");
         Check(!ShouldQueuePress(true, true, 2, kCmdGo, true, true), "a pending rally confirm keeps priority");
