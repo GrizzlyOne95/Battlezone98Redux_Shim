@@ -500,7 +500,8 @@ namespace BZROpenShim
             ReloadGroupStripConfig();
             // [Gameplay] RtsCommandPings / RtsArtilleryRange, and the placement
             // aids RtsBuildGhost / RtsPendingBuildGhost / RtsPowerRange /
-            // RtsWaypointLines, likewise.
+            // RtsWaypointLines, and the under-attack rings RtsAttackMarks,
+            // likewise.
             ReloadRtsMarkersConfig();
 
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;

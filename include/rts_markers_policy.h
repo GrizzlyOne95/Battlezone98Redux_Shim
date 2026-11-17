@@ -49,7 +49,11 @@ namespace BZROpenShim
         // targets (attack, follow, defend...).
         constexpr size_t kMaxTargetRingSlots = kMaxWaypointLineSlots;
         constexpr size_t kFirstTargetRingSlot = kFirstPendingSlot + kMaxWaypointLineSlots;
-        constexpr size_t kSlotCount = kFirstTargetRingSlot + kMaxTargetRingSlots;
+        // Then the "under attack" rings, one per own-team object an enemy hit
+        // within the last 2 s.
+        constexpr size_t kMaxAttackRingSlots = 16;
+        constexpr size_t kFirstAttackRingSlot = kFirstTargetRingSlot + kMaxTargetRingSlots;
+        constexpr size_t kSlotCount = kFirstAttackRingSlot + kMaxAttackRingSlots;
 
         // ---- Ring geometry ---------------------------------------------------
         constexpr unsigned kMinSegments = 48;
@@ -218,6 +222,70 @@ namespace BZROpenShim
             if (std::isfinite(boundingRadius) && boundingRadius > 0.0f)
                 r = std::min(kMaxTargetRadius, std::max(kMinTargetRadius, boundingRadius));
             return r + kTargetRingMargin;
+        }
+
+        // ---- Under-attack marks ([Gameplay] RtsAttackMarks) --------------------
+        // The stock radar flashes a blip while enemyShot + 2.0 > now
+        // (CockpitRadar::Render); the ring lives for the same window.
+        constexpr float kAttackMarkWindow = 2.0f;
+        constexpr float kAttackMarkFutureSlack = 0.1f; // a stamp this far ahead is still "now"
+        constexpr float kAttackMarkFadeStart = 1.5f;
+        constexpr float kAttackMarkPulseHz = 2.0f;
+        constexpr float kAttackMarkPulseDepth = 0.15f;
+
+        // Seconds since the last enemy hit, true when the mark is active:
+        // 0 <= now - enemyShot <= window. A stamp that is zero, non-finite or
+        // more than the slack ahead of the clock (a previous mission's) is
+        // not a hit; a stamp just ahead reads as age 0.
+        inline bool AttackMarkAge(float now, float enemyShot, float& age)
+        {
+            age = 0.0f;
+            if (!std::isfinite(now) || !std::isfinite(enemyShot) || !(enemyShot > 0.0f))
+                return false;
+            if (enemyShot > now + kAttackMarkFutureSlack)
+                return false;
+            age = std::max(0.0f, now - enemyShot);
+            return age <= kAttackMarkWindow;
+        }
+
+        struct AttackMarkFrame
+        {
+            float radiusScale = 1.0f;
+            float alpha = 1.0f; // multiplies the colour's alpha
+        };
+
+        // A 2 Hz pulse of +-15% on the radius; full alpha until 1.5 s, then a
+        // smoothstep to zero at 2.0 s.
+        inline AttackMarkFrame AttackMarkStyle(float age)
+        {
+            AttackMarkFrame frame;
+            if (!std::isfinite(age))
+                age = 0.0f;
+            age = std::max(0.0f, age);
+            frame.radiusScale = 1.0f + kAttackMarkPulseDepth * std::sin(2.0f * kPi * kAttackMarkPulseHz * age);
+            if (age >= kAttackMarkWindow)
+                frame.alpha = 0.0f;
+            else if (age > kAttackMarkFadeStart)
+            {
+                const float t = (age - kAttackMarkFadeStart) / (kAttackMarkWindow - kAttackMarkFadeStart);
+                frame.alpha = 1.0f - t * t * (3.0f - 2.0f * t);
+            }
+            return frame;
+        }
+
+        struct AttackMarkCandidate
+        {
+            float age = 0.0f;
+            size_t id = 0; // the caller's index into its own object list
+        };
+
+        // Keeps the `cap` most recently hit (smallest age; ties keep input
+        // order) at the front of `items` and returns how many remain.
+        inline size_t KeepMostRecent(AttackMarkCandidate* items, size_t count, size_t cap)
+        {
+            std::stable_sort(items, items + count,
+                             [](const AttackMarkCandidate& a, const AttackMarkCandidate& b) { return a.age < b.age; });
+            return std::min(count, cap);
         }
 
         struct PingFrame

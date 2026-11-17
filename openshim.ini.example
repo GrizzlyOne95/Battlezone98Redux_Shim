@@ -2783,6 +2783,15 @@ RtsWaypointLines = 1
 ; Exposed on the OpenShim Settings page as "Idle Unit Alert".
 RtsIdleUnitAlert = 0
 
+; Attack Marks. A pulsing red ring on the ground around each of your units
+; and buildings for 2 seconds after an enemy hits it, the same window the
+; radar blip flashes for. At most 16 rings, the most recently hit. Drawn for
+; you only.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Attack Marks".
+RtsAttackMarks = 0
+
 ; The RTS action keys. One key each, no modifier; rebind them in Options >
 ; Input > RTS Actions, which writes these lines. The remote-target key is
 ; used with Shift (Shift+T). Refused, with a log line and a fall back to the
