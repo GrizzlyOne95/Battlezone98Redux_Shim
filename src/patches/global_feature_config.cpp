@@ -495,6 +495,8 @@ namespace BZROpenShim
             ReloadOffenseOverflowConfig();
             // [Gameplay] GroupStrip, likewise.
             ReloadGroupStripConfig();
+            // [Gameplay] RtsCommandPings / RtsArtilleryRange, likewise.
+            ReloadRtsMarkersConfig();
 
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;
             if (TryGetUserConfigBool(

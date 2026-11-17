@@ -2007,6 +2007,8 @@ namespace BZROpenShim
         TickShellCasings(dt);
         // The 3D rally beacon, same thread and point. No-op without a rally.
         TickProducerRallyMeshes();
+        // RTS markers (order pings, artillery range), same thread and point.
+        TickRtsMarkers(dt);
     }
 
 }
