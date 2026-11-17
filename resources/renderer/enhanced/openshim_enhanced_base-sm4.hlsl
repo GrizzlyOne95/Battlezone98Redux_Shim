@@ -1685,6 +1685,7 @@ void base_fragment(
     // Reactive surfaces are Enhanced-only; Stock/Retro keep the stock output.
     float3 reactiveGlow;
     oColor.xyz = ose_surface_finish(oColor.xyz, vSurfacePosition, vTexCoord, reactiveGlow, OSE_SURFACE_ARGUMENTS);
+    oColor.xyz = ose_local_scorch(oColor.xyz, vSurfacePosition, reactiveGlow, OSE_SCORCH_ARGUMENTS);
     emissiveContribution = reactiveGlow;
 #endif
 #if defined(EMISSIVEMAP_ENABLED)
