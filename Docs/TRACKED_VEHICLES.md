@@ -5,8 +5,8 @@ instead of hovering, in the style of BZ2's `ivatank`. It is driven entirely
 by the ODF. There is no openshim.ini option, menu entry or feature flag; an
 ODF without `classLabel = "tracked"` is untouched.
 
-Phase 1 status: implemented, runtime qualification pending (see
-"Verification" below).
+Status: phase 1 (contact physics) and phase 2 (tread clips and
+`treadSound`) implemented and live-checked; see "Verification" below.
 
 ## ODF
 
@@ -31,12 +31,64 @@ damping = 40.0          ; ground damper, m/s^2 per m/s
 contactsPerSide = 3     ; 2..8 contact points per tread
 lateralFriction = 1.0   ; sideways grip as a fraction of g (no strafe)
 maxSlope = 40.0         ; full traction up to this slope; none 10 degrees past it
+treadSound = "xvtrd0.wav" ; looping tread sound (BZCC key name); none when absent
+treadCycleLength = 1.0  ; metres of tread travel per loop of a tread clip
 ```
 
-Every `[TrackedClass]` key is optional; the values above are the defaults.
-Out-of-range values are clamped (stiffness 10..5000, damping 0..500,
-lateralFriction 0..5, maxSlope 5..85). Hover-only keys (`velocStrafe`,
+Every `[TrackedClass]` key is optional; the values above are the defaults
+(`treadSound` has none). Out-of-range values are clamped (stiffness
+10..5000, damping 0..500, lateralFriction 0..5, maxSlope 5..85,
+treadCycleLength 0.05..100). Hover-only keys (`velocStrafe`,
 `setAltitude`, `accelJump`, boost) have no effect on a tracked unit.
+
+### Tread clips and sound
+
+Sides follow BZCC: `L` is the driver's left (-x), `R` the right. A tread's
+speed is the contact model's commanded speed for that side (m/s, positive
+when it drives the hull forward), eased toward its target at accelThrust
+while speeding up and accelBrake while slowing. Driving forward both are
+positive; a pivot to the left runs L backward and R forward; at rest both
+are 0.
+
+- **Clips.** Give the model's skeleton looping animations named `tread_L`
+  and `tread_R` (exact case, as in BZCC). Each tracked object advances its
+  own Entity's clips by `speed * dt * clipLength / treadCycleLength`
+  seconds, so one loop of a clip is `treadCycleLength` metres of tread
+  travel and a negative speed plays it backward. Animate bones that the
+  engine does not drive itself (wheels, sprockets, tread-link bones; not
+  turret, gun or nacelle bones). A missing clip is skipped, so a model
+  with neither stays as it is. Other objects sharing the mesh, tracked or
+  not, are untouched: the state lives on each Entity.
+- **Blend mode.** An entity that has a tread clip has its skeleton
+  instance switched to Ogre's `ANIMBLEND_CUMULATIVE`. Under the default
+  `ANIMBLEND_AVERAGE`, Skeleton::setAnimationState (OgreMain 0x10443345
+  in the shipped DLL) scales every enabled clip by 1/total weight, so
+  `tread_L` and `tread_R` would each pose at half strength (measured live:
+  0.50). The mode lives in the entity's own SkeletonInstance
+  (SkeletonInstance::loadImpl 0x10444C4A copies it from the master), so
+  other units using the mesh keep theirs. On craft models the engine
+  enables only one clip itself, a looping `idle` if the skeleton has one
+  (model loader 0x0067E6A8, GOG decomp); under cumulative it plays at full
+  weight next to the tread clips instead of being averaged down. Keep the
+  tread clips off bones `idle` animates, or the two add up. Do not key
+  bones whose 4th name character is `1` or `2`: the model loader marks
+  those for LOD hiding and takes manual control of them.
+- **No UV scroll.** The stock vehicle shaders (`base.program`) bind no
+  texture matrix, so a material scroll on a "tread" sub-mesh would not
+  show, and a shared material would scroll every unit using it.
+- **Sound.** `treadSound` loops through the engine's own looping-sound
+  path, the one the hover thrust loop uses: the same start block and
+  priority (higher for the user's craft), pitch `11025 + 5512.5 * t` Hz
+  and volume `5 + 5 * t` (five times that for AI craft), where `t` is the
+  faster tread's share of velocForward. It starts above `t = 0.05`; under
+  it a playing loop is muted and only stopped after 1.5 s in a row, so an
+  AI easing round the gate does not restart it. It is silent when
+  the unit is dead, and past 150 m from the camera (the stock hover
+  cutoff), and it is stopped when the object is cleaned up or destroyed
+  (vtable slots 0, 3 and 4). Names longer than 15 characters are refused.
+  A `treadSound` equal to `soundThrust`, `soundTurbo` or `soundFly` is
+  refused with a warning: the stock sound code finds its loops by name and
+  owner, so a shared name would stop the wrong loop.
 
 The two treads sit at 85% of the ODF collision box half-width, each with
 `contactsPerSide` points spread between 10% in from the back and 10% in
@@ -59,9 +111,12 @@ never has to clamp the hull.
 - Each object built from a tracked class gets an OpenShim copy of the
   HoverCraft vtable (`HoverCraftVtable`, 42 slots, RTTI locator kept so it
   still reads as `.?AVHoverCraft@@`). Slot 15 (Simulate) runs the tracked
-  model; every other slot, including PostSimulate (16) and UpdateWeaponAim
-  (38), is a `jmp [stock slot]` thunk, so in-place rewrites of the stock
-  table (the shot-convergence wrapper) still apply.
+  model. Slot 16 (PostSimulate) calls the stock slot first, then drives
+  the tread clips and sound; slots 0 (deleting destructor), 3 and 4 (the
+  two paths that run the stock HoverCraft sound cleanup 0x004EE8F0) stop
+  the tread loop and then call the stock slot. Every other slot, including
+  UpdateWeaponAim (38), is a `jmp [stock slot]` thunk, so in-place rewrites
+  of the stock table (the shot-convergence wrapper) still apply.
 - `TrackedSimulate` replaces only the hover force model. It reads throttle
   and steer, samples the floor height and normal at every contact through
   the engine's floor query (`Terrain::FloorQuery`, the call stock hover
@@ -103,13 +158,26 @@ place, `tracked` stays an unknown classLabel exactly as in stock Redux. A
 tracked object whose class data cannot be read falls back to the stock hover
 Simulate.
 
+Treads fail closed on their own: they also need `Sound::InitControl`,
+`Sound::InitPrep`, `Sound::SetParams`, `Sound::Stop` (new), the existing
+`PlayGlobalSound` and `Sound::Find` resolves, the `GetCameraRecord`
+engine address, and twelve OgreMain exports (Entity animation-state lookup,
+AnimationState length/time/addTime/enabled/loop, Entity::getSkeleton,
+Skeleton get/setBlendMode, the Entity vtable). If any
+is missing, slots 0, 3, 4 and 16 stay plain thunks, one warning names it,
+and the tracked physics runs unchanged. A fault inside an Ogre clip call
+or a blend-mode call turns tread clips off for the session (one warning).
+
 The `TRACKED` log component records the install, one line per tracked
 class built (its effective keys and footprint), and a bounded Debug trace of
 contact clearance, speed, omega, grounded contacts, slope, traction, the
 engine box bottom, the floor normal under the origin and the footprint
-plane normal for live checks.
+plane normal for live checks. For treads it logs which clips each object's
+Entity has (when that changes), each tread loop start/stop/release, and a
+bounded Debug trace of commanded and visual tread speeds, clip time
+positions, volume and rate.
 
-## Limits (phase 1)
+## Limits
 
 - Contacts use the engine floor query, which also returns object floors
   (bridges, roofs); only terrain has been checked live.
@@ -120,7 +188,10 @@ plane normal for live checks.
 - The unit is a HoverCraft underneath: AI, weapons, sounds and the HUD
   treat it as one. An ODF that used `classLabel = "wingman"` loses
   Wingman-specific behaviour when switched to `tracked`.
-- Tread visuals (animated treads or wheels) are not driven yet.
+- Tread visuals are skeleton clips only (see "Tread clips and sound");
+  there is no texture scroll. Clips follow the commanded tread speed, so
+  treads keep turning against an obstacle and are still while the hull is
+  pushed.
 - Pitch (+omega.x raises the nose) and roll (+omega.z lowers the right side)
   signs follow BZ 1.5's convention (+omega.y turns left). The live run
   shows both converge onto the ground (see Verification); a wrong sign
@@ -155,7 +226,47 @@ avtank ODF, AI Goto orders):
 - Not checked live: a pivot at standstill (AI Goto never gives zero
   throttle with full steer; the unit test covers it) and object floors.
 
-Two bugs found on the way: the tail called slot 39 without its `dt`
+Phase 2 (tread clips and sound), live 2026-11-16, same harness: three
+tracked copies (one driven, one left idle 15 m away, one killed at T12),
+a hover avtank, a fixture `avtank.skeleton` with 1 s `tread_L`/`tread_R`
+clips on the nacelle bones, `treadSound = "avwalke0.wav"`,
+`treadCycleLength = 2.0`, then SaveGame and reload:
+
+- All tracked objects log `tread clips: tread_L=driven tread_R=driven`,
+  in the fresh and the loaded run.
+- Clip direction: over the sampled steps where a step is under 0.4 of a
+  loop (faster samples alias), the clip time moved with the sign of the
+  visual tread speed in 94 of 94 driven-unit samples (37 of them in
+  reverse), including the turn-in-place phase (L -3.3..-9.6 m/s, R
+  +8.5..+13.3 m/s, clips running opposite ways). At rest the clip time
+  did not move (196 rest samples).
+- Shared mesh: the idle unit's clip time stayed at 0.000 for all 246
+  samples while the others drove at up to 20 m/s.
+- Sound: vol 27 at 11455 Hz at 3 m/s, rising to vol 50 at
+  16538 Hz at 20 m/s (AI craft); one start and one stop per phase;
+  `stopped (dead)` on the kill; restarts after reload.
+- No engine alert, empty crash logs, no tread warnings.
+- Pose strength (temporary diagnostic build, not in the source): two new
+  bones each keyed by its own clip, a full turn per loop; the measured
+  bone angle over the authored angle, on samples under 0.5 m/s. Both
+  clips with the cumulative switch: L 0.997, R 0.993 (median, n=54/92).
+  One clip only: 1.000 (n=126). Both clips with the switch disabled (the
+  old behaviour): L 0.506, R 0.498.
+- Not exercised live: a tread rig on a real model (the first fixture
+  animated nacelle bones, which the model loader controls itself, so the
+  frames are not evidence of the look), a destructor or cleanup release while a loop is
+  still playing (the loop had always stopped first), the user's own craft,
+  the 150 m camera cutoff, and the fail-closed path (no resolve missed).
+
+Bugs found in phase 2: the Entity vptr check used the wrong export
+(`??_7Entity@Ogre@@6B@` instead of the ShadowCaster-base vftable), so no
+clip bound; the loop restarted every few steps as AI throttle hovered
+round the gate (now held, muted, for 1.5 s); the hold was first counted
+in steps, about 0.25 s at the observed sim rate; and two clips posed at
+half strength under the default blend mode (review finding, now
+cumulative).
+
+Phase 1 bugs found on the way: the tail called slot 39 without its `dt`
 argument (the callee's `ret 4` corrupted the caller's stack and the posit
 was never moved, so the hull stayed at its spawn height while its velocity
 grew), and grip scaled by the share of touching contacts let a hull

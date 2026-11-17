@@ -459,6 +459,7 @@
     <ClInclude Include="include\pond_class_label.h" />
     <ClInclude Include="include\tracked_vehicle_class.h" />
     <ClInclude Include="include\tracked_vehicle_physics.h" />
+    <ClInclude Include="include\tracked_vehicle_treads.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\steam_launcher_skip.h" />
     <ClInclude Include="include\launcher_proxy_logic.h" />

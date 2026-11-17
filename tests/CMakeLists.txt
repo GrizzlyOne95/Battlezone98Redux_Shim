@@ -472,6 +472,7 @@ if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
 endif()
 
 openshim_add_test(tracked_vehicle_physics_tests STD 17 SOURCES tracked_vehicle_physics_tests.cpp)
+openshim_add_test(tracked_vehicle_treads_tests STD 17 SOURCES tracked_vehicle_treads_tests.cpp)
 
 openshim_add_test(headlight_falloff_tests STD 20 SOURCES
     headlight_falloff_tests.cpp
