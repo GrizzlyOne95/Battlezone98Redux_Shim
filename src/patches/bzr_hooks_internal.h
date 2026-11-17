@@ -2297,6 +2297,8 @@ namespace BZROpenShim
         void InitializeMpBlockFreeCam();
         // --- SeismicWave extent clamp (seismic_wave_extent_clamp.cpp) --------
         void InitializeSeismicWaveExtentClampConfig();
+        // --- SeismicWave walkerVelocityScale (seismic_walker_velocity_scale.cpp)
+        void InitializeSeismicWalkerVelocityScale();
 
         // --- DynamicMain allocator guard (dynamic_alloc_guard.cpp) ------------
         void InitializeDynamicAllocGuardConfig();
