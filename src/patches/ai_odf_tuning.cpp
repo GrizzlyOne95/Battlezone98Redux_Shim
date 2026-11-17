@@ -2636,15 +2636,13 @@ namespace BZROpenShim
                 g_TurretTankEnemyVtableAddr);
         }
 
-		void InstallAiTuningHooksIfPossible()
+        static void InstallAiTuningCoreHooksIfPossible()
         {
             InstallAiNativeOrdersHooksIfPossible();
             InstallTurretAttackOrdersHooksIfPossible();
             InstallProducerRallyPointsIfPossible();
             InstallAutoGroupNewUnitsIfPossible();
             InstallOffenseOverflowIfPossible();
-            InstallRtsCommandsIfPossible();
-            InstallRtsPlacementIfPossible();
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();
@@ -2899,6 +2897,16 @@ namespace BZROpenShim
                     kGlobalRetargetPeriod,
                     static_cast<unsigned>(sizeof(hooks) / sizeof(hooks[0])));
             }
+        }
+
+        void InstallAiTuningHooksIfPossible()
+        {
+            InstallAiTuningCoreHooksIfPossible();
+            // After the core installs: RTS Hold is ready only once the
+            // retarget-period hooks (installed late in the core pass) are, and
+            // RTS commands mark their options from what is ready on each pass.
+            InstallRtsCommandsIfPossible();
+            InstallRtsPlacementIfPossible();
         }
 
         static bool TryReadOrdnanceRangeFromOdfFile(const char* ordnanceToken, float& outRange)

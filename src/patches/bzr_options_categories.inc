@@ -20,7 +20,7 @@ constexpr const char* kShimRowRtsCommands = "RTS Commands";
 
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
-    "Shadow Distance", "HD Terrain Tiles", "Micro Relief", "GPU Skinning",
+    "Shadow Distance", "HD Terrain Tiles", "Terrain Tessellation", "GPU Skinning",
     "Primary Monitor Fix", "Resolution Filter", "Resolution List",
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
@@ -32,7 +32,7 @@ static const char* const kShimCategoryLighting[] = {
     "Explosion Flash", "Sun Glare", "Fog Culling", "Scrap Shadows",
     "Scrap Glow", "Scrap Draw Distance" };
 static const char* const kShimCategoryAudio[] = {
-    "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix" };
+    "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix", "Music Refill" };
 static const char* const kShimCategoryHud[] = {
     "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
     "MP Vehicle Flags", "Kill Ticker", "Command Pings", "Artillery Range", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };

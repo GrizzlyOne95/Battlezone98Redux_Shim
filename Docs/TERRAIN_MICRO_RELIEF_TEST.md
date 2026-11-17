@@ -1,10 +1,12 @@
 # Visual terrain micro relief prototype
 
-Experimental, off by default. The OpenShim Options page exposes **Terrain Micro
-Detail** on page 1, beside the DX11 rendering controls. Its On/Off choice saves
-`[Terrain] TerrainMicroRelief = 0/1` in `openshim.ini` and takes effect after a
-game restart. On uses factor 4 and the 0.25-world-unit relief preset. DX11 is
-required; unsupported renderer/build/terrain contracts retain native terrain.
+Experimental, off by default. The OpenShim Options page exposes **Terrain
+Tessellation** (formerly labelled Micro Relief / Micro Detail) on page 1,
+beside the DX11 rendering controls. Its On/Off choice saves
+`[Terrain] TerrainMicroRelief = 0/1` in `openshim.ini` (the key keeps its old
+name) and takes effect after a game restart. On uses factor 4 and the
+0.25-world-unit relief preset. DX11 is required; unsupported
+renderer/build/terrain contracts retain native terrain.
 
 This extends the native tessellation submission test with shallow procedural
 surface detail. It changes rendered terrain and

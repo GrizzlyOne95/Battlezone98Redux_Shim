@@ -64,6 +64,7 @@
 
 #include <cstring>
 
+#include "resource_walk_stat_cache.h"
 #include "shim_log.h"
 
 namespace BZROpenShim
@@ -183,8 +184,30 @@ namespace BZROpenShim
                 }
             }
 
+            // A [WALKSTAT] scope covers each shell setter's mount walk: it opens
+            // at the mode store and closes at the gate, both on the UI thread.
+            // A scope left open (the engine threw between the two) is closed at
+            // the next store, flush or mission mount.
+            // The scope depth is per thread, so the open flag is too.
+            thread_local bool t_walkScopeOpen = false;
+            thread_local const char* t_walkScopeLabel = "shell";
+
+            void CloseWalkScope()
+            {
+                if (!t_walkScopeOpen) return;
+                t_walkScopeOpen = false;
+                EndResourceWalkStatScope(t_walkScopeLabel);
+            }
+
             void __cdecl OnModeStore(void* self, int target)
             {
+                CloseWalkScope();
+                // Mode 0 (campaign) has its own gate, which does not close the scope.
+                if (target != kModeMission && BeginResourceWalkStatScope())
+                {
+                    t_walkScopeOpen = true;
+                    t_walkScopeLabel = ModeName(target);
+                }
                 int before = -1;
                 if (!ReadMode(self, before)) before = -1;
                 s_state.storeTarget = target;
@@ -194,6 +217,7 @@ namespace BZROpenShim
             // Returns 1 to jump over the clear+initialise block.
             int __cdecl DecideGate(int target)
             {
+                CloseWalkScope();
                 const GateResult r = DecideShellGate(s_state, target);
                 switch (r.reason)
                 {
@@ -247,6 +271,7 @@ namespace BZROpenShim
             // Same order as the setters: pre, clear, initialise, post.
             void Flush(void* self, const char* where)
             {
+                CloseWalkScope();
                 if (!s_state.pending) return;
                 s_state.pending = false;
                 int mode = -1;
@@ -273,6 +298,7 @@ namespace BZROpenShim
             // Replaces `call 0x0076E6C0` (thiscall, 2 args, ret 8) in 0x007647C0.
             int __fastcall MissionMountHook(void* self, void* /*edx*/, int a, int b)
             {
+                CloseWalkScope();
                 if (BeginMissionMount(s_state))
                 {
                     const ULONGLONG start = GetTickCount64();
