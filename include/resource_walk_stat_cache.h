@@ -27,8 +27,10 @@ namespace BZROpenShim
     // the [WALKSTAT] summary line. Ending with no scope open is a no-op.
     // When the outermost such scope ends, the Ogre script files it enumerated
     // and that were not seen before are read once on a background thread to
-    // warm the OS caches ([PREFETCH]; OPENSHIM_DISABLE_SHELL_SCRIPT_PREFETCH=1
-    // turns that off).
+    // warm the OS caches. The files read are saved to
+    // openshim\cache\shell_script_prefetch.txt, and the first scope of the
+    // next run queues that list ([PREFETCH];
+    // OPENSHIM_DISABLE_SHELL_SCRIPT_PREFETCH=1 turns all of it off).
     bool BeginResourceWalkStatScope();
     void EndResourceWalkStatScope(const char* label);
 }
