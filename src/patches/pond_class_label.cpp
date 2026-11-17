@@ -3,6 +3,7 @@
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
 #include "shim_log.h"
+#include "tracked_vehicle_class.h"
 
 #include <Windows.h>
 #include <cstddef>
@@ -381,6 +382,11 @@ namespace BZROpenShim
                 g_PondBuildPending = true;
                 return 0;
             }
+
+            // classLabel = tracked rides on this same call site; it aliases
+            // onto the registered hover descriptor (tracked_vehicle_class.cpp).
+            if (MatchTrackedClassLabel(registeredLabel, odfLabel, g_OriginalStricmp))
+                return 0;
 
             return stockResult;
         }
