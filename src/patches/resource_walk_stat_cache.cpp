@@ -646,15 +646,31 @@ namespace BZROpenShim
                 if (!*row.original)
                     return false;
             }
-            for (const Row& row : rows)
+            void* previousSlots[sizeof(rows) / sizeof(rows[0])] = {};
+            for (size_t i = 0; i < sizeof(rows) / sizeof(rows[0]); ++i)
             {
+                const Row& row = rows[i];
                 void* previous = nullptr;
                 if (IatPatch::PatchImportFromAnyDll(exe, row.name, row.hook, &previous) !=
                     IatPatch::Result::Patched)
                 {
                     LogShimA(LogLevel::Warn, kComponent, "[WALKSTAT] import %s not patched", row.name);
+                    // Put the rows already patched back. A slot left on our hook
+                    // makes a later retry see "already patched" with no previous
+                    // value, so the retry would chain to kernel32 and silently drop
+                    // whatever hook the slot held before (e.g. the UiPerf counters).
+                    for (size_t j = 0; j < i; ++j)
+                    {
+                        if (!previousSlots[j])
+                            continue;
+                        if (IatPatch::PatchImportFromAnyDll(exe, rows[j].name, previousSlots[j], nullptr) !=
+                            IatPatch::Result::Patched)
+                            LogShimA(LogLevel::Warn, kComponent, "[WALKSTAT] import %s could not be restored",
+                                     rows[j].name);
+                    }
                     return false;
                 }
+                previousSlots[i] = previous;
                 // Chain to whatever the slot held (another OpenShim hook, e.g.
                 // the UiPerf file-scan counters, or kernel32 itself).
                 if (previous)
