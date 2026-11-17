@@ -1399,6 +1399,8 @@ namespace BZROpenShim
         extern bool g_ScrapRetargetHookInstalled;
         extern std::unordered_map<uintptr_t, ScrapRetargetState> g_ScrapRetargetStateByTask;
         extern bool g_SmartScavengerPathingEnabled;
+        // Built scavengers skip InitState's 5 s coast (SP + SmartScavengerPathing).
+        void RefreshScavengerInstantStartState();
         bool TryGetAiTuningForObject(void* objectPtr, AiTuningConfig& outConfig);
         void InstallAiTuningHooksIfPossible();
 

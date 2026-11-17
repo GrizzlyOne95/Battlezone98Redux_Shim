@@ -601,6 +601,7 @@ namespace BZROpenShim
             RefreshSatelliteViewState();
             RefreshShotConvergencePatchState();
             RefreshSmartReticleRangeState();
+            RefreshScavengerInstantStartState();
             RefreshScrapPilotHudLayout();
 
             Log(L"[GLOBAL] scrapPilotHud=%hs weaponConvergence=%hs playerReticleConvergence=%hs smartReticleRange=%.3f smartScavengerPathing=%hs jumpSnipeCrouch=%hs neutralAttackOrders=%hs turretAim=%hs multiplier=%.3f aiOdfTuning=%hs (SinglePlayer features remain SP-only)\n",
@@ -737,6 +738,11 @@ namespace BZROpenShim
             // enemies from the shim player; applied everywhere, including MP.
             { "SatelliteVisibilityFix", FeatureTier::Display,
               nullptr, &RefreshSatelliteVisibilityFixState },
+            // [SinglePlayer] SmartScavengerPathing also turns InitState's age
+            // jbe into a jmp so built scavengers start at once; the stock
+            // byte goes back online. Read from the ini, no baseline to revert.
+            { "ScavengerInstantStart", FeatureTier::SinglePlayer,
+              nullptr, &RefreshScavengerInstantStartState },
             // [Fixes] engine-defect corrections. They are bug fixes rather than
             // enhancements and stay on for normal single-player play, but every
             // one of them changes simulation behaviour and none is negotiated

@@ -6721,6 +6721,12 @@
       "identity": "ScavengerEnemy primary vtable (.?AVScavengerEnemy@@, derives ScavengerProcess); RTTI-verified at patch time."
     },
     {
+      "name": "ScavengerInitStateAgeBranch",
+      "address": "0x005C44E8",
+      "expected": "0F 2F 05 5C 28 8A 00 76 78",
+      "identity": "ScavengerProcess::InitState (0x005C4490) age test on GOG Redux 2.2.301: the float at [result+4] of the call at 0x005C44D8 (movss at 0x005C44DD) is compared against the shared 5.0f constant at 0x008A285C (comiss here), then jbe +0x78 at 0x005C44EF. The jump target 0x005C4569 is the mission-start path that creates a RecycleTask at once; the fall-through (any unit older than 5 s, so every built scavenger) allocates a 0x134-byte task and waits 5 s. Smart Scavengers rewrites only the jbe opcode (0x76 -> 0xEB, jmp rel8) in single player and puts 0x76 back otherwise; the shared 5.0f constant is never written. Static GOG bytes checked 2026-11-17."
+    },
+    {
       "name": "DefendTaskVtable",
       "address": "0x008785F4",
       "kind": "data",
