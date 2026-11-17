@@ -431,10 +431,37 @@ namespace BZROpenShim::Hooks
             if (stock != -1 || !g_ExtendedActive.load(std::memory_order_acquire) ||
                 minSlot != Policy::kOffenseMinSlot || maxSlot != Policy::kOffenseMaxSlot)
                 return stock;
-            const bool userTeam = team != nullptr && team == SafeUserTeam();
-            char odf[AutoGroupPolicy::kOdfBufferSize];
-            const bool canPlace = userTeam && ReadClassOdf(cls, odf) && AutoGroupCanPlace(odf);
-            if (!Policy::BuildGateOpens(stock, minSlot, maxSlot, true, userTeam, canPlace))
+            void* const userTeamPtr = SafeUserTeam();
+            const bool userTeam = team != nullptr && team == userTeamPtr;
+            char odf[AutoGroupPolicy::kOdfBufferSize] = {};
+            const bool odfRead = userTeam && ReadClassOdf(cls, odf);
+            const bool canPlace = odfRead && AutoGroupCanPlace(odf);
+            const bool opens = Policy::BuildGateOpens(stock, minSlot, maxSlot, true, userTeam, canPlace);
+            // UpdateModeList runs this per build entry, every frame. Log the
+            // user team's decision once per (class, outcome) change, from
+            // its own small budget, so a refused gate names its failing
+            // check without starving the other [OVERFLOW] lines.
+            static void* s_lastCls = nullptr;
+            static int s_lastOutcome = -1;
+            static long s_gateLogBudget = 8;
+            const int outcome = (odfRead ? 1 : 0) | (canPlace ? 2 : 0);
+            if (userTeam && (cls != s_lastCls || outcome != s_lastOutcome) && s_gateLogBudget > 0)
+            {
+                s_lastCls = cls;
+                s_lastOutcome = outcome;
+                --s_gateLogBudget;
+                Log(L"[OVERFLOW] build gate %ls: odf='%hs' odfRead=%d canPlace=%d\n", opens ? L"open" : L"refused",
+                    odf, odfRead ? 1 : 0, canPlace ? 1 : 0);
+            }
+            else if (!userTeam && team != nullptr && userTeamPtr != nullptr && s_gateLogBudget > 0 &&
+                     s_lastOutcome != -2)
+            {
+                // Logged once: a gate call whose team is not the user's.
+                s_lastOutcome = -2;
+                --s_gateLogBudget;
+                Log(L"[OVERFLOW] build gate refused: team %p is not the user team %p\n", team, userTeamPtr);
+            }
+            if (!opens)
                 return stock;
             return minSlot; // the caller only compares with -1
         }
