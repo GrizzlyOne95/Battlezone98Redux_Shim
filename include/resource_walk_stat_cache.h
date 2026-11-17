@@ -25,6 +25,10 @@ namespace BZROpenShim
     // are not in place. Each true return must be paired with exactly one
     // EndResourceWalkStatScope on the same thread; the label names the walk in
     // the [WALKSTAT] summary line. Ending with no scope open is a no-op.
+    // When the outermost such scope ends, the Ogre script files it enumerated
+    // and that were not seen before are read once on a background thread to
+    // warm the OS caches ([PREFETCH]; OPENSHIM_DISABLE_SHELL_SCRIPT_PREFETCH=1
+    // turns that off).
     bool BeginResourceWalkStatScope();
     void EndResourceWalkStatScope(const char* label);
 }

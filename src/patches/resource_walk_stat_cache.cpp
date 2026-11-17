@@ -28,6 +28,17 @@
 // Paths are matched after lower-casing and folding '/' to '\'. A stat whose
 // spelling differs from the enumeration (relative vs absolute, "..") simply
 // misses and goes to the OS.
+//
+// Shell scopes (BeginResourceWalkStatScope) also note each Ogre script file the
+// walk enumerates and, when the scope closes, hand the ones not seen before to
+// one background-priority thread that opens and reads them. The first open of a
+// file since boot is slow (measured 2026-11-16: 5075 script files took 11.4 s
+// cold, 0.3 s warm; the bytes are only 9 MB, so it is per-open cost, likely the
+// on-access scan). The game-room rebuild opens ~2100 of them on the main
+// thread, so reading them early, while the player is in the menus, takes that
+// cost off the hang. Read only: the files and what the engine loads are
+// unchanged. Paths keep their enumerated spelling (case-sensitive filesystems
+// under Proton/Wine). OPENSHIM_DISABLE_SHELL_SCRIPT_PREFETCH=1 turns it off.
 
 #include "resource_walk_stat_cache.h"
 #include "bzr_options_ui.h"
@@ -41,6 +52,9 @@
 #include <cwctype>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace BZROpenShim
 {
@@ -48,6 +62,7 @@ namespace BZROpenShim
     {
         constexpr char kComponent[] = "walk-stat-cache";
         constexpr char kDisableSwitch[] = "OPENSHIM_DISABLE_RESOURCE_WALK_STAT_CACHE";
+        constexpr char kPrefetchDisableSwitch[] = "OPENSHIM_DISABLE_SHELL_SCRIPT_PREFETCH";
         constexpr char kEngineAddressName[] = "BuildSingleIAResource";
         constexpr uint8_t kExpectedPrologue[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
 
@@ -71,11 +86,19 @@ namespace BZROpenShim
         bool g_FailureLogged = false;
         bool g_DisabledLogged = false;
 
+        struct OpenEnum
+        {
+            std::wstring key;        // normalised directory
+            std::wstring spelling;   // directory as the walk spelled it
+        };
+
         struct Scope
         {
             int depth = 0;
-            std::unordered_map<HANDLE, std::wstring> openEnums;   // handle -> directory key
+            bool collectScripts = false;   // a shell scope: note script files for prefetch
+            std::unordered_map<HANDLE, OpenEnum> openEnums;
             std::unordered_map<std::wstring, WIN32_FILE_ATTRIBUTE_DATA> entries;
+            std::vector<std::wstring> scripts;   // enumerated script paths, walk spelling
             uint32_t hits = 0;
             uint32_t misses = 0;
             uint64_t startTick = 0;
@@ -99,7 +122,7 @@ namespace BZROpenShim
         }
 
         // "dir/*" or "dir\*.*" -> normalised "dir"; nothing for a bare pattern.
-        bool DirectoryOfPattern(LPCWSTR pattern, std::wstring& out)
+        bool DirectoryOfPattern(LPCWSTR pattern, OpenEnum& out)
         {
             if (!pattern)
                 return false;
@@ -107,16 +130,41 @@ namespace BZROpenShim
             const size_t sep = text.find_last_of(L"\\/");
             if (sep == std::wstring::npos || sep == 0)
                 return false;
-            out = Normalise(text.c_str(), sep);
+            out.key = Normalise(text.c_str(), sep);
+            out.spelling.assign(text, 0, sep);
             return true;
         }
 
-        void Remember(const std::wstring& directory, const WIN32_FIND_DATAW& data)
+        // The Ogre script types the Modable rebuild parses.
+        bool IsScriptName(const wchar_t* name)
+        {
+            static const wchar_t* const kExtensions[] = {
+                L".material", L".program", L".particle", L".compositor",
+                L".overlay", L".fontdef", L".os",
+            };
+            const wchar_t* dot = wcsrchr(name, L'.');
+            if (!dot)
+                return false;
+            for (const wchar_t* ext : kExtensions)
+                if (_wcsicmp(dot, ext) == 0)
+                    return true;
+            return false;
+        }
+
+        void Remember(const OpenEnum& directory, const WIN32_FIND_DATAW& data)
         {
             const wchar_t* name = data.cFileName;
             if (name[0] == L'.' && (name[1] == 0 || (name[1] == L'.' && name[2] == 0)))
                 return;
-            std::wstring key = directory;
+            if (t_Scope.collectScripts && !(data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                IsScriptName(name))
+            {
+                std::wstring path = directory.spelling;
+                path.push_back(L'\\');
+                path += name;
+                t_Scope.scripts.push_back(std::move(path));
+            }
+            std::wstring key = directory.key;
             key.push_back(L'\\');
             key += Normalise(name, wcslen(name));
             WIN32_FILE_ATTRIBUTE_DATA attributes = {};
@@ -148,7 +196,7 @@ namespace BZROpenShim
             HANDLE handle = g_RealFindFirstFileW(pattern, data);
             if (t_Scope.depth > 0 && handle != INVALID_HANDLE_VALUE && data)
             {
-                std::wstring directory;
+                OpenEnum directory;
                 if (DirectoryOfPattern(pattern, directory))
                 {
                     Remember(directory, *data);
@@ -204,6 +252,94 @@ namespace BZROpenShim
             return g_RealGetFileAttributesExW(path, level, info);
         }
 
+        // ---- background prefetch of shell script files -------------------
+        SRWLOCK g_PrefetchLock = SRWLOCK_INIT;
+        std::vector<std::wstring> g_PrefetchQueue;          // guarded by g_PrefetchLock
+        std::unordered_set<std::wstring> g_PrefetchSeen;    // normalised; guarded
+        bool g_PrefetchWorkerRunning = false;               // guarded
+        bool g_PrefetchDisabled = false;                    // set once at install
+
+        DWORD WINAPI PrefetchWorker(LPVOID)
+        {
+            // Background mode lowers I/O priority too; Wine may refuse it.
+            if (!SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN))
+                SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+            static char buffer[64 * 1024];   // only one worker runs at a time
+            uint32_t files = 0;
+            uint32_t failed = 0;
+            uint64_t bytes = 0;
+            const uint64_t start = GetTickCount64();
+            for (;;)
+            {
+                std::vector<std::wstring> batch;
+                AcquireSRWLockExclusive(&g_PrefetchLock);
+                batch.swap(g_PrefetchQueue);
+                if (batch.empty())
+                    g_PrefetchWorkerRunning = false;
+                ReleaseSRWLockExclusive(&g_PrefetchLock);
+                if (batch.empty())
+                    break;
+                for (const std::wstring& path : batch)
+                {
+                    HANDLE file = CreateFileW(path.c_str(), GENERIC_READ,
+                                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                              nullptr, OPEN_EXISTING, FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+                    if (file == INVALID_HANDLE_VALUE)
+                    {
+                        ++failed;
+                        continue;
+                    }
+                    DWORD got = 0;
+                    while (ReadFile(file, buffer, sizeof(buffer), &got, nullptr) && got != 0)
+                        bytes += got;
+                    CloseHandle(file);
+                    ++files;
+                }
+            }
+            LogShimA(LogLevel::Info, kComponent,
+                     "[PREFETCH] read %u script files (%llu KB) in %llu ms, %u could not be opened",
+                     files, static_cast<unsigned long long>(bytes / 1024),
+                     static_cast<unsigned long long>(GetTickCount64() - start), failed);
+            return 0;
+        }
+
+        void QueuePrefetch(std::vector<std::wstring>& paths, const char* label)
+        {
+            if (paths.empty() || g_PrefetchDisabled)
+                return;
+            uint32_t added = 0;
+            bool startWorker = false;
+            AcquireSRWLockExclusive(&g_PrefetchLock);
+            for (std::wstring& path : paths)
+            {
+                if (!g_PrefetchSeen.insert(Normalise(path.c_str(), path.size())).second)
+                    continue;
+                g_PrefetchQueue.push_back(std::move(path));
+                ++added;
+            }
+            if (added && !g_PrefetchWorkerRunning)
+                startWorker = g_PrefetchWorkerRunning = true;
+            ReleaseSRWLockExclusive(&g_PrefetchLock);
+            if (!added)
+                return;
+            LogShimA(LogLevel::Info, kComponent, "[PREFETCH] %s queued %u new script files", label, added);
+            if (!startWorker)
+                return;
+            HANDLE worker = CreateThread(nullptr, 0, PrefetchWorker, nullptr, 0, nullptr);
+            if (worker)
+            {
+                CloseHandle(worker);
+                return;
+            }
+            // No thread: drop the queue; the engine reads the files itself as before.
+            const DWORD error = GetLastError();
+            AcquireSRWLockExclusive(&g_PrefetchLock);
+            g_PrefetchQueue.clear();
+            g_PrefetchWorkerRunning = false;
+            ReleaseSRWLockExclusive(&g_PrefetchLock);
+            LogShimA(LogLevel::Warn, kComponent, "[PREFETCH] worker thread could not start (%lu)", error);
+        }
+
         void EnterScope()
         {
             if (t_Scope.depth++ == 0)
@@ -224,6 +360,10 @@ namespace BZROpenShim
                          static_cast<unsigned long long>(GetTickCount64() - t_Scope.startTick),
                          t_Scope.hits, t_Scope.misses,
                          static_cast<unsigned>(t_Scope.entries.size()));
+            if (t_Scope.collectScripts)
+                QueuePrefetch(t_Scope.scripts, label);
+            t_Scope.collectScripts = false;
+            t_Scope.scripts.clear();
             t_Scope.entries.clear();
             t_Scope.openEnums.clear();
             t_Scope.hits = t_Scope.misses = 0;
@@ -239,10 +379,10 @@ namespace BZROpenShim
             g_BuildOriginal(self, request);
         }
 
-        bool DisabledByEnvironment()
+        bool DisabledByEnvironment(const char* name = kDisableSwitch)
         {
             char value[16] = {};
-            const DWORD len = GetEnvironmentVariableA(kDisableSwitch, value, sizeof(value));
+            const DWORD len = GetEnvironmentVariableA(name, value, sizeof(value));
             if (len == 0 || len >= sizeof(value))
                 return false;
             return !(value[0] == '0' && value[1] == '\0');
@@ -305,6 +445,9 @@ namespace BZROpenShim
     {
         if (!g_ImportsPatched)
             return false;
+        // Only the outermost scope decides; a nested one changes nothing.
+        if (t_Scope.depth == 0)
+            t_Scope.collectScripts = !g_PrefetchDisabled;
         EnterScope();
         return true;
     }
@@ -342,6 +485,10 @@ namespace BZROpenShim
             LogFailureOnce("unexpected buildSingleIAResource prologue");
             return;
         }
+
+        g_PrefetchDisabled = DisabledByEnvironment(kPrefetchDisableSwitch);
+        if (g_PrefetchDisabled)
+            LogShimA(LogLevel::Info, kComponent, "[PREFETCH] disabled by %s", kPrefetchDisableSwitch);
 
         // Imports first: until the detour opens a scope the hooks only pass through.
         if (!g_ImportsPatched)
