@@ -50,6 +50,7 @@ namespace BZROpenShim::Hooks
         // scripts/patches.json, never used as addresses here.
         constexpr size_t kWeaponClass = 8;
         constexpr size_t kWeaponObject = 0x10;
+        constexpr size_t kWeaponHardpoint = 0x14; // "hard" OBJ76, MountWorldMatrix 0x006116A0
         constexpr size_t kWeaponRoot = 0x18;
         constexpr size_t kWeaponMountWorld = 0x28;
         constexpr size_t kClassParent = 8;
@@ -57,7 +58,9 @@ namespace BZROpenShim::Hooks
         constexpr size_t kObjectClassName = 0x30;
         constexpr size_t kCarrier = 0x1a0;
         constexpr size_t kCarrierSlots = 0x18;
+        constexpr size_t kCarrierMask = 0x2c; // Carrier::GetWeapon tests bit slot here
         constexpr size_t kMatrix = 0x20;
+        constexpr size_t kNodeParent = 0x78; // obj_rel_parent_matrix parent walk
         constexpr size_t kFlags = 0x14;
         constexpr uint32_t kDeadFlag = 0x200;
         constexpr size_t kRenderBackReference = 0x68;
@@ -521,6 +524,52 @@ namespace BZROpenShim::Hooks
             uint32_t flags = 0;
             return Read(ptr, kFlags, flags) && !(flags & kDeadFlag) &&
                 Read(ptr, 8, node.id) && Read(ptr, 0x80, node.child) && Read(ptr, 0x7c, node.sibling);
+        }
+
+        // Same node fields as ReadMesh, name folded to lower case so a Lua
+        // caller's spelling of a model part name matches either way.
+        bool ReadMeshFolded(uintptr_t address, WP::MeshNodeView& node, void* user)
+        {
+            if (!ReadMesh(address, node, user)) return false;
+            for (auto& ch : node.id)
+                if (ch >= 'A' && ch <= 'Z') ch = static_cast<char>(ch - 'A' + 'a');
+            return true;
+        }
+
+        // Local MAT_3D and parent edge, the two fields obj_rel_parent_matrix
+        // (0x0062E070) walks: node+0x20 and node+0x78.
+        bool ReadNodeFrame(uintptr_t address, WP::NodeFrameView& frame, void*)
+        {
+            void* ptr = reinterpret_cast<void*>(address);
+            uint32_t flags = 0;
+            return Read(ptr, kFlags, flags) && !(flags & kDeadFlag) &&
+                Read(ptr, kMatrix, frame.local) && Read(ptr, kNodeParent, frame.parent);
+        }
+
+        // Handle -> live object and its root OBJ76; null on a stale or reused
+        // handle (the arena reuses slots), a missing root or a dead root.
+        void* LiveObjectRoot(uint32_t handle, void*& root) noexcept
+        {
+            root = nullptr;
+            void* object = GameObjectFromHandleGog(static_cast<int>(handle));
+            uint32_t flags = 0;
+            if (!object || !TryGetGameObjectObj76(object, root) || !root ||
+                !Read(root, kFlags, flags) || (flags & kDeadFlag)) { root = nullptr; return nullptr; }
+            return object;
+        }
+
+        // Lower-cased copy of a caller's C string; false past 8 characters
+        // (a longer name can never match a native node) or on a bad pointer.
+        bool FoldNodeName(const char* name, char (&folded)[WP::kMeshIdBytes + 1], size_t& length) noexcept
+        {
+            __try { return WP::FoldNodeName(name, folded, length); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
+
+        int WriteTransform(void* out, const WP::Matrix& pose) noexcept
+        {
+            __try { std::memcpy(out, &pose, sizeof(pose)); return 1; }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return 0; }
         }
 
         bool LiveOwner(const WP::Identity& owner, void* root) noexcept
@@ -1472,6 +1521,64 @@ namespace BZROpenShim::Hooks
         pose = WeaponConvergence::Multiply(found->second.correction, pose);
         if (!WP::ValidPose(pose)) return 0;
         return WriteMuzzlePoint(outPosition, pose);
+    }
+
+    // Read-only mount bridge (Docs/WEAPON_MOUNTS_SCOPE.md). World MAT_3D of a
+    // craft's weapon hardpoint node, the obj_rel_parent_matrix(weapon->hard,
+    // nullptr) frame MountWorldMatrix (0x006116A0) starts from, before the
+    // weapon's muzzle offset and aim pose. Composed from the live native node
+    // tree, so it is the simulation pose: no renderer, settings, session or
+    // presentation binding needed. Writes 64 bytes (MAT_3D layout) to
+    // outMatrix and returns 1; 0 on a stale handle, a non-craft, an empty or
+    // out-of-range slot or an unreadable/invalid pose. Game thread only.
+    extern "C" __declspec(dllexport) int __cdecl OpenShimGetHardpointTransform(
+        uint32_t handle, int slot, void* outMatrix) noexcept
+    {
+        if (!outMatrix || slot < 0 || slot >= 5 || !EngineThread()) return 0;
+        void* root = nullptr;
+        void* owner = LiveObjectRoot(handle, root);
+        void* vtable = nullptr;
+        void* carrier = nullptr;
+        void* weapon = nullptr;
+        void* weaponRoot = nullptr;
+        void* hardpoint = nullptr;
+        uint32_t mask = 0;
+        if (!owner || !Read(owner, 0, vtable) ||
+            !VtableDerivesFrom(reinterpret_cast<uintptr_t>(vtable), ".?AVCraft@@") ||
+            !Read(owner, kCarrier, carrier) || !carrier || !Read(carrier, kCarrierMask, mask) ||
+            !(mask & (1u << slot)) || !Read(carrier, kCarrierSlots + slot * sizeof(void*), weapon) || !weapon ||
+            !Read(weapon, kWeaponRoot, weaponRoot) || weaponRoot != root ||
+            !Read(weapon, kWeaponHardpoint, hardpoint) || !hardpoint) return 0;
+        WP::Matrix pose;
+        if (!WP::ComposeNodeWorld(reinterpret_cast<uintptr_t>(root), reinterpret_cast<uintptr_t>(hardpoint),
+                ReadNodeFrame, nullptr, pose)) return 0;
+        return WriteTransform(outMatrix, pose);
+    }
+
+    // Read-only mount bridge. World MAT_3D of the named node (model part, at
+    // most 8 characters, case-insensitive) in the object's native node tree,
+    // composed like obj_rel_parent_matrix(node, nullptr). This is the
+    // simulation pose the engine itself fires from; the Ogre nodes copy it
+    // (ModelPose 0x00681A00), so it is valid off-screen and unrendered. A name
+    // matching two nodes is refused rather than guessed. Writes 64 bytes
+    // (MAT_3D layout) and returns 1; 0 otherwise. Game thread only.
+    extern "C" __declspec(dllexport) int __cdecl OpenShimGetNodeTransform(
+        uint32_t handle, const char* name, void* outMatrix) noexcept
+    {
+        if (!outMatrix || !name || !EngineThread()) return 0;
+        char folded[WP::kMeshIdBytes + 1] = {};
+        size_t length = 0;
+        if (!FoldNodeName(name, folded, length)) return 0;
+        const auto id = WP::ParseMeshId(std::string_view(folded, length));
+        void* root = nullptr;
+        if (!id || !LiveObjectRoot(handle, root)) return 0;
+        WP::MeshLookupResult found;
+        WP::Matrix pose;
+        try { found = WP::FindMeshNode(reinterpret_cast<uintptr_t>(root), *id, ReadMeshFolded, nullptr); }
+        catch (...) { return 0; } // bounded traversal allocates
+        if (found.status != WP::MeshLookupStatus::Found ||
+            !WP::ComposeNodeWorld(reinterpret_cast<uintptr_t>(root), found.node, ReadNodeFrame, nullptr, pose)) return 0;
+        return WriteTransform(outMatrix, pose);
     }
 
     void RetireWeaponPresentationNativeBindings() noexcept
