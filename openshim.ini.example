@@ -2879,12 +2879,16 @@ SmartReticleRange = 500
 ; Score scrap by viable path length and reconsider temporarily unreachable scrap.
 ; Also makes newly built scavengers start scavenging at once instead of idling
 ; for about 5 seconds first (stock already does this for units placed at
-; mission start). The 5-second pause after a finished scrap run is unchanged.
-; The instant start is one game-wide switch, so an ODF's scrapPathingAI does
-; not turn it off for a single unit. Single player only.
-; Accepted: boolean. Default: ON.
+; mission start). The 5-second idle a scavenger takes when it finds no scrap
+; (and after Go To, Stop or other finished orders) is cut to 0.5 seconds; it is
+; kept short rather than removed so a scavenger with no reachable scrap does not
+; re-search every frame. The instant start and the shorter idle are one
+; game-wide switch, so an ODF's scrapPathingAI does not change them for a single
+; unit. Single player only: everything here, including scrapPathingAI, is
+; stock in network games.
+; Accepted: boolean. Default: OFF.
 ; Legacy INI alias: ScavengerPathing
-SmartScavengerPathing = 1
+SmartScavengerPathing = 0
 
 ; Give defensive turrets increased pitch authority against airborne targets.
 ; Accepted: boolean. Default: ON.

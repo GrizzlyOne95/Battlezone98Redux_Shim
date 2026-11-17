@@ -587,11 +587,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Smart-reticle targeting distance; Stock is Redux's 200. This value is single player "
       "only; a mission calling EXU SetReticleRange (BZP, Reloaded) also sets it online." },
+    // Absent key = off, so defaultIndex 1 selects "0" (Off).
     { "Smart Scavengers", "SinglePlayer", "SmartScavengerPathing",
       kShimSettingsScavengerAltKeys, 1,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Smarter scavenger pathing to scrap. Single player only." },
+      "Smarter scavenger pathing to scrap; built scavengers start at once and idle 0.5 s "
+      "instead of 5 s. Single player only." },
     { "Turret AA Pitch", "SinglePlayer", "TurretAimPitch", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,

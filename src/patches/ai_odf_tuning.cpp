@@ -1523,7 +1523,9 @@ namespace BZROpenShim
                 return straightSquared;
             }
 
-            if (!craft || !candidateObject || ReadLocalPlayerNetIdValue() != 0)
+            // Single-player only, checked before the per-ODF scrapPathingAI
+            // override so no ODF can turn scoring on in a network game.
+            if (!craft || !candidateObject || !IsSinglePlayerSession())
                 return straightSquared;
 
             AiTuningConfig tuning = {};
@@ -1765,7 +1767,8 @@ namespace BZROpenShim
 
         static void ApplyScavengerRetargetAfterGotoScrap(void* recycleTask)
         {
-            if (!recycleTask || !g_BzrFn_GetGameTime || ReadLocalPlayerNetIdValue() != 0)
+            // Single-player only, before the per-ODF scrapPathingAI override.
+            if (!recycleTask || !g_BzrFn_GetGameTime || !IsSinglePlayerSession())
                 return;
 
             auto* taskBytes = reinterpret_cast<uint8_t*>(recycleTask);
@@ -2641,9 +2644,30 @@ namespace BZROpenShim
         // RecycleTask at once; anything older (every built scavenger) falls
         // through to a 5 s coast first. Smart Scavengers makes that jbe a jmp
         // so built scavengers start at once too. Only the opcode byte at +7
-        // changes; the shared constant is never written. The wait after a
-        // finished RecycleTask is a different path and stays stock.
+        // changes; the shared constant is never written.
         // Row ScavengerInitStateAgeBranch guards "comiss xmm0,[5.0f]; jbe +0x78".
+        //
+        // Wait floor. A finished RecycleTask (RecycleTask DoState 0x005B6470
+        // reaches state 6 when InitLookingForScrap 0x005B6580 finds no
+        // candidate or no dropoff) sends ScavengerProcess::DoState 0x005C4AA0
+        // case 4 to nextState 1 (WAIT). InitState case 1 (jump table
+        // 0x005C498C -> 0x005C458F) starts a SitTask and sets
+        // wait_time(+0x44) = now + 5.0f with "addss xmm0,[0x008A285C]" at
+        // 0x005C45F1; DoState case 1 goes back to RECYCLE (4) once now passes
+        // wait_time. 1.5 source: 0045d681 InitState case WAIT, 0045d8dd
+        // DoState case WAIT/RECYCLE. The wait cannot be removed: with no
+        // reachable scrap, RECYCLE -> Done -> WAIT would re-run the scrap scan
+        // and FindPlan every few frames. So the addss operand is pointed at an
+        // existing read-only 0.5f (.rdata 0x008A2584) instead: a 0.5 s floor.
+        // Neither constant is written. A collected scrap object no longer
+        // exists, so it cannot be re-picked, and the score hook's failure
+        // cache still skips hard-to-reach scrap.
+        // This shortens every entry into WAIT (also after Go To, Stop and
+        // finished Follow/Rescue/Retreat/Cash-out), not only the no-scrap one.
+        // Attributing the observed BuildObject / post-RecycleTask idles to
+        // this path is UNVERIFIED (no live test yet).
+        // Row ScavengerInitStateWaitDelayOperand guards
+        // "addss xmm0,[0x008A285C]; mov edx,[ebp-0x10]; movss [edx+0x44],xmm0".
         static uint32_t g_ScavengerInitStateAgeBranchAddr = 0;
         static bool g_ScavengerInstantStartInstalled = false;
         static bool g_ScavengerInstantStartPatchActive = false;
@@ -2651,16 +2675,48 @@ namespace BZROpenShim
         constexpr uint8_t kScavengerAgeJbeOpcode = 0x76;
         constexpr uint8_t kScavengerAgeJmpOpcode = 0xEB;
 
+        static uint32_t g_ScavengerWaitDelayOperandAddr = 0;
+        static bool g_ScavengerWaitFloorInstalled = false;
+        static bool g_ScavengerWaitFloorPatchActive = false;
+        constexpr uint32_t kScavengerWaitDisp32Offset = 4;     // addss xmm0,[disp32]
+        constexpr uint32_t kScavengerWaitStockConst = 0x008A285Cu; // 5.0f
+        constexpr uint32_t kScavengerWaitFloorConst = 0x008A2584u; // 0.5f
+
+        static void RefreshScavengerWaitFloorState(bool wantActive)
+        {
+            if (!g_ScavengerWaitFloorInstalled ||
+                wantActive == g_ScavengerWaitFloorPatchActive)
+                return;
+
+            const uint32_t operand =
+                wantActive ? kScavengerWaitFloorConst : kScavengerWaitStockConst;
+            if (!WritePatchBytes(g_ScavengerWaitDelayOperandAddr + kScavengerWaitDisp32Offset,
+                                 reinterpret_cast<const uint8_t*>(&operand), sizeof(operand)))
+            {
+                Log(L"[SCAVPATH] Failed writing scavenger wait floor operand wanted=%hs\n",
+                    wantActive ? "on" : "off");
+                return;
+            }
+
+            g_ScavengerWaitFloorPatchActive = wantActive;
+            Log(L"[SCAVPATH] scavenger wait floor: %hs (%hs)\n",
+                wantActive ? "0.5 s" : "stock 5 s",
+                wantActive ? "single-player"
+                           : (g_SmartScavengerPathingEnabled ? "network game"
+                                                             : "SmartScavengerPathing off"));
+        }
+
         // Single-player gate, same shape as RefreshApcAlliedTargetDeployFixState:
-        // the stock byte goes back for network games and when the option is
+        // the stock bytes go back for network games and when the option is
         // off. Only touches .text, and only logs, when the wanted state changes.
         void RefreshScavengerInstantStartState()
         {
-            if (!g_ScavengerInstantStartInstalled)
-                return;
-
             const bool wantActive =
                 g_SmartScavengerPathingEnabled && IsSinglePlayerSession();
+            RefreshScavengerWaitFloorState(wantActive);
+
+            if (!g_ScavengerInstantStartInstalled)
+                return;
             if (wantActive == g_ScavengerInstantStartPatchActive)
                 return;
 
@@ -2726,6 +2782,46 @@ namespace BZROpenShim
             RefreshScavengerInstantStartState();
         }
 
+        // Same pattern for the WAIT delay operand; bound separately so a
+        // mismatch on one site leaves the other usable.
+        static void InstallScavengerWaitFloorIfPossible()
+        {
+            static int s_bound = 0;
+            if (g_ScavengerWaitFloorInstalled || s_bound < 0)
+                return;
+
+            if (s_bound == 0)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "ScavengerInitStateWaitDelayOperand", &g_ScavengerWaitDelayOperandAddr },
+                };
+                s_bound = HookEngine::BindEngineRows("Scavenger wait floor", rows) ? 1 : -1;
+                if (s_bound < 0)
+                {
+                    Log(L"[SCAVPATH] Scavenger wait floor unavailable: InitState WAIT delay did not match this game build\n");
+                    return;
+                }
+            }
+
+            uint32_t current = 0;
+            if (!HookEngine::ReadMemory(g_ScavengerWaitDelayOperandAddr + kScavengerWaitDisp32Offset,
+                                        &current, sizeof(current)) ||
+                (current != kScavengerWaitStockConst && current != kScavengerWaitFloorConst))
+            {
+                s_bound = -1;
+                Log(L"[SCAVPATH] Scavenger wait floor unavailable: unexpected operand 0x%08X at 0x%08X\n",
+                    current, g_ScavengerWaitDelayOperandAddr + kScavengerWaitDisp32Offset);
+                return;
+            }
+
+            g_ScavengerWaitFloorPatchActive = (current == kScavengerWaitFloorConst);
+            g_ScavengerWaitFloorInstalled = true;
+            Log(L"[SCAVPATH] Scavenger wait floor ready at 0x%08X (%hs)\n",
+                g_ScavengerWaitDelayOperandAddr + kScavengerWaitDisp32Offset,
+                g_ScavengerWaitFloorPatchActive ? "on" : "off");
+            RefreshScavengerInstantStartState();
+        }
+
         static void InstallAiTuningCoreHooksIfPossible()
         {
             InstallAiNativeOrdersHooksIfPossible();
@@ -2737,6 +2833,7 @@ namespace BZROpenShim
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();
             InstallScavengerInstantStartIfPossible();
+            InstallScavengerWaitFloorIfPossible();
             // These installs are retried, so a hook that lands on a later
             // pass takes back an earlier Unavailable mark.
             if (g_AttackTaskDoStateHookInstalled && GetLegacyAttackHelpers())

@@ -161,7 +161,7 @@ namespace BZROpenShim
         // purpose, and every peer in a matched lobby is doing the same.
         bool g_SmartReticleRangeOwnedByBridge = false;
 
-        bool g_SmartScavengerPathingEnabled = true;
+        bool g_SmartScavengerPathingEnabled = false;
 
         static bool g_TurretAimPitchBaselineEnabled = true;
 
@@ -403,7 +403,7 @@ namespace BZROpenShim
             g_SmartReticleRangeOwnedByBridge = false;
             g_SmartReticleRange = g_SmartReticleRangeBaseline;
 
-            g_SmartScavengerPathingEnabled = true;
+            g_SmartScavengerPathingEnabled = false;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "SmartScavengerPathing", value) ||
                 TryGetUserConfigBool(kUserConfigSinglePlayerSection, "ScavengerPathing", value))
             {
@@ -739,8 +739,9 @@ namespace BZROpenShim
             { "SatelliteVisibilityFix", FeatureTier::Display,
               nullptr, &RefreshSatelliteVisibilityFixState },
             // [SinglePlayer] SmartScavengerPathing also turns InitState's age
-            // jbe into a jmp so built scavengers start at once; the stock
-            // byte goes back online. Read from the ini, no baseline to revert.
+            // jbe into a jmp so built scavengers start at once, and points the
+            // WAIT delay at a 0.5f floor; the stock bytes go back online.
+            // Read from the ini, no baseline to revert.
             { "ScavengerInstantStart", FeatureTier::SinglePlayer,
               nullptr, &RefreshScavengerInstantStartState },
             // [Fixes] engine-defect corrections. They are bug fixes rather than
