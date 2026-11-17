@@ -679,6 +679,8 @@ namespace BZROpenShim
             bool affectEnemies = true;
             ShieldPushMode::Mode pushMode = ShieldPushMode::Mode::Front;
             float reflectSpeed = ShieldPushMode::kDefaultReflectSpeed;
+            unsigned long long hitExplosionPacked = 0;
+            char hitExplosionName[ShieldPushMode::kExplosionNameMax + 1] = {};
             char line[256] = {};
             while (std::fgets(line, static_cast<int>(sizeof(line)), file))
             {
@@ -731,6 +733,17 @@ namespace BZROpenShim
                     reflectSpeed = parsedFloat;
                     foundAny = true;
                 }
+                else if (_stricmp(key, "shieldHitExplosion") == 0)
+                {
+                    // Invalid (over 8 characters) means no effect; say so once
+                    // per ODF (this reader runs once per ODF token).
+                    if (!ShieldPushMode::TryParseExplosionName(value, hitExplosionName, hitExplosionPacked))
+                    {
+                        Log(L"[%hs] odf=%hs shieldHitExplosion=%hs ignored: needs an explosion ODF name of 1-8 characters\n",
+                            logTag ? logTag : "TEAMODF", odfKey.token, value);
+                    }
+                    foundAny = true;
+                }
             }
 
             std::fclose(file);
@@ -743,13 +756,16 @@ namespace BZROpenShim
             outConfig.affectEnemies = affectEnemies;
             outConfig.pushMode = pushMode;
             outConfig.reflectSpeed = reflectSpeed;
-            Log(L"[%hs] Loaded team filter odf=%hs allies=%hs enemies=%hs pushMode=%hs reflectSpeed=%.1f file=%hs\n",
+            outConfig.hitExplosionPacked = hitExplosionPacked;
+            std::memcpy(outConfig.hitExplosionName, hitExplosionName, sizeof(hitExplosionName));
+            Log(L"[%hs] Loaded team filter odf=%hs allies=%hs enemies=%hs pushMode=%hs reflectSpeed=%.1f hitExplosion=%hs file=%hs\n",
                 logTag ? logTag : "TEAMODF",
                 odfKey.token,
                 affectAllies ? "true" : "false",
                 affectEnemies ? "true" : "false",
                 pushMode == ShieldPushMode::Mode::Radial ? "radial" : "front",
                 static_cast<double>(reflectSpeed),
+                hitExplosionPacked ? hitExplosionName : "none",
                 resolvedPath.string().c_str());
             return true;
         }
@@ -1099,6 +1115,126 @@ namespace BZROpenShim
             }
         }
 
+        // ExplosionClass::Find, cdecl (long64 packed name) -> ExplosionClass*;
+        // loads the class from its ODF on first use. Bound with Build below.
+        static uint32_t g_ExplosionClassFindAddr = 0;
+        // Own copy of the Build row: the proximity-mine binding zeroes its
+        // rows, g_ExplosionClassBuildAddr included, when any of them fails.
+        static uint32_t g_ShieldHitExplosionBuildAddr = 0;
+
+        static bool ShieldHitExplosionCallsBound()
+        {
+            static int s_bound = -1;
+            if (s_bound >= 0)
+                return s_bound != 0;
+
+            const HookEngine::EngineRow rows[] = {
+                { "ExplosionClassFind", &g_ExplosionClassFindAddr },
+                { "ExplosionClassBuild", &g_ShieldHitExplosionBuildAddr },
+            };
+            s_bound = HookEngine::BindEngineRows("Shield hit explosion", rows) ? 1 : 0;
+            if (!s_bound)
+            {
+                Log(L"[SHIELDODF] shieldHitExplosion disabled: ExplosionClass::Find/Build do not bind on this build; "
+                    L"ricochet still works, with no effect\n");
+            }
+            return s_bound != 0;
+        }
+
+        // shieldHitExplosion: spawns the named explosion where a ricochet
+        // happened, its front along the bubble's outward normal.
+        //
+        // The ExplosionClass pointer is not cached: the engine frees every
+        // ExplosionClass at mission teardown (ExplosionClass::Clean beside
+        // GameObjectClass::Clean in the 1.5 WinMain), and no seam here
+        // invalidates a cache at exactly that point. Find is called per hit
+        // instead (never per frame); once the class is loaded that is a short
+        // scan of the engine's class list with no file access. A name Find
+        // cannot resolve (missing ODF or unknown class label, both properties
+        // of the files) is remembered, so the engine's error and the file
+        // probe happen once per name per ODF index generation.
+        // False when Find returns null or either call faults.
+        static bool TryFindAndBuildExplosion(unsigned long long packedName, LegacyMat3& matrix)
+        {
+            using FnExplosionFind = void*(__cdecl*)(unsigned long long packedName);
+            using FnExplosionBuild = void*(__thiscall*)(void* explosionClass, void* matrix, void* ownerObj);
+
+            __try
+            {
+                void* explosionClass = reinterpret_cast<FnExplosionFind>(g_ExplosionClassFindAddr)(packedName);
+                if (!explosionClass)
+                    return false;
+                // Owner null, as stock Building::Explode builds its explosions;
+                // Explosion::Init copies the matrix, so a stack one is fine.
+                reinterpret_cast<FnExplosionBuild>(g_ShieldHitExplosionBuildAddr)(explosionClass, &matrix, nullptr);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        static void SpawnShieldHitExplosion(const TeamFilterConfig& filter,
+                                            const float (&position)[3],
+                                            const float (&outward)[3])
+        {
+            if (filter.hitExplosionPacked == 0 || !ShieldHitExplosionCallsBound())
+                return;
+
+            static std::vector<unsigned long long> s_unresolved;
+            static long s_unresolvedGeneration = 0;
+            const long generation = OdfIndexGeneration();
+            if (generation != s_unresolvedGeneration)
+            {
+                s_unresolvedGeneration = generation;
+                s_unresolved.clear();
+            }
+            for (const unsigned long long name : s_unresolved)
+            {
+                if (name == filter.hitExplosionPacked)
+                    return;
+            }
+
+            LegacyMat3 matrix = {};
+            float right[3] = {};
+            float up[3] = {};
+            float front[3] = {};
+            if (!ShieldPushMode::FrameFromFront(outward, right, up, front))
+                return;
+            matrix.right_x = right[0];
+            matrix.right_y = right[1];
+            matrix.right_z = right[2];
+            matrix.up_x = up[0];
+            matrix.up_y = up[1];
+            matrix.up_z = up[2];
+            matrix.front_x = front[0];
+            matrix.front_y = front[1];
+            matrix.front_z = front[2];
+            matrix.posit_x = static_cast<double>(position[0]);
+            matrix.posit_y = static_cast<double>(position[1]);
+            matrix.posit_z = static_cast<double>(position[2]);
+
+            if (!TryFindAndBuildExplosion(filter.hitExplosionPacked, matrix))
+            {
+                s_unresolved.push_back(filter.hitExplosionPacked);
+                Log(L"[SHIELDODF] shieldHitExplosion=%hs did not resolve (no such explosion ODF, or the engine faulted); "
+                    L"no effect for it until the ODF index changes\n",
+                    filter.hitExplosionName);
+                return;
+            }
+
+            static volatile long s_hitLogBudget = 8;
+            if (InterlockedDecrement(&s_hitLogBudget) >= 0)
+            {
+                BZROpenShim::LogShimA(BZROpenShim::LogLevel::Debug, "shield",
+                    "[SHIELDODF] hit explosion %s at (%.1f, %.1f, %.1f) normal (%.2f, %.2f, %.2f)",
+                    filter.hitExplosionName,
+                    static_cast<double>(position[0]), static_cast<double>(position[1]), static_cast<double>(position[2]),
+                    static_cast<double>(front[0]), static_cast<double>(front[1]), static_cast<double>(front[2]));
+            }
+        }
+
         void RunShieldTowerFilteredSimulate(void* shieldTowerPtr, float dt)
         {
             if (!shieldTowerPtr || !g_BzrFn_ShieldTowerPowerUpdate || !g_BzrFn_BuildingSimulate ||
@@ -1252,9 +1388,14 @@ namespace BZROpenShim
                             // A fast shot may still be outside the box and
                             // about to cross it, so the ricochet is tried
                             // before the box test the push uses.
+                            // The reflected shot heads outward, so it is not
+                            // a candidate next frame: one effect per hit.
                             if (ShieldTowerTryRicochetOrdnance(ordnance, ordWorld, outward, insideNow,
                                                                inverseMatrix, params, filter.reflectSpeed, dt))
+                            {
+                                SpawnShieldHitExplosion(filter, ordWorld, outward);
                                 continue;
+                            }
 
                             if (!insideNow)
                                 continue;

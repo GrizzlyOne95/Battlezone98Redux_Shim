@@ -48,6 +48,7 @@
 #include "perf_telemetry.h"
 #include "soak_telemetry.h"
 #include "mode_stress_driver.h"
+#include "music_refill_catchup.h"
 #include "music_single_fill.h"
 #include "p2p_reliable_send_fix.h"
 #include "precise_timestep.h"
@@ -314,6 +315,8 @@ static unsigned __stdcall PatchThreadProc(void*)
     PATCH_STAGE(BZROpenShim::InitializeThreadScheduling());
     // Skip the redundant first decode at music track start ([Fixes] MusicSingleFill).
     PATCH_STAGE(BZROpenShim::InitializeMusicSingleFill());
+    // Refill every music chunk playback has passed ([Fixes] MusicRefillCatchUp).
+    PATCH_STAGE(BZROpenShim::InitializeMusicRefillCatchUp());
     PATCH_STAGE(BZROpenShim::InitializeNativeCpuSampler());
 
     BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain", "Patch thread exiting");

@@ -31,6 +31,8 @@ namespace BZROpenShim::ShellScreens
     // Banned Players list with per-entry Unban (bans_screen.cpp).
     inline constexpr uint32_t kBansScreenId = kCustomScreenIdBase + 6;
     inline constexpr uint32_t kOptionsCategoryScreenIdBase = kCustomScreenIdBase + 0x10;
+    // Category screens are kOptionsCategoryScreenIdBase + 0 .. + count - 1.
+    inline constexpr uint32_t kOptionsCategoryScreenIdCount = 32;
 
     // Adds the screen's children to `screen` (a constructed Top Screen). Runs
     // inside the shell's factory call, on the UI thread, which is the point

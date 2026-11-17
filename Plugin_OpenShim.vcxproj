@@ -162,6 +162,7 @@
     <ClCompile Include="src\patches\auto_group_new_units.cpp" />
     <ClCompile Include="src\patches\group_strip.cpp" />
     <ClCompile Include="src\patches\offense_overflow.cpp" />
+    <ClCompile Include="src\patches\rts_commands.cpp" />
     <ClCompile Include="src\patches\ai_odf_tuning.cpp" />
     <ClCompile Include="src\patches\ai_unit_fixes.cpp" />
     <ClCompile Include="src\patches\ai_weapon_mask.cpp" />
@@ -196,6 +197,8 @@
     <ClCompile Include="src\patches\skinned_gibs.cpp" />
     <ClCompile Include="src\patches\shell_casings.cpp" />
     <ClCompile Include="src\patches\laser_sight.cpp" />
+    <ClCompile Include="src\patches\rts_markers.cpp" />
+    <ClCompile Include="src\patches\rts_placement.cpp" />
     <ClCompile Include="src\patches\scene_mutation_drain.cpp" />
 
     <ClCompile Include="src\patches\path_block.cpp" />
@@ -215,6 +218,7 @@
     <ClCompile Include="src\patches\mp_whitelist_tga.cpp" />
     <ClCompile Include="src\patches\no_damage_slowdown.cpp" />
     <ClCompile Include="src\patches\mp_block_freecam.cpp" />
+    <ClCompile Include="src\patches\seismic_walker_velocity_scale.cpp" />
     <ClCompile Include="src\patches\seismic_wave_extent_clamp.cpp" />
     <ClCompile Include="src\patches\dynamic_alloc_guard.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
@@ -323,6 +327,7 @@
     <ClCompile Include="src\patches\soak_telemetry.cpp" />
     <ClCompile Include="src\patches\mode_stress_driver.cpp" />
     <ClCompile Include="src\patches\music_single_fill.cpp" />
+    <ClCompile Include="src\patches\music_refill_catchup.cpp" />
     <ClCompile Include="src\patches\precise_timestep.cpp" />
     <ClCompile Include="src\patches\armory_repair_pick.cpp" />
     <ClCompile Include="src\patches\remote_object_smoothing.cpp" />
@@ -534,6 +539,7 @@
     <ClInclude Include="include\mode_stress_driver.h" />
     <ClInclude Include="include\mode_stress_plan.h" />
     <ClInclude Include="include\music_single_fill.h" />
+    <ClInclude Include="include\music_refill_catchup.h" />
     <ClInclude Include="include\precise_timestep.h" />
     <ClInclude Include="include\armory_repair_pick.h" />
     <ClInclude Include="include\armory_repair_pick_policy.h" />

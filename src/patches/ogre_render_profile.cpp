@@ -2630,6 +2630,22 @@ namespace BZROpenShim::RenderProfiles
             return true;
         }
 
+        // Instantiation refuses excluded-class materials (UI, loading
+        // screens) by design and has already logged why at Info; their stock
+        // fallback is the intended outcome, not a failure worth a warning.
+        void LogInstantiationFailed(const std::string& materialName,
+                                    const Dx11Compat::LegacyPassDesc& desc,
+                                    const std::string& detail)
+        {
+            if (Dx11Compat::IsExcludedFromSynthesis(materialName, desc))
+            {
+                return;
+            }
+            LogCompatOnce("[DX11COMPAT] instantiation failed material=" +
+                              materialName + detail,
+                          LogLevel::Warn);
+        }
+
         // The game's own EntityTransparencyMaterial code (not Ogre) clones these
         // per transparent renderable and later pairs clone and source
         // techniques by index, with no null check. Appending a compatibility
@@ -3580,10 +3596,8 @@ namespace BZROpenShim::RenderProfiles
                                               preserveTechniqueCount);
                     return generated;
                 }
-                LogCompatOnce(
-                    "[DX11COMPAT] instantiation failed material=" + materialName +
-                        " path=family-remap action=stock-fallback",
-                    LogLevel::Warn);
+                LogInstantiationFailed(materialName, desc,
+                                       " path=family-remap action=stock-fallback");
                 break;
             }
             case Dx11Compat::CompatPath::SuppressPass:
@@ -3606,10 +3620,8 @@ namespace BZROpenShim::RenderProfiles
                                                        inputs, materialName);
                     return generated;
                 }
-                LogCompatOnce(
-                    "[DX11COMPAT] instantiation failed material=" + materialName +
-                        " path=suppress action=stock-fallback",
-                    LogLevel::Warn);
+                LogInstantiationFailed(materialName, desc,
+                                       " path=suppress action=stock-fallback");
                 break;
             }
             case Dx11Compat::CompatPath::FixedFuncTextured:
@@ -3628,11 +3640,10 @@ namespace BZROpenShim::RenderProfiles
                                                        inputs, materialName);
                     return generated;
                 }
-                LogCompatOnce(
-                    "[DX11COMPAT] instantiation failed material=" + materialName +
-                        " path=" + Dx11Compat::CompatPathName(path) +
-                        " action=stock-fallback",
-                    LogLevel::Warn);
+                LogInstantiationFailed(materialName, desc,
+                                       std::string(" path=") +
+                                           Dx11Compat::CompatPathName(path) +
+                                           " action=stock-fallback");
                 break;
             }
             case Dx11Compat::CompatPath::FixedFuncMultiPass:
@@ -3680,11 +3691,10 @@ namespace BZROpenShim::RenderProfiles
                         return generated;
                     }
                 }
-                LogCompatOnce(
-                    "[DX11COMPAT] instantiation failed material=" + materialName +
-                        " path=" + Dx11Compat::CompatPathName(path) +
-                        " action=stock-fallback",
-                    LogLevel::Warn);
+                LogInstantiationFailed(materialName, desc,
+                                       std::string(" path=") +
+                                           Dx11Compat::CompatPathName(path) +
+                                           " action=stock-fallback");
                 break;
             }
             case Dx11Compat::CompatPath::AggressiveGeneric:
