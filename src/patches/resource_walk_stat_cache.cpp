@@ -258,23 +258,28 @@ namespace BZROpenShim
 
         // ---- background prefetch of shell script files -------------------
         // One worker at a time reads the queue. When a walk this run enumerated
-        // a script file not confirmed before, the files those walks enumerated
-        // and that opened are written to openshim\cache\shell_script_prefetch.txt
-        // (runs that never reach a walk keep the old list), and the first shell scope of the next run
-        // queues that saved list, so the cold opens happen at the main menu,
-        // long before the game room needs them.
+        // a script file not confirmed before, the files that opened are written
+        // to openshim\cache\shell_script_prefetch.txt, and the first shell scope
+        // of the next run queues that saved list, so the cold opens happen at
+        // the main menu, long before the game room needs them. Each line is
+        // "<misses>|<path>": misses counts the runs in a row in which no walk
+        // enumerated the file. A saved file that still opens is kept (a run that
+        // stops at the main menu must not drop the game-room files) until it
+        // passes kMaxPrefetchMisses, so files of mods no longer used age out.
+        constexpr uint32_t kMaxPrefetchMisses = 8;
+
         struct PrefetchItem
         {
             std::wstring path;
             bool fromSavedList = false;
+            uint32_t misses = 0;   // from the saved list
         };
 
         SRWLOCK g_PrefetchLock = SRWLOCK_INIT;
         std::vector<PrefetchItem> g_PrefetchQueue;          // guarded by g_PrefetchLock
         std::unordered_set<std::wstring> g_PrefetchSeen;    // normalised; guarded
-        std::vector<std::wstring> g_PrefetchOpened;         // walk spelling; guarded
-        // Normalised paths a walk enumerated this run. Only these are saved, so
-        // the list follows the mods in use instead of growing across mod sets.
+        std::vector<PrefetchItem> g_PrefetchOpened;         // walk spelling; guarded
+        // Normalised paths a walk enumerated this run (their misses reset to 0).
         std::unordered_set<std::wstring> g_PrefetchConfirmed;   // guarded
         bool g_PrefetchListChanged = false;                 // guarded
         bool g_PrefetchLoadSaved = false;                   // guarded
@@ -288,7 +293,7 @@ namespace BZROpenShim
         }
 
         // Caller holds g_PrefetchLock.
-        void AddUnseenLocked(std::wstring&& path, bool fromSavedList, uint32_t& added)
+        void AddUnseenLocked(std::wstring&& path, bool fromSavedList, uint32_t misses, uint32_t& added)
         {
             if (path.empty())
                 return;
@@ -297,14 +302,15 @@ namespace BZROpenShim
                 g_PrefetchListChanged = true;
             if (!g_PrefetchSeen.insert(std::move(key)).second)
                 return;
-            g_PrefetchQueue.push_back({std::move(path), fromSavedList});
+            g_PrefetchQueue.push_back({std::move(path), fromSavedList, misses});
             ++added;
         }
 
-        // Worker thread. UTF-8, one path per line.
+        // Worker thread. UTF-8, one "<misses>|<path>" per line ('|' cannot
+        // appear in a Windows path; a line without the prefix counts as 0).
         uint32_t QueueSavedList()
         {
-            std::vector<std::wstring> paths;
+            std::vector<std::pair<std::wstring, uint32_t>> paths;
             if (GetMainModuleDirectory().empty())
                 return 0;
             // Share delete so another instance can still rename its save over it.
@@ -333,6 +339,14 @@ namespace BZROpenShim
                 size_t stop = end;
                 if (stop > begin && text[stop - 1] == '\r')
                     --stop;
+                uint32_t misses = 0;
+                size_t digit = begin;
+                while (digit < stop && digit - begin < 4 && text[digit] >= '0' && text[digit] <= '9')
+                    misses = misses * 10 + static_cast<uint32_t>(text[digit++] - '0');
+                if (digit > begin && digit < stop && text[digit] == '|')
+                    begin = digit + 1;
+                else
+                    misses = 0;
                 const int chars = static_cast<int>(stop - begin);
                 if (chars > 0)
                 {
@@ -342,22 +356,22 @@ namespace BZROpenShim
                     if (wrote > 0)
                     {
                         path.resize(static_cast<size_t>(wrote));
-                        paths.push_back(std::move(path));
+                        paths.emplace_back(std::move(path), misses);
                     }
                 }
                 begin = end + 1;
             }
             uint32_t added = 0;
             AcquireSRWLockExclusive(&g_PrefetchLock);
-            for (std::wstring& path : paths)
-                AddUnseenLocked(std::move(path), true, added);
+            for (auto& entry : paths)
+                AddUnseenLocked(std::move(entry.first), true, entry.second, added);
             ReleaseSRWLockExclusive(&g_PrefetchLock);
             return added;
         }
 
         // Worker thread, while it holds the running claim (so saves never
         // overlap). Written to a temporary file and moved over the old one.
-        void SaveList(const std::vector<std::wstring>& paths)
+        void SaveList(const std::vector<PrefetchItem>& items)
         {
             if (GetMainModuleDirectory().empty())
                 return;   // no module path: never write into the working directory
@@ -365,13 +379,16 @@ namespace BZROpenShim
             std::error_code ec;
             std::filesystem::create_directories(target.parent_path(), ec);
             std::string text;
-            for (const std::wstring& path : paths)
+            for (const PrefetchItem& item : items)
             {
+                const std::wstring& path = item.path;
                 // Skip names that are not valid UTF-16 (lone surrogates) rather than mangle them.
                 const int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, path.c_str(),
                                                       static_cast<int>(path.size()), nullptr, 0, nullptr, nullptr);
                 if (bytes <= 0)
                     continue;
+                text += std::to_string(item.misses);
+                text += '|';
                 const size_t at = text.size();
                 text.resize(at + static_cast<size_t>(bytes));
                 WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, path.c_str(), static_cast<int>(path.size()),
@@ -394,7 +411,7 @@ namespace BZROpenShim
                 return;
             }
             LogShimA(LogLevel::Info, kComponent, "[PREFETCH] saved %u script paths for the next run",
-                     static_cast<unsigned>(paths.size()));
+                     static_cast<unsigned>(items.size()));
         }
 
         DWORD WINAPI PrefetchWorker(LPVOID)
@@ -422,7 +439,7 @@ namespace BZROpenShim
                 }
 
                 std::vector<PrefetchItem> batch;
-                std::vector<std::wstring> save;
+                std::vector<PrefetchItem> save;
                 bool done = false;
                 AcquireSRWLockExclusive(&g_PrefetchLock);
                 batch.swap(g_PrefetchQueue);
@@ -430,10 +447,17 @@ namespace BZROpenShim
                 {
                     if (g_PrefetchListChanged)
                     {
-                        // Files this run's walks enumerated and that opened.
-                        for (const std::wstring& path : g_PrefetchOpened)
-                            if (g_PrefetchConfirmed.count(Normalise(path.c_str(), path.size())))
-                                save.push_back(path);
+                        // Every file that opened: confirmed this run -> 0 misses,
+                        // otherwise one more miss, dropped past the limit.
+                        for (const PrefetchItem& item : g_PrefetchOpened)
+                        {
+                            PrefetchItem entry = item;
+                            if (g_PrefetchConfirmed.count(Normalise(item.path.c_str(), item.path.size())))
+                                entry.misses = 0;
+                            else if (++entry.misses > kMaxPrefetchMisses)
+                                continue;
+                            save.push_back(std::move(entry));
+                        }
                         g_PrefetchListChanged = false;
                     }
                     // Release the claim only when there is nothing left to do,
@@ -469,7 +493,7 @@ namespace BZROpenShim
                     CloseHandle(file);
                     ++files;
                     AcquireSRWLockExclusive(&g_PrefetchLock);
-                    g_PrefetchOpened.push_back(std::move(item.path));
+                    g_PrefetchOpened.push_back(std::move(item));
                     ReleaseSRWLockExclusive(&g_PrefetchLock);
                 }
             }
@@ -530,7 +554,7 @@ namespace BZROpenShim
             bool start = false;
             AcquireSRWLockExclusive(&g_PrefetchLock);
             for (std::wstring& path : paths)
-                AddUnseenLocked(std::move(path), false, added);
+                AddUnseenLocked(std::move(path), false, 0, added);
             // A walk that only confirmed saved entries still needs a worker to save.
             if (added || g_PrefetchListChanged)
                 start = ClaimWorkerLocked();
