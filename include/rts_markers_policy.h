@@ -37,6 +37,15 @@ namespace BZROpenShim
         constexpr size_t kCursorSlot = kMaxArtilleryRings;
         constexpr size_t kFirstPingSlot = kCursorSlot + 1;
         constexpr size_t kPoolSize = kFirstPingSlot + kMaxPings;
+        // The placement aids (rts_placement_policy.h) follow the rings in the
+        // same ManualObject pool: power range rings, then the current-order
+        // waypoint lines, then the dimmer pending-order lines.
+        constexpr size_t kMaxPowerRingSlots = 16;
+        constexpr size_t kMaxWaypointLineSlots = 16;
+        constexpr size_t kFirstPowerSlot = kPoolSize;
+        constexpr size_t kFirstWaypointSlot = kFirstPowerSlot + kMaxPowerRingSlots;
+        constexpr size_t kFirstPendingSlot = kFirstWaypointSlot + kMaxWaypointLineSlots;
+        constexpr size_t kSlotCount = kFirstPendingSlot + kMaxWaypointLineSlots;
 
         // ---- Ring geometry ---------------------------------------------------
         constexpr unsigned kMinSegments = 48;
@@ -129,6 +138,7 @@ namespace BZROpenShim
         constexpr Colour kRangeColour = {0.55f, 0.85f, 1.00f, 0.50f};
         constexpr Colour kReachableColour = {0.30f, 1.00f, 0.40f, 0.85f};
         constexpr Colour kUnreachableColour = {1.00f, 0.25f, 0.20f, 0.85f};
+        constexpr Colour kPowerColour = {0.95f, 0.90f, 0.35f, 0.55f};
 
         // ---- Command pings ---------------------------------------------------
         enum class PingKind : uint8_t

@@ -2301,6 +2301,10 @@ namespace BZROpenShim::Hooks
         Policy::RallyKey key;
         if (const char* reason = CheckRallyKey(text, key))
             return reason;
+        // An RTS action's key filter would see it first (rts_commands.cpp);
+        // the RTS key capture refuses the rally key the same way.
+        if (RtsCommandActionUsingKey(key.vk, key.extended) != nullptr)
+            return "an RTS action (Input > RTS Actions) uses it";
         StoreRallyKey(key);
         g_RallyKeyText = text;
         // A mark left by the old key could never be cleared by its key-up.

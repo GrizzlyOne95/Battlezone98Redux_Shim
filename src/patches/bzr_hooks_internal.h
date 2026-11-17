@@ -1405,6 +1405,7 @@ namespace BZROpenShim
         bool SetAiFollowEngageEnabled(bool enabled);
         bool SetAiDefendRefreshEnabled(bool enabled);
         bool SetAiHold(int handle, bool hold);
+        bool AiHoldHooksReady();
         bool IsAiHeldCraft(void* craft);
         bool IsAiHeldProcess(void* process);
         void ResetAiNativeOrders();
@@ -1471,6 +1472,38 @@ namespace BZROpenShim
         bool OffenseOverflowExtendsAutoGroup();
         // The keyed group (0-6) whose member list is open, -1 none.
         int OffenseOverflowMemberGroup();
+
+        // --- RTS command extras (rts_commands.cpp) -----------------------------
+        // Remote target, building cycle, smart command menu, smart
+        // Repair/Reload, area select and Hold (Docs/RTS_COMMANDS.md).
+        void InstallRtsCommandsIfPossible();
+        void ReloadRtsCommandsConfig();
+        // Game thread: the first selected commandable rig with a building
+        // picked (RtsCommandsPolicy::PickedBuildClass) while Build at Nav is
+        // active; false otherwise. Read by the build ghost's nav ghosts.
+        bool RtsBuildAtNavPickedRig(void*& rig, uint32_t& buildClass);
+        void RefreshRtsCommandsState();
+        void ResetRtsCommands();
+        // Frame thread, beside TickOffenseOverflow: key filters (and the
+        // queued actions while the scene-mutation drain is not installed).
+        void TickRtsCommands();
+        // The queued key actions; RunDeferredSceneMutations (frameStarted).
+        void RunRtsCommandsPendingActions() noexcept;
+        // Options > Input > RTS Actions (main thread). Index = KeyId in
+        // rts_commands_policy.h. Set returns nullptr on success, else the
+        // reason the key was refused; the caller persists it. An empty text
+        // unbinds the action (the rollback of a binding that had no key).
+        int RtsCommandKeyCount();
+        const char* RtsCommandKeyText(int index);
+        const char* SetRtsCommandKeyText(int index, const char* text);
+        // The display name of the RTS action whose key filter takes `chord`
+        // in a mission (Shift and plain as the action uses them; never Ctrl
+        // or Alt chords), else nullptr. Main thread: QuickSave and gamekey
+        // rebinding.
+        const char* RtsCommandActionTakingChord(const QuickSaveKeyPolicy::Chord& chord);
+        // The display name of the RTS action bound to this key in any Shift
+        // state, else nullptr. Main thread: rally key rebinding.
+        const char* RtsCommandActionUsingKey(unsigned vk, bool extended);
 
         // --- HUD group strip (group_strip.cpp) ---------------------------------
         // Read-only F1-F7 group row on the HUD. Tick: the world render tick

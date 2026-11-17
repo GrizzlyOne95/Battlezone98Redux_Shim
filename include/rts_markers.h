@@ -21,6 +21,14 @@ namespace BZROpenShim
         void* PrepareRtsMarkersObjectCommandHook(uint32_t site);
         void NoteRtsMarkersObjectCommandHookInstalled();
 
+        // An order on an object that did not go through BroadcastCommand:
+        // rts_commands.cpp's per-unit unit-menu dispatch (ExecuteMode) and
+        // its smart Defend-target pick. Game thread, while the local
+        // ControlPanel still has the selection; one call per order. Queues
+        // the same ping the broadcast detour would (RtsCommandPings; local
+        // panel with units selected), or nothing.
+        void NotifyRtsMarkersCommand(int what, void* target);
+
         // Game thread, from ChunkEffect::Simulate (bzr_hooks.cpp) after the
         // rally beacons, on the engine's dt. Places, rebuilds and hides the
         // ring pool. Never runs inside render-queue traversal.
