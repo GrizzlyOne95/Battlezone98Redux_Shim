@@ -519,7 +519,7 @@ namespace BZROpenShim::ShellScreens
         for (auto& entry : g_Live)
             if (entry.screen == container &&
                 (entry.id == kOptionsHubScreenId ||
-                 (entry.id >= kOptionsCategoryScreenIdBase && entry.id < kOptionsCategoryScreenIdBase + 16)))
+                 (entry.id >= kOptionsCategoryScreenIdBase && entry.id < kOptionsCategoryScreenIdBase + kOptionsCategoryScreenIdCount)))
                 owner = &entry;
         if (owner && !layoutParent && (flags & 0x40))
         {

@@ -62,6 +62,33 @@ Not done, by design or for lack of a verified offset:
 - The shot's facing matrix is not re-oriented to the new velocity. Whether
   Redux draws trails and sprites from it or from the velocity is UNVERIFIED.
 
+## `shieldHitExplosion`
+
+```ini
+shieldHitExplosion = "xshieldh"
+```
+
+Names an explosion ODF (1-8 characters; quotes and a trailing `.odf` are
+optional) that plays where a shot ricochets, its front axis along the
+bubble's outward normal and its position at the shot. Absent or empty means
+no effect. An invalid name is logged once at load and ignored.
+
+- Radial ricochet only: one effect per reflected shot. Slow shots that slide
+  off, front mode, and craft get none. The reflected shot heads outward, so
+  it is not reflected (or given a second effect) on later frames.
+- Explosions apply their blast damage, so give the explosion ODF zero damage
+  (`damageRadius = 0`, no `damageValue`); otherwise the effect hurts whatever
+  stands near the bubble. It has no owner.
+- Every machine plays it locally from its own ricochet; no network messages.
+- The class is looked up with the engine's `ExplosionClass::Find` per hit,
+  not per frame, and not cached: the engine frees explosion classes when a
+  mission ends, so a cached pointer could dangle. Names that fail to resolve
+  are remembered (one log line) until the ODF index changes.
+- If `ExplosionClass::Find`/`Build` do not bind on this build, OpenShim logs
+  once that the effect is disabled; the ricochet itself is unaffected.
+- Whether every explosion type orients its visuals along the matrix front is
+  UNVERIFIED.
+
 Code: `include/shield_push_mode.h` (math, host-tested by
 `tests/shield_push_mode_tests.cpp`) and `RunShieldTowerFilteredSimulate` in
 `src/patches/team_filter_mines.cpp`.
