@@ -238,11 +238,133 @@ namespace ShieldPushMode
     }
 
     // v' = v - 2 * dot(v, n) * n, with n the unit outward normal.
+    //
+    // After it, dot(v', n) = -dot(v, n) > 0, so the same tower cannot pick
+    // the shot as a ricochet candidate again: outward is horizontal, so
+    // gravity does not change the sign; push and drag only add outward
+    // velocity or scale it; and along a straight path the horizontal
+    // dot(v, p - tower) only grows (its time derivative is |v_xz|^2).
     inline void ReflectVelocity(const float (&outward)[3], float (&velocity)[3])
     {
         const float twiceNormal = 2.0f * Dot(velocity, outward);
         for (std::size_t i = 0; i < 3; ++i)
             velocity[i] -= twiceNormal * outward[i];
+    }
+
+    // --- Hit effect (radial mode, ODF key `shieldHitExplosion`) --------------
+    //
+    // Engine ODF names are packed into 8 bytes (ExplosionClass::Find takes
+    // them as a long64), so a name is at most 8 characters.
+    constexpr std::size_t kExplosionNameMax = 8;
+
+    // Parses the ODF value: surrounding whitespace, one pair of matching
+    // quotes and a trailing ".odf" (any case) are ignored. Writes the bare
+    // name, NUL-terminated, and its packed form (characters in order from
+    // the low byte, zero-padded). Returns false (outputs zeroed) when the
+    // value is empty or longer than kExplosionNameMax, or holds whitespace
+    // or a quote inside the name.
+    inline bool TryParseExplosionName(const char* text,
+                                      char (&outName)[kExplosionNameMax + 1],
+                                      unsigned long long& outPacked)
+    {
+        for (char& c : outName)
+            c = '\0';
+        outPacked = 0;
+        if (!text)
+            return false;
+
+        const char* begin = text;
+        while (*begin && Detail::IsSpace(*begin))
+            ++begin;
+        // First token only, so a trailing comment (`"xshield" // fx` or
+        // `xshield ; fx`) is ignored, as the engine's ParameterDB ignores it.
+        const char* end = begin;
+        if (*begin == '"' || *begin == '\'')
+        {
+            const char quote = *begin++;
+            end = begin;
+            while (*end && *end != quote)
+                ++end;
+            if (*end != quote)
+                return false;
+        }
+        else
+        {
+            while (*end && !Detail::IsSpace(*end) && *end != ';' &&
+                   !(end[0] == '/' && end[1] == '/'))
+                ++end;
+        }
+
+        if (end - begin >= 4 && Detail::Equals(end - 4, end, ".odf"))
+            end -= 4;
+
+        const std::size_t length = static_cast<std::size_t>(end - begin);
+        if (length == 0 || length > kExplosionNameMax)
+            return false;
+
+        unsigned long long packed = 0;
+        for (std::size_t i = 0; i < length; ++i)
+        {
+            const char c = begin[i];
+            if (Detail::IsSpace(c) || c == '"' || c == '\'')
+                return false;
+            packed |= static_cast<unsigned long long>(static_cast<unsigned char>(c)) << (8 * i);
+        }
+
+        for (std::size_t i = 0; i < length; ++i)
+            outName[i] = begin[i];
+        outPacked = packed;
+        return true;
+    }
+
+    // Orthonormal basis whose front is the given direction, for the
+    // explosion transform (the engine's right/up/front rows, left-handed:
+    // right = up x front, up = front x right). World up is the reference;
+    // a front within ~8 degrees of vertical uses world +X instead. Returns
+    // false (outputs untouched) for a zero or non-finite front.
+    inline bool FrameFromFront(const float (&front)[3],
+                               float (&outRight)[3],
+                               float (&outUp)[3],
+                               float (&outFront)[3])
+    {
+        const float length = Length(front);
+        if (!(length > 1.0e-6f) || !std::isfinite(length))
+            return false;
+
+        const float f[3] = { front[0] / length, front[1] / length, front[2] / length };
+        float reference[3] = { 0.0f, 1.0f, 0.0f };
+        if (std::fabs(f[1]) > 0.99f)
+        {
+            reference[0] = 1.0f;
+            reference[1] = 0.0f;
+        }
+
+        // right = reference x front, normalised.
+        float r[3] =
+        {
+            reference[1] * f[2] - reference[2] * f[1],
+            reference[2] * f[0] - reference[0] * f[2],
+            reference[0] * f[1] - reference[1] * f[0]
+        };
+        const float rightLength = Length(r);
+        for (float& value : r)
+            value /= rightLength;
+
+        // up = front x right (already unit).
+        const float u[3] =
+        {
+            f[1] * r[2] - f[2] * r[1],
+            f[2] * r[0] - f[0] * r[2],
+            f[0] * r[1] - f[1] * r[0]
+        };
+
+        for (std::size_t i = 0; i < 3; ++i)
+        {
+            outRight[i] = r[i];
+            outUp[i] = u[i];
+            outFront[i] = f[i];
+        }
+        return true;
     }
 }
 }

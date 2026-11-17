@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include "test_check.h"
 
 namespace
@@ -225,6 +226,142 @@ namespace
         // Neither now nor next inside: no ricochet.
         CHECK(!ShouldRicochet(velocity, outward, 120.0f, false, false));
     }
+
+    void TestExplosionNameParses()
+    {
+        using BZROpenShim::ShieldPushMode::kExplosionNameMax;
+        using BZROpenShim::ShieldPushMode::TryParseExplosionName;
+
+        char name[kExplosionNameMax + 1] = {};
+        unsigned long long packed = 0;
+
+        CHECK(TryParseExplosionName("  \"xpltrso\"  ", name, packed));
+        CHECK(std::strcmp(name, "xpltrso") == 0);
+        // Characters in order from the low byte, zero-padded: the long64
+        // ExplosionClass::Find compares against the class's packed name.
+        CHECK(packed == 0x006F7372746C7078ull);
+        char bytes[8] = {};
+        std::memcpy(bytes, &packed, sizeof(bytes));
+        CHECK(std::memcmp(bytes, "xpltrso", 8) == 0);
+
+        // Eight characters fill all eight bytes; a ".odf" suffix is dropped.
+        CHECK(TryParseExplosionName("xshieldh.ODF", name, packed));
+        CHECK(std::strcmp(name, "xshieldh") == 0);
+        std::memcpy(bytes, &packed, sizeof(bytes));
+        CHECK(std::memcmp(bytes, "xshieldh", 8) == 0);
+
+        CHECK(TryParseExplosionName("'a'", name, packed));
+        CHECK(std::strcmp(name, "a") == 0 && packed == 0x61ull);
+
+        // Trailing comments are ignored, quoted or not.
+        for (const char* commented : {"\"xshieldh\" // shield fx", "xshieldh // fx", "xshieldh; fx",
+                                      "xshieldh//fx", "xshieldh extra"})
+        {
+            CHECK(TryParseExplosionName(commented, name, packed));
+            CHECK(std::strcmp(name, "xshieldh") == 0);
+        }
+    }
+
+    void TestExplosionNameRejects()
+    {
+        using BZROpenShim::ShieldPushMode::kExplosionNameMax;
+        using BZROpenShim::ShieldPushMode::TryParseExplosionName;
+
+        char name[kExplosionNameMax + 1] = {'x'};
+        unsigned long long packed = 123;
+        for (const char* bad : {static_cast<const char*>(nullptr), "", "   ", "\"\"", ".odf",
+                                "toolong99", "\"toolong99\"", "\"unclosed", "x\"y", "// fx"})
+        {
+            CHECK(!TryParseExplosionName(bad, name, packed));
+            CHECK(packed == 0 && name[0] == '\0');
+            packed = 123;
+            name[0] = 'x';
+        }
+    }
+
+    void CheckFrame(const float (&front)[3])
+    {
+        using BZROpenShim::ShieldPushMode::Dot;
+        using BZROpenShim::ShieldPushMode::FrameFromFront;
+        using BZROpenShim::ShieldPushMode::Length;
+
+        float r[3] = {};
+        float u[3] = {};
+        float f[3] = {};
+        CHECK(FrameFromFront(front, r, u, f));
+        CHECK(Near(Length(r), 1.0f) && Near(Length(u), 1.0f) && Near(Length(f), 1.0f));
+        CHECK(Near(Dot(r, u), 0.0f) && Near(Dot(r, f), 0.0f) && Near(Dot(u, f), 0.0f));
+        const float length = Length(front);
+        for (int i = 0; i < 3; ++i)
+            CHECK(Near(f[i], front[i] / length));
+        // Left-handed like the engine: right = up x front.
+        CHECK(Near(u[1] * f[2] - u[2] * f[1], r[0]));
+        CHECK(Near(u[2] * f[0] - u[0] * f[2], r[1]));
+        CHECK(Near(u[0] * f[1] - u[1] * f[0], r[2]));
+    }
+
+    void TestFrameFromFront()
+    {
+        using BZROpenShim::ShieldPushMode::FrameFromFront;
+
+        // The identity for +Z.
+        float r[3] = {};
+        float u[3] = {};
+        float f[3] = {};
+        const float plusZ[3] = {0.0f, 0.0f, 1.0f};
+        CHECK(FrameFromFront(plusZ, r, u, f));
+        CHECK(Near(r[0], 1.0f) && Near(r[1], 0.0f) && Near(r[2], 0.0f));
+        CHECK(Near(u[0], 0.0f) && Near(u[1], 1.0f) && Near(u[2], 0.0f));
+
+        // A horizontal outward normal (the radial case) keeps up = world up.
+        const float east[3] = {1.0f, 0.0f, 0.0f};
+        CHECK(FrameFromFront(east, r, u, f));
+        CHECK(Near(u[1], 1.0f));
+
+        CheckFrame(plusZ);
+        CheckFrame(east);
+        const float diagonal[3] = {3.0f, 0.0f, -4.0f};
+        CheckFrame(diagonal);
+        const float tilted[3] = {0.2f, 0.7f, -0.3f};
+        CheckFrame(tilted);
+        const float straightUp[3] = {0.0f, 2.0f, 0.0f};
+        CheckFrame(straightUp);
+        const float straightDown[3] = {0.0f, -1.0f, 0.0f};
+        CheckFrame(straightDown);
+
+        const float zero[3] = {0.0f, 0.0f, 0.0f};
+        r[0] = 7.0f;
+        CHECK(!FrameFromFront(zero, r, u, f));
+        CHECK(r[0] == 7.0f);
+        const float nan[3] = {std::nanf(""), 0.0f, 0.0f};
+        CHECK(!FrameFromFront(nan, r, u, f));
+    }
+
+    void TestReflectedShotIsNotACandidateAgain()
+    {
+        using BZROpenShim::ShieldPushMode::IsRicochetCandidate;
+        using BZROpenShim::ShieldPushMode::PredictNextPosition;
+        using BZROpenShim::ShieldPushMode::ReflectVelocity;
+
+        // A grazing shot: mostly tangential, slightly inward. After the
+        // reflect it must not trigger again on later frames (one effect per
+        // hit), even as the outward normal follows its new position.
+        const float tower[3] = {0.0f, 0.0f, 0.0f};
+        const float front[3] = {0.0f, 0.0f, 1.0f};
+        float position[3] = {12.0f, 1.0f, -3.0f};
+        float velocity[3] = {-5.0f, -2.0f, 300.0f};
+        float outward[3] = {};
+        RadialOutwardDirection(tower, position, front, outward);
+        CHECK(IsRicochetCandidate(velocity, outward, 120.0f));
+        ReflectVelocity(outward, velocity);
+        for (int frame = 0; frame < 200; ++frame)
+        {
+            PredictNextPosition(position, velocity, 0.01f, position);
+            velocity[1] -= 9.8f * 0.01f;
+            RadialOutwardDirection(tower, position, front, outward);
+            CHECK(!IsRicochetCandidate(velocity, outward, 120.0f));
+        }
+    }
 }
 
 int main()
@@ -243,6 +380,10 @@ int main()
     TestRicochetThreshold();
     TestOutboundShotIsNotReflected();
     TestPredictedStepTriggersRicochet();
+    TestExplosionNameParses();
+    TestExplosionNameRejects();
+    TestFrameFromFront();
+    TestReflectedShotIsNotACandidateAgain();
     if (OpenShimTest::FailureCount() == 0)
         std::printf("shield_push_mode_tests: all passed\n");
     return OpenShimTest::ExitCode();

@@ -15,6 +15,7 @@
 
 #include <Windows.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -681,9 +682,28 @@ namespace BZROpenShim
     // fails the IsNetworkInit byte guard; the game then gets the detour's
     // answer (LAN admission, or the stock code when LAN is not requested),
     // so callers get the same.
+    // Callers poll this gate every frame or tick, so readiness is logged once
+    // per process, the first time it reports ready, with the path that
+    // answered.
+    static int QueryNetworkReadyGate(bool& viaLan);
+
     int QueryStockIsNetworkInit()
     {
+        bool viaLan = false;
+        const int ready = QueryNetworkReadyGate(viaLan);
+        static std::atomic<bool> s_loggedReady{false};
+        if (ready > 0 && !s_loggedReady.exchange(true))
+        {
+            Log(viaLan ? L"[BZRNET] network ready (LAN no-auth admission)\n"
+                       : L"[BZRNET] network ready (stock IsNetworkInit)\n");
+        }
+        return ready;
+    }
+
+    static int QueryNetworkReadyGate(bool& viaLan)
+    {
         const int detoured = LanNoAuth::DetouredPlatformReady();
+        viaLan = detoured >= 0 && LanNoAuth::Requested();
         if (detoured >= 0)
             return detoured;
         static uint32_t s_address = 0;

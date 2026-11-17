@@ -5712,6 +5712,12 @@
       "identity": "ExplosionClass::Build thiscall (matrix, owner obj), ret 8"
     },
     {
+      "name": "ExplosionClassFind",
+      "address": "0x004CB870",
+      "expected": "55 8B EC 6A FF 68 88 9E 84 00 64 A1 00 00 00 00 50 83 EC 60 A1 00 70 8E 00 33 C5 89 45 F0 57 50 8D 45 F4 64 A3 00 00 00 00 8B 45 08 25 7F 7F 7F 7F 8B 4D 0C 81 E1 7F 7F 7F 7F",
+      "identity": "ExplosionClass::Find cdecl (long64 packed name; pushed lo, hi) -> ExplosionClass*; masks both halves with 0x7F7F7F7F, scans the class list on class+0x10/+0x14, appends .odf, loads by class label; the only code xrefs of 'Explosion \"%s\" not found' (0x004CB9B3) and 'uses unknown class label' (0x004CBA95); ProximityMineClass ctor 0x005B0AF2: push edx; push eax; call; add esp,8; mov [ecx+0x170],eax (the class+0x170 ProximityMine detonation passes to ExplosionClassBuild); 18 call sites; matches 1.5 ExplosionClass::Find"
+    },
+    {
       "name": "BulletCollisionEntry",
       "address": "0x00480F40",
       "expected": "55 8B EC 81 EC AC 00 00 00 A1 00 70 8E 00 33 C5",
