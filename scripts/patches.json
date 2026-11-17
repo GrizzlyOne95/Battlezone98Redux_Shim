@@ -3101,6 +3101,84 @@
       "identity": "int, 1 while the stock EditMode input program is on, on exact GOG Redux 2.2.301. FUN_005B08B0 builds the active input-program mask (bit 0 ControlMode, bit 1 AlwaysOn, bit 2 EditMode, names at 0x008E8F90) and sets bit 2 when this is 1; FUN_005B0920 stores (arg == 1), called with 1 by the editor-enter routine FUN_004C82D0 and with 0 by editor-exit FUN_004C8310. Not TerrainEditMode (0x009454B8), which unscripted missions also carry. Read only, by ProducerRallyPoints to leave V/Ctrl+V to edit_vertflip/edit_paste."
     },
     {
+      "name": "ModeListIntersect",
+      "address": "0x0049F270",
+      "expected": "55 8B EC 83 EC 08 56 89 4D FC C7 45 F8 00 00 00",
+      "identity": "ModeList::Intersect(const ModeList& other), thiscall ret 4 (FUN_0049f270): each of the 11 slots whose mode differs from other's is zeroed (FUN_0049f270.c lines 8-12; no per-slot enabled-bit change), then the enabled masks at +0x2C are ANDed (line 13); active (+0x30) becomes -1 unless both lists agree on it and FUN_0046faf0 accepts it (lines 14-19). The stock rule that turns a mixed selection's menu into its common subset. RtsSmartCommandMenu / RtsSmartRepairReload call it as the original from the redirected ControlPanelMergeModeListCall. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelMergeModeListCall",
+      "address": "0x004A2E26",
+      "expected": "50 8B 8D BC FD FF FF 81 C1 3C 11 00 00 E8 38 C4 FF FF",
+      "identity": "ControlPanel::Render 0x004A08E0, the unit-menu merge over the selection (FUN_004a08e0.c lines 796-809): push the next unit's ModeList (GameObject +0x1A4), ecx = this [ebp-0x244] + 0x113C (the merged list), `call 0x0049F270` (ModeList::Intersect) at +0xD = 0x004A2E33 (line 808). RtsSmartCommandMenu / RtsSmartRepairReload redirect it (REL32) to keep Hunt, Follow Close, Defend, Get Repair and Get Reload when only some units offer them. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelDispatchMode",
+      "address": "0x004A7140",
+      "expected": "55 8B EC 83 EC 14 89 4D F0 C6 45 FF 01 C7 45 F8",
+      "identity": "ControlPanel::DispatchMode(int mode), thiscall ret 4, char result (FUN_004a7140): for each selected handle GameObject::GetObj 0x004DA060, vtable +0x38 (can command), vtable +0x2C (ExecuteMode(mode)); the results are ANDed. RtsSmartCommandMenu calls it as the original for every mode it does not filter. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelDispatchModeCall",
+      "address": "0x004A511D",
+      "expected": "8B 85 74 FD FF FF 50 8B 8D BC FD FF FF E8 11 20 00 00",
+      "identity": "ControlPanel::Render 0x004A08E0, the unit-menu entry pick (FUN_004a08e0.c line 1377): push mode [ebp-0x28C], ecx = this [ebp-0x244], `call 0x004A7140` at +0xD = 0x004A512A; a true result deselects (SelectNone at 0x004A513C). Redirected (REL32) so a smart mode goes only to units whose own ModeList holds it. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelBroadcastCommandObj",
+      "address": "0x004A7050",
+      "expected": "55 8B EC 83 EC 0C 89 4D F4 C7 45 FC 00 00 00 00",
+      "identity": "ControlPanel::BroadcastCommand(AiCommand what, GameObject* who), thiscall ret 8 (FUN_004a7050): for each selected, commandable object calls GameObject::SetCommand(what, who) 0x004DBD60. RtsSmartCommandMenu calls it as the original from the redirected ControlPanelDefendTargetBroadcastCall. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelDefendTargetBroadcastCall",
+      "address": "0x004A3679",
+      "expected": "8B 95 88 FD FF FF 52 6A 0F 8B 8D BC FD FF FF E8 C3 39 00 00",
+      "identity": "ControlPanel::Render 0x004A08E0, the Defend submenu's target pick (FUN_004a08e0.c line 946): push the target [ebp-0x278], push 0xF (CMD_DEFEND), ecx = this, `call 0x004A7050` at +0xF = 0x004A3688, then SelectNone (0x004A3693). Redirected (REL32) so Defend-on-target goes only to units with a Defend entry. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectSetCommandObj",
+      "address": "0x004DBD60",
+      "expected": "55 8B EC 6A FF 68 BC 77 84 00 64 A1 00 00 00 00",
+      "identity": "GameObject::SetCommand(AiCommand what, GameObject* who), thiscall ret 8 (FUN_004dbd60): the stock per-unit order the Defend target pick uses (called from ControlPanel::BroadcastCommand 0x004A7050). RtsSmartCommandMenu calls it for each unit it keeps. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectSetCommand",
+      "address": "0x004DBCE0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 D4 00 00 00",
+      "identity": "GameObject::SetCommand(AiCommand what), thiscall ret 4 (0x004DBD52; FUN_004dbce0): priority +0xC8 = 0, what +0xCC, who +0xD0 = 0, as Lua Defend(h, 0). RtsHold gives CMD_DEFEND (0xF) this way before the native hold. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectSetTarget",
+      "address": "0x0049F450",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 83 7D 08 00 74 0D 8B",
+      "identity": "GameObject::SetTarget(GameObject* target), thiscall ret 4 (FUN_0049f450): stores the target's handle at +0x21C (kGameObjectTargetHandle). RtsRemoteTarget sets the player's target with it. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelSelectAdd",
+      "address": "0x004A6C70",
+      "expected": "55 8B EC 51 89 4D FC 83 7D 08 00 74 4B 8B 45 08",
+      "identity": "ControlPanel::SelectAdd(GameObject* obj), thiscall ret 4 (FUN_004a6c70): vtable +0x38 can-command test, SetSelected(1), handle appended at [this+0x1C+4*selectNum], selectNum +0x188; no duplicate or capacity check. RtsAreaSelect checks both before each call. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectGetModeList",
+      "address": "0x0049F430",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 05 A4 01 00 00",
+      "identity": "GameObject::GetModeList(), thiscall: returns this + 0x1A4 (FUN_0049f430). Guard only: the RTS command extras read each unit's ModeList at +0x1A4. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelDefendClickSoundCall",
+      "address": "0x004A50A5",
+      "expected": "83 BD 74 FD FF FF 11 75 27 6A 00 6A 00 6A 00 68 20 1B 87 00 E8 72 59 F9 FF 83 C4 10 8B 8D BC FD FF FF 8B 15 DC 7B 8E 00 89 91 7C 11 00 00 EB 6C",
+      "identity": "ControlPanel::Render 0x004A08E0, the unit-menu entry click (FUN_004a08e0.c line 1370): `cmp [ebp-0x28C],0x11` (MODE_DEFEND), then PlayGlobalSound(\"mnu_next.wav\" 0x00871B20, 0, 0, 0) `call 0x0043AA30` at +0x14 = 0x004A50B9, add esp,0x10, currentItem +0x117C = the Defend submenu, `jmp 0x004A5141` (+0x9C). RtsHold (Shift alternate) redirects the sound call (REL32) to a thunk: with Shift held it issues Hold, drops the call frame and resumes at 0x004A5141; otherwise it tail-jumps to the sound. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "ControlPanelModeLabelLocalizeCall",
+      "address": "0x004A57AB",
+      "expected": "8B 95 74 FD FF FF 8B 04 D5 00 7B 8E 00 50 68 6C 73 87 00 E8 7D 73 37 00 83 C4 08",
+      "identity": "ControlPanel::Render 0x004A08E0, the unit-menu entry label (FUN_004a08e0.c line 1396): mode [ebp-0x28C], push the mode's name (table 0x008E7B00, 8 bytes per mode), push \"names\" (0x0087736C), `call 0x0081CB40` (UiLocalize) at +0x13 = 0x004A57BE, add esp,8. RtsHold (Shift alternate) redirects it (REL32) so the Defend entry reads \"Hold\" while Shift is held. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
       "name": "ClassLoadAssetsFlag",
       "address": "0x008E7732",
       "kind": "data",

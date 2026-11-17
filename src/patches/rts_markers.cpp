@@ -1028,6 +1028,24 @@ namespace BZROpenShim
             return reinterpret_cast<void*>(&ObjectBroadcastDetour);
         }
 
+        void NotifyRtsMarkersCommand(int what, void* target)
+        {
+            try
+            {
+                if (!g_ConfigLoaded)
+                    LoadConfig();
+                if (!target || !g_PingsOn || !BindApi())
+                    return;
+                // Same gate as the broadcast detour: the local ControlPanel
+                // with units selected (the caller runs before the stock
+                // SelectNone that follows an accepted pick).
+                OnObjectCommand(reinterpret_cast<void*>(g_Api.panel), what, target);
+            }
+            catch (...)
+            {
+            }
+        }
+
         void NoteRtsMarkersObjectCommandHookInstalled()
         {
             LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] %s installed", kHookName);

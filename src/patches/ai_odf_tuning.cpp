@@ -2642,6 +2642,7 @@ namespace BZROpenShim
             InstallProducerRallyPointsIfPossible();
             InstallAutoGroupNewUnitsIfPossible();
             InstallOffenseOverflowIfPossible();
+            InstallRtsCommandsIfPossible();
             InstallAttackTaskKiteHookIfPossible();
             InstallScrapPathScoreHookIfPossible();
             InstallScavengerRetargetHookIfPossible();

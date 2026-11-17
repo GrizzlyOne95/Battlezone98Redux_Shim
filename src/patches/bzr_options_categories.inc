@@ -16,6 +16,7 @@ constexpr const char* kShimRowRadar = "Radar Fading";
 constexpr const char* kShimRowMenuTheme = "Menu Colors";
 constexpr const char* kShimRowEffects = "Visual Effects";
 constexpr const char* kShimRowBans = "Banned Players";
+constexpr const char* kShimRowRtsCommands = "RTS Commands";
 
 static const char* const kShimCategoryVideo[] = {
     "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
@@ -59,7 +60,10 @@ static const char* const kShimCategoryPalette[] = {
 static const char* const kShimCategoryControls[] = {
     kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Input Smoothing", "Per-Frame Mouse",
     "Satellite Zoom", "Satellite Pan", "Editor Placement", "Background Mouse",
-    "Run in Background", "Rally Points", "Auto Group", "Extended Unit Cap", "Group Member Menu", "Group Strip" };
+    "Run in Background", "Rally Points", "Auto Group", "Extended Unit Cap", "Group Member Menu", "Group Strip",
+    kShimRowRtsCommands };
+static const char* const kShimCategoryRtsCommands[] = {
+    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold" };
 static const char* const kShimCategoryGameplay[] = {
     "Target Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
@@ -128,5 +132,9 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     BZR_SHIM_CATEGORY("Effects", "VISUAL EFFECTS",
         "Faction color jets, destruction chunks, muzzle effects, shell casings and person gibs.",
         kShimCategoryEffects),
+    // Subpage reached from Controls.
+    BZR_SHIM_CATEGORY("RTS Commands", "RTS COMMANDS",
+        "Unit command extras: target your own units and buildings, mixed-selection menus, area select and Hold.",
+        kShimCategoryRtsCommands),
 };
 #undef BZR_SHIM_CATEGORY
