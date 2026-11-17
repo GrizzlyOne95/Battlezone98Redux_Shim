@@ -414,6 +414,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # until the player presses a group key twice; it adds no unit and no
     # order, and is hard-disabled in network games. Default on by design.
     "Gameplay/GroupMemberMenu",
+    # RTS markers: local-only ground rings for the player's orders and for
+    # artillery range. Write nothing the game reads. Default on by design.
+    "Gameplay/RtsCommandPings",
+    "Gameplay/RtsArtilleryRange",
 
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
@@ -608,6 +612,8 @@ $shippingPolicyChecks = @{
     "Gameplay/ExtendedUnitCap" = "0"
     "Gameplay/GroupMemberMenu" = "1"
     "Gameplay/GroupStrip" = "1"
+    "Gameplay/RtsCommandPings" = "1"
+    "Gameplay/RtsArtilleryRange" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }

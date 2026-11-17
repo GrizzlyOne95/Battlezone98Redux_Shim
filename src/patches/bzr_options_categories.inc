@@ -34,7 +34,7 @@ static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix", "Music Refill" };
 static const char* const kShimCategoryHud[] = {
     "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
-    "MP Vehicle Flags", "Kill Ticker", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
+    "MP Vehicle Flags", "Kill Ticker", "Command Pings", "Artillery Range", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
 static const char* const kShimCategoryRadar[] = {
     "Radar Fade", "Radar Idle", "Radar Delay", "Radar Speed", "Keep Compass" };
 static const char* const kShimCategoryMeters[] = {

@@ -185,6 +185,8 @@ namespace BZROpenShim
                 EnsureRallyBeaconAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
                 // LaserSight's beam mesh, texture, shader and material.
                 EnsureLaserSightAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
+                // RtsMarkers' ring shader and material.
+                EnsureRtsMarkerAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
             }
         }
 
