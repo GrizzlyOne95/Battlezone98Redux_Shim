@@ -323,6 +323,7 @@
     <ClCompile Include="src\patches\soak_telemetry.cpp" />
     <ClCompile Include="src\patches\mode_stress_driver.cpp" />
     <ClCompile Include="src\patches\music_single_fill.cpp" />
+    <ClCompile Include="src\patches\music_refill_catchup.cpp" />
     <ClCompile Include="src\patches\precise_timestep.cpp" />
     <ClCompile Include="src\patches\armory_repair_pick.cpp" />
     <ClCompile Include="src\patches\remote_object_smoothing.cpp" />
@@ -534,6 +535,7 @@
     <ClInclude Include="include\mode_stress_driver.h" />
     <ClInclude Include="include\mode_stress_plan.h" />
     <ClInclude Include="include\music_single_fill.h" />
+    <ClInclude Include="include\music_refill_catchup.h" />
     <ClInclude Include="include\precise_timestep.h" />
     <ClInclude Include="include\armory_repair_pick.h" />
     <ClInclude Include="include\armory_repair_pick_policy.h" />

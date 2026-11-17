@@ -228,6 +228,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/DynamicAllocGuard",
     # Skips a music decode that Play overwrites before it is heard; audio only.
     "Fixes/MusicSingleFill",
+    # Refills every music chunk playback has passed; audio only.
+    "Fixes/MusicRefillCatchUp",
     "Fixes/MagnetZeroRangeGuard",
     # Client-local text-block scroll stride repair (briefing/archive/chat).
     "Fixes/BriefingPageStride",
@@ -550,6 +552,7 @@ $shippingPolicyChecks = @{
     "Fixes/ConstructorRecycleStaleTarget" = "1"
     "Fixes/PreciseTimestep" = "1"
     "Fixes/MusicSingleFill" = "1"
+    "Fixes/MusicRefillCatchUp" = "1"
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/BriefingPageStride" = "1"
     "Features/BriefingPages" = "1"
