@@ -132,13 +132,13 @@ openshim_opt:UnitEmptyColor:label~Empty Bars~Barres vides~Leere Balken~Barras va
 openshim_opt:UnitEmptyColor:desc~Unfilled portions of command and selection health/ammo bars. Does not affect cockpit textures. Default follows the base palette.~Parties non remplies des barres de santй/munitions de commande et de sйlection. N'affecte pas les textures du cockpit. Par dйfaut suit la palette de base.~Ungefьllte Teile der Gesundheits-/Munitionsbalken in Befehl und Auswahl. Betrifft keine Cockpit-Texturen. Standard folgt der Basispalette.~Partes sin rellenar de las barras de salud y municiуn de уrdenes y selecciуn. No afecta a las texturas de la cabina. Predeterminado sigue la paleta base.~Parti non riempite delle barre di salute/munizioni di comandi e selezione. Non influisce sulle texture della cabina. Predefinito segue la tavolozza base.~Незаполненные части шкал здоровья/боеприпасов команд и выбора. Не влияет на текстуры кокпита. По умолчанию следует базовой палитре.~Partes nгo preenchidas das barras de vida/muniзгo de comando e seleзгo. Nгo afeta as texturas da cabine. Padrгo segue a paleta base.
 openshim_opt:FieldOfView:label~Field of View~Champ de vision~Sichtfeld~Campo de visiуn~Campo Visivo~Поле зрения~Campo de Visгo
 openshim_opt:FieldOfView:desc~Cockpit and chase base FOV in degrees (4:3 reference); widescreen expands horizontally. Stock is 80. Satellite and target cameras keep their own angles. Restart required.~FOV de base du cockpit et de la vue externe en degrйs (rйfйrence 4:3) ; le grand йcran l'йlargit а l'horizontale. Origine : 80. Les camйras satellite et de cible gardent leurs propres angles. Redйmarrage requis.~Basis-Sichtfeld fьr Cockpit und Verfolgerkamera in Grad (Bezug 4:3); Breitbild erweitert horizontal. Standard ist 80. Satelliten- und Zielkameras behalten ihre eigenen Winkel. Neustart erforderlich.~FOV base de cabina y vista externa en grados (referencia 4:3); en pantalla panorбmica se amplнa en horizontal. El original es 80. Las cбmaras de satйlite y de objetivo mantienen sus propios бngulos. Requiere reiniciar.~FOV di base di cabina e inseguimento in gradi (riferimento 4:3); il widescreen si espande in orizzontale. L'originale и 80. Telecamere satellite e bersaglio mantengono i propri angoli. Richiede riavvio.~Базовое поле зрения кокпита и вида сзади в градусах (эталон 4:3); широкий экран расширяет по горизонтали. Штатное значение 80. Спутниковая камера и камеры цели сохраняют свои углы. Нужен перезапуск.~FOV base da cabine e da cвmera externa em graus (referкncia 4:3); widescreen expande na horizontal. O original й 80. As cвmeras de satйlite e de alvo mantкm seus prуprios вngulos. Requer reinнcio.
-openshim_opt:Renderer:label~Renderer~Moteur de rendu~~Renderizador~~Рендерер~Renderiz.
+openshim_opt:Renderer:label~Renderer~Moteur de rendu~Renderer~Renderizador~Renderer~Рендерер~Renderiz.
 openshim_opt:Renderer:desc~Graphics API the game starts on. Auto keeps the game's last choice. The Enhanced profile and the DX11 rows need DirectX 11. Restart required.~API graphique utilisйe au dйmarrage du jeu. Auto garde le dernier choix du jeu. Le profil Enhanced et les lignes DX11 nйcessitent DirectX 11. Redйmarrage requis.~Grafik-API, mit der das Spiel startet. Auto behдlt die letzte Wahl des Spiels. Das Profil "Enhanced" und die DX11-Zeilen benцtigen DirectX 11. Neustart erforderlich.~API grбfica con la que arranca el juego. Auto mantiene la ъltima elecciуn del juego. El perfil Mejorado y las filas DX11 necesitan DirectX 11. Requiere reiniciar.~API grafica con cui parte il gioco. Auto mantiene l'ultima scelta del gioco. Il profilo Enhanced e le righe DX11 richiedono DirectX 11. Richiede riavvio.~Графический API, на котором запускается игра. «Авто» сохраняет последний выбор игры. Профиль Enhanced и строки DX11 требуют DirectX 11. Нужен перезапуск.~API grбfica com que o jogo inicia. Auto mantйm a ъltima escolha do jogo. O perfil Enhanced e as linhas DX11 exigem DirectX 11. Requer reinнcio.
 openshim_opt:RenderProfile:label~Render Profile~Profil de rendu~Render-Profil~Perfil grбfico~Profilo Grafico~Профиль графики~Perfil Grбfico
 openshim_opt:RenderProfile:desc~Visual rendering policy: Redux (stock baseline), Enhanced, or Retro. Applies live.~Politique de rendu visuel : Redux (rйfйrence d'origine), Enhanced ou Retro. Appliquй en direct.~Darstellungsrichtlinie: Redux (Standard-Basis), Enhanced oder Retro. Wirkt sofort.~Polнtica de renderizado visual: Redux (base original), Mejorado o Retro. Se aplica al instante.~Criterio di resa visiva: Redux (base originale), Enhanced o Retro. Effetto immediato.~Политика визуализации: Redux (штатная основа), Enhanced или Retro. Применяется сразу.~Polнtica de renderizaзгo visual: Redux (base original), Enhanced ou Retro. Aplica na hora.
-openshim_opt:FXAA:label~DX11 FXAA~FXAA DX11~~FXAA DX11~~~FXAA DX11
+openshim_opt:FXAA:label~DX11 FXAA~FXAA DX11~DX11 FXAA~FXAA DX11~DX11 FXAA~DX11 FXAA~FXAA DX11
 openshim_opt:FXAA:desc~FXAA 3.11 anti-aliasing pass on the DX11 Enhanced pipeline. DX11 only. Restart required.~Passe d'anti-crйnelage FXAA 3.11 sur le pipeline DX11 Enhanced. DX11 uniquement. Redйmarrage requis.~FXAA-3.11-Kantenglдttung in der DX11-Enhanced-Pipeline. Nur DX11. Neustart erforderlich.~Pasada de antialiasing FXAA 3.11 en el pipeline DX11 Mejorado. Solo DX11. Requiere reiniciar.~Passaggio di anti-aliasing FXAA 3.11 sulla pipeline DX11 Enhanced. Solo DX11. Richiede riavvio.~Проход сглаживания FXAA 3.11 в конвейере DX11 Enhanced. Только DX11. Нужен перезапуск.~Passe de anti-aliasing FXAA 3.11 no pipeline DX11 Enhanced. Somente DX11. Requer reinнcio.
-openshim_opt:DxgiFlipModel:label~DX11 Flip Model~Flip Model DX11~DX11 Flip-Modell~Flip Model DX11~~~Flip Model DX11
+openshim_opt:DxgiFlipModel:label~DX11 Flip Model~Flip Model DX11~DX11 Flip-Modell~Flip Model DX11~DX11 Flip Model~DX11 Flip Model~Flip Model DX11
 openshim_opt:DxgiFlipModel:desc~Present through a flip-model swap chain with a frame-latency wait, to even out frame pacing. Experimental. DX11 windowed only. Restart required.~Prйsente via une chaоne d'йchange en flip model avec attente de latence d'image, pour lisser le rythme des images. Expйrimental. DX11 en fenкtrй uniquement. Redйmarrage requis.~Ausgabe ьber eine Flip-Model-Swapchain mit Frame-Latenz-Wartezeit, um den Bildtakt zu glдtten. Experimentell. Nur DX11 im Fenster. Neustart erforderlich.~Presenta mediante una cadena de intercambio flip-model con espera de latencia de fotograma, para igualar el ritmo de fotogramas. Experimental. Solo DX11 en ventana. Requiere reiniciar.~Presenta tramite una swap chain flip-model con attesa della latenza dei frame, per uniformare il ritmo dei frame. Sperimentale. Solo DX11 in finestra. Richiede riavvio.~Вывод через цепочку подкачки Flip Model с ожиданием задержки кадра для более ровного темпа кадров. Экспериментально. Только DX11 в окне. Нужен перезапуск.~Apresenta por uma swap chain flip-model com espera de latкncia de quadro, para uniformizar o ritmo dos quadros. Experimental. Somente DX11 em janela. Requer reinнcio.
 openshim_opt:ShadowFarDistance:label~Shadow Distance~Dist. ombres~Schattenweite~Dist. sombras~Distanza Ombre~Дальность теней~Dist. Sombras
 openshim_opt:ShadowFarDistance:desc~How far sun shadows reach. Full covers the 256 m the shadow shader was built for; Stock clips at 128 m for slightly sharper near shadows. Restart required.~Portйe des ombres du soleil. Full couvre les 256 m pour lesquels le shader d'ombres a йtй conзu ; Stock coupe а 128 m pour des ombres proches un peu plus nettes. Redйmarrage requis.~Wie weit Sonnenschatten reichen. Voll deckt die 256 m ab, fьr die der Schatten-Shader gebaut wurde; Standard kappt bei 128 m fьr etwas schдrfere Nahschatten. Neustart erforderlich.~Hasta dуnde llegan las sombras del sol. Completa cubre los 256 m para los que se diseсу el shader de sombras; Original recorta a 128 m para sombras cercanas algo mбs nнtidas. Requiere reiniciar.~Fin dove arrivano le ombre del sole. Piena copre i 256 m per cui и stato creato lo shader; Originale taglia a 128 m per ombre vicine un po' piщ nitide. Richiede riavvio.~Как далеко достигают тени от солнца. «Полная» покрывает 256 m, под которые создан шейдер теней; «Штатно» обрезает на 128 m для чуть более четких ближних теней. Нужен перезапуск.~Atй onde chegam as sombras do sol. Completo cobre os 256 m para os quais o shader de sombras foi feito; Original corta em 128 m para sombras prуximas um pouco mais nнtidas. Requer reinнcio.
@@ -198,7 +198,7 @@ openshim_opt:MapFilterExtras:label~Map Filters+~Filtres cartes+~Kartenfilter+~Fi
 openshim_opt:MapFilterExtras:desc~Create Game map list: 5+ Players and Stock Maps filters, plus a search box. Restart required.~Liste des cartes de Crйer une partie : filtres 5+ joueurs et Cartes d'origine, plus une zone de recherche. Redйmarrage requis.~Kartenliste "Spiel erstellen": Filter fьr 5+ Spieler und Standardkarten sowie ein Suchfeld. Neustart erforderlich.~Lista de mapas de Crear partida: filtros de 5+ jugadores y Mapas originales, mбs un cuadro de bъsqueda. Requiere reiniciar.~Elenco mappe di Crea Partita: filtri 5+ Giocatori e Mappe Originali, piщ una casella di ricerca. Richiede riavvio.~Список карт «Создать игру»: фильтры «5+ игроков» и «Штатные карты» и поле поиска. Нужен перезапуск.~Lista de mapas de Criar Jogo: filtros de 5+ Jogadores e Mapas Originais, mais uma caixa de busca. Requer reinнcio.
 openshim_opt:EditorOverheadPlacementOrder:label~Editor Placement~Placement йditeur~Editor-Platzierung~Colocaciуn editor~Posiz. Editor~Размещение в ред.~Posiзгo no Editor
 openshim_opt:EditorOverheadPlacementOrder:desc~BZ 1.5 view order so object placement works in the running overhead view. Needs /edit. Restart required.~Ordre de vue BZ 1.5 pour que le placement d'objets fonctionne dans la vue aйrienne en cours. Nйcessite /edit. Redйmarrage requis.~BZ-1.5-Ansichtsreihenfolge, damit die Objektplatzierung in der laufenden Draufsicht funktioniert. Benцtigt /edit. Neustart erforderlich.~Orden de vista de BZ 1.5 para que la colocaciуn de objetos funcione en la vista cenital en ejecuciуn. Requiere /edit. Requiere reiniciar.~Ordine di vista di BZ 1.5 perchй il posizionamento degli oggetti funzioni nella vista dall'alto in esecuzione. Richiede /edit. Richiede riavvio.~Порядок видов BZ 1.5, чтобы размещение объектов работало в запущенном виде сверху. Нужно /edit. Нужен перезапуск.~Ordem de visгo do BZ 1.5 para que a colocaзгo de objetos funcione na visгo aйrea em execuзгo. Requer /edit. Requer reinнcio.
-openshim_opt:Enabled:label~AutoSave~Sauv. auto~~Autoguardado~Salv. Auto~~
+openshim_opt:Enabled:label~AutoSave~Sauv. auto~AutoSave~Autoguardado~Salv. Auto~AutoSave~AutoSave
 openshim_opt:Enabled:desc~Rolling recovery save for single-player missions; manual saves remain your checkpoints.~Sauvegarde de rйcupйration glissante pour les missions solo ; les sauvegardes manuelles restent vos points de contrфle.~Laufender Wiederherstellungsstand fьr Einzelspieler-Missionen; manuelle Speicherstдnde bleiben Ihre Kontrollpunkte.~Guardado continuo de recuperaciуn para misiones de un jugador; los guardados manuales siguen siendo tus puntos de control.~Salvataggio di recupero a rotazione per le missioni in giocatore singolo; i salvataggi manuali restano i tuoi checkpoint.~Скользящее сохранение для восстановления в одиночных миссиях; ручные сохранения остаются вашими контрольными точками.~Salvamento de recuperaзгo rotativo para missхes de um jogador; os salvamentos manuais continuam sendo seus checkpoints.
 openshim_opt:IntervalSeconds:label~AutoSave Interval~Interv. sauv. auto~AutoSave-Intervall~Intervalo autogu.~Intervallo Salv. Auto~Интервал AutoSave~Intervalo AutoSave
 openshim_opt:IntervalSeconds:desc~How often OpenShim refreshes the rolling AutoSave recovery slot.~Frйquence а laquelle OpenShim actualise l'emplacement de rйcupйration de la sauvegarde auto.~Wie oft OpenShim den laufenden AutoSave-Wiederherstellungsplatz aktualisiert.~Con quй frecuencia OpenShim actualiza la ranura continua de recuperaciуn del autoguardado.~Ogni quanto OpenShim aggiorna lo slot di recupero del Salvataggio Auto a rotazione.~Как часто OpenShim обновляет скользящий слот восстановления AutoSave.~Com que frequкncia o OpenShim atualiza o slot rotativo de recuperaзгo do AutoSave.
@@ -262,28 +262,28 @@ openshim_opt:GroupMemberMenu:label~Group Member Menu~Menu des membres du groupe~
 openshim_opt:GroupMemberMenu:desc~Press a group's F-key a second time to list its units on keys 1-0 in the unit menu. With Ctrl held, the Offense, Defense and Utility labels read "All ..."; with Extended Unit Cap on, Ctrl+Offense also selects grouped units past the 10 slots. Single player only.~Appuyez une seconde fois sur la touche F d'un groupe pour lister ses unitйs sur les touches 1-0 du menu des unitйs. Ctrl enfoncй, les libellйs Attaque, Dйfense et Utilitaire deviennent « Tous ... » ; avec Limite d'unitйs йtendue, Ctrl+Attaque sйlectionne aussi les unitйs groupйes au-delа des 10 emplacements. Solo uniquement.~Drьcken Sie die F-Taste einer Gruppe ein zweites Mal, um ihre Einheiten im Einheitenmenь auf den Tasten 1-0 aufzulisten. Mit gehaltener Strg-Taste lauten die Bezeichnungen Angriff, Verteidigung und Versorgung "Alle ..."; mit Erweitertem Einheitenlimit wдhlt Strg+Angriff auch gruppierte Einheiten ьber die 10 Plдtze hinaus. Nur Einzelspieler.~Pulsa por segunda vez la tecla F de un grupo para listar sus unidades en las teclas 1-0 del menъ de unidades. Con Ctrl pulsado, las etiquetas Ataque, Defensa y Utilidad dicen "Todo ..."; con Lнmite de unidades ampliado, Ctrl+Ataque tambiйn selecciona las unidades agrupadas mбs allб de las 10 casillas. Solo un jugador.~Premi una seconda volta il tasto F di un gruppo per elencarne le unitа sui tasti 1-0 del menu unitа. Tenendo premuto Ctrl, le etichette Attacco, Difesa e Supporto diventano "Tutti ..."; con Limite unitа esteso, Ctrl+Attacco seleziona anche le unitа raggruppate oltre i 10 slot. Solo giocatore singolo.~Нажмите клавишу F группы второй раз, чтобы вывести её юнитов на клавиши 1-0 в меню юнитов. При зажатом Ctrl надписи Атака, Оборона и Поддержка читаются как "Все ..."; с расширенным лимитом юнитов Ctrl+Атака также выбирает юнитов из групп сверх 10 ячеек. Только одиночная игра.~Prima a tecla F de um grupo uma segunda vez para listar as suas unidades nas teclas 1-0 do menu de unidades. Com Ctrl premido, os rуtulos Ataque, Defesa e Utilidade passam a "Todos ..."; com Limite de unidades ampliado, Ctrl+Ataque tambйm seleciona as unidades agrupadas alйm dos 10 espaзos. Apenas um jogador.
 openshim_opt:GroupStrip:label~Group Strip~Bandeau groupes~Gruppenleiste~Barra de grupos~Barra Gruppi~Полоса групп~Faixa de Grupos
 openshim_opt:GroupStrip:desc~Shows each F1-F7 group that has units in a strip beside the scrap and pilot gauge: the key, how many units are alive and the first unit's name, with + when the group mixes types. Read only, so it also works in multiplayer.~Affiche chaque groupe F1-F7 contenant des unitйs dans un bandeau prиs de la jauge de fragments et de pilote : la touche, le nombre d'unitйs en vie et le nom de la premiиre unitй, avec + si le groupe mйlange les types. Lecture seule, donc aussi valable en multijoueur.~Zeigt jede F1-F7-Gruppe mit Einheiten in einer Leiste neben der Schrott-/Pilotenanzeige: Taste, Zahl lebender Einheiten und Name der ersten Einheit, mit + bei gemischten Typen. Nur lesend, funktioniert daher auch im Mehrspieler.~Muestra cada grupo F1-F7 con unidades en una barra junto al indicador de chatarra y pilotos: la tecla, cuбntas unidades siguen vivas y el nombre de la primera, con + cuando el grupo mezcla tipos. Solo lectura, asн que tambiйn funciona en multijugador.~Mostra ogni gruppo F1-F7 con unitа in una barra accanto all'indicatore di frammenti e piloti: il tasto, quante unitа sono vive e il nome della prima, con + se il gruppo mescola tipi. Sola lettura, quindi funziona anche in multiplayer.~Показывает каждую группу F1-F7 с юнитами в полосе рядом с индикатором лома и пилотов: клавишу, число живых юнитов и название первого, с + для смешанных типов. Только чтение, поэтому работает и в мультиплеере.~Mostra cada grupo F1-F7 que tem unidades numa faixa ao lado do medidor de sucata e piloto: a tecla, quantas unidades estгo vivas e o nome da primeira, com + quando o grupo mistura tipos. Somente leitura, entгo tambйm funciona no multijogador.
-openshim_opt:RtsCommandPings:label~Command Pings~~~~~~
-openshim_opt:RtsCommandPings:desc~Each order you give draws a short ring on the ground: green where units go, red around an attack target (it follows the target), yellow for other orders. Only you see it, so it also works in multiplayer.~~~~~~
-openshim_opt:RtsArtilleryRange:label~Artillery Range~~~~~~
-openshim_opt:RtsArtilleryRange:desc~Draws the maximum range on the ground around selected howitzers (not your own vehicle), and a ring at the aim point: green when one of them can reach it, red when none can. Only you see it, so it also works in multiplayer.~~~~~~
-openshim_opt:RtsRemoteTarget:label~Remote Target~~~~~~
-openshim_opt:RtsRemoteTarget:desc~Shift+T targets your selected units one after another without changing the selection; B cycles the target through your buildings, newest first. Keys in Input > RTS Actions.~~~~~~
-openshim_opt:RtsSmartCommandMenu:label~Smart Command Menu~~~~~~
-openshim_opt:RtsSmartCommandMenu:desc~A mixed selection keeps Hunt, Follow Close and Defend in the unit menu; each order goes only to the units that have it, and the others keep their orders.~~~~~~
-openshim_opt:RtsSmartRepairReload:label~Smart Repair/Reload~~~~~~
-openshim_opt:RtsSmartRepairReload:desc~Get Repair and Get Reload show when any selected unit needs them, and go only to the units that do.~~~~~~
-openshim_opt:RtsAreaSelect:label~Area Select~~~~~~
-openshim_opt:RtsAreaSelect:desc~X adds your units of the same type as the one under the reticle (else the first selected) within 100 m to the selection; Shift+X within 200 m.~~~~~~
-openshim_opt:RtsHold:label~Hold~~~~~~
-openshim_opt:RtsHold:desc~Z holds the selected units in place. With Shift held the Defend entry reads Hold and does the same; turn that off if Shift+number is bound elsewhere. Single player only.~~~~~~
-openshim_opt:RtsBuildAtNav:label~Build at Nav~~~~~~
-openshim_opt:RtsBuildAtNav:desc~With a building picked on a selected Construction Rig, Go To Nav reads Build at Nav: the rig builds it at the nav you pick, facing your way. A spot it cannot build on buzzes and keeps the selection.~~~~~~
-openshim_opt:RtsBuildGhost:label~Build Ghost~~~~~~
-openshim_opt:RtsBuildGhost:desc~While you place a building, a see-through copy of it shows where it will stand: green when the spot is good, yellow without power, red when blocked. With Build at Nav, the Go To Nav list also shows it at every nav. Only you see it.~~~~~~
-openshim_opt:RtsPowerRange:label~Power Range~~~~~~
-openshim_opt:RtsPowerRange:desc~While you place a building that needs power (gun towers, the Comm Bunker), the reach of every allied power plant shows as a ring on the ground. Only you see it.~~~~~~
-openshim_opt:RtsWaypointLines:label~Waypoint Lines~~~~~~
-openshim_opt:RtsWaypointLines:desc~Selected units show a line on the ground to where their current order takes them, and a fainter one on to their next order. Only you see it.~~~~~~
+openshim_opt:RtsCommandPings:label~Command Pings~Pings d'ordres~Befehlsmarker~Avisos de уrdenes~Ping Comandi~Метки команд~Pings de Comando
+openshim_opt:RtsCommandPings:desc~Each order you give draws a short ring on the ground: green where units go, red around an attack target (it follows the target), yellow for other orders. Only you see it, so it also works in multiplayer.~Chaque ordre donnй trace un court anneau au sol : vert lа oщ vont les unitйs, rouge autour d'une cible d'attaque (il la suit), jaune pour les autres ordres. Vous seul le voyez, il fonctionne donc aussi en multijoueur.~Jeder Befehl zeichnet einen kurzen Ring auf den Boden: grьn, wohin Einheiten fahren, rot um ein Angriffsziel (er folgt dem Ziel), gelb bei anderen Befehlen. Nur Sie sehen ihn, daher funktioniert er auch im Mehrspieler.~Cada orden que das dibuja un aro breve en el suelo: verde adonde van las unidades, rojo alrededor de un objetivo de ataque (lo sigue) y amarillo para otras уrdenes. Solo tъ lo ves, asн que tambiйn funciona en multijugador.~Ogni ordine che dai disegna un breve anello sul terreno: verde dove vanno le unitа, rosso intorno a un bersaglio d'attacco (lo segue), giallo per gli altri ordini. Lo vedi solo tu, quindi funziona anche in multiplayer.~Каждый ваш приказ рисует на земле короткое кольцо: зеленое там, куда идут юниты, красное вокруг цели атаки (следует за целью), желтое для прочих приказов. Видно только вам, поэтому работает и в мультиплеере.~Cada ordem que vocк dб desenha um anel curto no chгo: verde para onde as unidades vгo, vermelho ao redor de um alvo de ataque (ele segue o alvo), amarelo para outras ordens. Sу vocк vк, entгo tambйm funciona no multijogador.
+openshim_opt:RtsArtilleryRange:label~Artillery Range~Portйe artillerie~Artillerie-Reichweite~Alcance de artillerнa~Portata Artiglieria~Дальность артиллерии~Alcance Artilharia
+openshim_opt:RtsArtilleryRange:desc~Draws the maximum range on the ground around selected howitzers (not your own vehicle), and a ring at the aim point: green when one of them can reach it, red when none can. Only you see it, so it also works in multiplayer.~Trace au sol la portйe maximale autour des obusiers sйlectionnйs (pas de votre propre vйhicule), et un anneau au point de visйe : vert si l'un d'eux peut l'atteindre, rouge si aucun ne le peut. Vous seul le voyez, il fonctionne donc aussi en multijoueur.~Zeichnet die maximale Reichweite gewдhlter Haubitzen (nicht Ihres eigenen Fahrzeugs) auf den Boden und einen Ring am Zielpunkt: grьn, wenn eine davon ihn erreicht, rot, wenn keine. Nur Sie sehen ihn, daher funktioniert er auch im Mehrspieler.~Dibuja en el suelo el alcance mбximo alrededor de los obuses seleccionados (no de tu propio vehнculo) y un aro en el punto de punterнa: verde si alguno puede alcanzarlo, rojo si ninguno puede. Solo tъ lo ves, asн que tambiйn funciona en multijugador.~Disegna sul terreno la portata massima intorno agli obici selezionati (non il tuo veicolo) e un anello nel punto di mira: verde se almeno uno puт raggiungerlo, rosso se nessuno puт. Lo vedi solo tu, quindi funziona anche in multiplayer.~Рисует на земле предельную дальность вокруг выбранных гаубиц (не вашей машины) и кольцо в точке прицеливания: зеленое, если хотя бы одна может достать, красное, если ни одна. Видно только вам, поэтому работает и в мультиплеере.~Desenha o alcance mбximo no chгo ao redor dos howitzers selecionados (nгo do seu prуprio veнculo) e um anel no ponto de mira: verde quando um deles alcanзa, vermelho quando nenhum alcanзa. Sу vocк vк, entгo tambйm funciona no multijogador.
+openshim_opt:RtsRemoteTarget:label~Remote Target~Cible а distance~Fernziel~Objetivo remoto~Bersaglio Remoto~Удаленная цель~Alvo Remoto
+openshim_opt:RtsRemoteTarget:desc~Shift+T targets your selected units one after another without changing the selection; B cycles the target through your buildings, newest first. Keys in Input > RTS Actions.~Shift+T cible vos unitйs sйlectionnйes l'une aprиs l'autre sans changer la sйlection ; B fait dйfiler la cible parmi vos bвtiments, du plus rйcent au plus ancien. Touches dans Saisie > Actions RTS.~Shift+T wдhlt Ihre markierten Einheiten nacheinander als Ziel, ohne die Auswahl zu дndern; B schaltet das Ziel durch Ihre Gebдude, das neueste zuerst. Tasten unter Input > RTS Actions.~Shift+T selecciona como objetivo tus unidades seleccionadas una tras otra sin cambiar la selecciуn; B recorre tus edificios como objetivo, del mбs nuevo al mбs antiguo. Teclas en Input > RTS Actions.~Maiusc+T assegna il bersaglio alle unitа selezionate una dopo l'altra senza cambiare la selezione; B fa scorrere il bersaglio tra i tuoi edifici, dal piщ recente. Tasti in Input > RTS Actions.~Shift+T поочередно выбирает целью выбранные юниты, не меняя выделения; B перебирает ваши здания, сначала новейшие. Клавиши в Input > RTS Actions.~Shift+T mira suas unidades selecionadas uma apуs a outra sem mudar a seleзгo; B alterna o alvo entre suas construзхes, da mais nova para a mais antiga. Teclas em Entrada > Aзхes RTS.
+openshim_opt:RtsSmartCommandMenu:label~Smart Command Menu~Menu d'ordres intelligent~Smartes Befehlsmenь~Menъ de уrdenes inteligente~Menu Comandi Smart~Умное меню команд~Menu de Ordens Smart
+openshim_opt:RtsSmartCommandMenu:desc~A mixed selection keeps Hunt, Follow Close and Defend in the unit menu; each order goes only to the units that have it, and the others keep their orders.~Une sйlection mixte garde Chasser, Suivre de prиs et Dйfendre dans le menu d'unitй ; chaque ordre ne va qu'aux unitйs qui le possиdent, les autres gardent leurs ordres.~Eine gemischte Auswahl behдlt Jagen, Eng folgen und Verteidigen im Einheitenmenь; jeder Befehl geht nur an die Einheiten, die ihn haben, die anderen behalten ihre Befehle.~Una selecciуn mixta mantiene Cazar, Seguir de cerca y Defender en el menъ de unidades; cada orden va solo a las unidades que la tienen y las demбs conservan sus уrdenes.~Una selezione mista mantiene Caccia, Segui da Vicino e Difendi nel menu delle unitа; ogni ordine va solo alle unitа che lo hanno, le altre mantengono i loro ordini.~При смешанном выделении в меню юнита остаются «Охотется», «Держись Близко» и «Защити»; каждый приказ получают только юниты, у которых он есть, остальные сохраняют свои приказы.~Uma seleзгo mista mantйm Caзar, Seguir de Perto e Defender no menu de unidades; cada ordem vai sу para as unidades que a tкm, e as outras mantкm suas ordens.
+openshim_opt:RtsSmartRepairReload:label~Smart Repair/Reload~Rйparer/Recharger intelligent~Smart Reparatur/Nachladen~Reparar/Recargar inteligente~Ripara/Ricarica Smart~Умный ремонт/боезапас~Reparo/Recarga Smart
+openshim_opt:RtsSmartRepairReload:desc~Get Repair and Get Reload show when any selected unit needs them, and go only to the units that do.~Chercher rйparation et Chercher munitions s'affichent dиs qu'une unitй sйlectionnйe en a besoin, et ne vont qu'aux unitйs concernйes.~Reparatur holen und Nachladen holen erscheinen, wenn eine gewдhlte Einheit sie braucht, und gehen nur an die Einheiten, die sie brauchen.~Buscar reparaciуn y Buscar recarga aparecen cuando alguna unidad seleccionada los necesita, y van solo a las unidades que los necesitan.~Ripara e Ricarica (i comandi «Get Repair» e «Get Reload»: l'unitа va a farsi riparare o a ricaricarsi, non lo fa da sola) compaiono quando una qualsiasi unitа selezionata ne ha bisogno, e vanno solo alle unitа che ne hanno bisogno.~«Получи Ремонт» и «Получить Боеприпасы» показываются, когда они нужны хоть одному выбранному юниту, и отдаются только тем, кому нужны.~Obter Reparo e Obter Recarga aparecem quando qualquer unidade selecionada precisa deles, e vгo sу para as unidades que precisam.
+openshim_opt:RtsAreaSelect:label~Area Select~Sйlection de zone~Bereichsauswahl~Selecciуn por бrea~Selezione Area~Выбор по области~Selec. por Бrea
+openshim_opt:RtsAreaSelect:desc~X adds your units of the same type as the one under the reticle (else the first selected) within 100 m to the selection; Shift+X within 200 m.~X ajoute а la sйlection vos unitйs du mкme type que celle sous le rйticule (sinon la premiиre sйlectionnйe) dans un rayon de 100 m ; Shift+X dans un rayon de 200 m.~X fьgt Ihre Einheiten desselben Typs wie die unter dem Fadenkreuz (sonst die zuerst gewдhlte) im Umkreis von 100 m zur Auswahl hinzu; Shift+X im Umkreis von 200 m.~X aсade a la selecciуn tus unidades del mismo tipo que la que estб bajo la mira (si no, la primera seleccionada) a menos de 100 m; Shift+X, a menos de 200 m.~X aggiunge alla selezione le tue unitа dello stesso tipo di quella sotto il mirino (altrimenti della prima selezionata) entro 100 m; Maiusc+X entro 200 m.~X добавляет к выделению ваши юниты того же типа, что и под прицелом (иначе первый выбранный), в радиусе 100 м; Shift+X в радиусе 200 м.~X adiciona а seleзгo suas unidades do mesmo tipo da que estб sob a mira (ou da primeira selecionada) em atй 100 m; Shift+X em atй 200 m.
+openshim_opt:RtsHold:label~Hold~Tenir~Halten~Mantener~Mantieni~Стоять~Manter
+openshim_opt:RtsHold:desc~Z holds the selected units in place. With Shift held the Defend entry reads Hold and does the same; turn that off if Shift+number is bound elsewhere. Single player only.~Z maintient les unitйs sйlectionnйes sur place. Avec Shift enfoncй, l'entrйe Dйfendre devient Tenir et fait la mкme chose ; dйsactivez-le si Shift+chiffre est assignй ailleurs. Solo uniquement.~Z hдlt die gewдhlten Einheiten an Ort und Stelle. Bei gedrьckter Shift-Taste heiЯt der Eintrag Verteidigen stattdessen Halten und tut dasselbe; ausschalten, wenn Shift+Zahl anderweitig belegt ist. Nur Einzelspieler.~Z mantiene en su sitio las unidades seleccionadas. Con Shift pulsado, la entrada Defender dice Mantener y hace lo mismo; desactнvalo si Shift+nъmero estб asignado a otra cosa. Solo un jugador.~Z mantiene sul posto le unitа selezionate. Con Maiusc premuto la voce Difendi diventa Mantieni e fa lo stesso; disattivalo se Maiusc+numero и assegnato altrove. Solo giocatore singolo.~Z удерживает выбранные юниты на месте. При зажатом Shift пункт «Защити» читается как «Стоять» и делает то же; отключите это, если Shift+цифра занята под другое. Только одиночная игра.~Z mantйm as unidades selecionadas paradas no lugar. Com Shift pressionado, a entrada Defender mostra Manter e faz o mesmo; desligue se Shift+nъmero estiver usado em outro lugar. Somente um jogador.
+openshim_opt:RtsBuildAtNav:label~Build at Nav~Construire au nav~Am Nav. bauen~Edificar en punto~Costruisci a nav~Строить у маяка~Construir no Nav
+openshim_opt:RtsBuildAtNav:desc~With a building picked on a selected Construction Rig, Go To Nav reads Build at Nav: the rig builds it at the nav you pick, facing your way. A spot it cannot build on buzzes and keeps the selection.~Avec un bвtiment choisi sur un Constructeur sйlectionnй, Aller au nav devient Construire au nav : le constructeur le bвtit au nav choisi, orientй dans votre direction. Un emplacement impossible йmet un bourdonnement et garde la sйlection.~Ist bei einem gewдhlten Konstruktor ein Gebдude gewдhlt, heiЯt Gehe zu Nav stattdessen Am Nav. bauen: Der Konstruktor baut es am gewдhlten Nav, in Ihre Blickrichtung ausgerichtet. Ein Platz, auf dem er nicht bauen kann, summt und behдlt die Auswahl.~Con un edificio elegido en un Constructor seleccionado, Ir a punto dice Edificar en punto: el constructor lo edifica en el punto que elijas, orientado hacia ti. Un lugar donde no puede construir suena un aviso y conserva la selecciуn.~Con un edificio scelto su un Costruttore selezionato, Vai al Nav diventa Costruisci a nav: il costruttore lo edifica al nav scelto, rivolto verso di te. Un punto in cui non puт costruire emette un segnale acustico e mantiene la selezione.~Если у выбранного строителя выбрано здание, «Перейди К Маяку» читается как «Строить у маяка»: строитель возводит его у выбранного маяка, лицом в вашу сторону. Если место непригодно, раздается сигнал, а выделение сохраняется.~Com uma construзгo escolhida em um Construtor selecionado, Ir ao Nav passa a dizer Construir no Nav: o construtor a ergue no nav escolhido, voltada para o seu lado. Um local onde nгo pode construir emite um aviso sonoro e mantйm a seleзгo.
+openshim_opt:RtsBuildGhost:label~Build Ghost~Fantфme bвtiment~Bau-Vorschau~Fantasma de obra~Fantasma Edificio~Призрак здания~Fantasma de Obra
+openshim_opt:RtsBuildGhost:desc~While you place a building, a see-through copy of it shows where it will stand: green when the spot is good, yellow without power, red when blocked. With Build at Nav, the Go To Nav list also shows it at every nav. Only you see it.~Pendant le placement d'un bвtiment, une copie translucide montre oщ il sera : vert si l'emplacement convient, jaune sans йnergie, rouge si bloquй. Avec Construire au nav, la liste Aller au nav l'affiche aussi а chaque nav. Vous seul le voyez.~Beim Platzieren eines Gebдudes zeigt eine durchsichtige Kopie, wo es stehen wird: grьn bei gutem Platz, gelb ohne Strom, rot bei Blockade. Mit Am Nav. bauen zeigt die Liste von Gehe zu Nav sie auch an jedem Nav. Nur Sie sehen sie.~Al colocar un edificio, una copia translъcida muestra dуnde se alzarб: verde si el lugar es bueno, amarillo sin energнa, rojo si estб bloqueado. Con Edificar en punto, la lista Ir a punto tambiйn lo muestra en cada punto. Solo tъ lo ves.~Mentre piazzi un edificio, una copia trasparente mostra dove sorgerа: verde se il punto и buono, giallo senza energia, rosso se bloccato. Con Costruisci a nav, l'elenco Vai al Nav la mostra anche a ogni nav. Lo vedi solo tu.~Пока вы размещаете здание, прозрачная копия показывает, где оно встанет: зеленая, если место подходит, желтая без питания, красная, если занято. При «Строить у маяка» список «Перейди К Маяку» показывает ее и у каждого маяка. Видно только вам.~Ao posicionar uma construзгo, uma cуpia translъcida mostra onde ela ficarб: verde quando o local й bom, amarelo sem energia, vermelho quando bloqueado. Com Construir no Nav, a lista Ir ao Nav tambйm a mostra em cada nav. Sу vocк vк.
+openshim_opt:RtsPowerRange:label~Power Range~Portйe d'йnergie~Strom-Reichweite~Alcance de energнa~Portata Energia~Зона питания~Alcance Energia
+openshim_opt:RtsPowerRange:desc~While you place a building that needs power (gun towers, the Comm Bunker), the reach of every allied power plant shows as a ring on the ground. Only you see it.~Pendant le placement d'un bвtiment nйcessitant de l'йnergie (tourelles, Bunker de communication), la portйe de chaque centrale alliйe s'affiche en anneau au sol. Vous seul le voyez.~Beim Platzieren eines Gebдudes mit Strombedarf (Geschьtztьrme, der Kommunikationsbunker) zeigt ein Ring am Boden die Reichweite jedes verbьndeten Kraftwerks. Nur Sie sehen ihn.~Al colocar un edificio que necesita energнa (torretas, el Bъnker de comunicaciones), el alcance de cada central elйctrica aliada se ve como un aro en el suelo. Solo tъ lo ves.~Mentre piazzi un edificio che richiede energia (torri cannone, Comm Bunker), la portata di ogni centrale alleata appare come un anello sul terreno. Lo vedi solo tu.~Пока вы размещаете здание, которому нужно питание (оружейные башни, Коммуникационный бункер), зона действия каждой союзной электростанции показывается кольцом на земле. Видно только вам.~Ao posicionar uma construзгo que precisa de energia (torres de canhгo, o Bunker de Comunicaзгo), o alcance de cada usina de energia aliada aparece como um anel no chгo. Sу vocк vк.
+openshim_opt:RtsWaypointLines:label~Waypoint Lines~Lignes de trajet~Wegpunkt-Linien~Lнneas de ruta~Linee Percorso~Линии маршрута~Linhas de Rota
+openshim_opt:RtsWaypointLines:desc~Selected units show a line on the ground to where their current order takes them, and a fainter one on to their next order. Only you see it.~Les unitйs sйlectionnйes montrent au sol une ligne vers la destination de leur ordre actuel, et une plus discrиte vers leur ordre suivant. Vous seul le voyez.~Gewдhlte Einheiten zeigen eine Linie am Boden zum Ziel ihres aktuellen Befehls und eine blassere weiter zu ihrem nдchsten Befehl. Nur Sie sehen sie.~Las unidades seleccionadas muestran una lнnea en el suelo hasta donde las lleva su orden actual, y otra mбs tenue hasta su siguiente orden. Solo tъ lo ves.~Le unitа selezionate mostrano sul terreno una linea fino a dove le porta l'ordine attuale, e una piщ tenue fino al successivo. Lo vedi solo tu.~Выбранные юниты показывают на земле линию до точки, куда ведет их текущий приказ, и более бледную линию дальше, к следующему приказу. Видно только вам.~As unidades selecionadas mostram uma linha no chгo atй onde a ordem atual as leva, e outra mais tкnue atй a prуxima ordem. Sу vocк vк.
 openshim_opt:Turbo:label~Global Turbo~Turbo global~Globaler Turbo~Turbo global~Turbo Globale~Общий турбо~Turbo Global
 openshim_opt:Turbo:desc~Turbo available on all drivable units. Single player only.~Turbo disponible sur toutes les unitйs pilotables. Solo uniquement.~Turbo fьr alle steuerbaren Einheiten verfьgbar. Nur Einzelspieler.~Turbo disponible en todas las unidades conducibles. Solo un jugador.~Turbo disponibile su tutte le unitа guidabili. Solo giocatore singolo.~Турбо доступно на всех управляемых юнитах. Только одиночная игра.~Turbo disponнvel em todas as unidades pilotбveis. Somente um jogador.
 openshim_opt:NoDamageSlowdown:label~No Damage Slowdown~Sans ralentis. dйgвts~Kein Schadenstempo~Sin lentitud por daсo~Niente Rallent. Danni~Без замедления~Sem Lentidгo Dano
@@ -392,121 +392,121 @@ openshim_opt:BugReportZip:desc~Pack the logs, settings and newest crash dump int
 openshim_value:On~On~Act.~An~Sн~Sм~Вкл~Lig.
 openshim_value:Off~Off~Dйs.~Aus~No~No~Выкл~Desl.
 openshim_value:Hidden~Hidden~Masquй~Versteckt~Oculto~Nascosto~Скрыт~Oculto
-openshim_value:25%~25%~~~~~~
-openshim_value:50%~50%~~~~~~
-openshim_value:75%~75%~~~~~~
-openshim_value:1 s~1 s~~~~~~
-openshim_value:2.5 s~2.5 s~2,5 s~~~~~
-openshim_value:5 s~5 s~~~~~~
+openshim_value:25%~25%~25%~25%~25%~25%~25%~25%
+openshim_value:50%~50%~50%~50%~50%~50%~50%~50%
+openshim_value:75%~75%~75%~75%~75%~75%~75%~75%
+openshim_value:1 s~1 s~1 s~1 s~1 s~1 s~1 с~1 s
+openshim_value:2.5 s~2.5 s~2,5 s~2.5 s~2.5 s~2.5 s~2.5 с~2.5 s
+openshim_value:5 s~5 s~5 s~5 s~5 s~5 s~5 с~5 s
 openshim_value:Instant~Instant~Immйdiat~Sofort~Instant.~Istantanea~Мгновенно~Instantвneo
 openshim_value:Fast~Fast~Rapide~Schnell~Rбpido~Rapida~Быстро~Rбpido
-openshim_value:Normal~Normal~~~~Normale~Обычно~
+openshim_value:Normal~Normal~Normal~Normal~Normal~Normale~Обычно~Normal
 openshim_value:Slow~Slow~Lent~Langsam~Lento~Lenta~Медленно~Lento
 openshim_value:Red~Red~Rouge~Rot~Rojo~Rosso~Красный~Vermelho
 openshim_value:Amber~Amber~Ambre~Bernstein~Бmbar~Ambra~Янтарный~Вmbar
 openshim_value:White~White~Blanc~WeiЯ~Blanco~Bianco~Белый~Branco
-openshim_value:Cyan~Cyan~~~Cian~Ciano~Голубой~Ciano
-openshim_value:Magenta~Magenta~~~~~Пурпурный~
+openshim_value:Cyan~Cyan~Cyan~Cyan~Cian~Ciano~Голубой~Ciano
+openshim_value:Magenta~Magenta~Magenta~Magenta~Magenta~Magenta~Пурпурный~Magenta
 openshim_value:Green~Green~Vert~Grьn~Verde~Verde~Зеленый~Verde
 openshim_value:Blue~Blue~Bleu~Blau~Azul~Blu~Синий~Azul
 openshim_value:Yellow~Yellow~Jaune~Gelb~Amarillo~Giallo~Желтый~Amarelo
 openshim_value:Small~Small~Petit~Klein~Pequeсo~Piccolo~Малый~Pequeno
 openshim_value:Large~Large~Grand~GroЯ~Grande~Grande~Большой~Grande
-openshim_value:100%~100%~~~~~~
+openshim_value:100%~100%~100%~100%~100%~100%~100%~100%
 openshim_value:Short~Short~Court~Kurz~Corto~Corto~Коротко~Curto
-openshim_value:Long~Long~~Lang~Largo~Lungo~Долго~Longo
-openshim_value:Stock~Stock~~Standard~Original~Originale~Штатно~Original
+openshim_value:Long~Long~Long~Lang~Largo~Lungo~Долго~Longo
+openshim_value:Stock~Stock~Origine~Standard~Original~Originale~Штатно~Original
 openshim_value:Cross~Cross~Croix~Kreuz~Cruz~Croce~Крест~Cruz
 openshim_value:Dot~Dot~Point~Punkt~Punto~Punto~Точка~Ponto
 openshim_value:Cross + Dot~Cross + Dot~Croix + point~Kreuz + Punkt~Cruz + Punto~Croce + Punto~Крест + точка~Cruz + Ponto
 openshim_value:Thin~Thin~Fin~Dьnn~Fino~Sottile~Тонкая~Fino
 openshim_value:Thick~Thick~Йpais~Dick~Grueso~Spesso~Толстая~Grosso
-openshim_value:80 ms~80 ms~~~~~~
-openshim_value:120 ms~120 ms~~~~~~
-openshim_value:180 ms~180 ms~~~~~~
-openshim_value:250 ms~250 ms~~~~~~
+openshim_value:80 ms~80 ms~80 ms~80 ms~80 ms~80 ms~80 мс~80 ms
+openshim_value:120 ms~120 ms~120 ms~120 ms~120 ms~120 ms~120 мс~120 ms
+openshim_value:180 ms~180 ms~180 ms~180 ms~180 ms~180 ms~180 мс~180 ms
+openshim_value:250 ms~250 ms~250 ms~250 ms~250 ms~250 ms~250 мс~250 ms
 openshim_value:Default~Default~Dйfaut~Standard~Predeterm.~Predefinito~По умолч.~Padrгo
-openshim_value:Classic~Classic~~Klassisch~Clбsica~Classica~Классика~Clбssica
-openshim_value:High Contrast~High Contrast~~Hoher Kontrast~Alto contraste~Alto Contrasto~Контраст~Alto Contraste
-openshim_value:0~0~~~~~~
-openshim_value:25~25~~~~~~
-openshim_value:50~50~~~~~~
-openshim_value:75~75~~~~~~
-openshim_value:100~100~~~~~~
-openshim_value:Stock (80)~Stock (80)~~Standard (80)~Original (80)~Originale (80)~Штатно (80)~Original (80)
-openshim_value:60~60~~~~~~
-openshim_value:70~70~~~~~~
-openshim_value:80~80~~~~~~
-openshim_value:90~90~~~~~~
-openshim_value:110~110~~~~~~
-openshim_value:120~120~~~~~~
-openshim_value:Auto~Auto~~Automatisch~Automбtico~~Авто~
-openshim_value:DirectX 11~DirectX 11~~~~~~
-openshim_value:DirectX 9~DirectX 9~~~~~~
-openshim_value:Retro~Retro~~~~~~
-openshim_value:Redux~Redux~~~~~~
-openshim_value:Enhanced~Enhanced~~~Mejorado~~~
-openshim_value:Full (256 m)~Full (256 m)~~Voll (256 m)~Total (256 m)~Piena (256 m)~Полная (256 m)~Completo (256 m)
-openshim_value:Stock (128 m)~Stock (128 m)~~Standard (128 m)~Original (128 m)~Originale (128 m)~Штатно (128 m)~Original (128 m)
-openshim_value:Soft~Soft~~Sanft~Suave~Lieve~Мягко~Suave
-openshim_value:Minimal~Minimal~~~Mнnima~Minimo~Минимум~Mнnimo
+openshim_value:Classic~Classic~Classique~Klassisch~Clбsica~Classica~Классика~Clбssica
+openshim_value:High Contrast~High Contrast~Contraste йlevй~Hoher Kontrast~Alto contraste~Alto Contrasto~Контраст~Alto Contraste
+openshim_value:0~0~0~0~0~0~0~0
+openshim_value:25~25~25~25~25~25~25~25
+openshim_value:50~50~50~50~50~50~50~50
+openshim_value:75~75~75~75~75~75~75~75
+openshim_value:100~100~100~100~100~100~100~100
+openshim_value:Stock (80)~Stock (80)~Origine (80)~Standard (80)~Original (80)~Originale (80)~Штатно (80)~Original (80)
+openshim_value:60~60~60~60~60~60~60~60
+openshim_value:70~70~70~70~70~70~70~70
+openshim_value:80~80~80~80~80~80~80~80
+openshim_value:90~90~90~90~90~90~90~90
+openshim_value:110~110~110~110~110~110~110~110
+openshim_value:120~120~120~120~120~120~120~120
+openshim_value:Auto~Auto~Auto~Automatisch~Automбtico~Auto~Авто~Auto
+openshim_value:DirectX 11~DirectX 11~DirectX 11~DirectX 11~DirectX 11~DirectX 11~DirectX 11~DirectX 11
+openshim_value:DirectX 9~DirectX 9~DirectX 9~DirectX 9~DirectX 9~DirectX 9~DirectX 9~DirectX 9
+openshim_value:Retro~Retro~Rйtro~Retro~Retro~Retro~Ретро~Retro
+openshim_value:Redux~Redux~Redux~Redux~Redux~Redux~Redux~Redux
+openshim_value:Enhanced~Enhanced~Enhanced~Enhanced~Mejorado~Migliorato~Улучшенный~Aprimorado
+openshim_value:Full (256 m)~Full (256 m)~Complet (256 m)~Voll (256 m)~Total (256 m)~Piena (256 m)~Полная (256 m)~Completo (256 m)
+openshim_value:Stock (128 m)~Stock (128 m)~Origine (128 m)~Standard (128 m)~Original (128 m)~Originale (128 m)~Штатно (128 m)~Original (128 m)
+openshim_value:Soft~Soft~Doux~Sanft~Suave~Lieve~Мягко~Suave
+openshim_value:Minimal~Minimal~Minimal~Minimal~Mнnima~Minimo~Минимум~Mнnimo
 openshim_value:None~None~Aucune~Keine~Ninguna~Nessuno~Нет~Nenhum
 openshim_value:Suppress Neutral~Suppress Neutral~Ignorer neutres~Neutrale aus~Omitir neutrales~Escludi Neutrali~Без нейтр.~Suprimir Neutro
 openshim_value:Suppress All~Suppress All~Tout ignorer~Alle aus~Omitir todo~Escludi Tutti~Без всех~Suprimir Tudo
-openshim_value:Legacy~Legacy~~Alt~Heredada~~~Legado
-openshim_value:125%~125%~~~~~~
-openshim_value:150%~150%~~~~~~
-openshim_value:175%~175%~~~~~~
-openshim_value:200%~200%~~~~~~
-openshim_value:1.5x~1.5x~1,5x~~~~~
-openshim_value:2x~2x~~~~~~
-openshim_value:3x~3x~~~~~~
+openshim_value:Legacy~Legacy~Ancien~Alt~Heredada~Precedente~Устаревший~Legado
+openshim_value:125%~125%~125%~125%~125%~125%~125%~125%
+openshim_value:150%~150%~150%~150%~150%~150%~150%~150%
+openshim_value:175%~175%~175%~175%~175%~175%~175%~175%
+openshim_value:200%~200%~200%~200%~200%~200%~200%~200%
+openshim_value:1.5x~1.5x~1,5x~1.5x~1.5x~1.5x~1.5x~1.5x
+openshim_value:2x~2x~2x~2x~2x~2x~2x~2x
+openshim_value:3x~3x~3x~3x~3x~3x~3x~3x
 openshim_value:Reduced~Reduced~Rйduit~Reduziert~Reducida~Ridotto~Меньше~Reduzida
-openshim_value:64~64~~~~~~
-openshim_value:128~128~~~~~~
-openshim_value:192~192~~~~~~
-openshim_value:256~256~~~~~~
-openshim_value:1 min~1 min~~~~~~
-openshim_value:2 min~2 min~~~~~~
-openshim_value:3 min~3 min~~~~~~
-openshim_value:5 min~5 min~~~~~~
-openshim_value:10 min~10 min~~~~~~
-openshim_value:300~300~~~~~~
-openshim_value:400~400~~~~~~
-openshim_value:500~500~~~~~~
+openshim_value:64~64~64~64~64~64~64~64
+openshim_value:128~128~128~128~128~128~128~128
+openshim_value:192~192~192~192~192~192~192~192
+openshim_value:256~256~256~256~256~256~256~256
+openshim_value:1 min~1 min~1 min~1 min~1 min~1 min~1 мин~1 min
+openshim_value:2 min~2 min~2 min~2 min~2 min~2 min~2 мин~2 min
+openshim_value:3 min~3 min~3 min~3 min~3 min~3 min~3 мин~3 min
+openshim_value:5 min~5 min~5 min~5 min~5 min~5 min~5 мин~5 min
+openshim_value:10 min~10 min~10 min~10 min~10 min~10 min~10 мин~10 min
+openshim_value:300~300~300~300~300~300~300~300
+openshim_value:400~400~400~400~400~400~400~400
+openshim_value:500~500~500~500~500~500~500~500
 openshim_value:All teams~All teams~Toutes йquipes~Alle Teams~Todos equipos~Tutti i team~Все команды~Todos os times
 openshim_value:AI teams only~AI teams only~Йquipes IA~Nur KI-Teams~Solo equipos IA~Solo team IA~Только ИИ~Sу times de IA
-openshim_value:Key + Shift Menu~Key + Shift Menu~~~~~~
-openshim_value:Key Only~Key Only~~~~~~
-openshim_value:Orange~Orange~~~Naranja~Arancio~Оранжевый~Laranja
+openshim_value:Key + Shift Menu~Key + Shift Menu~Touche + menu Shift~Taste + Shift-Menь~Tecla + menъ Shift~Tasto + Menu Maiusc~Клавиша + меню Shift~Tecla + Menu Shift
+openshim_value:Key Only~Key Only~Touche seule~Nur Taste~Solo tecla~Solo Tasto~Только клавиша~Sу Tecla
+openshim_value:Orange~Orange~Orange~Orange~Naranja~Arancio~Оранжевый~Laranja
 openshim_value:Purple~Purple~Violet~Lila~Morado~Viola~Фиолетовый~Roxo
 openshim_value:Teal~Teal~Sarcelle~Tьrkis~Verde azul~Acqua~Бирюзовый~Verde-azulado
 openshim_value:Rainbow~Rainbow~Arc-en-ciel~Regenbogen~Arcoнris~Arcobaleno~Радуга~Arco-нris
-openshim_value:Focused~Focused~~Fokussiert~Enfocado~Stretto~Узкий~Focado
-openshim_value:Wide~Wide~~Breit~Ancho~Largo~Широкий~Largo
-openshim_value:Natural~Natural~~Natьrlich~~Naturale~Естеств.~
+openshim_value:Focused~Focused~Ciblй~Fokussiert~Enfocado~Stretto~Узкий~Focado
+openshim_value:Wide~Wide~Large~Breit~Ancho~Largo~Широкий~Largo
+openshim_value:Natural~Natural~Naturel~Natьrlich~Natural~Naturale~Естеств.~Natural
 openshim_value:Automatic~Automatic~Automatique~Automatisch~Automбtico~Automatica~Авто~Automбtico
-openshim_value:60 m~60 m~~~~~~
-openshim_value:90 m~90 m~~~~~~
-openshim_value:120 m~120 m~~~~~~
-openshim_value:180 m~180 m~~~~~~
-openshim_value:250 m~250 m~~~~~~
+openshim_value:60 m~60 m~60 m~60 m~60 m~60 m~60 м~60 m
+openshim_value:90 m~90 m~90 m~90 m~90 m~90 m~90 м~90 m
+openshim_value:120 m~120 m~120 m~120 m~120 m~120 m~120 м~120 m
+openshim_value:180 m~180 m~180 m~180 m~180 m~180 m~180 м~180 m
+openshim_value:250 m~250 m~250 m~250 m~250 m~250 m~250 м~250 m
 openshim_value:Past 50 m~Past 50 m~Au-delа 50 m~Ab 50 m~Mбs de 50 m~Oltre 50 m~Свыше 50 m~Alйm de 50 m
 openshim_value:Past 100 m~Past 100 m~Au-delа 100 m~Ab 100 m~Mбs de 100 m~Oltre 100 m~Свыше 100 m~Alйm de 100 m
 openshim_value:Past 150 m~Past 150 m~Au-delа 150 m~Ab 150 m~Mбs de 150 m~Oltre 150 m~Свыше 150 m~Alйm de 150 m
 openshim_value:Past 250 m~Past 250 m~Au-delа 250 m~Ab 250 m~Mбs de 250 m~Oltre 250 m~Свыше 250 m~Alйm de 250 m
 openshim_value:Past 400 m~Past 400 m~Au-delа 400 m~Ab 400 m~Mбs de 400 m~Oltre 400 m~Свыше 400 m~Alйm de 400 m
-openshim_value:Prefer Direct~Prefer Direct~~Direkt bevorz.~Preferir directa~Pref. Diretto~Прямой~Preferir Direto
-openshim_value:Force Relay~Force Relay~~Relay erzwingen~Forzar relй~Forza Relay~Ретрансл.~Forзar Relay
-openshim_value:17770~17770~~~~~~
-openshim_value:17771~17771~~~~~~
-openshim_value:17772~17772~~~~~~
-openshim_value:17773~17773~~~~~~
-openshim_value:50 ms~50 ms~~~~~~
-openshim_value:100 ms~100 ms~~~~~~
-openshim_value:150 ms~150 ms~~~~~~
-openshim_value:200 ms~200 ms~~~~~~
-openshim_value:OpenShim~OpenShim~~~~~~
+openshim_value:Prefer Direct~Prefer Direct~Direct prйfйrй~Direkt bevorz.~Preferir directa~Pref. Diretto~Прямой~Preferir Direto
+openshim_value:Force Relay~Force Relay~Relais forcй~Relay erzwingen~Forzar relй~Forza Relay~Ретрансл.~Forзar Relay
+openshim_value:17770~17770~17770~17770~17770~17770~17770~17770
+openshim_value:17771~17771~17771~17771~17771~17771~17771~17771
+openshim_value:17772~17772~17772~17772~17772~17772~17772~17772
+openshim_value:17773~17773~17773~17773~17773~17773~17773~17773
+openshim_value:50 ms~50 ms~50 ms~50 ms~50 ms~50 ms~50 мс~50 ms
+openshim_value:100 ms~100 ms~100 ms~100 ms~100 ms~100 ms~100 мс~100 ms
+openshim_value:150 ms~150 ms~150 ms~150 ms~150 ms~150 ms~150 мс~150 ms
+openshim_value:200 ms~200 ms~200 ms~200 ms~200 ms~200 ms~200 мс~200 ms
+openshim_value:OpenShim~OpenShim~OpenShim~OpenShim~OpenShim~OpenShim~OpenShim~OpenShim
 openshim_value:Reset~Reset~Rйinit.~Zurьcksetzen~Reiniciar~Azzera~Сброс~Zerar
 openshim_value:Confirm?~Confirm?~Confirmer ?~Bestдtigen?~їConfirmar?~Confermi?~Точно?~Confirmar?
 openshim_value:Build~Build~Crйer~Erstellen~Crear~Crea~Собрать~Construir
@@ -523,18 +523,18 @@ openshim_ui:row:RadarFading:label~Radar Fading~Fondu du radar~Radar-Ausblenden~A
 openshim_ui:row:MenuColors:label~Menu Colors~Couleurs menu~Menьfarben~Colores del menъ~Colori Menu~Цвета меню~Cores do Menu
 openshim_ui:row:VisualEffects:label~Visual Effects~Effets visuels~Visuelle Effekte~Efectos visuales~Effetti Visivi~Виз. эффекты~Efeitos Visuais
 openshim_ui:row:BannedPlayers:label~Banned Players~Joueurs bannis~Gebannte Spieler~Jugadores vetados~Giocatori Bannati~Забаненные игроки~Jogadores Banidos
-openshim_ui:row:RTSCommands:label~RTS Commands~~~~~~
-openshim_cat:Video:name~Video~Vidйo~~Vнdeo~~Видео~Vнdeo
-openshim_cat:Video:title~VIDEO~VIDЙO~~VНDEO~~ВИДЕО~VНDEO
+openshim_ui:row:RTSCommands:label~RTS Commands~Commandes RTS~RTS-Befehle~Уrdenes RTS~Comandi RTS~Команды RTS~Comandos RTS
+openshim_cat:Video:name~Video~Vidйo~Video~Vнdeo~Video~Видео~Vнdeo
+openshim_cat:Video:title~VIDEO~VIDЙO~VIDEO~VНDEO~VIDEO~ВИДЕО~VНDEO
 openshim_cat:Video:blurb~Renderer, render profile, the DX11 Enhanced passes, shadows and terrain; visual effects open from here.~Moteur de rendu, profil de rendu, passes DX11 Enhanced, ombres et terrain ; les effets visuels s'ouvrent d'ici.~Renderer, Render-Profil, die DX11-Enhanced-Durchgдnge, Schatten und Gelдnde; visuelle Effekte цffnen sich von hier.~Renderizador, perfil grбfico, las pasadas DX11 Mejorado, sombras y terreno; desde aquн se abren los efectos visuales.~Renderer, profilo grafico, passaggi DX11 Enhanced, ombre e terreno; da qui si aprono gli effetti visivi.~Рендерер, профиль графики, проходы DX11 Enhanced, тени и местность; отсюда открываются визуальные эффекты.~Renderizador, perfil grбfico, os passes DX11 Enhanced, sombras e terreno; os efeitos visuais abrem a partir daqui.
 openshim_cat:Lighting:name~Lighting~Йclairage~Licht~Iluminaciуn~Illuminazione~Освещение~Iluminaзгo
 openshim_cat:Lighting:title~LIGHTING~ЙCLAIRAGE~LICHT~ILUMINACIУN~ILLUMINAZIONE~ОСВЕЩЕНИЕ~ILUMINAЗГO
 openshim_cat:Lighting:blurb~Headlights, the pilot flashlight, and explosion and sun flashes.~Phares, lampe du pilote, et flashs d'explosion et de soleil.~Scheinwerfer, Pilot-Taschenlampe sowie Explosions- und Sonnenblitze.~Faros, la linterna del piloto, y los destellos de explosiones y del sol.~Fari, torcia del pilota, lampi di esplosioni e del sole.~Фары, фонарь пилота, вспышки взрывов и солнца.~Farуis, lanterna do piloto e flashes de explosгo e do sol.
-openshim_cat:Audio:name~Audio~~~~~Звук~Бudio
-openshim_cat:Audio:title~AUDIO~~~~~ЗВУК~БUDIO
+openshim_cat:Audio:name~Audio~Audio~Audio~Audio~Audio~Звук~Бudio
+openshim_cat:Audio:title~AUDIO~AUDIO~AUDIO~AUDIO~AUDIO~ЗВУК~БUDIO
 openshim_cat:Audio:blurb~Sound channels, background music, unit voices and alerts.~Canaux sonores, musique de fond, voix des unitйs et alertes.~Soundkanдle, Hintergrundmusik, Einheitenstimmen und Alarme.~Canales de sonido, mъsica de fondo, voces de unidades y alertas.~Canali audio, musica di sfondo, voci delle unitа e allarmi.~Звуковые каналы, фоновая музыка, голоса юнитов и сигналы.~Canais de som, mъsica de fundo, vozes das unidades e alertas.
-openshim_cat:HUD:name~HUD~~~Interfaz~~~
-openshim_cat:HUD:title~HUD~~~INTERFAZ~~~
+openshim_cat:HUD:name~HUD~HUD~HUD~Interfaz~HUD~HUD~HUD
+openshim_cat:HUD:title~HUD~HUD~HUD~INTERFAZ~HUD~HUD~HUD
 openshim_cat:HUD:blurb~Scrap and pilot readout, radar size, target popup, vehicle flags and the kill ticker.~Affichage des fragments et du pilote, taille du radar, infos de cible, drapeaux de vйhicules et journal de kills.~Schrott- und Pilotenanzeige, RadargrцЯe, Ziel-Popup, Fahrzeugflaggen und Abschuss-Ticker.~Indicador de chatarra y pilotos, tamaсo del radar, informaciуn de objetivo, banderas de vehнculos y aviso de bajas.~Indicatore di frammenti e piloti, misura del radar, popup bersaglio, bandiere dei veicoli e avviso uccisioni.~Индикатор лома и пилотов, размер радара, данные цели, флаги техники и счетчик убийств.~Indicador de sucata e piloto, tamanho do radar, popup de alvo, bandeiras de veнculo e o placar de abates.
 openshim_cat:Controls:name~Controls~Contrфles~Steuerung~Controles~Comandi~Управление~Controles
 openshim_cat:Controls:title~CONTROLS~CONTRФLES~STEUERUNG~CONTROLES~COMANDI~УПРАВЛЕНИЕ~CONTROLES
@@ -542,14 +542,14 @@ openshim_cat:Controls:blurb~Key bindings, raw mouse input, input smoothing and t
 openshim_cat:Gameplay:name~Gameplay~Jeu~Spielablauf~Jugabilidad~Gioco~Геймплей~Jogabilidade
 openshim_cat:Gameplay:title~GAMEPLAY~JEU~SPIELABLAUF~JUGABILIDAD~GIOCO~ГЕЙМПЛЕЙ~JOGABILIDADE
 openshim_cat:Gameplay:blurb~Single-player aiming, AI behaviour and turbo.~Visйe solo, comportement de l'IA et turbo.~Einzelspieler-Zielen, KI-Verhalten und Turbo.~Punterнa en un jugador, comportamiento de la IA y turbo.~Mira in giocatore singolo, comportamento dell'IA e turbo.~Прицеливание в одиночной игре, поведение ИИ и турбо.~Mira de um jogador, comportamento da IA e turbo.
-openshim_cat:Fixes:name~Fixes~Corrections~~Arreglos~Correzioni~Исправления~Correзхes
-openshim_cat:Fixes:title~FIXES~CORRECTIONS~~ARREGLOS~CORREZIONI~ИСПРАВЛЕНИЯ~CORREЗХES
+openshim_cat:Fixes:name~Fixes~Corrections~Fixes~Arreglos~Correzioni~Исправления~Correзхes
+openshim_cat:Fixes:title~FIXES~CORRECTIONS~FIXES~ARREGLOS~CORREZIONI~ИСПРАВЛЕНИЯ~CORREЗХES
 openshim_cat:Fixes:blurb~Switches for confirmed Redux engine defects. Leave these on unless you are chasing a regression.~Interrupteurs pour des dйfauts avйrйs du moteur Redux. Laissez-les activйs sauf si vous cherchez une rйgression.~Schalter fьr bestдtigte Redux-Engine-Fehler. Lassen Sie diese an, auЯer Sie jagen eine Regression.~Interruptores para defectos confirmados del motor de Redux. Dйjalos activados salvo que persigas una regresiуn.~Interruttori per difetti confermati del motore Redux. Lasciali attivi, salvo che tu stia cercando una regressione.~Переключатели подтвержденных дефектов движка Redux. Оставьте включенными, если не ищете регрессию.~Chaves para defeitos confirmados do motor do Redux. Deixe ligadas, a menos que esteja caзando uma regressгo.
 openshim_cat:Network:name~Network~Rйseau~Netzwerk~Red~Rete~Сеть~Rede
 openshim_cat:Network:title~NETWORK~RЙSEAU~NETZWERK~RED~RETE~СЕТЬ~REDE
 openshim_cat:Network:blurb~Connection route, the socket layer, lobby features and map lists.~Route de connexion, couche de sockets, fonctions du lobby et listes de cartes.~Verbindungsroute, Socket-Schicht, Lobby-Funktionen und Kartenlisten.~Ruta de conexiуn, capa de sockets, funciones de sala y listas de mapas.~Percorso di connessione, livello socket, funzioni della lobby ed elenchi mappe.~Маршрут соединения, сокетный слой, функции лобби и списки карт.~Rota de conexгo, a camada de sockets, recursos de sala e listas de mapas.
-openshim_cat:System:name~System~Systиme~~Sistema~Sistema~Система~Sistema
-openshim_cat:System:title~SYSTEM~SYSTИME~~SISTEMA~SISTEMA~СИСТЕМА~SISTEMA
+openshim_cat:System:name~System~Systиme~System~Sistema~Sistema~Система~Sistema
+openshim_cat:System:title~SYSTEM~SYSTИME~SYSTEM~SISTEMA~SISTEMA~СИСТЕМА~SISTEMA
 openshim_cat:System:blurb~OpenShim updates, career statistics and AutoSave.~Mises а jour OpenShim, statistiques de carriиre et sauvegarde auto.~OpenShim-Updates, Karrierestatistik und AutoSave.~Actualizaciones de OpenShim, estadнsticas y autoguardado.~Aggiornamenti di OpenShim, statistiche di carriera e Salvataggio Auto.~Обновления OpenShim, статистика карьеры и AutoSave.~Atualizaзхes do OpenShim, estatнsticas de carreira e AutoSave.
 openshim_cat:Reticle:name~Reticle~Rйticule~Fadenkreuz~Mira~Mirino~Прицел~Mira
 openshim_cat:Reticle:title~RETICLE / HIT FEEDBACK~RЙTICULE / RETOUR DE TOUCHE~FADENKREUZ / TREFFER-FEEDBACK~MIRA / AVISO DE IMPACTO~MIRINO / FEEDBACK COLPI~ПРИЦЕЛ / ОТКЛИК ПОПАДАНИЙ~MIRA / FEEDBACK DE ACERTO
@@ -572,9 +572,9 @@ openshim_cat:RadarFading:blurb~Cockpit radar opacity and timing, with an indepen
 openshim_cat:Effects:name~Effects~Effets~Effekte~Efectos~Effetti~Эффекты~Efeitos
 openshim_cat:Effects:title~VISUAL EFFECTS~EFFETS VISUELS~VISUELLE EFFEKTE~EFECTOS VISUALES~EFFETTI VISIVI~ВИЗУАЛЬНЫЕ ЭФФЕКТЫ~EFEITOS VISUAIS
 openshim_cat:Effects:blurb~Faction color jets, destruction chunks, muzzle effects, shell casings and person gibs.~Jets aux couleurs du camp, dйbris de destruction, effets de bouche, douilles et gibs de personnes.~Fraktionsfarbene Jets, Zerstцrungsbrocken, Mьndungseffekte, Patronenhьlsen und Personen-Gibs.~Jets de color de facciуn, trozos de destrucciуn, efectos de fogonazo, casquillos y restos de personas.~Getti in colore di fazione, pezzi di distruzione, effetti di bocca, bossoli e frammenti di persone.~Цветное пламя фракций, обломки, дульные эффекты, гильзы и части людей.~Jatos na cor da facзгo, pedaзos de destruiзгo, efeitos de cano, cбpsulas vazias e gibs de pessoas.
-openshim_cat:RTSCommands:name~RTS Commands~~~~~~
-openshim_cat:RTSCommands:title~RTS COMMANDS~~~~~~
-openshim_cat:RTSCommands:blurb~Unit command extras: target your own units and buildings, mixed-selection menus, area select, Hold, building at navs, build ghosts, power range and waypoint lines.~~~~~~
+openshim_cat:RTSCommands:name~RTS Commands~Commandes RTS~RTS-Befehle~Уrdenes RTS~Comandi RTS~Команды RTS~Comandos RTS
+openshim_cat:RTSCommands:title~RTS COMMANDS~COMMANDES RTS~RTS-BEFEHLE~УRDENES RTS~COMANDI RTS~КОМАНДЫ RTS~COMANDOS RTS
+openshim_cat:RTSCommands:blurb~Unit command extras: target your own units and buildings, mixed-selection menus, area select, Hold, building at navs, build ghosts, power range and waypoint lines.~Extras d'ordres d'unitйs : cibler vos unitйs et bвtiments, menus de sйlection mixte, sйlection de zone, Tenir, construction aux nav, fantфmes de construction, portйe d'йnergie et lignes de trajet.~Befehls-Extras fьr Einheiten: eigene Einheiten und Gebдude anvisieren, Menьs fьr gemischte Auswahl, Bereichsauswahl, Halten, Am Nav. bauen, Bau-Vorschau, Strom-Reichweite und Wegpunkt-Linien.~Extras de уrdenes de unidades: apunta a tus unidades y edificios, menъs de selecciуn mixta, selecciуn por бrea, Mantener, edificar en puntos, fantasmas de obra, alcance de energнa y lнneas de ruta.~Extra per i comandi alle unitа: bersaglio su unitа ed edifici propri, menu per selezioni miste, selezione area, Mantieni, costruzione ai nav, fantasmi degli edifici, portata energia e linee di percorso.~Дополнения к командам юнитов: выбор своих юнитов и зданий, меню смешанного выделения, выбор по области, «Стоять», строительство у маяков, призраки зданий, зона питания и линии маршрута.~Extras de comando de unidades: mire suas unidades e construзхes, menus de seleзгo mista, seleзгo por бrea, Manter, construзгo em navs, fantasmas de construзгo, alcance de energia e linhas de rota.
 ~~~~~~~
 openshim_ui:bans_unnamed~(unnamed)~(sans nom)~(unbenannt)~(sin nombre)~(senza nome)~(без имени)~(sem nome)
 openshim_ui:bans_confirm~Confirm~Confirmer~Bestдtigen~Confirmar~Conferma~Подтвердить~Confirmar
@@ -582,7 +582,7 @@ openshim_ui:bans_unban~Unban~Dйbannir~Entbannen~Quitar veto~Sbanna~Разбанить~Des
 openshim_ui:bans_empty~No banned players. Ban from the lobby or with /ban.~Aucun joueur banni. Bannissez via le lobby ou /ban.~Keine gebannten Spieler. Bannen in der Lobby oder mit /ban.~No hay jugadores vetados. Veta desde la sala o con /ban.~Nessun giocatore bannato. Banna dalla lobby o con /ban.~Нет забаненных игроков. Бан: кнопка в лобби или /ban.~Nenhum jogador banido. Bana pela sala ou com /ban.
 openshim_ui:bans_prev~Prev~Prйc.~Zurьck~Ant.~Prec.~Назад~Ant.
 openshim_ui:bans_next~Next~Suiv.~Weiter~Sig.~Succ.~Далее~Prуx.
-openshim_ui:bans_page~Page %s~~Seite %s~Pбgina %s~Pagina %s~Страница %s~Pбgina %s
+openshim_ui:bans_page~Page %s~Page %s~Seite %s~Pбgina %s~Pagina %s~Страница %s~Pбgina %s
 openshim_ui:bans_confirm_hint~Click Confirm to unban %s.~Cliquez sur Confirmer pour dйbannir %s.~Auf Bestдtigen klicken, um %s zu entbannen.~Pulsa Confirmar para quitar el veto a %s.~Clicca Conferma per sbannare %s.~Нажмите «Подтвердить», чтобы разбанить %s.~Clique em Confirmar para desbanir %s.
 openshim_ui:bans_unbanned~Unbanned %s. They can join your next game.~%s dйbanni. Il peut rejoindre votre prochaine partie.~%s entbannt. Der Spieler kann deinem nдchsten Spiel beitreten.~Se quitу el veto a %s. Puede unirse a tu prуxima partida.~%s sbannato. Puт unirsi alla tua prossima partita.~%s разбанен. Игрок сможет войти в вашу следующую игру.~%s desbanido. Pode entrar na sua prуxima partida.
 openshim_ui:bans_unban_failed~Could not unban %s; see openshim.log ([BAN]).~Impossible de dйbannir %s ; voir openshim.log ([BAN]).~%s konnte nicht entbannt werden; siehe openshim.log ([BAN]).~No se pudo quitar el veto a %s; consulta openshim.log ([BAN]).~Impossibile sbannare %s; vedi openshim.log ([BAN]).~Не удалось разбанить %s; см. openshim.log ([BAN]).~Nгo foi possнvel desbanir %s; veja openshim.log ([BAN]).
@@ -609,7 +609,7 @@ openshim_ui:row:MenuColors:desc~Live RGB sliders for the main menu image artwork
 openshim_ui:row:RadarFading:desc~Fade the complete cockpit radar while idle; native-visible alerts and activity reveal it. Optionally keep the compass visible.~Estompe tout le radar du cockpit au repos ; les alertes et l'activitй visibles nativement le font rйapparaоtre. Vous pouvez garder la boussole visible.~Blendet das komplette Cockpit-Radar im Leerlauf aus; sichtbare native Warnungen und Aktivitдt blenden es ein. Der Kompass kann sichtbar bleiben.~Atenъa todo el radar de la cabina en reposo; las alertas y la actividad visibles de forma nativa lo muestran. Opcionalmente mantiene visible la brъjula.~Sfuma l'intero radar della cabina quando inattivo; allarmi e attivitа visibili nativamente lo mostrano. Si puт mantenere visibile la bussola.~Затухание всего кокпитного радара в покое; видимые штатно сигналы и активность возвращают его. Компас можно оставить видимым.~Esmaece o radar completo da cabine quando inativo; alertas e atividade visнveis nativamente o revelam. Opcionalmente mantйm a bъssola visнvel.
 openshim_ui:row:VisualEffects:desc~Jet flames, emissive pulse, star twinkle, death chunks, muzzle flashes and recoil, shell casings and skinned gibs.~Flammes de jets, pulsation йmissive, scintillement des йtoiles, dйbris de mort, flashs de bouche et recul, douilles et gibs squelettiques.~Jet-Flammen, Leuchtpuls, Sternfunkeln, Zerstцrungsbrocken, Mьndungsfeuer und RьckstoЯ, Patronenhьlsen und Skinned Gibs.~Llamas de jets, pulso emisivo, parpadeo de estrellas, trozos de muerte, fogonazos y retroceso, casquillos y restos de personas.~Fiamme dei getti, pulsazione emissiva, scintillio delle stelle, pezzi di distruzione, lampi e rinculo delle bocche, bossoli e frammenti di persone.~Пламя реактивных машин, пульсация свечения, мерцание звезд, обломки, дульное пламя и отдача, гильзы и части людей.~Chamas de jato, pulso emissivo, cintilar de estrelas, pedaзos de morte, flashes de cano e recuo, cбpsulas vazias e gibs com skinning.
 openshim_ui:row:BannedPlayers:desc~Lists the players you have banned as host; Unban removes one immediately.~Liste les joueurs que vous avez bannis en tant qu'hфte ; Dйbannir en retire un immйdiatement.~Listet die von Ihnen als Host gebannten Spieler; Entbannen hebt einen sofort auf.~Lista los jugadores que has vetado como anfitriуn; Quitar veto retira uno al instante.~Elenca i giocatori che hai bannato come host; Sbanna ne rimuove uno subito.~Список игроков, которых вы забанили как хост; «Разбанить» снимает бан сразу.~Lista os jogadores que vocк baniu como host; Desbanir remove um imediatamente.
-openshim_ui:row:RTSCommands:desc~Target your own units and buildings, mixed-selection command menus, area select, Hold and Build at Nav.~~~~~~
+openshim_ui:row:RTSCommands:desc~Target your own units and buildings, mixed-selection command menus, area select, Hold and Build at Nav.~Cibler vos unitйs et bвtiments, menus d'ordres pour sйlection mixte, sйlection de zone, Tenir et Construire au nav.~Eigene Einheiten und Gebдude anvisieren, Befehlsmenьs fьr gemischte Auswahl, Bereichsauswahl, Halten und Am Nav. bauen.~Apunta a tus unidades y edificios, menъs de уrdenes de selecciуn mixta, selecciуn por бrea, Mantener y Edificar en punto.~Bersaglio su unitа ed edifici propri, menu comandi per selezioni miste, selezione area, Mantieni e Costruisci a nav.~Выбор своих юнитов и зданий, меню команд смешанного выделения, выбор по области, «Стоять» и «Строить у маяка».~Mire suas unidades e construзхes, menus de comando de seleзгo mista, seleзгo por бrea, Manter e Construir no Nav.
 openshim_ui:render_profile_dx9_desc~Enhanced requires DX11; on DX9 it falls back to Redux (Stock). Retro and Redux work on both. Your choice is kept for DX11.~Enhanced nйcessite DX11 ; sous DX9 il revient а Redux (Stock). Retro et Redux fonctionnent sur les deux. Votre choix est conservй pour DX11.~Enhanced benцtigt DX11; unter DX9 fдllt es auf Redux (Standard) zurьck. Retro und Redux laufen auf beiden. Ihre Wahl bleibt fьr DX11 erhalten.~Mejorado requiere DX11; en DX9 recurre a Redux (Original). Retro y Redux funcionan en ambos. Tu elecciуn se conserva para DX11.~Enhanced richiede DX11; su DX9 ripiega su Redux (Originale). Retro e Redux funzionano su entrambi. La tua scelta resta per DX11.~Enhanced требует DX11; на DX9 он переключается на Redux (Stock). Retro и Redux работают на обоих. Ваш выбор сохраняется для DX11.~Enhanced exige DX11; no DX9 volta para Redux (Original). Retro e Redux funcionam nos dois. Sua escolha й mantida para o DX11.
 openshim_ui:category_hint~Click a value to change it. Point at a setting to read what it does.~Cliquez sur une valeur pour la changer. Pointez un rйglage pour lire son effet.~Klicken Sie auf einen Wert, um ihn zu дndern. Zeigen Sie auf eine Einstellung, um ihre Wirkung zu lesen.~Haz clic en un valor para cambiarlo. Apunta a un ajuste para leer quй hace.~Clicca un valore per cambiarlo. Punta un'impostazione per leggere cosa fa.~Нажмите на значение, чтобы изменить его. Наведите на параметр, чтобы прочитать, что он делает.~Clique em um valor para alterб-lo. Aponte para uma opзгo para ver o que ela faz.
 openshim_ui:restart_note~* Takes effect after restarting Battlezone.~* Prend effet aprиs le redйmarrage de Battlezone.~* Wirkt nach einem Neustart von Battlezone.~* Surte efecto tras reiniciar Battlezone.~* Ha effetto dopo il riavvio di Battlezone.~* Вступает в силу после перезапуска Battlezone.~* Vale apуs reiniciar o Battlezone.
@@ -626,7 +626,7 @@ openshim_ui:status_next_use~  (takes effect the next time it is used)~  (prend e
 openshim_ui:status_applied~  (applied)~  (appliquй)~  (angewendet)~  (aplicado)~  (applicato)~  (применено)~  (aplicado)
 openshim_ui:restart_failed~Could not restart (%s). Quit the game to install the update.~Redйmarrage impossible (%s). Quittez le jeu pour installer la mise а jour.~Neustart nicht mцglich (%s). Beenden Sie das Spiel, um das Update zu installieren.~No se pudo reiniciar (%s). Sal del juego para instalar la actualizaciуn.~Impossibile riavviare (%s). Esci dal gioco per installare l'aggiornamento.~Не удалось перезапустить (%s). Выйдите из игры, чтобы установить обновление.~Nгo foi possнvel reiniciar (%s). Saia do jogo para instalar a atualizaзгo.
 openshim_ui:preview_idle~Idle~Repos~Leerlauf~Reposo~Inattivo~Покой~Inativo
-openshim_ui:preview_contact~Contact~~Kontakt~Contacto~Contatto~Контакт~Contato
+openshim_ui:preview_contact~Contact~Contact~Kontakt~Contacto~Contatto~Контакт~Contato
 openshim_ui:preview_sample_hit~Sample hit~Touche exemple~Beispieltreffer~Impacto de ejemplo~Colpo di esempio~Пример попадания~Acerto de exemplo
 openshim_ui:preview_attackers_1~1 attacker~1 attaquant~1 Angreifer~1 atacante~1 attaccante~1 атакующий~1 atacante
 openshim_ui:preview_attackers_2~2 attackers~2 attaquants~2 Angreifer~2 atacantes~2 attaccanti~2 атакующих~2 atacantes
@@ -647,7 +647,7 @@ openshim_ui:update_notice_title~OpenShim update ready~Mise а jour OpenShim prкte
 openshim_ui:career_perfect~perfect~parfait~perfekt~perfecto~perfetto~идеально~perfeito
 openshim_ui:career_overall~OVERALL~TOTAL~GESAMT~GENERAL~TOTALE~ИТОГО~GERAL
 openshim_ui:career_single_player~SINGLE PLAYER~UN JOUEUR~EINZELSPIELER~UN JUGADOR~GIOCATORE SINGOLO~ОДИН ИГРОК~UM JOGADOR
-openshim_ui:career_multiplayer~MULTIPLAYER~MULTIJOUEUR~MEHRSPIELER~MULTIJUGADOR~~МУЛЬТИПЛЕЕР~MULTIJOGADOR
+openshim_ui:career_multiplayer~MULTIPLAYER~MULTIJOUEUR~MEHRSPIELER~MULTIJUGADOR~MULTIPLAYER~МУЛЬТИПЛЕЕР~MULTIJOGADOR
 openshim_ui:career_kills_by_type~KILLS BY TYPE~TUЙS PAR TYPE~ABSCHЬSSE NACH TYP~BAJAS POR TIPO~UCCISIONI PER TIPO~УБИЙСТВА ПО ТИПАМ~ABATES POR TIPO
 openshim_ui:career_tracking_off~Stats tracking is off.~Le suivi des stats est dйsactivй.~Statistikerfassung ist aus.~El registro de estadнsticas estб desactivado.~Il tracciamento delle statistiche и disattivato.~Учёт статистики выключен.~O registro de estatнsticas estб desligado.
 openshim_ui:career_tracking_off_how1~Turn it on: OpenShim Options,~Activez-le : Options OpenShim,~Aktivieren: OpenShim-Optionen,~Actнvalo: Opciones OpenShim,~Attivalo: Opzioni OpenShim,~Включить: Параметры OpenShim,~Ative em: Opзхes do OpenShim,
@@ -690,7 +690,7 @@ openshim_ui:lan_off~Off~Dйs.~Aus~No~No~Выкл~Desl.
 openshim_ui:lan_found~%s found~%s trouvй(s)~%s gefunden~%s encontrado(s)~%s trovato/i~Найдено: %s~%s encontrado(s)
 openshim_ui:lan_title_noauth~LAN (NO SIGN-IN)~LAN (SANS CONNEXION)~LAN (OHNE ANMELDUNG)~LAN (SIN INICIO DE SESIУN)~LAN (SENZA ACCESSO)~LAN (БЕЗ ВХОДА)~LAN (SEM LOGIN)
 openshim_ui:lan_title_tools~LOCAL HOST TOOLS~OUTILS HФTE LOCAL~LOKALE HOST-TOOLS~HERRAMIENTAS DE ANFITRIУN LOCAL~STRUMENTI HOST LOCALE~ЛОКАЛЬНЫЙ ХОСТ~FERRAMENTAS DE HOST LOCAL
-openshim_ui:lan_hdr_host~HOST~HФTE~~ANFITRIУN~~ХОСТ~
+openshim_ui:lan_hdr_host~HOST~HФTE~HOST~ANFITRIУN~HOST~ХОСТ~HOST
 openshim_ui:lan_hdr_games_steam~GAMES ON THIS NETWORK AND STEAM~PARTIES SUR CE RЙSEAU ET STEAM~SPIELE IN DIESEM NETZWERK UND STEAM~PARTIDAS EN ESTA RED Y STEAM~PARTITE SU QUESTA RETE E STEAM~ИГРЫ В ЭТОЙ СЕТИ И STEAM~PARTIDAS NESTA REDE E STEAM
 openshim_ui:lan_hdr_games~GAMES ON THIS NETWORK~PARTIES SUR CE RЙSEAU~SPIELE IN DIESEM NETZWERK~PARTIDAS EN ESTA RED~PARTITE SU QUESTA RETE~ИГРЫ В ЭТОЙ СЕТИ~PARTIDAS NESTA REDE
 openshim_ui:lan_hdr_join~JOIN BY ADDRESS~REJOINDRE PAR ADRESSE~PER ADRESSE BEITRETEN~UNIRSE POR DIRECCIУN~UNISCITI PER INDIRIZZO~ВХОД ПО АДРЕСУ~ENTRAR POR ENDEREЗO
@@ -708,7 +708,7 @@ openshim_ui:mapfilter_search_placeholder~Search: click here~Recherche : cliquez 
 openshim_ui:overflow_all_category~All %s~Tous : %s~Alle: %s~Todo: %s~Tutti: %s~Все: %s~Todos: %s
 openshim_ui:prelobby_custom_note~Custom servers never receive your sign-in ticket.~Les serveurs personnalisйs ne reзoivent jamais votre ticket de connexion.~Eigene Server erhalten niemals dein Anmelde-Ticket.~Los servidores personalizados nunca reciben tu ticket de inicio de sesiуn.~I server personalizzati non ricevono mai il tuo ticket di accesso.~Пользовательские серверы никогда не получают ваш билет входа.~Servidores personalizados nunca recebem seu ticket de login.
 openshim_ui:prelobby_local_note~Start the dedicated server on this PC first.~Lancez d'abord le serveur dйdiй sur ce PC.~Starte zuerst den dedizierten Server auf diesem PC.~Inicia primero el servidor dedicado en este PC.~Avvia prima il server dedicato su questo PC.~Сначала запустите выделенный сервер на этом ПК.~Inicie primeiro o servidor dedicado neste PC.
-openshim_ui:prelobby_server_local~Local~~Lokal~~Locale~Локальный~
+openshim_ui:prelobby_server_local~Local~Local~Lokal~Local~Locale~Локальный~Local
 openshim_ui:prelobby_server_custom~Custom~Perso.~Eigener~Personal.~Person.~Свой~Person.
 openshim_ui:prelobby_lan_note_noauth~LAN host selected; no platform sign-in.~Hфte LAN sйlectionnй ; pas de connexion а une plateforme.~LAN-Host gewдhlt; keine Plattform-Anmeldung.~Anfitriуn LAN seleccionado; sin inicio de sesiуn de plataforma.~Host LAN selezionato; nessun accesso alla piattaforma.~Выбран LAN-хост; вход в платформу не нужен.~Host LAN selecionado; sem login de plataforma.
 openshim_ui:prelobby_lan_note_tools~LAN host selected; Local host tools changes the address.~Hфte LAN sйlectionnй ; Outils hфte local change l'adresse.~LAN-Host gewдhlt; Lokale Host-Tools дndert die Adresse.~Anfitriуn LAN seleccionado; Herramientas de anfitriуn local cambia la direcciуn.~Host LAN selezionato; Strumenti host locale cambia l'indirizzo.~Выбран LAN-хост; адрес меняется в разделе «Локальный хост».~Host LAN selecionado; Ferramentas de host local muda o endereзo.
@@ -724,11 +724,11 @@ openshim_ui:prelobby_err_nickname_not_saved~Nickname not saved~Pseudo non enregi
 openshim_ui:prelobby_server_saved_restart~Server saved; restart to connect to it~Serveur enregistrй ; redйmarrez pour vous y connecter~Server gespeichert; Neustart zum Verbinden nцtig~Servidor guardado; reinicia para conectarte~Server salvato; riavvia per connetterti~Сервер сохранён; перезапустите для подключения~Servidor salvo; reinicie para conectar
 openshim_ui:prelobby_switching_server~Switching server, retrying...~Changement de serveur, nouvel essai...~Server wird gewechselt, neuer Versuch...~Cambiando de servidor, reintentando...~Cambio server, nuovo tentativo...~Смена сервера, повтор...~Trocando de servidor, tentando de novo...
 openshim_ui:prelobby_err_not_ready~Still not ready (check sign-in or network)~Toujours pas prкt (vйrifiez la connexion ou le rйseau)~Noch nicht bereit (Anmeldung oder Netzwerk prьfen)~Aъn no estб listo (revisa el inicio de sesiуn o la red)~Ancora non pronto (controlla accesso o rete)~Всё ещё не готов (проверьте вход или сеть)~Ainda nгo estб pronto (verifique login ou rede)
-openshim_ui:prelobby_title~MULTIPLAYER~MULTIJOUEUR~MEHRSPIELER~MULTIJUGADOR~~МУЛЬТИПЛЕЕР~MULTIJOGADOR
+openshim_ui:prelobby_title~MULTIPLAYER~MULTIJOUEUR~MEHRSPIELER~MULTIJUGADOR~MULTIPLAYER~МУЛЬТИПЛЕЕР~MULTIJOGADOR
 openshim_ui:prelobby_hdr_flag~FLAG~DRAPEAU~FLAGGE~BANDERA~BANDIERA~ФЛАГ~BANDEIRA
-openshim_ui:prelobby_hdr_pilot~PILOT~PILOTE~~PILOTO~PILOTA~ПИЛОТ~PILOTO
-openshim_ui:prelobby_hdr_server~SERVER~SERVEUR~~SERVIDOR~~СЕРВЕР~SERVIDOR
-openshim_ui:prelobby_hdr_status~STATUS~ЙTAT~~ESTADO~STATO~СТАТУС~
+openshim_ui:prelobby_hdr_pilot~PILOT~PILOTE~PILOT~PILOTO~PILOTA~ПИЛОТ~PILOTO
+openshim_ui:prelobby_hdr_server~SERVER~SERVEUR~SERVER~SERVIDOR~SERVER~СЕРВЕР~SERVIDOR
+openshim_ui:prelobby_hdr_status~STATUS~ЙTAT~STATUS~ESTADO~STATO~СТАТУС~STATUS
 openshim_ui:prelobby_test_redirect~Server: %s (test redirect)~Serveur : %s (redirection de test)~Server: %s (Testumleitung)~Servidor: %s (redirecciуn de prueba)~Server: %s (reindirizzamento di test)~Сервер: %s (тестовое перенаправление)~Servidor: %s (redirecionamento de teste)
 openshim_ui:prelobby_lan_button~LAN (no sign-in)~LAN (sans connexion)~LAN (ohne Anmeldung)~LAN (sin inicio de sesiуn)~LAN (senza accesso)~LAN (без входа)~LAN (sem login)
 openshim_ui:prelobby_local_tools_button~Local host tools~Outils hфte local~Lokale Host-Tools~Herram. anfitriуn local~Strumenti host locale~Локальный хост~Ferram. de host local
