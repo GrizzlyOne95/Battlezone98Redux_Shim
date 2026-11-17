@@ -1124,7 +1124,7 @@ ShadowFarDistance = 256
 
 
 [Terrain]
-; Micro Relief in the OpenShim settings page. Off by default (opt-in):
+; Terrain Tessellation in the OpenShim settings page. Off by default (opt-in):
 ; a 2026-10-24 measurement on an RTX 5080 at 4K roughly halved the frame rate.
 ; Turning it on shows terrain paint height (rock, cracks, craters) using
 ; factor-4 DX11 tessellation and a 0.25-world-unit maximum offset. Visual only:
