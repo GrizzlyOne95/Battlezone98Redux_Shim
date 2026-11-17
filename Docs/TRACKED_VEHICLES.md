@@ -7,7 +7,8 @@ ODF without `classLabel = "tracked"` is untouched.
 
 Status: phase 1 (contact physics) and phase 2 (tread clips and
 `treadSound`) implemented and live-checked; phase 2b (rotating turret,
-`turretName`) implemented and live-checked with AI units; see "Verification" below.
+`turretName`) implemented and live-checked with AI units; phase 3
+(multiplayer) implemented, not yet live-tested; see "Verification" below.
 
 ## ODF
 
@@ -152,15 +153,60 @@ node names.
   keep them inside the turret node. Hardpoints
   under the turret fire exactly as on a stock tank; hull-mounted ones
   still aim along the turret (the stock aim is root-relative).
-- **Single-player only.** The player-or-AI hull rule uses the local
-  player flag, so another human's turret tank on a multiplayer peer runs
-  the AI hull rule and the two machines disagree. Phase 3 (multiplayer)
-  must gate on "piloted by any human" and sync the turret angle.
+- **Multiplayer.** Only the owner runs the hull rule, so the local player
+  flag is right there; other peers show the turret angle the owner sends
+  (see "Multiplayer" below).
 - **Save/load.** The turret angle is not saved. A loaded game starts with
   the hull under the turret's saved heading.
 - **Fails closed.** If `Obj76::SyncNode` does not resolve, or the node is
   missing, unreadable or the root has more than 16 children, the unit runs
   as a plain tracked vehicle; one `TRACKED` line names why.
+
+## Multiplayer
+
+Every peer in a game that uses tracked units must run OpenShim and the
+mod that ships the ODF. A stock peer does not know `classLabel =
+"tracked"`, so it fails to load the map or silently lacks the unit; this
+is deliberate (the label is not mapped onto a stock class). Maps without
+tracked units are unaffected.
+
+- **The owner simulates.** On the machine that owns the unit (its pilot's
+  machine, or the host for AI) everything above runs unchanged.
+- **Replicas dead-reckon.** On the other peers the unit is a remote
+  replica (network game and `DistributedObject::IsRemote`). The stock
+  `GameObject::Simulate` re-runs the Simulate slot from the last received
+  pose in up to five sub-steps each frame. On a replica that slot skips
+  the contact model and the hull rule, zeroes accel and alpha (they are
+  not replicated), and runs the stock tail, so the unit coasts on the
+  replicated velocity and omega until the next update. Tread clips and
+  `treadSound` follow that motion: the speed along the hull's front and
+  the hull's yaw rate (the replica's yaw rate less the owner's last
+  received turret slew rate, 0 when that is more than 2 s old).
+- **Turret angle.** The engine does not replicate it. Each peer
+  broadcasts the turrets it owns in one OpenShim net message per frame,
+  tag `'T','Y'`: a 4-byte header (tag, version 1, u8 record count 1-16)
+  and 12-byte records (u32 object id, f32 delta, f32 rate), at most 196
+  bytes. A record is keyed by the object's stock DistributedObject id
+  (the id a Lua handle crosses the network with). A turret's record goes
+  in when its angle moves more than 0.01 rad or its rate more than
+  0.05 rad/s, at most five times a second, and at least once a second
+  while the turret exists. The frame boundary is found by seeing an
+  owned turret's PostSimulate a second time, so a batch leaves one frame
+  late at most. A replica carries the
+  last received angle forward by its rate (at most 0.25 s) and slews its
+  displayed angle toward it at up to twice `yawRate`, once per frame;
+  until the first message arrives, and when the last one is more than
+  5 s old, it holds its angle (0 at spawn). A record with id 0, a delta
+  beyond +-(pi + 0.001) or a non-finite one, or a non-finite rate or one
+  above 1.01 times the largest `yawRate` is skipped; a bad header (count
+  0 or above 16, or a short message) drops the message. The received
+  angles are cleared when the network-game flag drops. A stock peer's
+  `Net::Receive` ignores the unknown tag.
+- **Fails closed.** Without the `DistributedObjectIsRemote` and
+  `IsNetGameFlag` rows every object runs the owner model, as before;
+  without `DistributedObject::GetLocalID`, `Net::BroadcastSend` or the
+  receive handler, replicas dead-reckon with the turret at delta 0. One
+  `TRACKED` line at install names the multiplayer state.
 
 ## How it works
 
@@ -227,8 +273,9 @@ Treads fail closed on their own: they also need `Sound::InitControl`,
 engine address, and twelve OgreMain exports (Entity animation-state lookup,
 AnimationState length/time/addTime/enabled/loop, Entity::getSkeleton,
 Skeleton get/setBlendMode, the Entity vtable). If any
-is missing, slots 0, 3, 4 and 16 stay plain thunks, one warning names it,
-and the tracked physics runs unchanged. A fault inside an Ogre clip call
+is missing, slots 3 and 4 stay plain thunks (slot 16 too, unless the
+multiplayer turret sync uses it), one warning names it, and the tracked
+physics runs unchanged. A fault inside an Ogre clip call
 or a blend-mode call turns tread clips off for the session (one warning).
 
 The `TRACKED` log component records the install, one line per tracked
@@ -351,6 +398,32 @@ SaveGame and reload:
   limits, a turret node directly under the root, hull-mounted weapons.
   Frame captures show the model intact (turret seated on the hull) but
   are too far away to measure the turret angle.
+
+Phase 3 (multiplayer): not yet live-tested. Static only: the decompiled
+GameObject::Simulate (0x004DEEC0) calls the Simulate slot for remote
+objects in up to five sub-steps after copying true_transform, and the
+PostSimulate wrapper (0x004DF370) calls slot 16 once with the frame time
+step and no remote test; `tests/tracked_vehicle_net_tests.cpp` covers the
+batch packet, the send policy and batching, the received-angle table, the
+replica slew and the replica tread speeds.
+Live checklist (two OpenShim peers, both with the mod):
+
+1. Install logs `multiplayer: replica dead reckoning on, turret sync on`.
+2. A tracked unit driven by the host moves smoothly on the guest and
+   vice versa (no hover bob, no jitter at rest); its tread clips and
+   sound follow its motion on the other peer.
+3. The owner logs `first turret angle queued`; the other peer logs
+   `replica turret follows the owner`; the turret on the replica matches
+   the owner's within a few degrees while slewing and exactly at rest.
+4. An AI turret tank owned by the host engages a target; the guest sees
+   the turret turn and the hull hold.
+5. A tracked unit that changes owner (its player leaves) keeps its
+   turret angle and starts sending. Check the unit's dwLocalID is
+   unchanged after the owner change: the `id=0x...` in the new owner's
+   `first turret angle queued` line matches the one in the earlier
+   `replica turret follows the owner` line.
+6. A map without tracked units plays as before; a stock peer joining a
+   map with tracked units fails as described under "Multiplayer".
 
 Bugs found in phase 2: the Entity vptr check used the wrong export
 (`??_7Entity@Ogre@@6B@` instead of the ShadowCaster-base vftable), so no
