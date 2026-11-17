@@ -5039,7 +5039,7 @@
       "name": "UnitTurboThrottleBlock",
       "address": "0x00601C92",
       "expected": "8B 45 90 D9 58 08 8B 4D 90 F3 0F 10 41 0C 0F 2F 05 04 26 8A 00 72 1A F3 0F 10 05 C8 25 8A 00 0F 2F 45 AC 76 0C C7 85 78 FF FF FF 01 00 00 00 EB 0A C7 85 78 FF FF FF 00 00 00 00 8B 55 90 8B 85 78 FF FF FF",
-      "identity": "per-unit turbo decision in the craft throttle update: begin hook +0, comiss [tolerance] operand +0x11, second gate jbe +0x23, end hook +0x3B"
+      "identity": "per-unit turbo decision in the craft throttle update: begin hook +0, comiss [tolerance] operand +0x11, movss [gate] operand +0x1B, second gate jbe +0x23"
     },
     {
       "name": "FlagDisplayVtable",

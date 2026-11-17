@@ -32,6 +32,8 @@ static const char* const kShimSettingsOnOffLabels[] = { "On", "Off" };
 static const char* const kShimSettingsInvertedOnOffValues[] = { "0", "1" };
 static const char* const kShimSettingsLegacyTankAiValues[] = { "0", "1", "2" };
 static const char* const kShimSettingsLegacyTankAiLabels[] = { "Off", "All teams", "AI teams only" };
+static const char* const kShimSettingsTurboValues[] = { "0", "1", "2", "3" };
+static const char* const kShimSettingsTurboLabels[] = { "Off", "All teams", "Enemy teams only", "My team only" };
 static const char* const kShimSettingsRtsHoldValues[] = { "2", "1", "0" };
 static const char* const kShimSettingsRtsHoldLabels[] = { "Key + Shift Menu", "Key Only", "Off" };
 static const char* const kShimSettingsAutoSaveIntervalValues[] = { "60", "120", "180", "300", "600" };
@@ -757,9 +759,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Selected units show a line on the ground to where their current order takes them, and a "
       "fainter one on to their next order. Only you see it." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
-      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      kShimSettingsTurboValues, kShimSettingsTurboLabels, 4, 0,
       ShimSettingApplyGroup::GlobalTurbo,
-      "Turbo available on all drivable units. Single player only." },
+      "Turbo available on drivable units of all teams, enemy teams only or your team only. "
+      "A mission script's turbo setting wins. Single player only." },
     { "No Damage Slowdown", "SinglePlayer", "NoDamageSlowdown", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::NoDamageSlowdown,

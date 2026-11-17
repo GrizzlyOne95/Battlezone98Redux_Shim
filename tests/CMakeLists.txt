@@ -564,6 +564,10 @@ openshim_add_test(bool_token_tests STD 20 SOURCES
     bool_token_tests.cpp
 )
 
+openshim_add_test(global_turbo_mode_tests STD 17 SOURCES
+    global_turbo_mode_tests.cpp
+)
+
 openshim_add_test(shield_push_mode_tests STD 17 SOURCES
     shield_push_mode_tests.cpp
 )

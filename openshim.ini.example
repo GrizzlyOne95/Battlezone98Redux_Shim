@@ -3033,8 +3033,22 @@ AiOdfGameplayTuning = 0
 ; Trace: OPENSHIM_TRACE_LEGACY_AI=1 (logs [LEGACY] state transitions)
 LegacyTankAi = 0
 
-; Make turbo available globally on drivable units.
-; Accepted: boolean. Default: OFF.
+; Make turbo available on drivable units, optionally only for some teams.
+; 0 = off, 1 = every team, 2 = enemy teams only (teams hostile to you, by the
+; game's own alliance rules: allies and neutral team 0 are left out),
+; 3 = my team only. true/false still read as 1/0.
+;
+; A mission script wins: exu.SetUnitTurbo on one unit beats this filter, and
+; exu.SetGlobalTurbo(true/false) means every team / off for that mission. The
+; value here comes back when the mission ends. Changing it on the options page
+; mid-mission applies at once, unless the mission has called
+; exu.SetGlobalTurbo; then it applies when that mission ends.
+; exu.GetGlobalTurbo returns true for any value other than 0.
+;
+; Changes stock content, so it never runs in a network game.
+;
+; Accepted: 0, 1, 2, 3. Default: 0 (OFF). Also on the options page as
+; Global Turbo.
 Turbo = 0
 
 ; Throttle threshold used by the global turbo path.
