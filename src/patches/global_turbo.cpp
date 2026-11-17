@@ -280,6 +280,36 @@ namespace BZROpenShim
             return fn;
         }
 
+        // The current player GameObject (HudFadeGetPlayer: returns the
+        // global at 0x00917AFC; the same getter contextual_hud uses).
+        // Player handles have the top bit set (0xFFF00001 seen live), so
+        // the handle path cannot be trusted for this.
+        using FnCurrentPlayer = void* (__cdecl*)();
+        static FnCurrentPlayer ResolveTurboCurrentPlayer()
+        {
+            static const FnCurrentPlayer fn = [] {
+                uint32_t getter = 0;
+                const HookEngine::EngineRow rows[] = { { "HudFadeGetPlayer", &getter } };
+                if (!HookEngine::BindEngineRows("Turbo player object", rows))
+                    return static_cast<FnCurrentPlayer>(nullptr);
+                return reinterpret_cast<FnCurrentPlayer>(static_cast<uintptr_t>(getter));
+            }();
+            return fn;
+        }
+
+        // SEH leaf: the getter reads an engine global.
+        static void* TryGetTurboCurrentPlayer(FnCurrentPlayer getter)
+        {
+            __try
+            {
+                return getter ? getter() : nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
         // SEH leaf: no RAII locals. Bit t set when EnemyP(player, t).
         static bool TryReadHostileTeamMask(FnGameObjectTeamRelation enemyP, void* player,
                                            uint32_t& outMask)
@@ -309,10 +339,17 @@ namespace BZROpenShim
         {
             int playerTeam = 1;
             int playerHandle = 0;
-            if (g_BzrFn_GetPlayerHandle && g_BzrFn_GetTeamNum)
+            void* player = TryGetTurboCurrentPlayer(ResolveTurboCurrentPlayer());
+            const int objectTeam = player ? GetGameObjectActualTeam(player) : INT_MIN;
+            if (objectTeam > 0 && objectTeam < GlobalTurboMode::kTeamCount)
             {
+                playerTeam = objectTeam;
+            }
+            else if (g_BzrFn_GetPlayerHandle && g_BzrFn_GetTeamNum)
+            {
+                // Handles carry the top bit, so test != 0, not > 0.
                 playerHandle = g_BzrFn_GetPlayerHandle();
-                const int team = playerHandle > 0 ? g_BzrFn_GetTeamNum(playerHandle) : 0;
+                const int team = playerHandle != 0 ? g_BzrFn_GetTeamNum(playerHandle) : 0;
                 if (team > 0)
                     playerTeam = team;
             }
@@ -321,10 +358,28 @@ namespace BZROpenShim
             if (g_GlobalTurboMode != Mode::EnemyTeams)
                 return;
             const FnGameObjectTeamRelation enemyP = ResolveTurboEnemyP();
-            void* player = playerHandle > 0 ? GameObjectFromHandleGog(playerHandle) : nullptr;
             uint32_t mask = 0;
-            if (enemyP && player && TryReadHostileTeamMask(enemyP, player, mask))
+            const bool read = enemyP && player && TryReadHostileTeamMask(enemyP, player, mask);
+            if (read)
                 g_TurboHostileMask.store(mask, std::memory_order_relaxed);
+
+            // Change-only: the per-unit decision is silent, so log what it
+            // will see whenever the inputs move.
+            static int s_loggedTeam = -1, s_loggedHandle = -1;
+            static uint32_t s_loggedMask = ~0u;
+            static bool s_loggedRead = false;
+            if (playerTeam != s_loggedTeam || playerHandle != s_loggedHandle ||
+                mask != s_loggedMask || read != s_loggedRead)
+            {
+                s_loggedTeam = playerTeam;
+                s_loggedHandle = playerHandle;
+                s_loggedMask = mask;
+                s_loggedRead = read;
+                Log(L"[TURBO] enemy filter: player=0x%08X obj=%p team=%d enemyP=%hs read=%hs mask=0x%04X\n",
+                    static_cast<uint32_t>(playerHandle), player, playerTeam,
+                    enemyP ? "yes" : "no", read ? "yes" : "no",
+                    g_TurboHostileMask.load(std::memory_order_relaxed));
+            }
         }
 
         static void SetGlobalTurboMode(Mode mode, const char* source)
