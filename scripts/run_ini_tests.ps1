@@ -419,6 +419,23 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Gameplay/RtsCommandPings",
     "Gameplay/RtsArtilleryRange",
 
+    # RTS command extras: nothing happens until the player presses one of the
+    # RTS keys or picks a unit-menu entry, and then only the stock per-unit
+    # orders go out, to the units whose own menu offers them. Hold uses the
+    # native hold and stands down in network games. Default on by design.
+    "Gameplay/RtsRemoteTarget",
+    "Gameplay/RtsSmartCommandMenu",
+    "Gameplay/RtsSmartRepairReload",
+    "Gameplay/RtsAreaSelect",
+    "Gameplay/RtsBuildAtNav",
+
+    # RTS placement aids: local-only ghosts, rings and lines while placing a
+    # building or with units selected. Write nothing the game reads. Default
+    # on by design.
+    "Gameplay/RtsBuildGhost",
+    "Gameplay/RtsPowerRange",
+    "Gameplay/RtsWaypointLines",
+
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
     "Fixes/AiMultiProducerMakers",
@@ -614,6 +631,15 @@ $shippingPolicyChecks = @{
     "Gameplay/GroupStrip" = "1"
     "Gameplay/RtsCommandPings" = "1"
     "Gameplay/RtsArtilleryRange" = "1"
+    "Gameplay/RtsRemoteTarget" = "1"
+    "Gameplay/RtsSmartCommandMenu" = "1"
+    "Gameplay/RtsSmartRepairReload" = "1"
+    "Gameplay/RtsAreaSelect" = "1"
+    "Gameplay/RtsHold" = "2"
+    "Gameplay/RtsBuildAtNav" = "1"
+    "Gameplay/RtsBuildGhost" = "1"
+    "Gameplay/RtsPowerRange" = "1"
+    "Gameplay/RtsWaypointLines" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }
