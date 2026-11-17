@@ -1317,6 +1317,16 @@
       "identity": "Floor query (terrain plus object floors) on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): void __cdecl(int ignoreEntity, double x, double y, double z, float* floorY, Vec3* normal, int* floorObject), caller cleans 0x28 bytes. Stock HoverCraft::Simulate calls it at 0x004EC631 and 0x004EDDE6 with ignoreEntity = obj+0xF0 and the craft posit, then forms obj76+0xB4 + posit.y - 0.2 - floorY as its unpiloted ground clearance (0x004EDDFA-0x004EDE25). The body first samples terrain height and normal through 0x00785730 (call at 0x00444FB6), then tests object floors below y + 1; 0x004451D0 wraps it with ignoreEntity = 0. tracked_vehicle_class.cpp calls it, read-only, for each tread contact. Unique by whole-image scan 2026-11-16."
     },
     {
+      "name": "Obj76::SyncNode",
+      "pattern": "55 8B EC 83 EC 3C A1 ?? ?? ?? ?? 33 C5 89 45 FC 83 7D 08 00 0F 84 7F 01 00 00 8B 45 0C 50 8D 4D C4 51 E8",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00681A00",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Model node to Ogre sync on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413): void __cdecl(obj76* node, MAT_3D* local), caller cleans 8 bytes. Returns at once for a null node; otherwise sets the orientation (vtable +0x20, quaternion with x negated) and, unless node+0x84 == 0x28, the position (vtable +0x2C, (-x, y, z)) of the Ogre node at node+0xC8 and again of the one at node+0xCC. Stock HoverCraft::UpdateWeaponAim calls it after posing each weapon node (call at 0x004EB7A4) and the TurretTank simulate after posing its turret nodes. tracked_vehicle_class.cpp calls it for the turret node and the root children it re-poses. Unique by whole-image scan 2026-11-16."
+    },
+    {
       "name": "CollisionGrid::Objects",
       "pattern": "F2 0F 11 04 24 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 4D 98 51 8D 8D 6C FF FF FF E8",
       "offset": 7,

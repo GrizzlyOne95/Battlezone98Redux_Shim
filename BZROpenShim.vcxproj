@@ -162,6 +162,7 @@
     <ClInclude Include="include\tracked_vehicle_class.h" />
     <ClInclude Include="include\tracked_vehicle_physics.h" />
     <ClInclude Include="include\tracked_vehicle_treads.h" />
+    <ClInclude Include="include\tracked_vehicle_turret.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\cli_multiparam_parser.h" />
     <ClInclude Include="include\terrain_atlas_rect_repair.h" />

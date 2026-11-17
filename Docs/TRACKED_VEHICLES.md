@@ -6,7 +6,8 @@ by the ODF. There is no openshim.ini option, menu entry or feature flag; an
 ODF without `classLabel = "tracked"` is untouched.
 
 Status: phase 1 (contact physics) and phase 2 (tread clips and
-`treadSound`) implemented and live-checked; see "Verification" below.
+`treadSound`) implemented and live-checked; phase 2b (rotating turret,
+`turretName`) implemented and live-checked with AI units; see "Verification" below.
 
 ## ODF
 
@@ -99,6 +100,68 @@ engine's terrain collision (0x004AA1D0) probes, minus a skin of
 `g / stiffness`, so that probe stays just above the floor and the engine
 never has to clamp the hull.
 
+### Rotating turret
+
+A BZ2/BZCC assault-tank style turret, opt-in per class. The classLabel
+stays `tracked` (BZCC uses a separate `assaulttank` label; here the turret
+is one more `[TrackedClass]` key, so a tank gains or loses it without
+changing class):
+
+```ini
+[TrackedClass]
+turretName = "AGR11TUR" ; model node that turns; no turret when absent
+yawRate = 2.0           ; turret slew rate (rad/s); omegaTurret also read
+yawAlpha = 5.0          ; turret slew acceleration (rad/s^2); alphaTurret also read
+yawMin = -1.6           ; optional limits, radians relative to the hull,
+yawMax = 1.6            ; + = left; none when absent
+```
+
+`yawRate`/`yawAlpha`/`yawMin`/`yawMax` are BZCC's AssaultTankClass names
+and defaults; the BZ1 TurretTankClass names `omegaTurret`/`alphaTurret`
+are read too (the BZCC name wins when both are set). Rate is clamped to
+0.05..20, alpha to 0.1..200. Limits are radians, not BZCC-style degrees:
+limits outside +-pi or not including 0 are dropped with a `TRACKED` warning.
+With limits, an AI that is not moving never turns its hull toward a
+target outside them; it waits at the limit.
+`turretName` is matched case-insensitively against the model's 8-character
+node names.
+
+- **The root is the turret.** The object's own transform (obj76) points
+  where the turret points; the hull is a counter-rotated pose of the
+  root's direct child nodes. So the camera, reticle and stock weapon aim
+  (HoverCraft::UpdateWeaponAim poses each weapon node against the root)
+  follow the turret, ordnance leaves along it, and the stock AI's steering
+  aims it. This is what the stock BZ1 TurretTank does while deployed.
+- **Controls.** Steering (mouse) slews the turret at up to `yawRate`; the
+  strafe keys turn the hull (strafe right turns it right) and throttle
+  drives it along its own heading. The camera follows the turret. The
+  turret's rate is relative to the hull, so it turns with the hull.
+- **AI.** No new AI: the stock pilot steers the root (now the turret) at
+  its target or waypoint, and its throttle/strafe are read as a move
+  intent in the turret frame. The hull turns toward that intent (steer
+  2 per radian of error) and drives once it roughly faces it; a reverse
+  intent backs up. A unit attacking from where it stands turns only its
+  turret; one that closes in turns its hull toward the target as it moves.
+- **Model.** Put the turret node anywhere below the root. Every direct
+  child of the root is yawed with the hull (all of them, so LOD copies
+  follow); keep weapon and gimbal nodes off that level. The turret node is
+  re-posed to keep its rest heading relative to the root; a turret that is
+  itself a direct child of the root also rides the hull's ring (its
+  position turns with the hull). Only the first node matching
+  `turretName` is posed, so LOD copies of the turret turn with the hull;
+  keep them inside the turret node. Hardpoints
+  under the turret fire exactly as on a stock tank; hull-mounted ones
+  still aim along the turret (the stock aim is root-relative).
+- **Single-player only.** The player-or-AI hull rule uses the local
+  player flag, so another human's turret tank on a multiplayer peer runs
+  the AI hull rule and the two machines disagree. Phase 3 (multiplayer)
+  must gate on "piloted by any human" and sync the turret angle.
+- **Save/load.** The turret angle is not saved. A loaded game starts with
+  the hull under the turret's saved heading.
+- **Fails closed.** If `Obj76::SyncNode` does not resolve, or the node is
+  missing, unreadable or the root has more than 16 children, the unit runs
+  as a plain tracked vehicle; one `TRACKED` line names why.
+
 ## How it works
 
 - `GameObjectClass::Find` compares an ODF's classLabel with each registered
@@ -184,7 +247,13 @@ positions, volume and rate.
 - No contact torque: pitch and roll follow the footprint plane rather than
   being pushed by individual contacts, so a tank cresting a ridge levels
   smoothly instead of teetering.
-- Boost, jump and strafe inputs are ignored.
+- Boost, jump and strafe inputs are ignored (on a turret tank strafe
+  turns the hull).
+- Turret tanks: the collision box turns with the root (the turret), not
+  the hull, and everything outside this class (radar, AI formation and
+  path code, Lua `GetTransform`) sees the turret's heading as the unit's.
+  The turret angle is not saved. Root-level LOD copies of the turret (a
+  4th name character `2` node directly under the root) follow the hull.
 - The unit is a HoverCraft underneath: AI, weapons, sounds and the HUD
   treat it as one. An ODF that used `classLabel = "wingman"` loses
   Wingman-specific behaviour when switched to `tracked`.
@@ -257,6 +326,31 @@ clips on the nacelle bones, `treadSound = "avwalke0.wav"`,
   frames are not evidence of the look), a destructor or cleanup release while a loop is
   still playing (the loop had always stopped first), the user's own craft,
   the 150 m camera cutoff, and the fail-closed path (no resolve missed).
+
+Phase 2b (rotating turret), live 2026-11-16, same harness: a tracked
+avtank copy with `turretName = "AGR11TUR"`, `yawRate = 1.0`; an enemy
+avtank 60 m to the hull's left, held still; a plain tracked copy; AI only
+(independence on, then an Attack order, then idle, then Goto), then
+SaveGame and reload:
+
+- `turret node AGR11TUR found (parent AGR11BDA, nested ...)` in the fresh
+  and the loaded run; the plain tracked copy logs no turret lines.
+- Off-heading engagement, independence only: the root (turret) turned from
+  0 to -109.0 degrees (target bearing -108.4) while the hull stopped at
+  -29.6 degrees with zero hull steer and throttle; the target's health
+  fell 3000 -> 1766 over those 3.3 s, so ordnance left along the turret,
+  79 degrees off the hull.
+- Slew rate: the turret's rate relative to the hull peaked at exactly
+  1.000 rad/s (yawRate).
+- Idle hold: after the target was removed, delta held at 0.131 rad and
+  the root yaw at -115.97 degrees for 5 s.
+- Goto: the hull turned toward the move intent and drove.
+- Save/load: after reload delta restarted at 0 (hull under the turret's
+  saved heading) and the unit drove on; no engine alert, empty crash logs.
+- Not checked live: the user's own craft (mouse/strafe controls), yaw
+  limits, a turret node directly under the root, hull-mounted weapons.
+  Frame captures show the model intact (turret seated on the hull) but
+  are too far away to measure the turret angle.
 
 Bugs found in phase 2: the Entity vptr check used the wrong export
 (`??_7Entity@Ogre@@6B@` instead of the ShadowCaster-base vftable), so no

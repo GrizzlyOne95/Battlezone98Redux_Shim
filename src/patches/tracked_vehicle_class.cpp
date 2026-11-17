@@ -6,6 +6,7 @@
 #include "shim_log.h"
 #include "tracked_vehicle_physics.h"
 #include "tracked_vehicle_treads.h"
+#include "tracked_vehicle_turret.h"
 
 #include <Windows.h>
 #include <cmath>
@@ -43,6 +44,16 @@
 // AnimationState also never touches the shared mesh or material. Slots 0, 3
 // and 4 release the loop, as the stock HoverCraft cleanup (0x004EE8F0) does
 // from slots 3 and 4.
+//
+// Turret (phase 2b): with [TrackedClass] turretName set, the object's root
+// transform is the turret and the hull is a counter-rotated child pose
+// (tracked_vehicle_turret.h). Camera, reticle, stock weapon aim
+// (HoverCraft::UpdateWeaponAim 0x004EB590 poses each weapon node against
+// the root) and the stock AI steering then all act on the turret. Simulate
+// slews the turret from the steer control, runs the contact model on the
+// hull frame from strafe/throttle (player) or from the AI's move intent,
+// and re-poses the root's direct children and the turret node through the
+// model-node sync 0x00681A00, as the stock TurretTank Simulate does.
 
 namespace BZROpenShim
 {
@@ -56,6 +67,7 @@ namespace BZROpenShim
     {
         namespace TP = TrackedPhysics;
         namespace TT = TrackedTreads;
+        namespace TU = TrackedTurret;
 
         constexpr char kTrackedClassLabel[] = "tracked";
         constexpr char kHoverClassLabel[] = "hover";
@@ -104,7 +116,15 @@ namespace BZROpenShim
         constexpr size_t kObjThrottleVisual = 0x2B4;
         constexpr size_t kObjAirborne = 0x2B8;
 
-        // obj76.
+        // obj76. Model nodes share the layout: name char[8] at +0x08,
+        // local MAT_3D at +0x20 (posit doubles at +0x48), parent +0x78, next
+        // sibling +0x7C, first child +0x80 (TurretTank::FindTurret
+        // 0x005F2130 walks the same links).
+        constexpr size_t kObj76Name = 0x08;
+        constexpr size_t kObj76NameBytes = 8;
+        constexpr size_t kObj76Parent = 0x78;
+        constexpr size_t kObj76Sibling = 0x7C;
+        constexpr size_t kObj76Child = 0x80;
         constexpr size_t kObj76Flags = 0x14;
         // Set on the user's craft: the aim-pitch gate, and UpdateSounds
         // starts that craft's loops at priority 0x41 instead of 0x2D.
@@ -122,6 +142,7 @@ namespace BZROpenShim
         // Control block.
         constexpr size_t kCtrlSteer = 0xC4;
         constexpr size_t kCtrlPitch = 0xC8;
+        constexpr size_t kCtrlStrafe = 0xCC;  // +1 moves right
         constexpr size_t kCtrlThrottle = 0xD0;
         constexpr size_t kCtrlEyepoint = 0xFC;
         constexpr size_t kCtrlFlags = 0x114;
@@ -192,6 +213,9 @@ namespace BZROpenShim
         using FnSoundStop = void (__cdecl*)(void* sound);
         using FnSoundFind = void* (__cdecl*)(const char* name, void* owner);
         using FnCameraRecord = const uint8_t* (__cdecl*)();
+        // Obj76::SyncNode 0x00681A00: copies a node's local MAT_3D to its
+        // Ogre bone/node pair at +0xC8/+0xCC.
+        using FnSyncNode = void (__cdecl*)(void* node, void* local);
 
         using FnEntityHasAnimation = bool (__thiscall*)(void*, const std::string&);
         using FnEntityGetAnimation = void* (__thiscall*)(void*, const std::string&);
@@ -216,6 +240,7 @@ namespace BZROpenShim
         FnRawGet g_RawGet = nullptr;
         FnPopScope g_PopScope = nullptr;
         FnFloorQuery g_FloorQuery = nullptr;
+        FnSyncNode g_SyncNode = nullptr;  // null: turretName is ignored
 
         // Treads: all bound or none (g_TreadsReady).
         FnSoundInit g_SoundInitControl = nullptr;
@@ -262,6 +287,8 @@ namespace BZROpenShim
             TP::Footprint footprint;
             char treadSound[kSoundNameBytes] = {};
             float treadCycleLength = TT::kDefaultCycleLength;
+            char turretName[kObj76NameBytes + 1] = {};  // empty: no turret
+            TU::Config turret;
         };
 
         // Per object, keyed by the object pointer: reset at Build, erased
@@ -283,6 +310,42 @@ namespace BZROpenShim
 
         SRWLOCK g_TreadLock = SRWLOCK_INIT;
         std::unordered_map<uintptr_t, TreadState> g_Treads;
+
+        // Turret: per object, keyed by the object pointer; reset at Build,
+        // erased by the destructor slot. Not saved: a loaded game starts
+        // with the hull under the turret (delta 0).
+        constexpr int kMaxRootChildren = 16;
+        constexpr int kMaxModelNodes = 512;
+        constexpr int kTurretUnseen = -1;
+        constexpr int kTurretMissing = 0;
+        constexpr int kTurretFound = 1;
+
+        struct NodePose
+        {
+            TU::Mat3 rot;
+            double pos[3];
+        };
+
+        struct TurretState
+        {
+            float delta = 0.0f;   // turret yaw relative to the hull, + left
+            float rate = 0.0f;    // its slew rate, rad/s
+            float applied = 0.0f; // delta the nodes were last posed at
+            bool posed = false;
+            int status = kTurretUnseen;
+            uint8_t* root = nullptr;
+            uint8_t* turret = nullptr;
+            bool direct = false;  // turret is a direct child of the root
+            int childCount = 0;
+            uint8_t* children[kMaxRootChildren] = {};
+            NodePose childRest[kMaxRootChildren] = {};
+            NodePose turretRest = {};
+            TU::Mat3 parentRest;  // turret's parent chain to the root, at rest
+        };
+
+        SRWLOCK g_TurretLock = SRWLOCK_INIT;
+        std::unordered_map<uintptr_t, TurretState> g_Turrets;
+        volatile long g_TurretLogBudget = 200;
 
         volatile long g_TreadLogBudget = 200;
         volatile long g_TreadTraceBudget = 1500;
@@ -363,6 +426,13 @@ namespace BZROpenShim
             char maxSlope[kRawValueBytes];
             char treadSound[kRawValueBytes];
             char treadCycleLength[kRawValueBytes];
+            char turretName[kRawValueBytes];
+            char yawRate[kRawValueBytes];
+            char omegaTurret[kRawValueBytes];
+            char yawAlpha[kRawValueBytes];
+            char alphaTurret[kRawValueBytes];
+            char yawMin[kRawValueBytes];
+            char yawMax[kRawValueBytes];
         };
 
         void CopyRaw(const char* value, char (&out)[kRawValueBytes])
@@ -408,6 +478,13 @@ namespace BZROpenShim
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("maxSlope")), keys.maxSlope);
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("treadSound")), keys.treadSound);
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("treadCycleLength")), keys.treadCycleLength);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("turretName")), keys.turretName);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("yawRate")), keys.yawRate);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("omegaTurret")), keys.omegaTurret);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("yawAlpha")), keys.yawAlpha);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("alphaTurret")), keys.alphaTurret);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("yawMin")), keys.yawMin);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("yawMax")), keys.yawMax);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -444,9 +521,11 @@ namespace BZROpenShim
                 value = static_cast<int>(parsed);
         }
 
-        // treadSound = "name.wav": the quotes are optional. False when the
-        // name does not fit the char[16] the stock sound names use.
-        bool ParseSoundKey(const char* raw, char (&out)[kSoundNameBytes])
+        // treadSound = "name.wav", turretName = "node": the quotes are
+        // optional. False when the name does not fit out (the char[16] the
+        // stock sound names use, the char[8] of a model node name).
+        template<size_t N>
+        bool ParseNameKey(const char* raw, char (&out)[N])
         {
             out[0] = 0;
             if (!raw)
@@ -456,7 +535,7 @@ namespace BZROpenShim
             size_t n = 0;
             while (raw[n] && raw[n] != '"' && raw[n] != ' ' && raw[n] != '\t' && raw[n] != '\r' && raw[n] != '\n')
             {
-                if (n + 1 >= kSoundNameBytes)
+                if (n + 1 >= N)
                 {
                     out[0] = 0;
                     return false;
@@ -544,7 +623,7 @@ namespace BZROpenShim
                 ParseFloatKey(keys.lateralFriction, data.config.lateralFriction);
                 ParseFloatKey(keys.maxSlope, data.config.maxSlopeDeg);
                 ParseFloatKey(keys.treadCycleLength, data.treadCycleLength);
-                if (!ParseSoundKey(keys.treadSound, data.treadSound))
+                if (!ParseNameKey(keys.treadSound, data.treadSound))
                 {
                     LogShimA(LogLevel::Warn, kComponent,
                         "ODF %.8s: treadSound longer than %u characters; no tread sound",
@@ -557,6 +636,20 @@ namespace BZROpenShim
                         "ODF %.8s: treadSound %s is also %s; no tread sound", odfName, data.treadSound, clash);
                     data.treadSound[0] = 0;
                 }
+                if (!ParseNameKey(keys.turretName, data.turretName))
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "ODF %.8s: turretName longer than %u characters; no turret",
+                        odfName, static_cast<unsigned>(kObj76NameBytes));
+                }
+                // BZCC AssaultTankClass names, with the BZ1 TurretTankClass
+                // omegaTurret/alphaTurret as fallbacks.
+                ParseFloatKey(keys.omegaTurret, data.turret.yawRate);
+                ParseFloatKey(keys.yawRate, data.turret.yawRate);
+                ParseFloatKey(keys.alphaTurret, data.turret.yawAlpha);
+                ParseFloatKey(keys.yawAlpha, data.turret.yawAlpha);
+                ParseFloatKey(keys.yawMin, data.turret.yawMin);
+                ParseFloatKey(keys.yawMax, data.turret.yawMax);
             }
             else
             {
@@ -566,6 +659,21 @@ namespace BZROpenShim
             data.config = TP::Sanitize(data.config);
             data.footprint = TP::FootprintFromBox(boxMin, boxMax);
             data.treadCycleLength = TT::SanitizeCycleLength(data.treadCycleLength);
+            const bool limitKeySet = (std::isfinite(data.turret.yawMin) && data.turret.yawMin > -1.0e29f) ||
+                                     (std::isfinite(data.turret.yawMax) && data.turret.yawMax < 1.0e29f);
+            data.turret = TU::Sanitize(data.turret);
+            if (data.turretName[0] && limitKeySet && !data.turret.limited)
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "ODF %.8s: yawMin/yawMax ignored; they are radians with yawMin <= 0 <= yawMax inside +-pi",
+                    odfName);
+            }
+            if (data.turretName[0] && !g_SyncNode)
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "ODF %.8s: turretName ignored (Obj76::SyncNode did not resolve); plain tracked", odfName);
+                data.turretName[0] = 0;
+            }
 
             AcquireSRWLockExclusive(&g_ClassDataLock);
             g_ClassData[reinterpret_cast<uintptr_t>(objectClass)] = data;
@@ -581,6 +689,13 @@ namespace BZROpenShim
                 data.footprint.centerX, data.footprint.halfWidth,
                 data.footprint.backZ, data.footprint.frontZ, data.footprint.bottomY,
                 data.treadSound[0] ? data.treadSound : "-", data.treadCycleLength);
+            if (data.turretName[0])
+            {
+                LogShimA(LogLevel::Info, kComponent,
+                    "ODF %.8s: turret node %s yawRate=%.2f yawAlpha=%.2f limits=%s%.2f..%.2f",
+                    odfName, data.turretName, data.turret.yawRate, data.turret.yawAlpha,
+                    data.turret.limited ? "" : "none ", data.turret.yawMin, data.turret.yawMax);
+            }
         }
 
         void* __fastcall HoverBuildClassHook(void* thisPtr, void* /*edx*/, uint32_t odfNameLo, uint32_t odfNameHi)
@@ -624,6 +739,13 @@ namespace BZROpenShim
             ReleaseSRWLockExclusive(&g_TreadLock);
         }
 
+        void ReleaseTurret(const void* object)
+        {
+            AcquireSRWLockExclusive(&g_TurretLock);
+            g_Turrets.erase(reinterpret_cast<uintptr_t>(object));
+            ReleaseSRWLockExclusive(&g_TurretLock);
+        }
+
         void* __fastcall HoverBuildHook(void* objectClass, void* /*edx*/, void* arg)
         {
             void* object = g_OriginalBuild(objectClass, arg);
@@ -635,9 +757,12 @@ namespace BZROpenShim
                         "tracked class %p built object %p without the HoverCraft vtable; left as hover",
                         objectClass, object);
                 }
-                else if (g_TreadsReady)
+                else
                 {
-                    ResetTreadState(object);
+                    // A stale entry at a reused address would carry its delta.
+                    ReleaseTurret(object);
+                    if (g_TreadsReady)
+                        ResetTreadState(object);
                 }
             }
             return object;
@@ -661,7 +786,29 @@ namespace BZROpenShim
             int grounded;
             float leftTread;
             float rightTread;
+            // Turret objects only.
+            float hullSteer;
+            float hullThrottle;
+            float turretCommand;
+            float rootYaw;  // degrees, world: atan2(front.x, front.z)
+            float hullYaw;
         };
+
+        // One turret step: Simulate fills the inputs from TurretState,
+        // ComputeTrackedForces the outputs.
+        struct TurretStep
+        {
+            TU::Config config;
+            float delta = 0.0f;
+            float rate = 0.0f;
+            float newDelta = 0.0f;
+            float newRate = 0.0f;
+        };
+
+        float YawDegrees(TP::Vec3 front)
+        {
+            return std::atan2(front.x, front.z) * (180.0f / TU::kPi);
+        }
 
         TP::Vec3 ReadVec(const uint8_t* base, size_t offset)
         {
@@ -677,7 +824,10 @@ namespace BZROpenShim
 
         // Replaces the hover force model: reads the inputs and body state,
         // runs the contact step, writes accel/alpha and the hover visuals.
-        bool ComputeTrackedForces(uint8_t* self, float dt, const TrackedClassData& data, TraceSample& trace)
+        // turret: null for a plain tracked object. With it the root frame is
+        // the turret's and the contact model runs on the hull frame.
+        bool ComputeTrackedForces(uint8_t* self, float dt, const TrackedClassData& data, TraceSample& trace,
+                                  TurretStep* turret)
         {
             __try
             {
@@ -702,6 +852,21 @@ namespace BZROpenShim
                     inputs.steer = *reinterpret_cast<const float*>(ctrl + kCtrlSteer);
                     if (!TP::Finite(inputs.throttle)) inputs.throttle = 0.0f;
                     if (!TP::Finite(inputs.steer)) inputs.steer = 0.0f;
+                    if (turret)
+                    {
+                        // Steer slews the turret. The user's strafe keys turn
+                        // the hull; an AI pilot's throttle/strafe is a move
+                        // intent in the turret frame that the hull follows.
+                        float strafe = *reinterpret_cast<const float*>(ctrl + kCtrlStrafe);
+                        if (!TP::Finite(strafe)) strafe = 0.0f;
+                        const bool user = (*reinterpret_cast<const uint32_t*>(obj76 + kObj76Flags) &
+                                           kObj76FlagAimGate) != 0;
+                        trace.turretCommand = inputs.steer;
+                        const TU::HullCommand hull = user ? TU::PlayerHull(inputs.throttle, strafe)
+                                                          : TU::AiHull(inputs.throttle, strafe, turret->delta);
+                        inputs.throttle = hull.throttle;
+                        inputs.steer = hull.steer;
+                    }
                 }
 
                 const float perf = TP::PerformanceScale(*reinterpret_cast<const float*>(self + kObjHealthRatio));
@@ -724,6 +889,20 @@ namespace BZROpenShim
                 body.pz = posit[2];
                 body.veloc = ReadVec(self, kObjVeloc);
                 body.omega = ReadVec(self, kObjOmega);
+                if (turret)
+                {
+                    trace.rootYaw = YawDegrees(body.front);
+                    TU::HullAxes(body.right, body.front, turret->delta, body.right, body.front);
+                    body.omega = TU::RootToHullOmega(body.omega, turret->delta, turret->rate);
+                    turret->newRate = TU::SlewRate(turret->config, turret->rate, trace.turretCommand,
+                                                   turret->delta, dt);
+                    // Trapezoid: the root yaws by the mid-step omega.
+                    turret->newDelta = TU::AdvanceDelta(turret->config, turret->delta,
+                                                        0.5f * (turret->rate + turret->newRate), dt);
+                    trace.hullYaw = YawDegrees(body.front);
+                    trace.hullSteer = inputs.steer;
+                    trace.hullThrottle = inputs.throttle;
+                }
 
                 void* floorContext = reinterpret_cast<void*>(
                     static_cast<intptr_t>(*reinterpret_cast<const int*>(self + kObjFloorIgnore)));
@@ -735,7 +914,9 @@ namespace BZROpenShim
                                                    &FloorAt, floorContext);
                 WriteVec(self, kObjVeloc, result.veloc);
                 WriteVec(self, kObjAccel, result.accel);
-                WriteVec(self, kObjAlpha, result.alpha);
+                WriteVec(self, kObjAlpha, turret
+                    ? TU::HullToRootAlpha(result.alpha, turret->delta, turret->newRate - turret->rate, dt)
+                    : result.alpha);
                 *reinterpret_cast<float*>(self + kObjThrustRatio) = 1.0f;
                 *reinterpret_cast<float*>(self + kObjThrottleVisual) =
                     inputs.steer * inputs.steer * 0.5f + std::fabs(inputs.throttle);
@@ -854,17 +1035,283 @@ namespace BZROpenShim
             ReleaseSRWLockExclusive(&g_TreadLock);
         }
 
+        // ---- turret nodes ------------------------------------------------------
+
+        uint8_t* NodeLink(const uint8_t* node, size_t offset)
+        {
+            return *reinterpret_cast<uint8_t* const*>(node + offset);
+        }
+
+        void NodeName(const uint8_t* node, char (&out)[kObj76NameBytes + 1])
+        {
+            std::memcpy(out, node + kObj76Name, kObj76NameBytes);
+            out[kObj76NameBytes] = 0;
+        }
+
+        NodePose ReadPose(const uint8_t* node)
+        {
+            NodePose pose;
+            std::memcpy(&pose.rot, node + kObj76Right, sizeof(pose.rot));
+            std::memcpy(pose.pos, node + kObj76Posit, sizeof(pose.pos));
+            return pose;
+        }
+
+        void WritePose(uint8_t* node, const NodePose& pose)
+        {
+            std::memcpy(node + kObj76Right, &pose.rot, sizeof(pose.rot));
+            std::memcpy(node + kObj76Posit, pose.pos, sizeof(pose.pos));
+            g_SyncNode(node, node + kObj76Right);
+        }
+
+        // Finds the turret node under root and records the root's direct
+        // children and the rest poses. Leaves state.status at kTurretFound
+        // or kTurretMissing; why names the failure.
+        void FindTurretNodes(uint8_t* root, const char* name, TurretState& state, const char*& why)
+        {
+            const float delta = state.delta;
+            const float rate = state.rate;
+            state = TurretState{};
+            state.delta = delta;
+            state.rate = rate;
+            state.root = root;
+            state.status = kTurretMissing;
+            why = "node not in the model";
+            __try
+            {
+                uint8_t* stack[kMaxModelNodes];
+                int top = 0;
+                int visited = 0;
+                uint8_t* first = NodeLink(root, kObj76Child);
+                if (first)
+                    stack[top++] = first;
+                while (top > 0 && !state.turret)
+                {
+                    uint8_t* node = stack[--top];
+                    if (++visited > kMaxModelNodes)
+                    {
+                        why = "model has too many nodes";
+                        return;
+                    }
+                    char nodeName[kObj76NameBytes + 1];
+                    NodeName(node, nodeName);
+                    if (_stricmp(nodeName, name) == 0)
+                    {
+                        state.turret = node;
+                        break;
+                    }
+                    uint8_t* sibling = NodeLink(node, kObj76Sibling);
+                    uint8_t* child = NodeLink(node, kObj76Child);
+                    if (sibling && top < kMaxModelNodes)
+                        stack[top++] = sibling;
+                    if (child && top < kMaxModelNodes)
+                        stack[top++] = child;
+                }
+                if (!state.turret)
+                    return;
+
+                for (uint8_t* child = NodeLink(root, kObj76Child); child; child = NodeLink(child, kObj76Sibling))
+                {
+                    if (state.childCount >= kMaxRootChildren)
+                    {
+                        why = "model root has too many children";
+                        state.turret = nullptr;
+                        return;
+                    }
+                    state.children[state.childCount] = child;
+                    state.childRest[state.childCount] = ReadPose(child);
+                    ++state.childCount;
+                }
+
+                uint8_t* parent = NodeLink(state.turret, kObj76Parent);
+                state.direct = parent == root;
+                state.turretRest = ReadPose(state.turret);
+                // Parent chain to the root at rest: parent * grandparent * ...
+                TU::Mat3 chain;
+                int depth = 0;
+                for (uint8_t* n = parent; n != root; n = NodeLink(n, kObj76Parent))
+                {
+                    if (!n || ++depth > kMaxModelNodes)
+                    {
+                        why = "turret node parent links do not reach the root";
+                        state.turret = nullptr;
+                        return;
+                    }
+                    chain = TU::Mul(chain, ReadPose(n).rot);
+                }
+                state.parentRest = chain;
+                state.status = kTurretFound;
+                why = nullptr;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                state.turret = nullptr;
+                state.status = kTurretMissing;
+                why = "model nodes unreadable";
+            }
+        }
+
+        // Hull under the root yawed by delta; the turret kept at its rest
+        // heading relative to the root (the turret frame).
+        bool PoseTurret(TurretState& state)
+        {
+            const float delta = state.delta;
+            if (state.posed && state.applied == delta)
+                return true;
+            __try
+            {
+                const TU::Mat3 yaw = TU::Yaw(delta);
+                for (int i = 0; i < state.childCount; ++i)
+                {
+                    const NodePose& rest = state.childRest[i];
+                    NodePose pose;
+                    // A direct-child turret keeps its rest heading (root = turret
+                    // frame) but rides the hull's ring, so only its position turns.
+                    pose.rot = state.direct && state.children[i] == state.turret
+                        ? rest.rot
+                        : TU::HullChildRotation(rest.rot, delta);
+                    pose.pos[0] = rest.pos[0] * yaw.right.x + rest.pos[2] * yaw.front.x;
+                    pose.pos[1] = rest.pos[1];
+                    pose.pos[2] = rest.pos[0] * yaw.right.z + rest.pos[2] * yaw.front.z;
+                    WritePose(state.children[i], pose);
+                }
+                if (!state.direct)
+                {
+                    NodePose pose = state.turretRest;
+                    pose.rot = TU::TurretRotation(state.turretRest.rot, state.parentRest, delta);
+                    WritePose(state.turret, pose);
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            state.applied = delta;
+            state.posed = true;
+            return true;
+        }
+
+        void StoreTurret(const uint8_t* self, const TurretState& state);
+
+        bool TakeTurretLogLine()
+        {
+            return g_TurretLogBudget > 0 && InterlockedDecrement(&g_TurretLogBudget) >= 0;
+        }
+
+        // Copies this object's turret state out, finding its nodes on first
+        // use and again when the model root changes. Logs each change of
+        // outcome once. False: run as plain tracked.
+        bool LoadTurret(const uint8_t* self, const char* name, TurretState& state)
+        {
+            uint8_t* root = nullptr;
+            __try
+            {
+                root = *reinterpret_cast<uint8_t* const*>(self + kObjObj76);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            if (!root)
+                return false;
+
+            AcquireSRWLockExclusive(&g_TurretLock);
+            state = g_Turrets[reinterpret_cast<uintptr_t>(self)];
+            ReleaseSRWLockExclusive(&g_TurretLock);
+            if (state.status != kTurretUnseen && state.root == root)
+                return state.status == kTurretFound;
+
+            const int before = state.status;
+            const char* why = nullptr;
+            FindTurretNodes(root, name, state, why);
+            if (state.status != before && TakeTurretLogLine())
+            {
+                if (state.status == kTurretFound)
+                {
+                    char parentName[kObj76NameBytes + 1] = {};
+                    __try
+                    {
+                        NodeName(NodeLink(state.turret, kObj76Parent), parentName);
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        parentName[0] = 0;
+                    }
+                    LogShimA(LogLevel::Info, kComponent,
+                        "obj=%p turret node %s found (parent %s, %s child of the root, %d root children); "
+                        "the root frame is the turret",
+                        self, name, parentName, state.direct ? "direct" : "nested", state.childCount);
+                }
+                else
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "obj=%p turret node %s not used: %s; plain tracked", self, name, why ? why : "?");
+                }
+            }
+            StoreTurret(self, state);
+            return state.status == kTurretFound;
+        }
+
+        void StoreTurret(const uint8_t* self, const TurretState& state)
+        {
+            AcquireSRWLockExclusive(&g_TurretLock);
+            g_Turrets[reinterpret_cast<uintptr_t>(self)] = state;
+            ReleaseSRWLockExclusive(&g_TurretLock);
+        }
+
+        volatile long g_TurretTraceBudget = 4000;
+        volatile long g_TurretTraceCounter = 0;
+        constexpr long kTurretTraceEvery = 7;
+
         void __fastcall TrackedSimulateHook(void* thisPtr, void* /*edx*/, float dt)
         {
             auto* self = static_cast<uint8_t*>(thisPtr);
             TrackedClassData data{};
             TraceSample trace{};
-            if (!LookupClassData(self, data) || !ComputeTrackedForces(self, dt, data, trace))
+            TurretState turretState;
+            TurretStep step;
+            bool turret = false;
+            const bool tracked = LookupClassData(self, data);
+            if (tracked && data.turretName[0])
+            {
+                turret = LoadTurret(self, data.turretName, turretState);
+                step.config = data.turret;
+                step.delta = turretState.delta;
+                step.rate = turretState.rate;
+            }
+            if (!tracked ||
+                !ComputeTrackedForces(self, dt, data, trace, turret ? &step : nullptr))
             {
                 if (g_TreadsReady)
                     SetTreadCommand(self, 0.0f, 0.0f);
                 g_StockSimulate(thisPtr, dt);
                 return;
+            }
+            if (turret)
+            {
+                turretState.delta = step.newDelta;
+                turretState.rate = step.newRate;
+                if (!PoseTurret(turretState))
+                {
+                    turretState.status = kTurretMissing;
+                    turretState.delta = 0.0f;
+                    turretState.rate = 0.0f;
+                    if (TakeTurretLogLine())
+                    {
+                        LogShimA(LogLevel::Warn, kComponent,
+                            "obj=%p turret node %s could not be posed; plain tracked", self, data.turretName);
+                    }
+                }
+                StoreTurret(self, turretState);
+                if (g_TurretTraceBudget > 0 &&
+                    (InterlockedIncrement(&g_TurretTraceCounter) % kTurretTraceEvery) == 1 &&
+                    InterlockedDecrement(&g_TurretTraceBudget) >= 0)
+                {
+                    LogShimA(LogLevel::Debug, kComponent,
+                        "obj=%p turret delta=%.3f rate=%.3f cmd=%.2f rootYaw=%.1f hullYaw=%.1f "
+                        "hullSteer=%.2f hullThrottle=%.2f",
+                        thisPtr, turretState.delta, turretState.rate, trace.turretCommand,
+                        trace.rootYaw, trace.hullYaw, trace.hullSteer, trace.hullThrottle);
+                }
             }
             if (g_TreadsReady)
                 SetTreadCommand(self, trace.leftTread, trace.rightTread);
@@ -1258,6 +1705,7 @@ namespace BZROpenShim
 
         void* __fastcall TrackedDestructorHook(void* thisPtr, void* /*edx*/, unsigned int flags)
         {
+            ReleaseTurret(thisPtr);
             ReleaseTreads(thisPtr, true);
             return reinterpret_cast<FnDestructor>(g_Thunks + kDestructorSlot * kThunkStride)(thisPtr, flags);
         }
@@ -1383,9 +1831,10 @@ namespace BZROpenShim
             for (size_t i = 0; i < kHoverVtableSlots; ++i)
                 g_TrackedVtable[1 + i] = g_Thunks + i * kThunkStride;
             g_TrackedVtable[1 + kSimulateSlot] = reinterpret_cast<void*>(&TrackedSimulateHook);
+            // Drops the per-object turret (and tread) state.
+            g_TrackedVtable[1 + kDestructorSlot] = reinterpret_cast<void*>(&TrackedDestructorHook);
             if (treads)
             {
-                g_TrackedVtable[1 + kDestructorSlot] = reinterpret_cast<void*>(&TrackedDestructorHook);
                 g_TrackedVtable[1 + kCleanupSlotA] = reinterpret_cast<void*>(&TrackedCleanupHookA);
                 g_TrackedVtable[1 + kCleanupSlotB] = reinterpret_cast<void*>(&TrackedCleanupHookB);
                 g_TrackedVtable[1 + kPostSimulateSlot] = reinterpret_cast<void*>(&TrackedPostSimulateHook);
@@ -1457,6 +1906,14 @@ namespace BZROpenShim
         g_PopScope = reinterpret_cast<FnPopScope>(popScope);
         g_FloorQuery = reinterpret_cast<FnFloorQuery>(floorQuery);
         g_HoverVtable = hoverVtable;
+
+        // Optional: without it a turretName is ignored (logged per class).
+        g_SyncNode = reinterpret_cast<FnSyncNode>(HookEngine::ResolveNamedAddress("Obj76::SyncNode"));
+        if (!g_SyncNode)
+        {
+            LogShimA(LogLevel::Warn, kComponent,
+                "rotating turret off (Obj76::SyncNode did not resolve); tracked physics unaffected");
+        }
 
         const char* treadMissing = nullptr;
         const bool treads = ResolveTreads(treadMissing);
