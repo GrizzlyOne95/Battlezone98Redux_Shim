@@ -6727,6 +6727,12 @@
       "identity": "ScavengerProcess::InitState (0x005C4490) age test on GOG Redux 2.2.301: the float at [result+4] of the call at 0x005C44D8 (movss at 0x005C44DD) is compared against the shared 5.0f constant at 0x008A285C (comiss here), then jbe +0x78 at 0x005C44EF. The jump target 0x005C4569 is the mission-start path that creates a RecycleTask at once; the fall-through (any unit older than 5 s, so every built scavenger) allocates a 0x134-byte task and waits 5 s. Smart Scavengers rewrites only the jbe opcode (0x76 -> 0xEB, jmp rel8) in single player and puts 0x76 back otherwise; the shared 5.0f constant is never written. Static GOG bytes checked 2026-11-17."
     },
     {
+      "name": "ScavengerInitStateWaitDelayOperand",
+      "address": "0x005C45F1",
+      "expected": "F3 0F 58 05 5C 28 8A 00 8B 55 F0 F3 0F 11 42 44",
+      "identity": "ScavengerProcess::InitState (0x005C4490) case 1 WAIT on GOG Redux 2.2.301 (jump table 0x005C498C -> 0x005C458F): after creating the SitTask (call FUN_00608580) it sets wait_time = now + 5.0f with addss xmm0,[0x008A285C] at 0x005C45F1 and movss [edx+0x44],xmm0 at 0x005C45FC. ScavengerProcess::DoState (0x005C4AA0) case 1 sets nextState=4 (RECYCLE) once now > [+0x44]; case 4 sets nextState=1 when the RecycleTask reports Done. Matches 1.5 source 0045d681 InitState case WAIT and 0045d8dd DoState. Smart Scavengers (single player only) rewrites only the disp32 at +4 to 0x008A2584, an existing read-only .rdata 0.5f, giving a 0.5 s wait floor; neither constant is written."
+    },
+    {
       "name": "DefendTaskVtable",
       "address": "0x008785F4",
       "kind": "data",

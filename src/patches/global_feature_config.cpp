@@ -161,7 +161,7 @@ namespace BZROpenShim
         // purpose, and every peer in a matched lobby is doing the same.
         bool g_SmartReticleRangeOwnedByBridge = false;
 
-        bool g_SmartScavengerPathingEnabled = true;
+        bool g_SmartScavengerPathingEnabled = false;
 
         static bool g_TurretAimPitchBaselineEnabled = true;
 
@@ -403,7 +403,7 @@ namespace BZROpenShim
             g_SmartReticleRangeOwnedByBridge = false;
             g_SmartReticleRange = g_SmartReticleRangeBaseline;
 
-            g_SmartScavengerPathingEnabled = true;
+            g_SmartScavengerPathingEnabled = false;
             if (TryGetUserConfigBool(kUserConfigSinglePlayerSection, "SmartScavengerPathing", value) ||
                 TryGetUserConfigBool(kUserConfigSinglePlayerSection, "ScavengerPathing", value))
             {
@@ -631,7 +631,10 @@ namespace BZROpenShim
         // reset/tick site:
         //   revertToBaseline  restore the post-mission resting state — the user's
         //                     openshim.ini baseline for Display features, the build
-        //                     default for gameplay features. Called on mission end.
+        //                     default for gameplay features. Run at hook startup
+        //                     and by exu.ResetMissionHookOverrides(); a feature
+        //                     that must revert on every mission exit also calls
+        //                     its revert from the lifecycle_seams.cpp exit seam.
         //   refreshMpGate     reconcile a SinglePlayer-tier feature against the
         //                     live net id so it can never touch a network game.
         //                     Called on mission end and from the periodic sim tick.
@@ -739,10 +742,11 @@ namespace BZROpenShim
             { "SatelliteVisibilityFix", FeatureTier::Display,
               nullptr, &RefreshSatelliteVisibilityFixState },
             // [SinglePlayer] SmartScavengerPathing also turns InitState's age
-            // jbe into a jmp so built scavengers start at once; the stock
-            // byte goes back online. Read from the ini, no baseline to revert.
+            // jbe into a jmp so built scavengers start at once, and points the
+            // WAIT delay at a 0.5f floor; the stock bytes go back online and
+            // at mission end, before the next mission's gate has run.
             { "ScavengerInstantStart", FeatureTier::SinglePlayer,
-              nullptr, &RefreshScavengerInstantStartState },
+              &RevertScavengerInstantStartToBaseline, &RefreshScavengerInstantStartState },
             // [Fixes] engine-defect corrections. They are bug fixes rather than
             // enhancements and stay on for normal single-player play, but every
             // one of them changes simulation behaviour and none is negotiated
