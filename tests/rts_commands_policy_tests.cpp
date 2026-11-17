@@ -175,6 +175,8 @@ namespace
         Check(ClassifyFamily(".?AVMinelayer@@") == Family::Minelayer, "minelayer");
         Check(ClassifyFamily(".?AVScavenger@@") == Family::Scavenger, "scavenger");
         Check(ClassifyFamily(".?AVTug@@") == Family::Tug, "tug");
+        Check(ClassifyFamily(".?AVConstructionRig@@") == Family::ConstructionRig, "construction rig");
+        Check(std::string(FamilyName(Family::ConstructionRig)) == "construction rig", "rig family name");
         Check(ClassifyFamily(".?AVRecycler@@") == Family::None, "recycler has no family");
         Check(ClassifyFamily(".?AVHoverCraft@@") == Family::None, "plain hovercraft has no family");
         Check(ClassifyFamily(nullptr) == Family::None, "null name");
@@ -276,7 +278,13 @@ namespace
                   std::string("default key accepted: ") + GetKeyDef(id).iniKey);
             keys[i] = k;
         }
-        Check(keys[0].vk == 'T' && keys[1].vk == 'B' && keys[2].vk == 'X' && keys[3].vk == 'Z', "defaults T B X Z");
+        Check(keys[0].vk == 'T' && keys[1].vk == 'B' && keys[2].vk == 'X' && keys[3].vk == 'Z' && keys[4].vk == 'J',
+              "defaults T B X Z J");
+        const KeyDef& idleDef = GetKeyDef(KeyId::IdleUnit);
+        Check(std::string(idleDef.iniKey) == "RtsIdleUnitKey" &&
+                  std::string(idleDef.rowCommand) == "OpenShim:RtsIdleUnitKey" &&
+                  std::string(idleDef.defaultText) == "J" && !idleDef.needsShift && idleDef.shiftVariant,
+              "idle unit key row");
 
         Key k;
         Check(CheckKeyText(KeyId::Hold, "V", keys, rally, save, load, k) != nullptr, "the rally key is refused");
@@ -286,11 +294,15 @@ namespace
         Check(CheckKeyText(KeyId::Hold, "F3", keys, rally, save, load, k) != nullptr, "group keys refused");
         Check(CheckKeyText(KeyId::Hold, "Shift+J", keys, rally, save, load, k) != nullptr, "modifiers refused");
         Check(CheckKeyText(KeyId::Hold, "bogus", keys, rally, save, load, k) != nullptr, "junk refused");
-        Check(CheckKeyText(KeyId::Hold, "J", keys, rally, save, load, k) == nullptr && k.vk == 'J', "J accepted");
-        const Chord shiftJ{ false, true, false, 'J', false };
-        Check(CheckKeyText(KeyId::AreaSelect, "J", keys, rally, shiftJ, load, k) != nullptr,
+        Check(CheckKeyText(KeyId::Hold, "J", keys, rally, save, load, k) != nullptr, "the idle unit key is refused");
+        Check(CheckKeyText(KeyId::IdleUnit, "J", keys, rally, save, load, k) == nullptr, "idle unit: its own key");
+        Check(CheckKeyText(KeyId::Hold, "Q", keys, rally, save, load, k) == nullptr && k.vk == 'Q', "Q accepted");
+        const Chord shiftQ{ false, true, false, 'Q', false };
+        Check(CheckKeyText(KeyId::AreaSelect, "Q", keys, rally, shiftQ, load, k) != nullptr,
               "Shift+key action refuses a Shift-only QuickSave chord on that key");
-        Check(CheckKeyText(KeyId::Hold, "J", keys, rally, shiftJ, load, k) == nullptr,
+        Check(CheckKeyText(KeyId::IdleUnit, "Q", keys, rally, shiftQ, load, k) != nullptr,
+              "idle unit (Shift variant) refuses a Shift-only QuickSave chord");
+        Check(CheckKeyText(KeyId::Hold, "Q", keys, rally, shiftQ, load, k) == nullptr,
               "plain-only action ignores a Shift QuickSave chord");
     }
 
@@ -311,7 +323,10 @@ namespace
         Check(ActionTakingChord(keys, 'B', false, false, true, false) == KeyId::Count, "Ctrl+B (eject) is stock");
         Check(ActionTakingChord(keys, 'X', false, false, false, true) == KeyId::Count, "Alt chords are stock");
         Check(ActionTakingChord(keys, 'X', true, false, false, false) == KeyId::Count, "extended bit must match");
-        Check(ActionTakingChord(keys, 'J', false, false, false, false) == KeyId::Count, "unbound key");
+        // Idle unit (J) takes J and Shift+J.
+        Check(ActionTakingChord(keys, 'J', false, false, false, false) == KeyId::IdleUnit, "J is ours");
+        Check(ActionTakingChord(keys, 'J', false, true, false, false) == KeyId::IdleUnit, "Shift+J is ours");
+        Check(ActionTakingChord(keys, 'Q', false, false, false, false) == KeyId::Count, "unbound key");
         Check(ActionUsingKey(keys, 'T', false) == KeyId::RemoteTarget, "the rally key may not be T");
         Check(ActionUsingKey(keys, 'V', false) == KeyId::Count, "V is free for the rally key");
         Check(ActionTakingChord(nullptr, 'X', false, false, false, false) == KeyId::Count, "no keys");
@@ -394,6 +409,103 @@ namespace
         return rig;
     }
 
+    void TestIdleUnits()
+    {
+        Check(IsIdle(0, 0) && IsIdle(2, 0) && IsIdle(0, 2) && IsIdle(2, 2), "0/0, 2/0, 0/2, 2/2 are idle");
+        Check(!IsIdle(3, 0) && !IsIdle(0, 3) && !IsIdle(19, 0), "3/0, 0/3, 19/0 are busy");
+        Check(!IsIdle(0, 19) && !IsIdle(4, 4), "any live order is busy");
+        Check(IsIdle(0, 1) && IsIdle(1, 0), "a selection (CMD_SELECT) is not an order");
+        Check(IdleTracksFamily(Family::Combat) && IdleTracksFamily(Family::Tug) &&
+                  IdleTracksFamily(Family::ConstructionRig),
+              "combat, tugs and rigs are tracked");
+        Check(!IdleTracksFamily(Family::Scavenger) && !IdleTracksFamily(Family::None),
+              "scavengers (self-directed) and non-units are not");
+
+        uint32_t list[5] = { 0x30, 0x10, 0x50, 0x20, 0x40 };
+        SortHandlesAscending(list, 5);
+        Check(list[0] == 0x10 && list[1] == 0x20 && list[2] == 0x30 && list[3] == 0x40 && list[4] == 0x50,
+              "idle handles sort ascending");
+        Check(NextIdleIndex(list, 5, 0) == 0, "no last pick: the first");
+        Check(NextIdleIndex(list, 5, 0x10) == 1, "after the first: the second");
+        Check(NextIdleIndex(list, 5, 0x50) == 0, "after the last: wraps to the first");
+        Check(NextIdleIndex(list, 5, 0x35) == 0, "a last handle that is gone restarts at 0");
+        Check(NextIdleIndex(list, 1, 0x10) == 0, "a single unit cycles onto itself");
+        Check(NextIdleIndex(list, 0, 0x10) == -1 && NextIdleIndex(nullptr, 3, 0) == -1, "empty list: -1");
+
+        uint32_t out[kSelectCapacity] = {};
+        Check(PlanIdleSelect(list, 5, 0x20, false, out, kSelectCapacity) == 1 && out[0] == 0x30,
+              "one press picks the next unit");
+        Check(PlanIdleSelect(list, 5, 0, true, out, kSelectCapacity) == 5 && out[0] == 0x10 && out[4] == 0x50,
+              "Shift picks them all");
+        Check(PlanIdleSelect(list, 5, 0, true, out, 3) == 3, "Shift stops at the output capacity");
+        Check(PlanIdleSelect(list, 0, 0, true, out, kSelectCapacity) == 0, "nothing idle: nothing picked");
+        uint32_t many[kSelectCapacity + 20];
+        for (int i = 0; i < kSelectCapacity + 20; ++i)
+            many[i] = static_cast<uint32_t>(i + 1);
+        uint32_t big[kSelectCapacity + 20] = {};
+        Check(PlanIdleSelect(many, kSelectCapacity + 20, 0, true, big, kSelectCapacity + 20) == kSelectCapacity,
+              "Shift stops at the selection capacity");
+
+        // Alert policy: busy->idle only, never a first sighting, 5 s apart.
+        IdleTracker t;
+        t.BeginPass();
+        IdleObservation o = t.Observe(1, true, 1000);
+        Check(o.first && !o.changed && !o.alert, "a unit first seen idle never alerts");
+        o = t.Observe(2, false, 1000);
+        Check(o.first && !o.alert, "a unit first seen busy does not alert");
+        t.EndPass();
+        Check(t.Count() == 2, "two tracked");
+
+        t.BeginPass();
+        o = t.Observe(1, false, 1500);
+        Check(o.changed && !o.alert && !o.idle, "idle->busy does not alert");
+        o = t.Observe(2, true, 1500);
+        Check(o.changed && o.idle && o.alert, "busy->idle alerts");
+        t.EndPass();
+
+        t.BeginPass();
+        o = t.Observe(1, true, 3000);
+        Check(o.changed && !o.alert, "a second alert inside 5 s is suppressed");
+        o = t.Observe(2, true, 3000);
+        Check(!o.changed && !o.alert, "no change, no alert");
+        t.EndPass();
+
+        t.BeginPass();
+        o = t.Observe(1, false, 4000);
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(1, true, 1500 + kIdleAlertIntervalMs - 1);
+        Check(o.changed && !o.alert, "one ms short of the interval is still suppressed");
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(1, false, 7000);
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(1, true, 1500 + kIdleAlertIntervalMs);
+        Check(o.changed && o.alert, "exactly the interval later alerts again");
+        t.EndPass();
+
+        // Entries not observed in a pass are dropped.
+        t.BeginPass();
+        t.Observe(1, true, 9000);
+        t.EndPass();
+        Check(t.Count() == 1, "an unobserved unit is dropped");
+        t.BeginPass();
+        o = t.Observe(2, true, 9000);
+        Check(o.first && !o.alert, "a dropped unit that returns is a first sighting");
+        t.EndPass();
+
+        // A full table ignores new units instead of overflowing.
+        IdleTracker full;
+        full.BeginPass();
+        for (int i = 1; i <= kIdleTrackCapacity + 5; ++i)
+            full.Observe(static_cast<uint32_t>(i), true, 0);
+        full.EndPass();
+        Check(full.Count() == kIdleTrackCapacity, "the table is fixed size");
+        t.Clear();
+        Check(t.Count() == 0, "Clear empties the table");
+    }
+
     void TestBuildAtNav()
     {
         const uint32_t cls = 0x0A1B2C30u;
@@ -467,6 +579,7 @@ int main()
     TestKeys();
     TestChordClashes();
     TestKeyMessages();
+    TestIdleUnits();
     TestBuildAtNav();
     if (OpenShimTest::FailureCount() != 0)
     {

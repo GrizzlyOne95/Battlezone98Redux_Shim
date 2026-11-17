@@ -29,6 +29,14 @@
 //       with the rig's own GetCommand and gives BUILD there (refused rigs
 //       buzz, and an all-refused pick keeps the selection). Other selected
 //       units get the stock GO. Local rigs only.
+//   Idle units (key: always on once its rows bind)
+//     * J (RtsIdleUnitKey) selects the next idle own unit (ascending handle
+//       order, one per press); Shift+J selects all of them up to the
+//       selection capacity. mnu_buzz when none is idle.
+//   [Gameplay] RtsIdleUnitAlert (default OFF)
+//     * One short stock sound when an own unit goes from busy to idle, at
+//       most once per 5 s, never for a unit's first observed state.
+//     * Idle = current and pending command `what` both 0 or 2 (CMD_STOP).
 // Rules: include/rts_commands_policy.h. Evidence and limits:
 // Docs/RTS_COMMANDS.md. Every address is a scripts/patches.json row; each
 // part binds its own rows and stays stock (option marked unavailable) when
@@ -131,6 +139,10 @@ namespace BZROpenShim::Hooks
         // The stock "cannot build here" click (FUN_004a08e0.c line 564, a
         // CMD_NO_DROPOFF hover; push at 0x004A1E6F).
         constexpr const char* kRefuseSound = "mnu_buzz.wav";
+        // The idle-unit alert: stock bzone.zfs holds ping.wav (listed with the
+        // BZ98R toolkit's ZFSReader on the GOG 2.2.301 install, read-only).
+        constexpr const char* kIdleAlertSound = "ping.wav";
+        constexpr ULONGLONG kIdleScanIntervalMs = 250;
 
         // Shared rows.
         uint32_t g_ControlPanelAddr = 0;
@@ -167,6 +179,9 @@ namespace BZROpenShim::Hooks
         uint32_t g_NavSelectNoneAddr = 0;
         uint32_t g_RigVtableAddr = 0;
         uint32_t g_RigGetCommandAddr = 0;
+        // Idle units (its own copies of the select/sound rows).
+        uint32_t g_IdleSelectAddAddr = 0;
+        uint32_t g_IdleSelectNoneAddr = 0;
 
         FnGetObj g_FnGetObj = nullptr;
         FnIntersect g_FnIntersect = nullptr;
@@ -193,6 +208,7 @@ namespace BZROpenShim::Hooks
         bool g_AreaEnabled = true;
         int g_HoldMode = Policy::kHoldKeyAndShiftMenu;
         bool g_BuildNavEnabled = true;
+        bool g_IdleAlertEnabled = false;
 
         // Part readiness (patch thread, then read-only).
         bool g_SharedReady = false;
@@ -206,6 +222,7 @@ namespace BZROpenShim::Hooks
         bool g_LabelReady = false;
         bool g_NavSelectNoneReady = false;
         bool g_NavPickReady = false;
+        bool g_IdleReady = false;
 
         // Live state.
         std::atomic<unsigned> g_SmartMask{ 0 }; // Policy::SmartSet bits in force
@@ -214,6 +231,10 @@ namespace BZROpenShim::Hooks
         std::atomic<bool> g_HoldKeyActive{ false };
         std::atomic<bool> g_HoldMenuActive{ false };
         std::atomic<bool> g_BuildNavActive{ false };
+        std::atomic<bool> g_IdleKeyActive{ false };
+        std::atomic<bool> g_IdleAlertActive{ false };
+        std::atomic<bool> g_IdleResetPending{ false };
+        std::atomic<bool> g_IdlePickResetPending{ false };
         // Set by the nav-pick hook for the SelectNone call that follows it
         // (same Render frame, game thread).
         bool g_SkipNavSelectNone = false;
@@ -223,7 +244,13 @@ namespace BZROpenShim::Hooks
         std::atomic<bool> g_PendingBuilding{ false };
         std::atomic<int> g_PendingArea{ 0 }; // 1: 100 m, 2: 200 m
         std::atomic<bool> g_PendingHold{ false };
+        std::atomic<int> g_PendingIdle{ 0 }; // 1: next idle unit, 2: all idle units
         volatile long g_LogBudget = 48;
+        // Idle units: drain thread only (the key action and the alert scan).
+        volatile long g_IdleStateLogBudget = 300;
+        uint32_t g_LastIdlePick = 0;
+        ULONGLONG g_IdleLastScanMs = 0;
+        Policy::IdleTracker g_IdleTracker;
 
         // Keys (main thread: both filters and the key-binding editor).
         Policy::Key g_Keys[Policy::kKeyCount] = {};
@@ -1264,6 +1291,122 @@ namespace BZROpenShim::Hooks
                         radius, added, selectedCount);
         }
 
+        // ---- idle units --------------------------------------------------------
+
+        bool EditorActive();
+        bool WorldInteractive();
+
+        // Reads one object for the idle features. False unless it is an alive
+        // (in the object list snapshot), own, commandable unit of a tracked
+        // family (so never a building or scavenger), and not the player's own piloted
+        // object (as DoAreaSelect skips it).
+        bool EvaluateIdleUnit(void* obj, void* user, uint32_t& handle, bool& idle, int& current, int& pending,
+                              Policy::Family& family)
+        {
+            if (!obj || obj == user || !IsPlayerTeam(obj))
+                return false;
+            RttiNameBuffer name;
+            family = Policy::ClassifyFamily(RttiName(obj, name));
+            if (!Policy::IdleTracksFamily(family) || !SafeCanCommand(obj))
+                return false;
+            handle = SafeGetHandle(obj);
+            const uintptr_t base = reinterpret_cast<uintptr_t>(obj);
+            if (handle == 0 ||
+                !ReadInt(base + RtsPlacement::kCurrentRecordOffset + RtsPlacement::kRecordWhatOffset, current) ||
+                !ReadInt(base + RtsPlacement::kPendingRecordOffset + RtsPlacement::kRecordWhatOffset, pending))
+                return false;
+            idle = Policy::IsIdle(current, pending);
+            return true;
+        }
+
+        void DoIdleSelect(bool all)
+        {
+            void* const panel = reinterpret_cast<void*>(g_ControlPanelAddr);
+            void* const user = UserObject();
+            static uint32_t idleHandles[Policy::kIdleTrackCapacity];
+            int idleCount = 0;
+            const size_t n = SnapshotObjects(g_ObjectScratch, kMaxObjects);
+            for (size_t i = 0; i < n && idleCount < Policy::kIdleTrackCapacity; ++i)
+            {
+                uint32_t handle = 0;
+                bool idle = false;
+                int current = 0;
+                int pending = 0;
+                Policy::Family family = Policy::Family::None;
+                if (EvaluateIdleUnit(g_ObjectScratch[i], user, handle, idle, current, pending, family) && idle)
+                    idleHandles[idleCount++] = handle;
+            }
+            Policy::SortHandlesAscending(idleHandles, idleCount);
+            uint32_t pick[Policy::kSelectCapacity];
+            const int count =
+                Policy::PlanIdleSelect(idleHandles, idleCount, g_LastIdlePick, all, pick, Policy::kSelectCapacity);
+            int added = 0;
+            if (count > 0 && SafeSelectNone(panel))
+            {
+                for (int i = 0; i < count; ++i)
+                {
+                    // Re-read: SelectAdd appends with no room check.
+                    int now = 0;
+                    if (!ReadInt(g_ControlPanelAddr + kSelectNumOffset, now) || now >= Policy::kSelectCapacity)
+                        break;
+                    void* const obj = SafeGetObj(pick[i]);
+                    if (obj && SafeSelectAdd(panel, obj))
+                        ++added;
+                }
+            }
+            const uint32_t first = count > 0 ? pick[0] : 0;
+            Log(L"[RTS] idle unit select n=%d picked=0x%08X shift=%d\n", idleCount, first, all ? 1 : 0);
+            if (added > 0)
+            {
+                g_LastIdlePick = pick[count - 1];
+                SafePlayClick();
+            }
+            else
+            {
+                SafePlaySound(kRefuseSound);
+            }
+        }
+
+        // Every kIdleScanIntervalMs, while the alert is on: tracks each own
+        // unit's idle state and plays kIdleAlertSound on an allowed busy->idle
+        // flip (Policy::IdleTracker).
+        void ScanIdleAlerts()
+        {
+            if (!g_IdleAlertActive.load(std::memory_order_acquire))
+                return;
+            const ULONGLONG now = GetTickCount64();
+            if (now - g_IdleLastScanMs < kIdleScanIntervalMs)
+                return;
+            g_IdleLastScanMs = now;
+            if (!WorldInteractive() || EditorActive())
+                return;
+            const size_t n = SnapshotObjects(g_ObjectScratch, kMaxObjects);
+            if (n == 0)
+                return;
+            void* const user = UserObject();
+            g_IdleTracker.BeginPass();
+            for (size_t i = 0; i < n; ++i)
+            {
+                uint32_t handle = 0;
+                bool idle = false;
+                int current = 0;
+                int pending = 0;
+                Policy::Family family = Policy::Family::None;
+                if (!EvaluateIdleUnit(g_ObjectScratch[i], user, handle, idle, current, pending, family))
+                    continue;
+                const Policy::IdleObservation o = g_IdleTracker.Observe(handle, idle, now);
+                if ((o.first || o.changed) && InterlockedDecrement(&g_IdleStateLogBudget) >= 0)
+                    Log(L"[RTS] idle state handle=0x%08X idle=%d what=%d/%d family=%hs\n", handle,
+                        idle ? 1 : 0, current, pending, Policy::FamilyName(family));
+                if (o.alert)
+                {
+                    SafePlaySound(kIdleAlertSound);
+                    Log(L"[RTS] idle alert handle=0x%08X what=%d/%d\n", handle, current, pending);
+                }
+            }
+            g_IdleTracker.EndPass();
+        }
+
         void DoHoldKey()
         {
             if (!HoldAvailableNow())
@@ -1317,6 +1460,8 @@ namespace BZROpenShim::Hooks
                 return g_AreaActive.load(std::memory_order_acquire);
             case Policy::KeyId::Hold:
                 return g_HoldKeyActive.load(std::memory_order_acquire) && HoldAvailableNow();
+            case Policy::KeyId::IdleUnit:
+                return g_IdleKeyActive.load(std::memory_order_acquire);
             default:
                 return false;
             }
@@ -1379,6 +1524,7 @@ namespace BZROpenShim::Hooks
                 case Policy::KeyId::BuildingCycle: g_PendingBuilding.store(true); break;
                 case Policy::KeyId::AreaSelect: g_PendingArea.store(d.shift ? 2 : 1); break;
                 case Policy::KeyId::Hold: g_PendingHold.store(true); break;
+                case Policy::KeyId::IdleUnit: g_PendingIdle.store(d.shift ? 2 : 1); break;
                 default: break;
                 }
             }
@@ -1454,8 +1600,9 @@ namespace BZROpenShim::Hooks
             }
             g_PrevWndProc = prev;
             g_Window = ctx.found;
-            Log(L"[RTS] key filters on (target %hs, building %hs, area %hs, hold %hs)\n",
-                g_KeyText[0].c_str(), g_KeyText[1].c_str(), g_KeyText[2].c_str(), g_KeyText[3].c_str());
+            Log(L"[RTS] key filters on (target %hs, building %hs, area %hs, hold %hs, idle %hs)\n",
+                g_KeyText[0].c_str(), g_KeyText[1].c_str(), g_KeyText[2].c_str(), g_KeyText[3].c_str(),
+                g_KeyText[4].c_str());
         }
 
         // The QuickSave chords and rally key in force, for the clash checks.
@@ -1751,6 +1898,22 @@ namespace BZROpenShim::Hooks
                                                   reinterpret_cast<const void*>(&NavPickHook), g_NavBroadcastObjAddr,
                                                   "ControlPanel::Render/nav pick (rts)") != 0;
             }
+            if (!g_IdleReady)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "ControlPanelSelectAdd", &g_IdleSelectAddAddr },
+                    { "ControlPanelSelectNone", &g_IdleSelectNoneAddr },
+                };
+                const uint32_t sound = HookEngine::ResolveNamedAddress("PlayGlobalSound");
+                if (sound != 0 && HookEngine::BindEngineRows("RTS idle units", rows))
+                {
+                    // The same engine functions the other parts bind.
+                    g_FnSelectAdd = reinterpret_cast<FnSelectAdd>(g_IdleSelectAddAddr);
+                    g_FnSelectNone = reinterpret_cast<FnSelectNone>(g_IdleSelectNoneAddr);
+                    g_FnPlaySound = reinterpret_cast<FnPlaySound>(sound);
+                    g_IdleReady = g_ObjectListGlobal != 0;
+                }
+            }
 #endif
         }
 
@@ -1785,6 +1948,8 @@ namespace BZROpenShim::Hooks
                   "Unavailable: Hold did not hook on this game build (see openshim.log)." },
                 { "RtsBuildAtNav", BuildNavPartsReady(),
                   "Unavailable: Build at Nav did not hook on this game build (see openshim.log)." },
+                { "RtsIdleUnitAlert", g_SharedReady && g_IdleReady,
+                  "Unavailable: the idle unit alert did not hook on this game build (see openshim.log)." },
             };
             for (const Mark& m : marks)
             {
@@ -1809,6 +1974,7 @@ namespace BZROpenShim::Hooks
         g_SmartRepairEnabled = ReadBoolOption("RtsSmartRepairReload", true);
         g_AreaEnabled = ReadBoolOption("RtsAreaSelect", true);
         g_BuildNavEnabled = ReadBoolOption("RtsBuildAtNav", true);
+        g_IdleAlertEnabled = ReadBoolOption("RtsIdleUnitAlert", false);
         std::string hold;
         g_HoldMode = Policy::kHoldKeyAndShiftMenu;
         if (TryGetUserConfigString("Gameplay", "RtsHold", hold) && !hold.empty())
@@ -1816,9 +1982,10 @@ namespace BZROpenShim::Hooks
         ResolveKeysFromConfig();
         if (!g_ConfigRead)
             Log(L"[RTS] Baseline RtsRemoteTarget=%hs RtsSmartCommandMenu=%hs RtsSmartRepairReload=%hs "
-                L"RtsAreaSelect=%hs RtsHold=%d RtsBuildAtNav=%hs\n",
+                L"RtsAreaSelect=%hs RtsHold=%d RtsBuildAtNav=%hs RtsIdleUnitAlert=%hs\n",
                 g_TargetEnabled ? "yes" : "no", g_SmartMenuEnabled ? "yes" : "no", g_SmartRepairEnabled ? "yes" : "no",
-                g_AreaEnabled ? "yes" : "no", g_HoldMode, g_BuildNavEnabled ? "yes" : "no");
+                g_AreaEnabled ? "yes" : "no", g_HoldMode, g_BuildNavEnabled ? "yes" : "no",
+                g_IdleAlertEnabled ? "yes" : "no");
         g_ConfigRead = true;
         RefreshRtsCommandsState();
     }
@@ -1838,16 +2005,16 @@ namespace BZROpenShim::Hooks
             InstallParts();
         MarkParts();
         const bool all = SmartMenuPartsReady() && g_TargetReady && g_AreaReady && HoldHooksReady() &&
-                         g_HoldClickReady && g_LabelReady && BuildNavPartsReady();
+                         g_HoldClickReady && g_LabelReady && BuildNavPartsReady() && g_IdleReady;
         if (all || s_attempts >= kMaxInstallAttempts)
         {
             s_done = true;
             Log(L"[RTS] install %hs after %d attempt(s): merge %hs, dispatch %hs, Defend target %hs, target %hs, "
-                L"area %hs, hold %hs, Shift+Defend click %hs, label %hs, Build at Nav %hs\n",
+                L"area %hs, hold %hs, Shift+Defend click %hs, label %hs, Build at Nav %hs, idle %hs\n",
                 all ? "complete" : "gave up", s_attempts, g_MergeReady ? "yes" : "no", g_DispatchReady ? "yes" : "no",
                 g_BroadcastReady ? "yes" : "no", g_TargetReady ? "yes" : "no", g_AreaReady ? "yes" : "no",
                 HoldHooksReady() ? "yes" : "no", g_HoldClickReady ? "yes" : "no", g_LabelReady ? "yes" : "no",
-                BuildNavPartsReady() ? "yes" : "no");
+                BuildNavPartsReady() ? "yes" : "no", g_IdleReady ? "yes" : "no");
         }
         RefreshRtsCommandsState();
     }
@@ -1868,6 +2035,12 @@ namespace BZROpenShim::Hooks
         g_TargetActive.store(g_TargetEnabled && g_SharedReady && g_TargetReady, std::memory_order_release);
         g_AreaActive.store(g_AreaEnabled && g_SharedReady && g_AreaReady, std::memory_order_release);
         g_BuildNavActive.store(g_BuildNavEnabled && BuildNavPartsReady(), std::memory_order_release);
+        g_IdleKeyActive.store(g_SharedReady && g_IdleReady, std::memory_order_release);
+        const bool idleAlert = g_IdleAlertEnabled && g_SharedReady && g_IdleReady;
+        // This runs every 250 ms from the MP gate reconcile: clear the table only
+        // when the alert turns off, so an old table cannot alert later.
+        if (g_IdleAlertActive.exchange(idleAlert, std::memory_order_acq_rel) && !idleAlert)
+            g_IdleResetPending.store(true, std::memory_order_release);
         const bool sp = IsSinglePlayerSession();
         const bool holdKey = Policy::HoldAvailable(g_HoldMode != Policy::kHoldOff, HoldHooksReady(), sp);
         g_HoldKeyActive.store(holdKey, std::memory_order_release);
@@ -1887,7 +2060,9 @@ namespace BZROpenShim::Hooks
     {
         const bool anyKey = g_TargetActive.load(std::memory_order_acquire) ||
                             g_AreaActive.load(std::memory_order_acquire) ||
-                            g_HoldKeyActive.load(std::memory_order_acquire);
+                            g_HoldKeyActive.load(std::memory_order_acquire) ||
+                            g_IdleKeyActive.load(std::memory_order_acquire) ||
+                            g_IdleAlertActive.load(std::memory_order_acquire);
         if (!anyKey)
             return;
         g_LastTickMs.store(GetTickCount64(), std::memory_order_relaxed);
@@ -1910,6 +2085,13 @@ namespace BZROpenShim::Hooks
                 DoAreaSelect(area == 2);
             if (g_PendingHold.exchange(false))
                 DoHoldKey();
+            if (const int idle = g_PendingIdle.exchange(0))
+                DoIdleSelect(idle == 2);
+            if (g_IdleResetPending.exchange(false))
+                g_IdleTracker.Clear();
+            if (g_IdlePickResetPending.exchange(false))
+                g_LastIdlePick = 0;
+            ScanIdleAlerts();
         }
         catch (...)
         {
@@ -1924,6 +2106,10 @@ namespace BZROpenShim::Hooks
         g_PendingBuilding.store(false);
         g_PendingArea.store(0);
         g_PendingHold.store(false);
+        g_PendingIdle.store(0);
+        g_IdleResetPending.store(true); // the drain thread clears the table
+        g_IdlePickResetPending.store(true);
+        g_IdleStateLogBudget = 300;
         g_LogBudget = 48;
         RefreshRtsCommandsState();
     }
