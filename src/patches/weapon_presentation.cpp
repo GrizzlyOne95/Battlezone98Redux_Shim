@@ -87,6 +87,18 @@ namespace BZROpenShim::WeaponPresentation
         return result;
     }
 
+    bool FoldNodeName(const char* name, char (&folded)[kMeshIdBytes + 1], size_t& length) noexcept
+    {
+        length = 0;
+        for (; name[length]; ++length)
+        {
+            if (length == kMeshIdBytes) return false;
+            const char ch = name[length];
+            folded[length] = (ch >= 'A' && ch <= 'Z') ? static_cast<char>(ch - 'A' + 'a') : ch;
+        }
+        return length != 0;
+    }
+
     std::optional<MeshId> ParseMeshId(std::string_view name) noexcept
     {
         if (name.empty() || name.size() > kMeshIdBytes)
@@ -148,6 +160,32 @@ namespace BZROpenShim::WeaponPresentation
                 pending.push_back(view.child);
         }
         return { match ? MeshLookupStatus::Found : MeshLookupStatus::NotFound, match };
+    }
+
+    bool ComposeNodeWorld(uintptr_t root, uintptr_t node, ReadNodeFrame read,
+        void* user, Matrix& out, size_t limit)
+    {
+        if (!root || !node || !read || limit == 0 || limit > kMaxNodeDepth)
+            return false;
+        NodeFrameView view;
+        if (!read(node, view, user))
+            return false;
+        Matrix world = view.local;
+        uintptr_t current = node;
+        // The visited count bounds the walk, so a cycle exhausts it and fails.
+        for (size_t depth = 1; view.parent; ++depth)
+        {
+            if (depth >= limit)
+                return false;
+            current = view.parent;
+            if (!read(current, view, user))
+                return false;
+            world = WeaponConvergence::Multiply(world, view.local);
+        }
+        if (current != root || !ValidPose(world))
+            return false;
+        out = world;
+        return true;
     }
 
     bool Identity::operator==(const Identity& rhs) const noexcept
