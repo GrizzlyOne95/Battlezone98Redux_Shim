@@ -587,6 +587,17 @@ PreciseTimestep = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_MUSIC_SINGLE_FILL
 MusicSingleFill = 1
 
+; Music streams from a 3 s ring of 16 chunks. The decoder thread refills one
+; chunk per DirectSound notification, but the notifications share one
+; auto-reset event, so two that fire before the thread wakes count once and
+; the writer stays a chunk behind for the rest of the track. Enough misses
+; replay stale audio: a skip like a scratched CD. This refills every chunk
+; playback has passed on each wake and ignores stale wakes. The log line
+; [MusicRefillCatchUp] counts how often it had to catch up.
+; Accepted: boolean. Default: ON. Client-local audio; also runs in network games.
+; Env alias to force it off: OPENSHIM_DISABLE_MUSIC_REFILL_CATCHUP
+MusicRefillCatchUp = 1
+
 ; Skip magnet-mine attraction when the ODF declares a non-finite or
 ; non-positive range, which otherwise faults. Base Mine::Simulate still runs,
 ; so mine lifetime and removal are unchanged. Only content with a broken range

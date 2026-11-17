@@ -163,6 +163,8 @@ namespace
             return TryReadMappedBool(ini, "Fixes", "ThreadScheduling", true, out);
         if (Equals(name, "OPENSHIM_DISABLE_MUSIC_SINGLE_FILL"))
             return TryReadMappedBool(ini, "Fixes", "MusicSingleFill", true, out);
+        if (Equals(name, "OPENSHIM_DISABLE_MUSIC_REFILL_CATCHUP"))
+            return TryReadMappedBool(ini, "Fixes", "MusicRefillCatchUp", true, out);
 
         // Working runtime features use positive INI keys; legacy DISABLE_*
         // environment names are inverted here so old call-site semantics remain

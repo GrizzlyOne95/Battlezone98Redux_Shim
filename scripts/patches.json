@@ -750,6 +750,26 @@
       "identity": "StreamingOggSound constructor 0x00416830 on GOG Redux 2.2.301, reached only from OggManager setup 0x0043F050 on the music path (track start 0x004378F0). `push 0; mov edx,4; imul eax,edx,0; mov ecx,[ebp-0x10]; mov edx,[ecx+4]; mov eax,[edx+eax]; push eax; mov ecx,[ebp-0x10]; call` FillBufferWithSound (__thiscall, two stack args, result unused), then `mov [ebp-4],-1`. OggManager::Play 0x0043F320 runs Reset 0x00416CF0 (ov_raw_seek 0, positions zeroed) and fills again, so this fill is never heard. Target of StreamingOggSound::CtorFillCall; MusicSingleFill checks the call still targets it before patching."
     },
     {
+      "name": "OggDecoder::RefillCall",
+      "pattern": "0F B6 42 10 50 8B 4D FC 8B 49 1C E8 ?? ?? ?? ?? 89 45 EC",
+      "offset": 11,
+      "mode": "address",
+      "fallback": "0x0043E924",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "OggDecoder thread 0x0043E8A0 on GOG Redux 2.2.301 (created by music init 0x0043E980, one per stream). After MsgWaitForMultipleObjects returns the stream's notification event, under the stream lock: `movzx eax,byte [edx+0x10]; push eax; mov ecx,[ebp-4]; mov ecx,[ecx+0x1C]; call` StreamingOggSound::Refill (__thiscall, one stack arg = loop flag, ret 4), then `mov [ebp-0x14],eax`. Refill decodes one chunk at write cursor +0x20 and advances it by chunk +0x1C modulo ring +0x08. This is the E8 at 0x0043E924. Redirected by MusicRefillCatchUp."
+    },
+    {
+      "name": "StreamingOggSound::Refill",
+      "pattern": "0F B6 42 10 50 8B 4D FC 8B 49 1C E8 ?? ?? ?? ?? 89 45 EC",
+      "offset": 11,
+      "mode": "rel32_target",
+      "fallback": "0x00416AA0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "OggDecoder thread 0x0043E8A0 on GOG Redux 2.2.301 (created by music init 0x0043E980, one per stream). After MsgWaitForMultipleObjects returns the stream's notification event, under the stream lock: `movzx eax,byte [edx+0x10]; push eax; mov ecx,[ebp-4]; mov ecx,[ecx+0x1C]; call` StreamingOggSound::Refill (__thiscall, one stack arg = loop flag, ret 4), then `mov [ebp-0x14],eax`. Refill decodes one chunk at write cursor +0x20 and advances it by chunk +0x1C modulo ring +0x08. Target of OggDecoder::RefillCall; MusicRefillCatchUp checks the call still targets it."
+    },
+    {
       "name": "SetLoopTimes::FrameCall",
       "pattern": "68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 E8 ?? ?? ?? ?? 83 7D 08 00 75 05 E8",
       "offset": 13,
