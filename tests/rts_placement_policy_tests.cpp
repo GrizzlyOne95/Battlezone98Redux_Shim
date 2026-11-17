@@ -276,6 +276,90 @@ namespace
         Check(WaypointColour(kCmdAttack, false).r > WaypointColour(kCmdAttack, false).g, "attack is red");
     }
 
+    void RouteTests()
+    {
+        RouteSample out[kMaxRouteSamples];
+
+        // A straight 2-point route matches the old straight line.
+        const float straight[] = {10.0f, 20.0f, 10.0f, 30.0f}; // 10 m along +z
+        const unsigned segments = LineSegmentsFor(10.0f);
+        unsigned n = BuildRouteSamples(straight, 2, kLineWidth, out);
+        Check(n == segments + 1, "straight route: same sample count as the line");
+        bool same = n == segments + 1;
+        for (unsigned i = 0; i < n && same; ++i)
+        {
+            const float t = static_cast<float>(i) / static_cast<float>(segments);
+            // Old line: perpendicular (-dz, dx)/len * half.
+            same = Near(out[i].x, 0.0f) && Near(out[i].z, 10.0f * t) && Near(out[i].px, -0.5f * kLineWidth) &&
+                   Near(out[i].pz, 0.0f);
+        }
+        Check(same, "straight route: samples and offsets match the old line");
+
+        // An L-shaped route keeps its corner (a sample sits on it, mitred).
+        const float ell[] = {0.0f, 0.0f, 10.0f, 0.0f, 10.0f, 10.0f};
+        n = BuildRouteSamples(ell, 3, kLineWidth, out);
+        bool corner = false;
+        for (unsigned i = 0; i < n; ++i)
+            if (Near(out[i].x, 10.0f) && Near(out[i].z, 0.0f))
+            {
+                corner = true;
+                // Normals (0,1) and (-1,0) average to (-0.707, 0.707), scaled by 1/cos(45).
+                Check(Near(out[i].px, -0.5f * kLineWidth) && Near(out[i].pz, 0.5f * kLineWidth), "corner is mitred");
+            }
+        Check(corner && n >= 3, "L route keeps its corner");
+        Check(Near(out[n - 1].x, 10.0f) && Near(out[n - 1].z, 10.0f), "L route ends on the goal");
+
+        // A sharp reversal clamps the miter.
+        const float back[] = {0.0f, 0.0f, 10.0f, 0.0f, 0.0f, 0.001f};
+        n = BuildRouteSamples(back, 3, kLineWidth, out);
+        bool clamped = n > 0;
+        for (unsigned i = 0; i < n; ++i)
+            clamped = clamped && std::sqrt(out[i].px * out[i].px + out[i].pz * out[i].pz) <=
+                                     kMaxMiter * 0.5f * kLineWidth + 1e-4f;
+        Check(clamped, "miter is clamped");
+
+        // A long, winding route stays within the vertex budget.
+        float longRoute[2 * kMaxRoutePoints];
+        for (unsigned i = 0; i < kMaxRoutePoints; ++i)
+        {
+            longRoute[2 * i] = 500.0f * static_cast<float>(i);
+            longRoute[2 * i + 1] = (i & 1u) ? 300.0f : 0.0f;
+        }
+        n = BuildRouteSamples(longRoute, kMaxRoutePoints, kLineWidth, out);
+        Check(n >= 2 && n <= kMaxRouteSamples, "long route stays within the budget");
+        Check(Near(out[n - 1].x, longRoute[2 * (kMaxRoutePoints - 1)] - longRoute[0], 0.01f), "long route reaches the goal");
+
+        // Degenerate input.
+        const float dup[] = {5.0f, 5.0f, 5.0f, 5.0f, 5.0f, 5.0f};
+        Check(BuildRouteSamples(dup, 3, kLineWidth, out) == 0, "all-duplicate points: nothing");
+        Check(BuildRouteSamples(dup, 1, kLineWidth, out) == 0, "one point: nothing");
+        Check(BuildRouteSamples(nullptr, 2, kLineWidth, out) == 0, "no points: nothing");
+        const float nanRoute[] = {0.0f, 0.0f, std::nanf(""), 1.0f, 8.0f, 0.0f};
+        n = BuildRouteSamples(nanRoute, 3, kLineWidth, out);
+        Check(n >= 2 && Near(out[n - 1].x, 8.0f), "a NaN point is skipped");
+        const float dupMid[] = {0.0f, 0.0f, 4.0f, 0.0f, 4.0f, 0.0f, 8.0f, 0.0f};
+        n = BuildRouteSamples(dupMid, 4, kLineWidth, out);
+        Check(n >= 2 && Near(out[n - 1].x, 8.0f), "a duplicate mid point is merged");
+
+        // Trim keeps the first 63 points and the goal.
+        float big[2 * 100], trimmed[2 * kMaxRoutePoints];
+        for (unsigned i = 0; i < 100; ++i)
+        {
+            big[2 * i] = static_cast<float>(i);
+            big[2 * i + 1] = 0.0f;
+        }
+        Check(TrimRoute(big, 100, trimmed) == kMaxRoutePoints && Near(trimmed[2 * 62], 62.0f) &&
+                  Near(trimmed[2 * 63], 99.0f),
+              "long route trimmed to 63 points and the goal");
+        Check(TrimRoute(big, 5, trimmed) == 5 && TrimRoute(big, 0, trimmed) == 0, "short route kept whole");
+
+        // The hash follows the points.
+        float a[] = {0.0f, 0.0f, 1.0f, 1.0f}, b[] = {0.0f, 0.0f, 1.0f, 1.0f};
+        Check(RouteHash(a, 2) == RouteHash(b, 2), "equal routes hash equal");
+        b[3] = 1.5f;
+        Check(RouteHash(a, 2) != RouteHash(b, 2), "a changed point changes the hash");
+    }
+
     void PoolTests()
     {
         using namespace BZROpenShim::RtsMarkers;
@@ -344,6 +428,7 @@ int main(int argc, char** argv)
     OrientationTests();
     PowerTests();
     WaypointTests();
+    RouteTests();
     PoolTests();
     AssetTests();
     return OpenShimTest::ExitCode();

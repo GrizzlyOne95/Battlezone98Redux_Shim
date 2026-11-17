@@ -404,6 +404,164 @@ namespace BZROpenShim
             return static_cast<unsigned>(wanted);
         }
 
+        // ---- Planned-route ribbon ------------------------------------------
+        // A route is a polyline of sim-space {x, z} points; the first is the
+        // unit's position, the last the goal.
+        constexpr unsigned kMaxRoutePoints = 64;
+        constexpr float kMaxMiter = 2.0f; // longest corner offset, as a multiple of the half width
+
+        // Keeps the first kMaxRoutePoints-1 points and the goal when the route
+        // is longer. Returns the number of points written to `out`.
+        inline unsigned TrimRoute(const float* xz, unsigned count, float (&out)[2 * kMaxRoutePoints])
+        {
+            if (!xz || count == 0)
+                return 0;
+            if (count <= kMaxRoutePoints)
+            {
+                std::memcpy(out, xz, sizeof(float) * 2 * count);
+                return count;
+            }
+            std::memcpy(out, xz, sizeof(float) * 2 * (kMaxRoutePoints - 1));
+            out[2 * (kMaxRoutePoints - 1)] = xz[2 * (count - 1)];
+            out[2 * (kMaxRoutePoints - 1) + 1] = xz[2 * (count - 1) + 1];
+            return kMaxRoutePoints;
+        }
+
+        // One ribbon sample: the centre line point relative to the route's
+        // first point, and the half-width offset to add (subtract) for the
+        // ribbon's two edges.
+        struct RouteSample
+        {
+            float x, z;
+            float px, pz;
+        };
+        constexpr unsigned kMaxRouteSamples = kMaxLineSegments + 1;
+
+        // Resamples the route along its arc length every kLineSegmentLength
+        // metres (a longer step when that would exceed kMaxLineSegments), with
+        // an extra sample on every corner so bends stay sharp. Offsets use the
+        // segment's perpendicular, mitred (clamped to kMaxMiter) at corners.
+        // Duplicate and non-finite points are skipped. Returns the sample
+        // count, 0 when there is no usable length (fewer than 2 distinct points).
+        inline unsigned BuildRouteSamples(const float* xz, unsigned count, float width,
+                                          RouteSample (&out)[kMaxRouteSamples])
+        {
+            if (!xz || count < 2)
+                return 0;
+            if (count > kMaxRoutePoints)
+                count = kMaxRoutePoints;
+            // Distinct points relative to the first.
+            float px[kMaxRoutePoints], pz[kMaxRoutePoints];
+            unsigned n = 0;
+            for (unsigned i = 0; i < count; ++i)
+            {
+                if (!std::isfinite(xz[2 * i]) || !std::isfinite(xz[2 * i + 1]))
+                    continue;
+                if (n == 0)
+                {
+                    if (i != 0)
+                        return 0; // the start must be valid
+                    px[0] = 0.0f;
+                    pz[0] = 0.0f;
+                    n = 1;
+                    continue;
+                }
+                const float x = xz[2 * i] - xz[0], z = xz[2 * i + 1] - xz[1];
+                const float dx = x - px[n - 1], dz = z - pz[n - 1];
+                if (dx * dx + dz * dz < 1.0e-6f)
+                    continue;
+                px[n] = x;
+                pz[n] = z;
+                ++n;
+            }
+            if (n < 2)
+                return 0;
+            // Cumulative length and unit direction per segment.
+            float cum[kMaxRoutePoints], dirX[kMaxRoutePoints], dirZ[kMaxRoutePoints];
+            cum[0] = 0.0f;
+            for (unsigned j = 0; j + 1 < n; ++j)
+            {
+                const float dx = px[j + 1] - px[j], dz = pz[j + 1] - pz[j];
+                const float len = std::sqrt(dx * dx + dz * dz);
+                dirX[j] = dx / len;
+                dirZ[j] = dz / len;
+                cum[j + 1] = cum[j] + len;
+            }
+            const float total = cum[n - 1];
+            if (!std::isfinite(total) || !(total > 0.0f))
+                return 0;
+
+            // Sample arc lengths: uniform steps plus every corner.
+            const unsigned corners = n - 2;
+            unsigned uniform = LineSegmentsFor(total);
+            if (uniform + corners > kMaxLineSegments)
+                uniform = kMaxLineSegments > corners ? kMaxLineSegments - corners : 1;
+            float at[kMaxRouteSamples + kMaxRoutePoints];
+            unsigned m = 0;
+            for (unsigned i = 0; i <= uniform; ++i)
+                at[m++] = total * static_cast<float>(i) / static_cast<float>(uniform);
+            for (unsigned j = 1; j + 1 < n; ++j)
+                at[m++] = cum[j];
+            std::sort(at, at + m);
+            // Drop samples closer than 1 mm to the previous one.
+            unsigned k = 1;
+            for (unsigned i = 1; i < m; ++i)
+                if (at[i] - at[k - 1] > 1.0e-3f)
+                    at[k++] = at[i];
+            m = k;
+            if (m > kMaxRouteSamples)
+                m = kMaxRouteSamples;
+
+            const float half = 0.5f * width;
+            unsigned seg = 0;
+            for (unsigned i = 0; i < m; ++i)
+            {
+                const float s = at[i];
+                while (seg + 2 < n && s > cum[seg + 1] - 1.0e-3f)
+                    ++seg;
+                const float t = (s - cum[seg]) / (cum[seg + 1] - cum[seg]);
+                float nx = -dirZ[seg], nz = dirX[seg];
+                float scale = half;
+                if (seg > 0 && std::fabs(s - cum[seg]) <= 1.0e-3f)
+                {
+                    // A corner: average the two segments' normals.
+                    const float ax = -dirZ[seg - 1], az = dirX[seg - 1];
+                    float mx = ax + nx, mz = az + nz;
+                    const float ml = std::sqrt(mx * mx + mz * mz);
+                    if (ml > 1.0e-4f)
+                    {
+                        mx /= ml;
+                        mz /= ml;
+                        const float d = mx * nx + mz * nz; // cos of half the turn
+                        scale = half * (d > 1.0f / kMaxMiter ? 1.0f / d : kMaxMiter);
+                        nx = mx;
+                        nz = mz;
+                    }
+                }
+                out[i] = {px[seg] + (px[seg + 1] - px[seg]) * t, pz[seg] + (pz[seg + 1] - pz[seg]) * t,
+                          nx * scale, nz * scale};
+            }
+            return m;
+        }
+
+        // FNV-1a over the route's float bits; lets the renderer skip a rebuild
+        // while the route is unchanged.
+        inline uint32_t RouteHash(const float* xz, unsigned count)
+        {
+            uint32_t h = 2166136261u;
+            for (unsigned i = 0; i < 2 * count; ++i)
+            {
+                uint32_t bits = 0;
+                std::memcpy(&bits, &xz[i], sizeof(bits));
+                for (int b = 0; b < 4; ++b)
+                {
+                    h ^= (bits >> (8 * b)) & 0xFFu;
+                    h *= 16777619u;
+                }
+            }
+            return h;
+        }
+
         inline bool ShouldDrawLine(float fromX, float fromZ, float toX, float toZ)
         {
             const float dx = toX - fromX, dz = toZ - fromZ;

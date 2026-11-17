@@ -92,6 +92,21 @@ namespace BZROpenShim
             constexpr size_t kSelectHandlesOffset = 0x1C;
             constexpr size_t kSelectCountOffset = 0x188;
             constexpr int kSelectMax = static_cast<int>((kSelectCountOffset - kSelectHandlesOffset) / 4);
+            // Planned route (the data the stock Shift+F9 AI debug view draws):
+            // GameObject +0xFC AiProcess*, process +0x38 current task*; a
+            // UnitTask holds an int state at +0x08 (2 = GOTO), the AiPath* plan
+            // at +0x40 and the uint32 current point index at +0x44. AiPath +0x04
+            // is the int point count, +0x08 a float* of {x, z} pairs.
+            // GOG:0x006004A0 / GOG:0x00601070
+            constexpr size_t kGameObjectAiProcessOffset = 0xFC;
+            constexpr size_t kAiProcessTaskOffset = 0x38;
+            constexpr size_t kTaskStateOffset = 0x08;
+            constexpr size_t kTaskPathOffset = 0x40;
+            constexpr size_t kTaskPathIndexOffset = 0x44;
+            constexpr size_t kPathCountOffset = 0x04;
+            constexpr size_t kPathPointsOffset = 0x08;
+            constexpr int kTaskStateGoto = 2;
+            constexpr int kMaxEngineRoutePoints = 512;
             // ControlPanel +0x1124: VECTOR_3D* of the reticle/satellite cursor
             // point (row RtsMarkersCursorPointField).
             constexpr size_t kCursorPointOffset = 0x1124;
@@ -293,6 +308,28 @@ namespace BZROpenShim
                        ReadInt(reinterpret_cast<uintptr_t>(obj) + kGameObjectActualTeamOffset, team) &&
                        ReadInt(reinterpret_cast<uintptr_t>(player) + kGameObjectActualTeamOffset, playerTeam) &&
                        team == playerTeam;
+            }
+
+            // Copies `pairs` {x, z} floats; all must be finite.
+            bool CopyRoutePointsSeh(uintptr_t address, float* out, unsigned pairs)
+            {
+                if (address < 0x10000)
+                    return false;
+                __try
+                {
+                    const float* in = reinterpret_cast<const float*>(address);
+                    for (unsigned i = 0; i < 2 * pairs; ++i)
+                    {
+                        out[i] = in[i];
+                        if (!std::isfinite(out[i]))
+                            return false;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+                return true;
             }
 
             bool TerrainHeightSeh(double x, double z, double& out)
@@ -571,6 +608,7 @@ namespace BZROpenShim
                 // Last built geometry; equal requests skip the rebuild.
                 float key[10] = {};
                 bool keyValid = false;
+                uint32_t routeHash = 0;
             };
             RingSlot g_Slots[RM::kSlotCount];
             bool g_AnyVisible = false;
@@ -585,6 +623,10 @@ namespace BZROpenShim
                 RM::Colour colour;
                 bool line = false;   // a draped line from centre to end
                 float end[2] = {};   // sim x, z of a line's end
+                // A line that follows a planned route: sim {x, z} points from
+                // the unit's position (the first) to the goal.
+                unsigned routeCount = 0;
+                float route[2 * RtsPlacement::kMaxRoutePoints] = {};
             };
 
             // One ring's strip, built before begin() so nothing between
@@ -624,11 +666,42 @@ namespace BZROpenShim
 
             static_assert(RtsPlacement::kMaxLineSegments <= RM::kMaxSegments, "a line fits the ring strip budget");
 
+            // A planned-route line: the same ribbon, bent through each route
+            // point (RtsPlacement::BuildRouteSamples), draped like a line.
+            unsigned BuildRouteStrip(const RingRequest& request, StripVertex (&out)[kMaxStripVertices])
+            {
+                RtsPlacement::RouteSample samples[RtsPlacement::kMaxRouteSamples];
+                const unsigned count =
+                    RtsPlacement::BuildRouteSamples(request.route, request.routeCount, RtsPlacement::kLineWidth, samples);
+                unsigned n = 0;
+                double last = request.centre[1];
+                for (unsigned i = 0; i < count; ++i)
+                {
+                    const RtsPlacement::RouteSample& s = samples[i];
+                    double h = last;
+                    if (!TerrainHeightSeh(request.centre[0] + s.x, request.centre[2] + s.z, h))
+                        h = last;
+                    last = h;
+                    const float y = RM::LocalVertexY(static_cast<float>(h), request.centre[1]);
+                    out[n++] = {s.x + s.px, y, -(s.z + s.pz)};
+                    out[n++] = {s.x - s.px, y, -(s.z - s.pz)};
+                }
+                return n;
+            }
+
             // A waypoint line: a ribbon kLineWidth wide from centre to end,
             // sampled every kLineSegmentLength metres along the ground, in the
             // same node-local frame as a ring.
             unsigned BuildLineStrip(const RingRequest& request, StripVertex (&out)[kMaxStripVertices])
             {
+                if (request.routeCount >= 2)
+                {
+                    const unsigned n = BuildRouteStrip(request, out);
+                    if (n >= 4)
+                        return n;
+                    // A degenerate route (every point under the unit): draw
+                    // the straight line instead.
+                }
                 const float dx = request.end[0] - request.centre[0];
                 const float dz = request.end[1] - request.centre[2];
                 const float length = std::sqrt(dx * dx + dz * dz);
@@ -825,7 +898,9 @@ namespace BZROpenShim
                                        request.line ? -1.0f : request.radius,
                                        request.colour.r,  request.colour.g,  request.colour.b,  request.colour.a,
                                        request.line ? request.end[0] : 0.0f, request.line ? request.end[1] : 0.0f};
-                if (!slot.keyValid || std::memcmp(key, slot.key, sizeof(key)) != 0)
+                const uint32_t routeHash =
+                    request.line && request.routeCount >= 2 ? RtsPlacement::RouteHash(request.route, request.routeCount) : 0u;
+                if (!slot.keyValid || std::memcmp(key, slot.key, sizeof(key)) != 0 || routeHash != slot.routeHash)
                 {
                     static StripVertex vertices[kMaxStripVertices];
                     const unsigned count = request.line ? BuildLineStrip(request, vertices) : BuildStrip(request, vertices);
@@ -848,6 +923,7 @@ namespace BZROpenShim
                         return false;
                     }
                     std::memcpy(slot.key, key, sizeof(key));
+                    slot.routeHash = routeHash;
                     slot.keyValid = true;
                 }
                 // The node follows the render origin every tick; the vertices
@@ -959,6 +1035,40 @@ namespace BZROpenShim
                 return found;
             }
 
+            // The unit's remaining planned route as {x, z} pairs, the unit's
+            // own position first and the goal last. False (use the straight
+            // line) unless the current task is a UnitTask in GOTO state with a
+            // plan and a valid point index.
+            bool ReadUnitRoute(void* obj, const float pos[3], RingRequest& request, unsigned& indexOut, int& countOut)
+            {
+                int process = 0, task = 0, vtable = 0, state = 0, path = 0, index = 0, count = 0, points = 0;
+                const uintptr_t o = reinterpret_cast<uintptr_t>(obj);
+                if (!ReadInt(o + kGameObjectAiProcessOffset, process) || !process ||
+                    !ReadInt(static_cast<uintptr_t>(static_cast<uint32_t>(process)) + kAiProcessTaskOffset, task) || !task ||
+                    !ReadInt(static_cast<uintptr_t>(static_cast<uint32_t>(task)), vtable) || !vtable ||
+                    !VtableDerivesFrom(static_cast<uintptr_t>(static_cast<uint32_t>(vtable)), ".?AVUnitTask@@"))
+                    return false;
+                const uintptr_t t = static_cast<uintptr_t>(static_cast<uint32_t>(task));
+                if (!ReadInt(t + kTaskStateOffset, state) || state != kTaskStateGoto ||
+                    !ReadInt(t + kTaskPathOffset, path) || !path || !ReadInt(t + kTaskPathIndexOffset, index))
+                    return false;
+                const uintptr_t p = static_cast<uintptr_t>(static_cast<uint32_t>(path));
+                if (!ReadInt(p + kPathCountOffset, count) || count < 1 || count > kMaxEngineRoutePoints || index < 0 ||
+                    index >= count || !ReadInt(p + kPathPointsOffset, points) || !points)
+                    return false;
+                const unsigned remaining = static_cast<unsigned>(count - index);
+                static float buffer[2 * (kMaxEngineRoutePoints + 1)];
+                buffer[0] = pos[0];
+                buffer[1] = pos[2];
+                if (!CopyRoutePointsSeh(static_cast<uintptr_t>(static_cast<uint32_t>(points)) + 8u * static_cast<unsigned>(index),
+                                        buffer + 2, remaining))
+                    return false;
+                request.routeCount = RtsPlacement::TrimRoute(buffer, remaining + 1, request.route);
+                indexOut = static_cast<unsigned>(index);
+                countOut = count;
+                return request.routeCount >= 2;
+            }
+
             void LineRequest(RingRequest& line, const float from[3], float toX, float toZ, int what, bool pending)
             {
                 if (!RtsPlacement::ShouldDrawLine(from[0], from[2], toX, toZ))
@@ -974,6 +1084,10 @@ namespace BZROpenShim
                 line.colour.b = c.b;
                 line.colour.a = c.a;
             }
+
+            // Per selected-unit index: 0 none, 1 straight line, 2 planned route
+            // (change-only log).
+            int g_LineSource[RM::kMaxWaypointLineSlots] = {};
 
             void BuildPlacementRequests(RingRequest (&requests)[RM::kSlotCount])
             {
@@ -1002,15 +1116,37 @@ namespace BZROpenShim
                     float x = 0.0f, z = 0.0f;
                     if (ReadRtsCommandDestination(units[i], false, what, x, z))
                     {
-                        LineRequest(requests[RM::kFirstWaypointSlot + i], pos, x, z, what, false);
+                        RingRequest& current = requests[RM::kFirstWaypointSlot + i];
+                        LineRequest(current, pos, x, z, what, false);
+                        if (current.wanted)
+                        {
+                            unsigned routeIndex = 0;
+                            int routeCount = 0;
+                            if (!ReadUnitRoute(units[i], pos, current, routeIndex, routeCount))
+                                current.routeCount = 0;
+                            const int source = current.routeCount >= 2 ? 2 : 1;
+                            if (g_LineSource[i] != source)
+                            {
+                                g_LineSource[i] = source;
+                                if (source == 2)
+                                    LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] unit line source=route idx=%u count=%d",
+                                             routeIndex, routeCount);
+                                else
+                                    LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] unit line source=straight");
+                            }
+                        }
                         double ground = pos[1];
                         from[0] = x;
                         from[1] = TerrainHeightSeh(x, z, ground) ? static_cast<float>(ground) : pos[1];
                         from[2] = z;
                     }
+                    if (!requests[RM::kFirstWaypointSlot + i].wanted)
+                        g_LineSource[i] = 0;
                     if (ReadRtsCommandDestination(units[i], true, what, x, z))
                         LineRequest(requests[RM::kFirstPendingSlot + i], from, x, z, what, true);
                 }
+                for (size_t i = unitCount; i < RM::kMaxWaypointLineSlots; ++i)
+                    g_LineSource[i] = 0;
             }
 
             void BuildRequests(RingRequest (&requests)[RM::kSlotCount])
