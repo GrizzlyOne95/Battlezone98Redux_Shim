@@ -37,6 +37,13 @@
 //     * One short stock sound when an own unit goes from busy to idle, at
 //       most once per 5 s, never for a unit's first observed state.
 //     * Idle = current and pending command `what` both 0 or 2 (CMD_STOP).
+//   [Gameplay] RtsFollowCamera (default OFF)
+//     * In the satellite view, Shift+C (RtsFollowCameraKey) keeps the view
+//       centred on the first selected own unit (else the player's vehicle);
+//       Shift+C again stops. Leaving the satellite view or the unit dying
+//       stops it too. Each frame calls the stock OverView::SetObject
+//       (0x00588970) on the overview, the call the satellite setter makes
+//       once on entry. Local camera only; works in multiplayer.
 // Rules: include/rts_commands_policy.h. Evidence and limits:
 // Docs/RTS_COMMANDS.md. Every address is a scripts/patches.json row; each
 // part binds its own rows and stays stock (option marked unavailable) when
@@ -90,6 +97,10 @@ namespace BZROpenShim::Hooks
         using FnPlaySound = int(__cdecl*)(const char* filename, uint32_t, uint32_t, uint32_t);
         using FnGetPosition = const float*(__thiscall*)(void* entity);
         using FnRigGetCommand = int(__thiscall*)(void* rig, const float* pos);
+        // OverView::SetObject(GameObject* complete): copies the object's
+        // position into the view centre (+0x44) the satellite camera matrix
+        // reads (FUN_00588a40). No null check: callers pass a live object.
+        using FnOverViewSetObject = void(__thiscall*)(void* overview, void* obj);
         using FnSetCommandWhere = void(__thiscall*)(void* obj, int what, const float* where, uint32_t paramLow,
                                                     uint32_t paramHigh);
 
@@ -182,6 +193,10 @@ namespace BZROpenShim::Hooks
         // Idle units (its own copies of the select/sound rows).
         uint32_t g_IdleSelectAddAddr = 0;
         uint32_t g_IdleSelectNoneAddr = 0;
+        // Follow camera.
+        uint32_t g_OverViewSetObjectRowAddr = 0; // OverView_SetObject(handle) wrapper
+        uint32_t g_OverViewSetObjectAddr = 0;
+        uint32_t g_OverViewAddr = 0; // the global OverView, read from the wrapper
 
         FnGetObj g_FnGetObj = nullptr;
         FnIntersect g_FnIntersect = nullptr;
@@ -199,6 +214,7 @@ namespace BZROpenShim::Hooks
         FnSetCommandWhere g_FnNavSetCommandWhere = nullptr;
         FnSelectNone g_FnNavSelectNone = nullptr;
         FnRigGetCommand g_FnRigGetCommand = nullptr;
+        FnOverViewSetObject g_FnOverViewSetObject = nullptr;
 
         // Config ([Gameplay]); main thread.
         bool g_ConfigRead = false;
@@ -209,6 +225,7 @@ namespace BZROpenShim::Hooks
         int g_HoldMode = Policy::kHoldKeyAndShiftMenu;
         bool g_BuildNavEnabled = true;
         bool g_IdleAlertEnabled = false;
+        bool g_FollowEnabled = false;
 
         // Part readiness (patch thread, then read-only).
         bool g_SharedReady = false;
@@ -223,6 +240,7 @@ namespace BZROpenShim::Hooks
         bool g_NavSelectNoneReady = false;
         bool g_NavPickReady = false;
         bool g_IdleReady = false;
+        bool g_FollowReady = false;
 
         // Live state.
         std::atomic<unsigned> g_SmartMask{ 0 }; // Policy::SmartSet bits in force
@@ -233,6 +251,7 @@ namespace BZROpenShim::Hooks
         std::atomic<bool> g_BuildNavActive{ false };
         std::atomic<bool> g_IdleKeyActive{ false };
         std::atomic<bool> g_IdleAlertActive{ false };
+        std::atomic<bool> g_FollowActive{ false };
         std::atomic<bool> g_IdleResetPending{ false };
         std::atomic<bool> g_IdlePickResetPending{ false };
         // Set by the nav-pick hook for the SelectNone call that follows it
@@ -245,6 +264,10 @@ namespace BZROpenShim::Hooks
         std::atomic<int> g_PendingArea{ 0 }; // 1: 100 m, 2: 200 m
         std::atomic<bool> g_PendingHold{ false };
         std::atomic<int> g_PendingIdle{ 0 }; // 1: next idle unit, 2: all idle units
+        std::atomic<bool> g_PendingFollow{ false };
+        std::atomic<bool> g_FollowResetPending{ false };
+        // Game thread: the handle being followed, 0 when off.
+        uint32_t g_FollowHandle = 0;
         volatile long g_LogBudget = 48;
         // Idle units: drain thread only (the key action and the alert scan).
         volatile long g_IdleStateLogBudget = 300;
@@ -1182,6 +1205,86 @@ namespace BZROpenShim::Hooks
                 LogBudgeted(L"[RTS] target -> selected unit 0x%08X (%d selected)\n", next, count);
         }
 
+        bool EditorActive();
+        bool WorldInteractive();
+
+        // ---- follow camera (satellite view) -----------------------------------
+
+        bool SafeOverViewSetObject(void* obj)
+        {
+            if (!g_FnOverViewSetObject || !g_OverViewAddr || !obj)
+                return false;
+            __try
+            {
+                g_FnOverViewSetObject(reinterpret_cast<void*>(static_cast<uintptr_t>(g_OverViewAddr)), obj);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        void StopFollow(const char* why)
+        {
+            if (g_FollowHandle == 0)
+                return;
+            LogBudgeted(L"[RTS] follow camera off (%hs) 0x%08X\n", why, g_FollowHandle);
+            g_FollowHandle = 0;
+        }
+
+        // The key (gate: the option is on and the satellite view is up).
+        void DoFollowKey()
+        {
+            void* const user = UserObject();
+            uint32_t handles[Policy::kSelectCapacity];
+            const int n = ReadSelection(handles);
+            uint32_t firstOwn = 0;
+            for (int i = 0; i < n && firstOwn == 0; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                if (obj && obj != user && IsPlayerTeam(obj))
+                    firstOwn = handles[i];
+            }
+            const uint32_t userHandle = user ? SafeGetHandle(user) : 0;
+            const uint32_t next = Policy::FollowKeyTarget(firstOwn, userHandle, g_FollowHandle);
+            if (next == 0)
+            {
+                StopFollow("key");
+                return;
+            }
+            void* const obj = SafeGetObj(next);
+            if (!obj || !SafeOverViewSetObject(obj))
+            {
+                LogBudgeted(L"[RTS] follow camera: could not centre on 0x%08X\n", next);
+                return;
+            }
+            g_FollowHandle = next;
+            LogBudgeted(L"[RTS] follow camera on 0x%08X (%hs)\n", next, next == userHandle ? "player" : "selected unit");
+        }
+
+        // Every frame while following (frameStarted drain): re-centre the
+        // overview on the unit. Whether this lands before or after the stock
+        // pan step is UNVERIFIED live (Docs/RTS_COMMANDS.md).
+        void TickFollowCamera()
+        {
+            if (g_FollowHandle == 0)
+                return;
+            void* const obj = SafeGetObj(g_FollowHandle);
+            const Policy::FollowTick tick = Policy::ClassifyFollowTick(
+                g_FollowActive.load(std::memory_order_acquire), IsSatelliteOverviewActive(),
+                WorldInteractive() && !EditorActive(), obj != nullptr);
+            if (tick == Policy::FollowTick::Hold)
+                return;
+            if (tick != Policy::FollowTick::Recenter)
+            {
+                StopFollow(Policy::FollowTickName(tick));
+                return;
+            }
+            if (!SafeOverViewSetObject(obj))
+                StopFollow("SetObject faulted");
+        }
+
         void DoBuildingCycle()
         {
             void* const user = UserObject();
@@ -1303,9 +1406,6 @@ namespace BZROpenShim::Hooks
         }
 
         // ---- idle units --------------------------------------------------------
-
-        bool EditorActive();
-        bool WorldInteractive();
 
         // GameObject::aiProcess (GameObject +0xFC, GetAIProcess 0x0045BDF0);
         // ScavengerProcess curState +0x1C and task +0x58; RecycleTask curState
@@ -1543,6 +1643,8 @@ namespace BZROpenShim::Hooks
                 return g_HoldKeyActive.load(std::memory_order_acquire) && HoldAvailableNow();
             case Policy::KeyId::IdleUnit:
                 return g_IdleKeyActive.load(std::memory_order_acquire);
+            case Policy::KeyId::FollowCamera:
+                return g_FollowActive.load(std::memory_order_acquire) && IsSatelliteOverviewActive();
             default:
                 return false;
             }
@@ -1606,6 +1708,7 @@ namespace BZROpenShim::Hooks
                 case Policy::KeyId::AreaSelect: g_PendingArea.store(d.shift ? 2 : 1); break;
                 case Policy::KeyId::Hold: g_PendingHold.store(true); break;
                 case Policy::KeyId::IdleUnit: g_PendingIdle.store(d.shift ? 2 : 1); break;
+                case Policy::KeyId::FollowCamera: g_PendingFollow.store(true); break;
                 default: break;
                 }
             }
@@ -1681,9 +1784,9 @@ namespace BZROpenShim::Hooks
             }
             g_PrevWndProc = prev;
             g_Window = ctx.found;
-            Log(L"[RTS] key filters on (target %hs, building %hs, area %hs, hold %hs, idle %hs)\n",
+            Log(L"[RTS] key filters on (target %hs, building %hs, area %hs, hold %hs, idle %hs, follow Shift+%hs)\n",
                 g_KeyText[0].c_str(), g_KeyText[1].c_str(), g_KeyText[2].c_str(), g_KeyText[3].c_str(),
-                g_KeyText[4].c_str());
+                g_KeyText[4].c_str(), g_KeyText[5].c_str());
         }
 
         // The QuickSave chords and rally key in force, for the clash checks.
@@ -1979,6 +2082,41 @@ namespace BZROpenShim::Hooks
                                                   reinterpret_cast<const void*>(&NavPickHook), g_NavBroadcastObjAddr,
                                                   "ControlPanel::Render/nav pick (rts)") != 0;
             }
+            if (!g_FollowReady)
+            {
+                // OverView_SetObject(handle) is `GetObj(handle); mov ecx,
+                // <overView>; call OverView::SetObject`. Its bytes pin both
+                // the global OverView (imm32 at +0x11) and the callee (E8 at
+                // +0x15), which must be the separately guarded SetObject row.
+                const HookEngine::EngineRow rows[] = {
+                    { "OverViewSetObjectByHandle", &g_OverViewSetObjectRowAddr },
+                    { "OverViewSetObject", &g_OverViewSetObjectAddr },
+                };
+                if (HookEngine::BindEngineRows("RTS follow camera", rows))
+                {
+                    uint8_t site[0x1A] = {};
+                    if (ReadBytes(g_OverViewSetObjectRowAddr, site, sizeof(site)) && site[0x10] == 0xB9 &&
+                        site[0x15] == 0xE8)
+                    {
+                        uint32_t overview = 0;
+                        int32_t rel = 0;
+                        std::memcpy(&overview, site + 0x11, sizeof(overview));
+                        std::memcpy(&rel, site + 0x16, sizeof(rel));
+                        const uint32_t callee = g_OverViewSetObjectRowAddr + 0x1A + static_cast<uint32_t>(rel);
+                        if (callee == g_OverViewSetObjectAddr && overview != 0)
+                        {
+                            g_OverViewAddr = overview;
+                            g_FnOverViewSetObject = reinterpret_cast<FnOverViewSetObject>(g_OverViewSetObjectAddr);
+                            g_FollowReady = true;
+                        }
+                        else if (InterlockedDecrement(&g_InstallLogBudget) >= 0)
+                        {
+                            Log(L"[RTS] follow camera: wrapper calls 0x%08X, not 0x%08X; left stock\n", callee,
+                                g_OverViewSetObjectAddr);
+                        }
+                    }
+                }
+            }
             if (!g_IdleReady)
             {
                 const HookEngine::EngineRow rows[] = {
@@ -2031,6 +2169,8 @@ namespace BZROpenShim::Hooks
                   "Unavailable: Build at Nav did not hook on this game build (see openshim.log)." },
                 { "RtsIdleUnitAlert", g_SharedReady && g_IdleReady,
                   "Unavailable: the idle unit alert did not hook on this game build (see openshim.log)." },
+                { "RtsFollowCamera", g_SharedReady && g_FollowReady,
+                  "Unavailable: Satellite Follow did not hook on this game build (see openshim.log)." },
             };
             for (const Mark& m : marks)
             {
@@ -2056,6 +2196,7 @@ namespace BZROpenShim::Hooks
         g_AreaEnabled = ReadBoolOption("RtsAreaSelect", true);
         g_BuildNavEnabled = ReadBoolOption("RtsBuildAtNav", true);
         g_IdleAlertEnabled = ReadBoolOption("RtsIdleUnitAlert", false);
+        g_FollowEnabled = ReadBoolOption("RtsFollowCamera", false);
         std::string hold;
         g_HoldMode = Policy::kHoldKeyAndShiftMenu;
         if (TryGetUserConfigString("Gameplay", "RtsHold", hold) && !hold.empty())
@@ -2063,10 +2204,10 @@ namespace BZROpenShim::Hooks
         ResolveKeysFromConfig();
         if (!g_ConfigRead)
             Log(L"[RTS] Baseline RtsRemoteTarget=%hs RtsSmartCommandMenu=%hs RtsSmartRepairReload=%hs "
-                L"RtsAreaSelect=%hs RtsHold=%d RtsBuildAtNav=%hs RtsIdleUnitAlert=%hs\n",
+                L"RtsAreaSelect=%hs RtsHold=%d RtsBuildAtNav=%hs RtsIdleUnitAlert=%hs RtsFollowCamera=%hs\n",
                 g_TargetEnabled ? "yes" : "no", g_SmartMenuEnabled ? "yes" : "no", g_SmartRepairEnabled ? "yes" : "no",
                 g_AreaEnabled ? "yes" : "no", g_HoldMode, g_BuildNavEnabled ? "yes" : "no",
-                g_IdleAlertEnabled ? "yes" : "no");
+                g_IdleAlertEnabled ? "yes" : "no", g_FollowEnabled ? "yes" : "no");
         g_ConfigRead = true;
         RefreshRtsCommandsState();
     }
@@ -2086,16 +2227,16 @@ namespace BZROpenShim::Hooks
             InstallParts();
         MarkParts();
         const bool all = SmartMenuPartsReady() && g_TargetReady && g_AreaReady && HoldHooksReady() &&
-                         g_HoldClickReady && g_LabelReady && BuildNavPartsReady() && g_IdleReady;
+                         g_HoldClickReady && g_LabelReady && BuildNavPartsReady() && g_IdleReady && g_FollowReady;
         if (all || s_attempts >= kMaxInstallAttempts)
         {
             s_done = true;
             Log(L"[RTS] install %hs after %d attempt(s): merge %hs, dispatch %hs, Defend target %hs, target %hs, "
-                L"area %hs, hold %hs, Shift+Defend click %hs, label %hs, Build at Nav %hs, idle %hs\n",
+                L"area %hs, hold %hs, Shift+Defend click %hs, label %hs, Build at Nav %hs, idle %hs, follow %hs\n",
                 all ? "complete" : "gave up", s_attempts, g_MergeReady ? "yes" : "no", g_DispatchReady ? "yes" : "no",
                 g_BroadcastReady ? "yes" : "no", g_TargetReady ? "yes" : "no", g_AreaReady ? "yes" : "no",
                 HoldHooksReady() ? "yes" : "no", g_HoldClickReady ? "yes" : "no", g_LabelReady ? "yes" : "no",
-                BuildNavPartsReady() ? "yes" : "no", g_IdleReady ? "yes" : "no");
+                BuildNavPartsReady() ? "yes" : "no", g_IdleReady ? "yes" : "no", g_FollowReady ? "yes" : "no");
         }
         RefreshRtsCommandsState();
     }
@@ -2117,6 +2258,8 @@ namespace BZROpenShim::Hooks
         g_AreaActive.store(g_AreaEnabled && g_SharedReady && g_AreaReady, std::memory_order_release);
         g_BuildNavActive.store(g_BuildNavEnabled && BuildNavPartsReady(), std::memory_order_release);
         g_IdleKeyActive.store(g_SharedReady && g_IdleReady, std::memory_order_release);
+        // A local camera move on the player's own units: no session gate.
+        g_FollowActive.store(g_FollowEnabled && g_SharedReady && g_FollowReady, std::memory_order_release);
         const bool idleAlert = g_IdleAlertEnabled && g_SharedReady && g_IdleReady;
         // This runs every 250 ms from the MP gate reconcile: clear the table only
         // when the alert turns off, so an old table cannot alert later.
@@ -2143,7 +2286,8 @@ namespace BZROpenShim::Hooks
                             g_AreaActive.load(std::memory_order_acquire) ||
                             g_HoldKeyActive.load(std::memory_order_acquire) ||
                             g_IdleKeyActive.load(std::memory_order_acquire) ||
-                            g_IdleAlertActive.load(std::memory_order_acquire);
+                            g_IdleAlertActive.load(std::memory_order_acquire) ||
+                            g_FollowActive.load(std::memory_order_acquire);
         if (!anyKey)
             return;
         g_LastTickMs.store(GetTickCount64(), std::memory_order_relaxed);
@@ -2175,6 +2319,11 @@ namespace BZROpenShim::Hooks
             }
             if (g_IdlePickResetPending.exchange(false))
                 g_LastIdlePick = 0;
+            if (g_FollowResetPending.exchange(false))
+                g_FollowHandle = 0;
+            if (g_PendingFollow.exchange(false))
+                DoFollowKey();
+            TickFollowCamera();
             ScanIdleAlerts();
         }
         catch (...)
@@ -2191,6 +2340,8 @@ namespace BZROpenShim::Hooks
         g_PendingArea.store(0);
         g_PendingHold.store(false);
         g_PendingIdle.store(0);
+        g_PendingFollow.store(false);
+        g_FollowResetPending.store(true); // the drain thread drops the follow
         g_IdleResetPending.store(true); // the drain thread clears the table
         g_IdlePickResetPending.store(true);
         g_IdleStateLogBudget = 300;

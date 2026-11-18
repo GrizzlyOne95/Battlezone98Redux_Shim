@@ -2,7 +2,7 @@
 // rts_commands_policy.h
 // Pure rules for the RTS command extras ([Gameplay] RtsRemoteTarget,
 // RtsSmartCommandMenu, RtsSmartRepairReload, RtsAreaSelect, RtsHold,
-// RtsIdleUnitAlert): the mixed-selection command-menu merge, which selected
+// RtsIdleUnitAlert, RtsFollowCamera): the mixed-selection command-menu merge, which selected
 // units an order is sent to, unit families, target cycles, the area-select
 // radius filter, idle units (definition, cycling, alert policy) and the
 // rebindable keys. No Windows or engine calls, so
@@ -303,6 +303,62 @@ namespace BZROpenShim
             return list[0];
         }
 
+        // ---- Follow camera (satellite view) ---------------------------------
+
+        // [Gameplay] RtsFollowCamera (default OFF): Shift+C (RtsFollowCameraKey)
+        // in the satellite view keeps the view centred on one of the player's
+        // units. What a press does, by handle (0 = none):
+        //   * a first own selected unit other than the one followed: follow it;
+        //   * else, while following: stop (a second press on the same unit);
+        //   * else: follow the player's own vehicle (`user`, may be 0).
+        inline uint32_t FollowKeyTarget(uint32_t firstOwnSelected, uint32_t user, uint32_t following)
+        {
+            if (firstOwnSelected != 0 && firstOwnSelected != following)
+                return firstOwnSelected;
+            if (following != 0)
+                return 0;
+            return user;
+        }
+
+        // Per tick while a unit is followed. Stop ends the follow for good (the
+        // option went off, the player left the satellite view, or the unit is
+        // gone); Hold keeps it but moves nothing this tick (pause menu, a
+        // shell screen, the editor); Recenter puts the view on the unit.
+        enum class FollowTick
+        {
+            Recenter,
+            Hold,
+            StopDisabled,
+            StopLeftSatellite,
+            StopTargetGone,
+        };
+
+        inline FollowTick ClassifyFollowTick(bool active, bool satelliteView, bool worldInteractive, bool targetLive)
+        {
+            if (!active)
+                return FollowTick::StopDisabled;
+            if (!satelliteView)
+                return FollowTick::StopLeftSatellite;
+            if (!targetLive)
+                return FollowTick::StopTargetGone;
+            if (!worldInteractive)
+                return FollowTick::Hold;
+            return FollowTick::Recenter;
+        }
+
+        inline const char* FollowTickName(FollowTick tick)
+        {
+            switch (tick)
+            {
+            case FollowTick::Recenter: return "recenter";
+            case FollowTick::Hold: return "hold";
+            case FollowTick::StopDisabled: return "option off";
+            case FollowTick::StopLeftSatellite: return "left satellite";
+            case FollowTick::StopTargetGone: return "unit gone";
+            default: return "?";
+            }
+        }
+
         // ---- area select ------------------------------------------------------
 
         constexpr float kAreaRadius = 100.0f;
@@ -590,6 +646,7 @@ namespace BZROpenShim
             AreaSelect,       // key: 100 m, Shift+key: 200 m
             Hold,             // key: Hold the selection
             IdleUnit,         // key: select the next idle unit, Shift+key: all of them
+            FollowCamera,     // Shift+key in the satellite view: follow a unit
             Count,
         };
         constexpr int kKeyCount = static_cast<int>(KeyId::Count);
@@ -610,6 +667,10 @@ namespace BZROpenShim
         // N, P-T, V-W and gamekey.map M, O, R, U, Y (J appears in neither;
         // checked against the GOG 2.2.301 install files, read-only), and X
         // and Z are the area-select and hold keys.
+        // Follow camera: Shift+C only. Plain C is center_player in the
+        // satellite view (input.map `+ program ControlMode`) and pitch_up
+        // elsewhere, with no Shift exclusion; the gate (satellite view and
+        // RtsFollowCamera on) leaves Shift+C stock everywhere else.
         inline const KeyDef& GetKeyDef(KeyId id)
         {
             static const KeyDef kDefs[kKeyCount] = {
@@ -618,6 +679,7 @@ namespace BZROpenShim
                 { "RtsAreaSelectKey", "OpenShim:RtsAreaSelectKey", "Select Same Type Nearby", "X", false, true },
                 { "RtsHoldKey", "OpenShim:RtsHoldKey", "Hold Position", "Z", false, false },
                 { "RtsIdleUnitKey", "OpenShim:RtsIdleUnitKey", "Select Next Idle Unit", "J", false, true },
+                { "RtsFollowCameraKey", "OpenShim:RtsFollowCameraKey", "Satellite Follow Unit", "C", true, false },
             };
             const int index = static_cast<int>(id);
             return kDefs[index >= 0 && index < kKeyCount ? index : 0];

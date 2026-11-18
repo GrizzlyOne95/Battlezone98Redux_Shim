@@ -2831,6 +2831,19 @@ RtsOrderQueue = 0
 ; Exposed on the OpenShim Settings page as "Build Queue".
 RtsBuildQueue = 0
 
+; Satellite Follow. In the satellite view, Shift+C (RtsFollowCameraKey) keeps
+; the view centred on your first selected unit, or on your own vehicle when
+; none of your units is selected, as it moves; the stock satellite pan is
+; overridden while it follows. Shift+C with another unit selected switches to
+; it; Shift+C again stops. Leaving the satellite view, or the unit dying or
+; being removed, also stops it; the pause menu only holds it. Plain C keeps
+; its stock job (centre on your vehicle). Only your camera moves, so it works
+; in multiplayer.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Satellite Follow".
+RtsFollowCamera = 0
+
 ; The RTS action keys. One key each, no modifier; rebind them in Options >
 ; Input > RTS Actions, which writes these lines. The remote-target key is
 ; used with Shift (Shift+T). Refused, with a log line and a fall back to the
@@ -2839,12 +2852,15 @@ RtsBuildQueue = 0
 ; key that is a Shift-only QuickSave chord.
 ; The idle unit key (J) selects the next idle unit of yours, one per press,
 ; cycling through them; Shift+J selects all of them. J is unbound in stock.
-; Defaults: T, B, X, Z, J.
+; The follow key (C) is used with Shift (Shift+C) and only in the satellite
+; view while RtsFollowCamera is on; Shift+C stays stock everywhere else.
+; Defaults: T, B, X, Z, J, C.
 RtsRemoteTargetKey = T
 RtsBuildingCycleKey = B
 RtsAreaSelectKey = X
 RtsHoldKey = Z
 RtsIdleUnitKey = J
+RtsFollowCameraKey = C
 
 
 [Updater]

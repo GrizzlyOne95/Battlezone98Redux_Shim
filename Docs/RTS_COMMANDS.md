@@ -313,6 +313,47 @@ for a replica (FUN_004dbe70.c lines 40-42). Whether the drop matrix and
 class reach the other machines before the building replicates is
 UNVERIFIED; live-test host and client.
 
+## Satellite follow (Shift+C)
+
+`[Gameplay] RtsFollowCamera` (default OFF, Options > Gameplay > Satellite
+Follow; key `RtsFollowCameraKey`, default C, used as Shift+C).
+
+- **What it does.** In the satellite view, Shift+C follows the first
+  selected own unit (never the piloted vehicle), else the player's own
+  vehicle. Shift+C with another own unit selected first switches to it;
+  Shift+C on the unit already followed, or with nothing selected while
+  following, stops. Leaving the satellite view, or the unit dying or being
+  removed (its handle no longer resolves), stops it; the pause menu, a shell
+  screen or the editor only hold it. Mission load drops it. Rules:
+  `FollowKeyTarget` and `ClassifyFollowTick` in
+  `include/rts_commands_policy.h`.
+- **How.** Each frame while following (`RunRtsCommandsPendingActions`, at
+  frameStarted), the stock `OverView::SetObject(GameObject*)` (0x00588970,
+  thiscall; bsim 0.9976 against BZ 1.5 `OverView::SetObject` 0x004D3167) is
+  called on the global OverView (0x009C9170). It writes the object at +0x3C
+  and copies its `GetPosition` (interface slot 0xC, `[obj+0x18]`) into the
+  view centre at +0x44..+0x4C, which the satellite camera matrix
+  (0x00588A40) reads; the stock satellite setter (0x0061BD20) makes the
+  same call once on entry, through `OverView_SetObject(handle)` (0x00588BA0,
+  called at 0x0061BDB6). The OverView pointer is not a raw address in the
+  code: the `OverViewSetObjectByHandle` row pins that wrapper's bytes, the
+  OverView is its `mov ecx, imm32` operand (+0x11), and its call (+0x15)
+  must reach the separately guarded `OverViewSetObject` row, or the part
+  stays stock and the option is marked unavailable. SetObject has no null
+  check, so it is only called with an object `GetObj` just resolved, under
+  SEH.
+- **Key.** Taken only while the option is on and the satellite view is up
+  (`IsSatelliteOverviewActive`: View_Record Current_View == 3). Plain C
+  stays stock (`center_player` in the satellite view, input.map
+  `+ program ControlMode`); Shift+C is swallowed only behind that gate, so
+  it stays stock elsewhere (pitch_up has no Shift exclusion).
+- **Multiplayer.** Local camera only on the player's own units; no packet,
+  no gate.
+- **UNVERIFIED live.** Whether the stock pan step runs before or after
+  frameStarted (a one-frame lag or a visible tug against the mouse pan
+  would show it), and whether `[obj+0x18]` slot 0x2C (stored at +0x38) has
+  any side effect when called every frame.
+
 ## Command pings for unit-menu orders
 
 `rts_markers.cpp` pings orders where `ControlPanel::BroadcastCommand` runs.
@@ -354,7 +395,8 @@ broadcast pings. An order without a target object (Hunt) gets no ping.
   Binding a stock gamekey action to such a chord saves it with a warning
   that the RTS action takes it in missions.
 - **Stock binds.** Stock binds X, Z, J and plain B to nothing (gamekey.map,
-  input.map). F is pitch_down, which is why area select is on X.
+  input.map). F is pitch_down, which is why area select is on X. C is
+  center_player in the satellite view, so follow takes only Shift+C.
 
 ## Live checklist (not yet run)
 
@@ -385,6 +427,15 @@ broadcast pings. An order without a target object (Hunt) gets no ping.
     unit finishing a move plays ping.wav at most every 5 s. In
     `openshim.log`, `idle state` lines show whether tugs and constructors
     read idle=0 while they work.
+
+11b. Satellite follow (`RtsFollowCamera = 1`): enter satellite, select a
+    moving unit, Shift+C: the view stays on it. Select another unit and
+    Shift+C: the view switches. Shift+C again: it stops and the mouse pans
+    as stock. With nothing selected, Shift+C follows the player. Exit the
+    satellite view and re-enter: no follow. Kill the followed unit: the
+    follow stops, no crash. Plain C still centres on the player; outside
+    satellite, Shift+C is stock. `openshim.log` shows `follow camera on` /
+    `off (...)` lines.
 
 ### Build at Nav (not yet run)
 

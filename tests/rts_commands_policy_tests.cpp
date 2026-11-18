@@ -278,8 +278,14 @@ namespace
                   std::string("default key accepted: ") + GetKeyDef(id).iniKey);
             keys[i] = k;
         }
-        Check(keys[0].vk == 'T' && keys[1].vk == 'B' && keys[2].vk == 'X' && keys[3].vk == 'Z' && keys[4].vk == 'J',
-              "defaults T B X Z J");
+        Check(keys[0].vk == 'T' && keys[1].vk == 'B' && keys[2].vk == 'X' && keys[3].vk == 'Z' && keys[4].vk == 'J' &&
+                  keys[5].vk == 'C',
+              "defaults T B X Z J C");
+        const KeyDef& followDef = GetKeyDef(KeyId::FollowCamera);
+        Check(std::string(followDef.iniKey) == "RtsFollowCameraKey" &&
+                  std::string(followDef.rowCommand) == "OpenShim:RtsFollowCameraKey" &&
+                  std::string(followDef.defaultText) == "C" && followDef.needsShift && !followDef.shiftVariant,
+              "follow camera key row: Shift+C only");
         const KeyDef& idleDef = GetKeyDef(KeyId::IdleUnit);
         Check(std::string(idleDef.iniKey) == "RtsIdleUnitKey" &&
                   std::string(idleDef.rowCommand) == "OpenShim:RtsIdleUnitKey" &&
@@ -326,10 +332,39 @@ namespace
         // Idle unit (J) takes J and Shift+J.
         Check(ActionTakingChord(keys, 'J', false, false, false, false) == KeyId::IdleUnit, "J is ours");
         Check(ActionTakingChord(keys, 'J', false, true, false, false) == KeyId::IdleUnit, "Shift+J is ours");
+        // Follow camera (C) takes only Shift+C: plain C stays center_player.
+        Check(ActionTakingChord(keys, 'C', false, true, false, false) == KeyId::FollowCamera, "Shift+C is ours");
+        Check(ActionTakingChord(keys, 'C', false, false, false, false) == KeyId::Count, "plain C is stock");
+        Check(ActionTakingChord(keys, 'C', false, true, true, false) == KeyId::Count, "Ctrl+Shift+C is stock");
         Check(ActionTakingChord(keys, 'Q', false, false, false, false) == KeyId::Count, "unbound key");
         Check(ActionUsingKey(keys, 'T', false) == KeyId::RemoteTarget, "the rally key may not be T");
         Check(ActionUsingKey(keys, 'V', false) == KeyId::Count, "V is free for the rally key");
         Check(ActionTakingChord(nullptr, 'X', false, false, false, false) == KeyId::Count, "no keys");
+    }
+
+    void TestFollowCamera()
+    {
+        // A press: a new selected unit wins, the same one stops, nothing
+        // selected follows the player (or stops while following).
+        Check(FollowKeyTarget(0x11, 0x99, 0) == 0x11, "follow the first selected unit");
+        Check(FollowKeyTarget(0x22, 0x99, 0x11) == 0x22, "a different selected unit switches");
+        Check(FollowKeyTarget(0x11, 0x99, 0x11) == 0, "the same unit again stops");
+        Check(FollowKeyTarget(0, 0x99, 0x11) == 0, "no selection while following stops");
+        Check(FollowKeyTarget(0, 0x99, 0) == 0x99, "no selection follows the player");
+        Check(FollowKeyTarget(0, 0, 0) == 0, "no selection and no player: nothing");
+        Check(FollowKeyTarget(0, 0x99, 0x99) == 0, "second press on the player stops");
+
+        // A tick: stops outrank the hold, the hold outranks the recentre.
+        Check(ClassifyFollowTick(true, true, true, true) == FollowTick::Recenter, "recentre");
+        Check(ClassifyFollowTick(true, true, false, true) == FollowTick::Hold, "pause holds the follow");
+        Check(ClassifyFollowTick(false, true, true, true) == FollowTick::StopDisabled, "option off stops");
+        Check(ClassifyFollowTick(true, false, true, true) == FollowTick::StopLeftSatellite, "leaving satellite stops");
+        Check(ClassifyFollowTick(true, false, false, true) == FollowTick::StopLeftSatellite,
+              "leaving satellite stops even when paused");
+        Check(ClassifyFollowTick(true, true, true, false) == FollowTick::StopTargetGone, "a dead unit stops");
+        Check(ClassifyFollowTick(true, true, false, false) == FollowTick::StopTargetGone,
+              "a dead unit stops even when paused");
+        Check(std::string(FollowTickName(FollowTick::StopTargetGone)) == "unit gone", "tick names");
     }
 
     KeyEvent Down(unsigned vk, bool shift = false, bool ctrl = false)
@@ -586,6 +621,7 @@ int main()
     TestHoldLabel();
     TestKeys();
     TestChordClashes();
+    TestFollowCamera();
     TestKeyMessages();
     TestIdleUnits();
     TestBuildAtNav();
