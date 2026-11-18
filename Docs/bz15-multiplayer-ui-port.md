@@ -415,6 +415,12 @@ Worth reusing rather than rebuilding:
    N = 10, which rendered `TheGrizzler` as `heGrizzler`. It is now derived from
    the field width rather than picked, and 216 units carry 15 characters.
 
+   **Update:** the panel and the flag picker are no longer built on the
+   host/client lobby screens or the in-match game-stats screen (the stock lobby
+   reused in a match); both are edited only on the pre-lobby screen. The lobby
+   screens keep just the route readout, and the lobby-side nickname and flag
+   click callbacks were removed.
+
    These lobby screens have no usable general text-focus path and do
    not share a single reliable `OnChar` target. They do all feed their stock
    chat entry through `cUI_TextEntry::AppendChar` (`0x007CFA70`), however. A

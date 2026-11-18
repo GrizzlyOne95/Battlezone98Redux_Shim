@@ -1006,7 +1006,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Lobby Readouts", "Network", "LobbyReadouts", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "Nickname field and route readout in the waiting-room left column. "
+      "Network route readout in the waiting-room left column. "
       "Does not cover BZP's faction picker. Restart required." },
     // defaultIndex 0 selects "1": the block ships on; 0 is the stock kill switch.
     { "Block Free Camera", "Network", "BlockFreeCamInMultiplayer", nullptr, 0,

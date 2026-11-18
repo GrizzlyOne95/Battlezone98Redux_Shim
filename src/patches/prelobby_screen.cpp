@@ -789,14 +789,6 @@ namespace BZROpenShim
         return true;
     }
 
-    // The lobby moves its pickers here only when this screen can actually
-    // open: with the key on by default, an unbound click hook must not leave
-    // the player with no nickname or flag picker anywhere.
-    bool IsPreLobbyEnabled()
-    {
-        return g_Registered && g_ClickHookInstalled && PreLobbyIniEnabled();
-    }
-
     void __fastcall PreLobbyClickMultiPlayerHook(void* thisPtr, void* /*edx*/)
     {
         bool requested = false;
