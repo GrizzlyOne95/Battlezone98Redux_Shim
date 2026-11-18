@@ -1794,6 +1794,9 @@ namespace BZROpenShim
         // RTS key actions: selection, target and order changes (SelectAdd
         // runs the object's OnSelect), kept out of the traversal.
         RunRtsCommandsPendingActions();
+        // Queued orders (RtsOrderQueue): issue the next entry of each idle
+        // unit's queue at ~4 Hz, on this same thread.
+        RunRtsOrderQueue();
     }
 
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
@@ -1872,6 +1875,9 @@ namespace BZROpenShim
         // RTS command extras: key filters; the queued key actions run from
         // RunDeferredSceneMutations (inline only without the drain).
         TickRtsCommands();
+        // Queued orders: drained from RunDeferredSceneMutations, inline only
+        // without the drain.
+        TickRtsOrderQueue();
 
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.

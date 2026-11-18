@@ -53,7 +53,14 @@ namespace BZROpenShim
         // within the last 2 s.
         constexpr size_t kMaxAttackRingSlots = 16;
         constexpr size_t kFirstAttackRingSlot = kFirstTargetRingSlot + kMaxTargetRingSlots;
-        constexpr size_t kSlotCount = kFirstAttackRingSlot + kMaxAttackRingSlots;
+        // Then the queued-order chain (RtsOrderQueue): one line per queued
+        // leg of the selected units, then one ring per distinct queued
+        // object target.
+        constexpr size_t kMaxQueueLineSlots = 48;
+        constexpr size_t kFirstQueueLineSlot = kFirstAttackRingSlot + kMaxAttackRingSlots;
+        constexpr size_t kMaxQueueRingSlots = 16;
+        constexpr size_t kFirstQueueRingSlot = kFirstQueueLineSlot + kMaxQueueLineSlots;
+        constexpr size_t kSlotCount = kFirstQueueRingSlot + kMaxQueueRingSlots;
 
         // ---- Ring geometry ---------------------------------------------------
         constexpr unsigned kMinSegments = 48;

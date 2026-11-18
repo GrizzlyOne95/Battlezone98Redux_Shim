@@ -200,6 +200,7 @@
     <ClCompile Include="src\patches\laser_sight.cpp" />
     <ClCompile Include="src\patches\rts_markers.cpp" />
     <ClCompile Include="src\patches\rts_placement.cpp" />
+    <ClCompile Include="src\patches\rts_order_queue.cpp" />
     <ClCompile Include="src\patches\scene_mutation_drain.cpp" />
 
     <ClCompile Include="src\patches\path_block.cpp" />

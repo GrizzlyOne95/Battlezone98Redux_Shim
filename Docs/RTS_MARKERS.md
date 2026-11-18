@@ -150,6 +150,10 @@ If any row fails to bind, the feature fails closed:
 - **Multiplayer:** a local visual with no network gate, like the pings. Whether `enemyShot` is written for remote-owned objects on a multiplayer client is **UNVERIFIED**; rings may only appear for objects the local simulation damaged itself.
 - Pure rules: `AttackMarkAge`, `AttackMarkStyle`, `KeepMostRecent` in `include/rts_markers_policy.h`, tested in `tests/rts_markers_policy_tests.cpp`.
 
+## Queued-order chain
+
+`[Gameplay] RtsOrderQueue` (`Docs/RTS_ORDER_QUEUE.md`) adds its own pool slots after the attack rings: 48 line slots (`kFirstQueueLineSlot`, one per queued leg) and 16 ring slots (`kFirstQueueRingSlot`, one per distinct queued object target), amber (`RtsOrderQueuePolicy::kQueueColour`). For each selected own unit (at most 16) with a queue, the chain starts where its current order ends and runs through each queued point; a leg to a gone object, or an enemy the player cannot detect, is skipped. Drawn whenever the option is active, independent of `RtsWaypointLines`. The pool-size check is in `tests/rts_placement_policy_tests.cpp`.
+
 ## Placement aids
 
 Four more local-only features share the tick and the ring pool. Their rows are on Options > Controls > RTS Commands; all ship on, stock value off.
