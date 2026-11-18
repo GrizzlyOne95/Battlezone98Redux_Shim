@@ -3651,6 +3651,18 @@
       "identity": "Input byte at +5 of the native command action block (HudFadeCommandInputs 0x00919870). ControlPanel::Render 0x004A08E0 takes its unit-command branch (writes +0x11A0 = 4) only while it is 0 and the selection is non-empty (FUN_004a08e0.c line 1313); with it set the unit-type branch at line 1500 runs instead. Also read by OverView 0x00587EF0 and Reticle::Simulate 0x005BA560. Meaning beyond that gate UNVERIFIED. Read only, by ProducerRallyPoints."
     },
     {
+      "name": "BuildScrapCost",
+      "address": "0x004E1B90",
+      "expected": "55 8B EC 83 EC 0C 8B 45 0C 8B 48 48 89 4D FC E8",
+      "identity": "FUN_004E1B90(teamNumber, GameObjectClass*), cdecl: the difficulty-adjusted scrap cost of a class that Producer::StartBuild 0x005AECB0 compares with the team's scrap (Team +0x16C xor 0x33333333; team number = producer +0x174, Team* = producer +0x17C) before it starts a build. RtsBuildQueue calls it to decide when a queued item can start. Exact GOG Redux 2.2.301, bytes read 2026-11-17."
+    },
+    {
+      "name": "BuildPilotCost",
+      "address": "0x004E1C10",
+      "expected": "55 8B EC 83 EC 08 8B 45 0C 8B 48 50 89 4D FC E8",
+      "identity": "FUN_004E1C10(teamNumber, GameObjectClass*), cdecl: the pilot cost of a class that Producer::StartBuild 0x005AECB0 compares with the team's pilots (Team +0x174); the build starts only if scrap cost <= scrap and pilot cost <= pilots. RtsBuildQueue calls it to decide when a queued item can start. Exact GOG Redux 2.2.301, bytes read 2026-11-17."
+    },
+    {
       "name": "InputHeldModifierKeys",
       "address": "0x0260C250",
       "kind": "data",

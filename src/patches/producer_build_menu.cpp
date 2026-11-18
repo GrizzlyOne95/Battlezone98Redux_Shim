@@ -1084,12 +1084,29 @@ namespace BZROpenShim
     {
         RunProducerMenuUpdateModeList(self, kProducerFamilyLayout, g_BzrFn_ProducerUpdateModeList,
             reinterpret_cast<const void*>(&ProducerSetActiveModeHook));
+        RtsBuildQueueAfterUpdateModeList(self);
+    }
+
+    bool Hooks::IsProducerMenuStubMode(uint32_t mode)
+    {
+        return IsProducerMenuStub(static_cast<int>(mode));
     }
 
     bool __fastcall ProducerSetActiveModeHook(void* self, void* /*edx*/, int mode)
     {
         if (TryHandleProducerMenuMode(self, mode))
             return false;
+        // A build pick (mode is the GameObjectClass pointer) may join the
+        // Recycler/Factory build queue (RtsBuildQueue).
+        // The exe is large-address-aware: a class pointer can be negative as
+        // an int, so compare unsigned as stock does.
+        if (static_cast<uint32_t>(mode) >= 0x1b)
+        {
+            if (RtsBuildQueueOnPick(self, mode))
+                return true;
+        }
+        else if (mode == 0x17 || mode == 0xb || mode == 3)
+            RtsBuildQueueOnPlainOrder(self);
         return g_BzrFn_ProducerSetActiveMode ? g_BzrFn_ProducerSetActiveMode(self, mode) : true;
     }
 

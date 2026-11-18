@@ -507,6 +507,8 @@ namespace BZROpenShim
             ReloadRtsMarkersConfig();
             // [Gameplay] RtsOrderQueue (Shift-queued orders), likewise.
             ReloadRtsOrderQueueConfig();
+            // [Gameplay] RtsBuildQueue (Recycler/Factory build queue), likewise.
+            ReloadRtsBuildQueueConfig();
 
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;
             if (TryGetUserConfigBool(
@@ -741,6 +743,11 @@ namespace BZROpenShim
             // mission end.
             { "RtsOrderQueue", FeatureTier::SinglePlayer,
               &ResetRtsOrderQueue, &RefreshRtsOrderQueueState },
+            // [Gameplay] RtsBuildQueue: queued Recycler/Factory builds; single
+            // player only (the refresh clears the table online). Revert clears
+            // it at mission end.
+            { "RtsBuildQueue", FeatureTier::SinglePlayer,
+              &ResetRtsBuildQueue, &RefreshRtsBuildQueueState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config

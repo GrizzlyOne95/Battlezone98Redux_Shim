@@ -16,6 +16,7 @@
 
 #include "bzr_hooks.h"
 #include "rts_markers.h"
+#include "rts_build_queue_policy.h"
 #include "rts_order_queue_policy.h"
 #include "quicksave_key_policy.h"
 #include "stable_id_list.h"
@@ -1475,6 +1476,11 @@ namespace BZROpenShim
         void ResetOffenseOverflow();
         // Frame thread, beside TickGroupStrip.
         void TickOffenseOverflow();
+        // The UpdateModeList unit-cap gate as the game sees it: TeamFirstEmptySlot,
+        // opened by ExtendedUnitCap for a full offense range that can auto-group.
+        // -1: no slot. kOffenseOverflowGateUnbound: TeamFirstEmptySlot not bound.
+        constexpr int kOffenseOverflowGateUnbound = -2;
+        int OffenseOverflowBuildGate(void* team, int minSlot, int maxSlot, void* cls);
         // ExtendedUnitCap on, installed and single player: auto-group runs too.
         bool OffenseOverflowExtendsAutoGroup();
         // The keyed group (0-6) whose member list is open, -1 none.
@@ -1559,6 +1565,38 @@ namespace BZROpenShim
         // The BroadcastCommand(where) entry detour 0x004A70C0 is installed (the
         // queue's plain-order clear listens on it).
         bool ProducerRallyBroadcastHookInstalled();
+
+        // --- RTS build queue (rts_build_queue.cpp, Docs/RTS_BUILD_QUEUE.md) -----
+        // [Gameplay] RtsBuildQueue: Recycler/Factory build queue. Install: patch
+        // thread, retried from InstallAiTuningHooksIfPossible. Everything else
+        // runs on the frame/game thread.
+        void InstallRtsBuildQueueIfPossible();
+        void ReloadRtsBuildQueueConfig();
+        // Mission gate reconcile (every 250 ms) and option changes: on, bound
+        // and single player; clears the table when it turns off.
+        void RefreshRtsBuildQueueState();
+        // Mission end / load: drops every queue.
+        void ResetRtsBuildQueue();
+        // Frame thread, world render tick: drains inline only while the
+        // scene-mutation drain is not installed.
+        void TickRtsBuildQueue();
+        // RunDeferredSceneMutations (frameStarted): ~4 Hz, issues the next
+        // entry of each idle producer's queue.
+        void RunRtsBuildQueue() noexcept;
+        // ProducerSetActiveModeHook, for a build pick (mode >= 0x1b, the
+        // GameObjectClass pointer): true when the queue handled it.
+        bool RtsBuildQueueOnPick(void* self, int mode);
+        // Same hook, modes 0x17, 0xB and 3 (non-build orders): drops the
+        // producer's queue.
+        void RtsBuildQueueOnPlainOrder(void* self);
+        // After Producer::UpdateModeList: keeps build entries pickable while the
+        // producer is building, so picks can queue.
+        void RtsBuildQueueAfterUpdateModeList(void* self);
+        // PRODMENU: true for a nested-menu stub mode (not a buildable class).
+        bool IsProducerMenuStubMode(uint32_t mode);
+        // Badge scan/painter (producer_badges.cpp): the producer's queue size
+        // and whether its next entry waits for scrap or pilots. False: no queue.
+        bool RtsBuildQueueBadgeQuery(uint32_t handle, RtsBuildQueuePolicy::BadgeInfo& out);
 
         // --- HUD group strip (group_strip.cpp) ---------------------------------
         // Read-only F1-F7 group row on the HUD. Tick: the world render tick

@@ -942,6 +942,13 @@ namespace BZROpenShim::Hooks
         }
     }
 
+    int OffenseOverflowBuildGate(void* team, int minSlot, int maxSlot, void* cls)
+    {
+        if (!g_FnFirstEmptySlot)
+            return kOffenseOverflowGateUnbound;
+        return BuildGateDecide(team, minSlot, maxSlot, cls);
+    }
+
     // Exported to auto_group_new_units.cpp and group_strip.cpp.
     bool OffenseOverflowExtendsAutoGroup()
     {

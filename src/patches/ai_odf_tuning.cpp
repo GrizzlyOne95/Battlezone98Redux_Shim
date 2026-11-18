@@ -3109,6 +3109,7 @@ namespace BZROpenShim
             // RTS commands mark their options from what is ready on each pass.
             InstallRtsCommandsIfPossible();
             InstallRtsOrderQueueIfPossible();
+            InstallRtsBuildQueueIfPossible();
             InstallRtsPlacementIfPossible();
         }
 

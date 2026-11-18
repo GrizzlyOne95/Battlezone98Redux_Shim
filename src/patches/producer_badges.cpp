@@ -36,7 +36,9 @@
 #include "kill_ticker.h"
 #include "patcher.h"
 #include "producer_badges_policy.h"
+#include "openshim_l10n_text.h"
 #include "producer_rally_policy.h"
+#include "rts_build_queue_policy.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -44,6 +46,8 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+
+using BZROpenShim::L10n::ShimText;
 
 namespace BZROpenShim::Hooks
 {
@@ -80,6 +84,7 @@ namespace BZROpenShim::Hooks
         constexpr uint32_t kTextColor = 0xFF60FF60;  // the rally label
         constexpr uint32_t kPanelColor = 0x90000000; // the rally label
         constexpr size_t kNameCacheSize = 32;
+        constexpr size_t kBadgeTextChars = 96;
 
         uint32_t g_ObjectListGlobal = 0;
         uint32_t g_GetObjAddr = 0;
@@ -229,8 +234,11 @@ namespace BZROpenShim::Hooks
         }
 
         // One object: a live, local producer of `userTeam` that is building.
-        bool ReadCandidate(void* object, int userTeam, Policy::Candidate& out)
+        // `idle` is set (and out.odf left empty) for a producer that is not
+        // building: the scan keeps it only when RtsBuildQueue holds a queue for it.
+        bool ReadCandidate(void* object, int userTeam, Policy::Candidate& out, bool& idle)
         {
+            idle = false;
             __try
             {
                 const uint8_t* const obj = static_cast<const uint8_t*>(object);
@@ -244,7 +252,11 @@ namespace BZROpenShim::Hooks
                     return false;
                 const uint32_t cls = BuildClassOf(obj, vtable);
                 if (cls == 0)
-                    return false;
+                {
+                    idle = true;
+                    out.odf[0] = '\0';
+                    return true;
+                }
                 char raw[Policy::kOdfChars] = {};
                 std::memcpy(raw, reinterpret_cast<const void*>(static_cast<uintptr_t>(cls) + kClassOdfOffset),
                             sizeof(raw));
@@ -453,11 +465,21 @@ namespace BZROpenShim::Hooks
             for (size_t i = 0; i < n && foundCount < Policy::kMaxBadges; ++i)
             {
                 Policy::Candidate c;
-                if (!ReadCandidate(g_Scratch[i], userTeam, c))
+                bool idle = false;
+                if (!ReadCandidate(g_Scratch[i], userTeam, c, idle))
                     continue;
                 c.handle = SafeGetHandle(g_Scratch[i]);
                 if (c.handle == 0)
                     continue;
+                if (idle)
+                {
+                    // An idle producer shows a badge only for a build queue:
+                    // the next queued item's ODF stands in for the class.
+                    RtsBuildQueuePolicy::BadgeInfo info;
+                    if (!RtsBuildQueueBadgeQuery(c.handle, info) || info.nextOdf[0] == '\0')
+                        continue;
+                    std::memcpy(c.odf, info.nextOdf, sizeof(c.odf));
+                }
                 found[foundCount++] = c;
             }
             g_WorkCount = Policy::Reconcile(g_Work, g_WorkCount, found, foundCount, LogChange);
@@ -544,15 +566,45 @@ namespace BZROpenShim::Hooks
                 void* const obj = SafeGetObj(entry.handle);
                 float progress = 0.0f;
                 float pos[3] = {};
-                if (!obj || !ReadLive(obj, progress) || !TryGetGameObjectWorldPosition(obj, pos))
+                if (!obj)
                     continue;
-                LogProgress(entry.handle, progress);
+                const bool building = ReadLive(obj, progress);
+                // RtsBuildQueue: " +N" on a building producer; an idle one with
+                // a queue shows what it waits for (only while the badge still
+                // names the queue's next item).
+                RtsBuildQueuePolicy::BadgeInfo queue;
+                const bool queued = RtsBuildQueueBadgeQuery(entry.handle, queue);
+                const bool waiting = !building && queued && queue.waiting && _stricmp(queue.nextOdf, entry.odf) == 0;
+                if ((!building && !waiting) || !TryGetGameObjectWorldPosition(obj, pos))
+                    continue;
+                if (building)
+                    LogProgress(entry.handle, progress);
                 float sx = 0.0f, sy = 0.0f;
                 if (!ProducerRallyPolicy::ProjectToScreen(cam, pos, sx, sy) ||
                     !ProducerRallyPolicy::OnScreen(sx, sy, frame.viewW, frame.viewH))
                     continue;
-                char text[Policy::kLabelChars + 8];
-                Policy::FormatBadgeText(entry.label, Policy::ProgressPercent(progress), text, sizeof(text));
+                char text[kBadgeTextChars];
+                if (building)
+                {
+                    Policy::FormatBadgeText(entry.label, Policy::ProgressPercent(progress), text, sizeof(text));
+                    if (queued)
+                        RtsBuildQueuePolicy::AppendQueuedSuffix(text, sizeof(text), queue.queued);
+                }
+                else
+                {
+                    const char* phrase = "waiting for scrap";
+                    try
+                    {
+                        const char* const localized = ShimText("openshim_ui:rts_build_queue_waiting", "waiting for scrap");
+                        if (localized && localized[0])
+                            phrase = localized;
+                    }
+                    catch (...)
+                    {
+                    }
+                    if (!RtsBuildQueuePolicy::FormatWaitingText(entry.label, phrase, text, sizeof(text)))
+                        continue;
+                }
                 const Policy::Layout l = Policy::ComputeLayout(static_cast<int>(sx), static_cast<int>(sy),
                                                                PanelHalfWidth(frame, text));
                 if (!HudGaugeOverlay::DrawPanelText(frame, l.panel.x1, l.panel.y1, l.panel.x2, l.panel.y2,

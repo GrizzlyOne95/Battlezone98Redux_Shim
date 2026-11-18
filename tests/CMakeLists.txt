@@ -1181,3 +1181,4 @@ openshim_add_test(laser_sight_policy_tests STD 20 SOURCES laser_sight_policy_tes
 openshim_add_test(rts_markers_policy_tests STD 20 SOURCES rts_markers_policy_tests.cpp)
 openshim_add_test(rts_placement_policy_tests STD 20 SOURCES rts_placement_policy_tests.cpp)
 openshim_add_test(rts_order_queue_policy_tests STD 20 SOURCES rts_order_queue_policy_tests.cpp)
+openshim_add_test(rts_build_queue_policy_tests STD 20 SOURCES rts_build_queue_policy_tests.cpp)
