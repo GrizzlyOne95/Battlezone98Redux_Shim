@@ -2815,6 +2815,22 @@ RtsAttackMarks = 0
 ; Exposed on the OpenShim Settings page as "Queue Orders".
 RtsOrderQueue = 0
 
+; Build Queue. While your Recycler or a Factory is building (or already holds
+; a queue), picking another item in its build menu adds it to a queue (10 deep,
+; up to 16 producers) instead of replacing the build. The queue builds one item
+; after another: the next starts when the producer is idle and your team can
+; pay its scrap and pilots, and scrap is charged then, as stock does. Shift+pick
+; (Ctrl not held) removes the last queued copy of that item; a pick into a full
+; queue buzzes. With RtsProducerBadges on, the badge shows " +N" for N queued
+; items and "<item> waiting for scrap" while the next one cannot be paid.
+; Construction Rigs and Armories are not queued. The queue is not saved and is
+; dropped on mission load, when this is turned off and in network games.
+; Single player only.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Build Queue".
+RtsBuildQueue = 0
+
 ; The RTS action keys. One key each, no modifier; rebind them in Options >
 ; Input > RTS Actions, which writes these lines. The remote-target key is
 ; used with Shift (Shift+T). Refused, with a log line and a fall back to the

@@ -1797,6 +1797,8 @@ namespace BZROpenShim
         // Queued orders (RtsOrderQueue): issue the next entry of each idle
         // unit's queue at ~4 Hz, on this same thread.
         RunRtsOrderQueue();
+        // Build queue (RtsBuildQueue): issue each idle producer's next item.
+        RunRtsBuildQueue();
     }
 
     void __fastcall LegacyWorldUpdateRenderQueueHook(void* thisPtr, void* /*edx*/, void* renderQueue)
@@ -1878,6 +1880,8 @@ namespace BZROpenShim
         // Queued orders: drained from RunDeferredSceneMutations, inline only
         // without the drain.
         TickRtsOrderQueue();
+        // Build queue: likewise.
+        TickRtsBuildQueue();
 
         // Sample after the stock world queue update, when Ogre has evaluated
         // the entity materials and its hardware-animation decision is current.
