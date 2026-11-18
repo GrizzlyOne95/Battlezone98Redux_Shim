@@ -2496,8 +2496,8 @@ namespace BZROpenShim
         // is bad, so there has to be a way to turn them off without a rebuild.
         //   openshim.ini  [Network] LobbyReadouts = 1
         //   environment   OPENSHIM_DISABLE_LOBBY_READOUTS=1
-        // Nickname/route sit in the empty left column. Missing key is ON so
-        // the name field stays available; Ban/Flags remain separately gated.
+        // The route row sits in the empty left column. Missing key is ON;
+        // the Ban button is gated separately.
         static bool ShouldEnableLobbyReadouts()
         {
             if (EnvFlagEnabled("OPENSHIM_DISABLE_LOBBY_READOUTS"))
@@ -3150,34 +3150,6 @@ namespace BZROpenShim
             g_BzrFn_LabelState(g_BanLabelClient, param);
     }
 
-    void __cdecl FlagButtonOnClickHost()
-    {
-        CycleSelectedFlag(1, "host_button");
-        UpdateFlagSelectionUiLabel(g_FlagLabelHost);
-        UpdateFlagPreviewWidget(g_FlagPreviewHost);
-    }
-
-    void __cdecl FlagButtonOnClickClient()
-    {
-        CycleSelectedFlag(1, "client_button");
-        UpdateFlagSelectionUiLabel(g_FlagLabelClient);
-        UpdateFlagPreviewWidget(g_FlagPreviewClient);
-    }
-
-    void __cdecl FlagButtonOnClickPrevHost()
-    {
-        CycleSelectedFlag(-1, "host_button_prev");
-        UpdateFlagSelectionUiLabel(g_FlagLabelHost);
-        UpdateFlagPreviewWidget(g_FlagPreviewHost);
-    }
-
-    void __cdecl FlagButtonOnClickPrevClient()
-    {
-        CycleSelectedFlag(-1, "client_button_prev");
-        UpdateFlagSelectionUiLabel(g_FlagLabelClient);
-        UpdateFlagPreviewWidget(g_FlagPreviewClient);
-    }
-
     void __cdecl NetRouteRefreshHost()
     {
         if (CachedLobbyWidgetIsLive(true, g_NetRouteLabelHost, "route_refresh"))
@@ -3188,32 +3160,6 @@ namespace BZROpenShim
     {
         if (CachedLobbyWidgetIsLive(false, g_NetRouteLabelClient, "route_refresh"))
             UpdateNetRouteLabel(g_ClientUiParent, g_NetRouteLabelClient);
-    }
-
-    void __cdecl NicknameEntryOnEnterHost()
-    {
-        CompleteNicknameEdit(
-            g_NicknameEntryHost,
-            g_NetRouteLabelHost,
-            "host_lobby");
-    }
-
-    void __cdecl NicknameEntryOnEnterClient()
-    {
-        CompleteNicknameEdit(
-            g_NicknameEntryClient,
-            g_NetRouteLabelClient,
-            "client_lobby");
-    }
-
-    void __cdecl NicknameEditOnClickHost()
-    {
-        BeginNicknameEdit(g_NicknameEntryHost, g_HostUiParent, "host_lobby_click");
-    }
-
-    void __cdecl NicknameEditOnClickClient()
-    {
-        BeginNicknameEdit(g_NicknameEntryClient, g_ClientUiParent, "client_lobby_click");
     }
 
     // The route table is filled from the BZRNet worker thread, so the label is
@@ -3298,79 +3244,23 @@ namespace BZROpenShim
             }
         }
 
-        // With [Network] PreLobby on, the flag and nickname pickers live on the
-        // pre-lobby screen only; the net-route readout stays here.
-        const bool pickersMoved = IsPreLobbyEnabled();
-
-        if (!pickersMoved && ShouldEnableMultiplayerFlagUi() &&
-            (!g_FlagButtonHost ||
-             !IsWidgetLiveChildOfParent(parent, g_FlagButtonHost)))
+        // The nickname and flag pickers live on the pre-lobby screen only; the
+        // net-route readout is all the lobby and in-match screens keep.
+        if (!g_NetRouteLabelHost || !IsWidgetLiveChildOfParent(parent, g_NetRouteLabelHost))
         {
-            // The pair plus its gap is 100px wide, so it starts far enough left
-            // of the Ban button (g_BanX - 48, 48 wide) to clear it entirely.
-            CreateFlagButtonCommon(
-                parent,
-                g_BanX - 224.0f,
-                g_BanY + 96.0f,
-                &g_FlagButtonHost,
-                &g_FlagButtonHostRight,
-                &g_FlagLabelHost,
-                &g_FlagPreviewHost,
-                reinterpret_cast<void*>(FlagButtonOnClickPrevHost),
-                reinterpret_cast<void*>(FlagButtonOnClickHost),
-                reinterpret_cast<void*>(FlagButtonOnHoverHost));
-        }
-
-        if (pickersMoved)
-        {
-            // Same position as the full cluster would give the route row.
-            if (!g_NetRouteLabelHost || !IsWidgetLiveChildOfParent(parent, g_NetRouteLabelHost))
-            {
-                CreateNicknameAndRouteWidgets(
-                    parent,
-                    g_BanX - 208.0f,
-                    g_BanY - 360.0f,
-                    nullptr, nullptr, nullptr, nullptr,
-                    &g_NetRouteLabelHost,
-                    nullptr,
-                    nullptr,
-                    reinterpret_cast<void*>(NetRouteRefreshHost),
-                    reinterpret_cast<void*>(FlagButtonOnHoverHost));
-            }
-            else
-            {
-                NetRouteRefreshHost();
-            }
-        }
-        else if (!g_NicknamePanelHost || !g_NicknameEntryHost || !g_NicknameEditButtonHost ||
-            !g_NicknameConfirmButtonHost ||
-            !IsWidgetLiveChildOfParent(parent, g_NicknamePanelHost) ||
-            !IsWidgetLiveChildOfParent(parent, g_NicknameEntryHost) ||
-            !IsWidgetLiveChildOfParent(parent, g_NicknameEditButtonHost) ||
-            !IsWidgetLiveChildOfParent(parent, g_NicknameConfirmButtonHost))
-        {
-            // Use the otherwise empty upper-left column. This keeps the name,
-            // explicit OK button and compact route row together and leaves a
-            // clear gap above the framed flag selector and stock W/M controls.
             CreateNicknameAndRouteWidgets(
                 parent,
                 g_BanX - 208.0f,
                 g_BanY - 360.0f,
-                &g_NicknamePanelHost,
-                &g_NicknameEntryHost,
-                &g_NicknameEditButtonHost,
-                &g_NicknameConfirmButtonHost,
+                nullptr, nullptr, nullptr, nullptr,
                 &g_NetRouteLabelHost,
-                reinterpret_cast<void*>(NicknameEntryOnEnterHost),
-                reinterpret_cast<void*>(NicknameEditOnClickHost),
+                nullptr,
+                nullptr,
                 reinterpret_cast<void*>(NetRouteRefreshHost),
                 reinterpret_cast<void*>(FlagButtonOnHoverHost));
         }
         else
         {
-            // Re-assert it: SetActive on a surviving panel would restore the
-            // byte and put the click-swallowing rectangle back over the row.
-            MakeViewInputTransparent(g_NicknamePanelHost);
             NetRouteRefreshHost();
         }
 
@@ -3441,74 +3331,23 @@ namespace BZROpenShim
             }
         }
 
-        // With [Network] PreLobby on, the flag and nickname pickers live on the
-        // pre-lobby screen only; the net-route readout stays here.
-        const bool pickersMoved = IsPreLobbyEnabled();
-
-        if (!pickersMoved && ShouldEnableMultiplayerFlagUi() &&
-            (!g_FlagButtonClient ||
-             !IsWidgetLiveChildOfParent(parent, g_FlagButtonClient)))
+        // The nickname and flag pickers live on the pre-lobby screen only; the
+        // net-route readout is all the lobby and in-match screens keep.
+        if (!g_NetRouteLabelClient || !IsWidgetLiveChildOfParent(parent, g_NetRouteLabelClient))
         {
-            CreateFlagButtonCommon(
-                parent,
-                -205.0f,
-                942.0f,
-                &g_FlagButtonClient,
-                &g_FlagButtonClientRight,
-                &g_FlagLabelClient,
-                &g_FlagPreviewClient,
-                reinterpret_cast<void*>(FlagButtonOnClickPrevClient),
-                reinterpret_cast<void*>(FlagButtonOnClickClient),
-                reinterpret_cast<void*>(FlagButtonOnHoverClient));
-        }
-
-        if (pickersMoved)
-        {
-            if (!g_NetRouteLabelClient || !IsWidgetLiveChildOfParent(parent, g_NetRouteLabelClient))
-            {
-                CreateNicknameAndRouteWidgets(
-                    parent,
-                    -189.0f,
-                    496.0f,
-                    nullptr, nullptr, nullptr, nullptr,
-                    &g_NetRouteLabelClient,
-                    nullptr,
-                    nullptr,
-                    reinterpret_cast<void*>(NetRouteRefreshClient),
-                    reinterpret_cast<void*>(FlagButtonOnHoverClient));
-            }
-            else
-            {
-                NetRouteRefreshClient();
-            }
-        }
-        else if (!g_NicknamePanelClient || !g_NicknameEntryClient || !g_NicknameEditButtonClient ||
-            !g_NicknameConfirmButtonClient ||
-            !IsWidgetLiveChildOfParent(parent, g_NicknamePanelClient) ||
-            !IsWidgetLiveChildOfParent(parent, g_NicknameEntryClient) ||
-            !IsWidgetLiveChildOfParent(parent, g_NicknameEditButtonClient) ||
-            !IsWidgetLiveChildOfParent(parent, g_NicknameConfirmButtonClient))
-        {
-            // Mirror the host layout in the client's empty left column.
             CreateNicknameAndRouteWidgets(
                 parent,
                 -189.0f,
                 496.0f,
-                &g_NicknamePanelClient,
-                &g_NicknameEntryClient,
-                &g_NicknameEditButtonClient,
-                &g_NicknameConfirmButtonClient,
+                nullptr, nullptr, nullptr, nullptr,
                 &g_NetRouteLabelClient,
-                reinterpret_cast<void*>(NicknameEntryOnEnterClient),
-                reinterpret_cast<void*>(NicknameEditOnClickClient),
+                nullptr,
+                nullptr,
                 reinterpret_cast<void*>(NetRouteRefreshClient),
                 reinterpret_cast<void*>(FlagButtonOnHoverClient));
         }
         else
         {
-            // Re-assert it: SetActive on a surviving panel would restore the
-            // byte and put the click-swallowing rectangle back over the row.
-            MakeViewInputTransparent(g_NicknamePanelClient);
             NetRouteRefreshClient();
         }
     }

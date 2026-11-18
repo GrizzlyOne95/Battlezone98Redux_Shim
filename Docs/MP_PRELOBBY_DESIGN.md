@@ -249,8 +249,11 @@ will use, whatever happens to the live session.
       Back returns here.
 6. **Back / Esc:** the shell pops the screen. An unapplied typed name or
    server choice is dropped (the next build reads the persisted state).
-7. With the setting on, the nickname and flag pickers are no longer built on the
-   in-lobby host/client setup screens (the net-route readout stays there).
+7. The nickname and flag pickers are never built on the in-lobby host/client
+   screens or the in-match game-stats screen, whatever the setting (the
+   net-route readout is all that stays there). With `PreLobby = 0` (or if the
+   Multiplayer click hook does not bind) the last chosen flag is kept and the
+   name changes only with `/nickname`.
 
 The in-lobby `/nickname` command keeps working either way. Its recycle runs
 while a lounge is registered, which is the unknown case above.

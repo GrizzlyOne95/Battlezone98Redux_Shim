@@ -147,9 +147,6 @@ namespace BZROpenShim
     // flag widgets it borrows from the lobby; prelobby_screen.cpp owns the
     // screen. The widgets are children of the screen's centre panel and die
     // with it.
-    // [Network] PreLobby, read now. When on, the nickname and flag pickers are
-    // built on the pre-lobby screen only, not on the host/client setup screens.
-    bool IsPreLobbyEnabled();
     bool CreatePreLobbyNicknameAndFlagWidgets(
         void* parent, float nicknameX, float nicknameY, float flagX, float flagY);
     void ResetPreLobbyLobbyWidgets();
@@ -176,16 +173,8 @@ namespace BZROpenShim
     void __cdecl BanButtonOnHoverHost(void* param);
     void __cdecl BanButtonOnHoverClient(void* param);
     // 1.5 used a left/right pair; OnClick* advances, OnClickPrev* steps back.
-    void __cdecl FlagButtonOnClickHost();
-    void __cdecl FlagButtonOnClickClient();
-    void __cdecl FlagButtonOnClickPrevHost();
-    void __cdecl FlagButtonOnClickPrevClient();
     void __cdecl FlagButtonOnHoverHost(void* param);
     void __cdecl FlagButtonOnHoverClient(void* param);
-    void __cdecl NicknameEntryOnEnterHost();
-    void __cdecl NicknameEntryOnEnterClient();
-    void __cdecl NicknameEditOnClickHost();
-    void __cdecl NicknameEditOnClickClient();
     void __cdecl NetRouteRefreshHost();
     void __cdecl NetRouteRefreshClient();
     void __cdecl AutoSaveButtonOnClickLoad();
