@@ -71,8 +71,8 @@ dropped one.
   modder's choice with the key. A saved game restores the flags the object
   was saved with; whether load overwrites the constructor's flags is
   UNVERIFIED.
-- No initial velocity or drop rate is set. A faster or slower drop is a
-  separate item (see `Docs/FEATURE_IDEAS_SCOPING_20261118.md`).
+- No initial velocity is set. For a faster or slower fall, add
+  `dropRate` (`Docs/DAYWRECKER_DROP_RATE.md`).
 
 ## Live checklist (not yet run)
 

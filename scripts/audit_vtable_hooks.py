@@ -58,6 +58,7 @@ HOOKS = [
     ("TurretCraftUpdateWeaponAim", "TurretCraftUpdateWeaponAim", [VT("TurretCraftVtable", 38)]),
     ("TurretTankUpdateWeaponAim", "TurretTankUpdateWeaponAim", [VT("HowitzerVtable", 38), VT("TurretTankVtable", 38)]),
     ("ShieldTowerSimulate", "ShieldTowerSimulate", [VT("ShieldTowerVtable", 15)]),
+    ("DayWreckerSimulate (DWARMORY hold, dropRate)", "DayWreckerSimulate", [VT("DayWreckerVtable", 15)]),
     ("MagnetMineSimulate", "MagnetMineSimulate", [VT("MagnetMineVtable", 15)]),
     ("ProximityMineSimulate", "ProximityMineSimulate", [VT("ProximityMineVtable", 15)]),
     ("SprayBuildingSimulate", "SprayBuildingSimulate", [VT("SprayBuildingVtable", 15)]),

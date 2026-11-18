@@ -1,10 +1,10 @@
 #pragma once
 // daywrecker_spawn_policy.h
-// Pure rules for the Daywrecker fall-on-spawn ODF key
-// ([DayWreckerClass] fallOnSpawn). No Windows or engine calls, so
+// Pure rules for the Daywrecker ODF keys [DayWreckerClass] fallOnSpawn and
+// dropRate. No Windows or engine calls, so
 // tests/daywrecker_spawn_policy_tests.cpp runs them directly. The engine side
 // is src/patches/daywrecker_spawn_fall.cpp; evidence and limits:
-// Docs/DAYWRECKER_FALL_ON_SPAWN.md.
+// Docs/DAYWRECKER_FALL_ON_SPAWN.md and Docs/DAYWRECKER_DROP_RATE.md.
 //
 // Stock behaviour (GOG 2.2.301): DayWrecker::Simulate (0x004B0460) detonates
 // on its first tick unless the PowerUp state flags ([obj+0x228]+0x114) have
@@ -17,6 +17,7 @@
 
 #include "bool_token.h"
 
+#include <cmath>
 #include <cstdint>
 
 namespace BZROpenShim
@@ -53,6 +54,86 @@ namespace BZROpenShim
             return flags | kFlagAirborne;
         }
 
+        // ---- [DayWreckerClass] dropRate ----------------------------------
+        // Time scale for an airborne Daywrecker: its Simulate runs with
+        // dt * dropRate while the airborne bit is set. That fast-forwards the
+        // flight (gravity, the descent drag, the drift terms all advance by
+        // the larger step), so the arc and the landing point stay where the
+        // Armory aimed them, up to step-size error; only the flight time
+        // changes (time / dropRate).
+        constexpr const char* kDropRateKey = "dropRate";
+        constexpr float kDropRateStock = 1.0f;
+        constexpr float kDropRateMin = 0.25f;
+        // A larger step moves the bomb further per tick, so unit hits
+        // (Collide) get coarser; the cap keeps that bounded. Terrain landing
+        // is a height test, so it cannot be stepped over.
+        constexpr float kDropRateMax = 3.0f;
+
+        // Locale-independent: "2", "0.5", " 1.5 ", "2 ; comment". Absent,
+        // junk, non-positive or not finite: stock (1). Out of range: clamped.
+        inline float ParseDropRate(const char* raw)
+        {
+            if (!raw)
+                return kDropRateStock;
+            const char* p = raw;
+            while (*p == ' ' || *p == '\t')
+                ++p;
+            if (*p == '+')
+                ++p;
+            bool sawDigit = false;
+            double value = 0.0;
+            while (*p >= '0' && *p <= '9')
+            {
+                value = value * 10.0 + static_cast<double>(*p - '0');
+                sawDigit = true;
+                ++p;
+            }
+            if (*p == '.')
+            {
+                ++p;
+                double scale = 0.1;
+                while (*p >= '0' && *p <= '9')
+                {
+                    value += static_cast<double>(*p - '0') * scale;
+                    scale *= 0.1;
+                    sawDigit = true;
+                    ++p;
+                }
+            }
+            while (*p == ' ' || *p == '\t')
+                ++p;
+            if (!sawDigit || (*p != '\0' && *p != ';' && *p != '/'))
+                return kDropRateStock;
+            const float rate = static_cast<float>(value);
+            if (!std::isfinite(rate) || rate <= 0.0f)
+                return kDropRateStock;
+            if (rate < kDropRateMin)
+                return kDropRateMin;
+            if (rate > kDropRateMax)
+                return kDropRateMax;
+            return rate;
+        }
+
+        // The dt to hand the stock Simulate. Only an airborne, not yet
+        // detonated Daywrecker in single player is scaled: a grounded one's
+        // Simulate is the detonation itself, and a network game would
+        // desynchronise the flight.
+        inline float ScaledStep(bool singlePlayer, float rate, uint32_t flags, float dt)
+        {
+            if (!singlePlayer || rate == kDropRateStock)
+                return dt;
+            if ((flags & kFlagAirborne) == 0 || (flags & kFlagDetonated) != 0)
+                return dt;
+            return dt * rate;
+        }
+
+        // What a class's ODF asks for; read once per class.
+        struct ClassSettings
+        {
+            bool fallOnSpawn = false;
+            float dropRate = kDropRateStock;
+        };
+
         // Per-class cache entry: the class pointer and its packed 8-character
         // ODF name (GameObjectClass +0x30), so a class freed and another
         // allocated at the same address is not mistaken for it.
@@ -68,15 +149,15 @@ namespace BZROpenShim
         };
 
         // A small fixed cache; the ODF is read once per class.
-        template <int N>
+        template <int N, typename V = bool>
         struct ClassCache
         {
             ClassKey keys[N] = {};
-            bool values[N] = {};
+            V values[N] = {};
             int count = 0;
             int next = 0; // replacement cursor once full
 
-            bool Find(const ClassKey& key, bool& value) const
+            bool Find(const ClassKey& key, V& value) const
             {
                 for (int i = 0; i < count; ++i)
                 {
@@ -89,7 +170,7 @@ namespace BZROpenShim
                 return false;
             }
 
-            void Put(const ClassKey& key, bool value)
+            void Put(const ClassKey& key, const V& value)
             {
                 for (int i = 0; i < count; ++i)
                 {
