@@ -793,6 +793,10 @@ openshim_add_test(autosave_gate_tests STD 20 SOURCES
     autosave_gate_tests.cpp
 )
 
+openshim_add_test(daywrecker_spawn_policy_tests STD 17 SOURCES
+    daywrecker_spawn_policy_tests.cpp
+)
+
 openshim_add_test(autosave_notice_layout_tests STD 20 SOURCES
     autosave_notice_layout_tests.cpp
 )

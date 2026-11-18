@@ -1650,6 +1650,8 @@ namespace BZROpenShim
         // --- Ordnance entity leak fix (ordnance_entity_leak.cpp) ----------------
         extern bool g_OrdnanceEntityLeakFixEnabled;
         void InstallOrdnanceEntityLeakFixIfPossible();
+        // Daywrecker fall-on-spawn ODF key (daywrecker_spawn_fall.cpp).
+        void InstallDayWreckerSpawnFallIfPossible();
         // SceneManager::destroyAllEntities is about to free every Entity:
         // forget the tracked ordnance Entities. Main thread only.
         void OrdnanceEntityLeakOnSceneEntitiesDestroyed() noexcept;

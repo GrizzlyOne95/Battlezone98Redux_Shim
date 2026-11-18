@@ -1665,6 +1665,7 @@ namespace BZROpenShim
             {"InitializeMeshAccurateImpacts", &MeshImpact::InitializeGlobal},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"InstallOrdnanceEntityLeakFixIfPossible", &InstallOrdnanceEntityLeakFixIfPossible},
+            {"InstallDayWreckerSpawnFallIfPossible", &InstallDayWreckerSpawnFallIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
             {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},
             {"InitializeUnitVoConfig", &InitializeUnitVoConfig},
