@@ -122,8 +122,7 @@ Fail closed (stock walker plus one log line, as TV:162-164): SyncNode unresolved
 - Control model: v2 independent twist; mouse/aim turns the head, movement keys steer the legs. Walkers: generic opt-in for any ODF naming its torso; verify on avwalk first, svwalk `sup` later.
 - AI: player only first, AI stays stock. Network: SP only for v1. Yaw limits: unlimited unless `yawMin`/`yawMax` are set. Shared code: extract the tank's node/pose helpers into a shared header, no duplication.
 
+- Sidestep: losing the stock strafe on twist-enabled walkers is accepted (user). Head aim: world-stabilised. Milestones: M1 and M2 as separate PRs, M0 gates both, fallback "legs follow the head" if M0 fails.
+
 ## Open questions (still open)
-1. Sidestep: with the keys steering the legs, is losing the stock strafe on twist-enabled walkers acceptable, or should a separate key (or Shift+turn) keep it?
-2. Head aim lock: should turning the legs leave the aim world-stabilised (recommended, step 6) or carry the head along (simpler)?
-3. Is M1's go/no-go checkpoint (functional twist before the leg pose) fine, or do you want M1+M2 as one PR?
-4. Do you accept the 2-3 week estimate gated on M0, with the fallback to "legs follow" if M0 fails?
+None; next step is the M0 probe.
