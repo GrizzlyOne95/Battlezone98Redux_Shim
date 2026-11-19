@@ -2,6 +2,7 @@
 
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
+#include "mru_class.h"
 #include "net_tag_dispatch.h"
 #include "pond_class_label.h"
 #include "shim_log.h"
@@ -743,10 +744,14 @@ namespace BZROpenShim
             // so nested class lookups stay ordinary.
             const bool tracked = g_TrackedBuildPending;
             g_TrackedBuildPending = false;
+            // classLabel = mru rides on the same detour (mru_class.cpp).
+            const bool mru = TakeMruBuildPending();
 
             void* objectClass = g_OriginalBuildClass(thisPtr, odfNameLo, odfNameHi);
             if (tracked && objectClass)
                 ConfigureTrackedClass(objectClass, odfNameLo, odfNameHi);
+            else if (mru && objectClass)
+                ConfigureMruClass(objectClass, odfNameLo, odfNameHi);
             return objectClass;
         }
 
@@ -802,6 +807,10 @@ namespace BZROpenShim
                     if (g_TreadsReady)
                         ResetTreadState(object);
                 }
+            }
+            else if (object)
+            {
+                OnHoverObjectBuilt(objectClass, object);
             }
             return object;
         }
