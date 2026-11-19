@@ -88,7 +88,11 @@ The user's spec, modelled on BZ2's FactoryPanel:
   - Every lore line must cite the stock file it came from.
   - A unit with no stock text gets an empty lore field.
   - Full model names come from the same sources. Example from the user: a training briefing names the `avturr` model (the "M173 Badger" turret).
-  - Found 2026-11-19: "M173 Badger Turrets" appears in `.inf` files under the bundled `addon\BzE Map Pack` and `addon\Legacy Instant Action` folders. Whether those community packs count as stock is open; ask the user before citing them.
+  - **Base game only.** The bundled community packs (`addon\BzE Map Pack`, `addon\Legacy Instant Action`, other `addon\` folders) are not sources (user, 2026-11-19).
+  - Source location:
+    - The user's dump of the stock ZFS archives is at `C:\Users\iestu\Documents\BZR_moved_out_20261112\StockODFFiles` (6081 files, flat).
+    - Fall back to `bzone_en.zfs` in the game folder for anything missing.
+    - Verified examples: `tran02.des` (training briefing: "M173 Badger turret") and `avturr.inf` (unit description). Unit `.inf` files exist per ODF (`avturr.inf`, `bvturr.inf`, `avtump.inf` and others).
 - **Briefings tab:** each campaign's missions with their `.des` pages and images. It reuses the lobby Briefing overlay's reader (item 15), so build item 15 first.
 - **Out of scope:** unlocks, the in-game PDA, 3D model previews, multiplayer.
 - **First step:** inventory the stock text sources (which unit `.inf`/`.des` files exist, and the VO transcript and debriefing locations) before writing any lore.
