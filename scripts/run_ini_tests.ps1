@@ -643,6 +643,7 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsPowerRange" = "1"
     "Gameplay/RtsWaypointLines" = "1"
     "Gameplay/RtsAttackMarks" = "0"
+    "Gameplay/RtsRadarPings" = "0"
     "Gameplay/RtsProducerBadges" = "0"
     "Gameplay/RtsOrderQueue" = "0"
     "Gameplay/RtsBuildQueue" = "0"

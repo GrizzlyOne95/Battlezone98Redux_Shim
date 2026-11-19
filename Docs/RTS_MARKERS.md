@@ -150,6 +150,19 @@ If any row fails to bind, the feature fails closed:
 - **Multiplayer:** a local visual with no network gate, like the pings. Whether `enemyShot` is written for remote-owned objects on a multiplayer client is **UNVERIFIED**; rings may only appear for objects the local simulation damaged itself.
 - Pure rules: `AttackMarkAge`, `AttackMarkStyle`, `KeepMostRecent` in `include/rts_markers_policy.h`, tested in `tests/rts_markers_policy_tests.cpp`.
 
+## Radar pings
+
+`[Gameplay] RtsRadarPings` (Options > HUD, default **off**) also draws a short expanding, fading ring on the cockpit radar at the position of each order the local player gives, in the colour of the ground ping (green Go, red attack, yellow other). It works with or without `RtsCommandPings`. Local only, nothing is sent.
+
+- **Orders:** the same two paths as the ground pings (`QueuePing`); the radar ping records the world position and the game-local time (`HudFadeRadarTime`, so it pauses with the game).
+- **Draw seam:** `contextual_hud.cpp` owns the radar render slot (`HudFadeRadarRenderSlot`). `RegisterRadarPostDraw` (same shape as the command panel one) puts its wrapper in the slot with or without the radar fade; the callback runs right after the stock radar render, inside the fade scope when the fade is on (alpha is scaled by the fade opacity). It is skipped while the radar is hidden (`HudFadeRadarShow` = 0), in the alternate layout (`CommandMenuAltLayoutFlag`), or while EXU owns the radar.
+- **Projection (reads of the stock radar, GOG 2.2.301):** `FUN_004933e0` lines 91-117 and `FUN_00493ec0` lines 225-230 give the CockpitRadar fields: +0x08 scanner and +0x0C user object (non-null when the radar works), +0x10 range, +0x14 range squared, +0x20/+0x24/+0x28 user position, basis rows right +0x30..+0x38, up +0x3C..+0x44, front +0x48..+0x50. The radar-space vector is `d = world - userPos`; if `|d|^2 > range^2` then `d *= range/|d|` (the native rim clamp, so off-range orders sit on the rim like contacts); `v = (right.d, up.d, front.d)`. The stock projector `FUN_00493330` is `s = projRadius*5 / (range*5 + v.z)`, `x = centreX + round(v.x*s)`, `y = centreY - round(v.y*s)`. The shim re-implements it in `include/rts_radar_pings_policy.h` (it does not call the engine function) and reads `RadarProjRadius/CentreX/CentreY` live, because `radar_layout.cpp` rescales them.
+- **Primitive:** `HudLine` (0x0068AF40, `55 8B EC 8B 45 20 50 8B 4D 1C 51 E8 00 FD FF FF 83 C4 08 50 8B 55 18 52`, read from the shipping exe), cdecl `(buffer, x1, y1, x2, y2, ARGB, mode)`, mode 0 = colour passthrough, buffer = `*HudPaneBuffer`. The native radar grid caller is `FUN_00493ec0` (line 259 area), which calls it as `FUN_0068af40(DAT_00917580, x1, y1, cx, cy, 0xafffffff)`. No new hook: the row is only called. `HudSpriteZ` is raised by 0.0005 around the ring and restored, like the native radar overlays.
+- **Style:** 12 segments; lives 1.5 s; radius grows from 0.04 to 0.14 of the projection radius (minimum 3 px); alpha 1 to 0 linearly. At most 8 pings (the oldest is replaced). A ping born after the current clock (clock reset by a mission restart) is dropped.
+- **Log:** `[RTSMARKERS] radar pings enabled=%d installed=%d` (change-only) and the first 8 drawn pings (`radar ping drawn at x,y`, with `(clamped to the rim)`).
+- Pure rules: `Project`, `Evaluate`, `RadarPingQueue` in `include/rts_radar_pings_policy.h`, tested in `tests/rts_radar_pings_policy_tests.cpp`.
+- UNVERIFIED in game: that `HudLine` draws at the expected depth over the radar disc, and the ring look at every radar size. See live checklist item 13.
+
 ## Queued-order chain
 
 `[Gameplay] RtsOrderQueue` (`Docs/RTS_ORDER_QUEUE.md`) adds its own pool slots after the attack rings: 48 line slots (`kFirstQueueLineSlot`, one per queued leg) and 16 ring slots (`kFirstQueueRingSlot`, one per distinct queued object target), amber (`RtsOrderQueuePolicy::kQueueColour`). For each selected own unit (at most 16) with a queue, the chain starts where its current order ends and runs through each queued point; a leg to a gone object, or an enemy the player cannot detect, is skipped. Drawn whenever the option is active, independent of `RtsWaypointLines`. The pool-size check is in `tests/rts_placement_policy_tests.cpp`.
@@ -278,6 +291,7 @@ Each group binds once on the patch thread (all or nothing, byte-checked); every 
 10. Turn each option off in Options > Controls > RTS Commands: its visuals go on the next frame; the others stay.
 11. Multiplayer: repeat 1-7 and 12 as a client and as the host; nothing appears for other players.
 12. Pending Build Ghost: order two rigs to build different buildings far away (one from the reticle, one with Build at Nav): a dim ghost at each spot while they drive. Each goes when its rig starts building. Cancel one order (give it Go): its ghost goes. Kill a rig on its way: its ghost goes.
+13. Radar Pings (`[Gameplay] RtsRadarPings` = 1): select a unit and give a Go order on open ground: a green ring grows and fades on the radar at the right bearing. An order beyond radar range: the ring sits on the radar rim. An attack order: red. Pause the game: the ring freezes. Option off: nothing is drawn. Check with Radar Fade on and off (the ring fades with the radar when it fades), and with Radar Size changed.
 
 Producer build badges (name and build percent over busy own producers, `[Gameplay] RtsProducerBadges`, default off) are a HUD overlay, not a ring: see `Docs/PRODUCER_BADGES.md`.
 

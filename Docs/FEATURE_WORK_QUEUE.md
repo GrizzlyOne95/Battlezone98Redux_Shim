@@ -9,9 +9,9 @@ Standing: merge as you go (squash + auto-merge after local CI, a live test for n
 
 ## In review
 - **6. Follow camera** (`[Gameplay] RtsFollowCamera`, Shift+C in satellite). Branch `agent/follow-camera`, PR #900, built in a cloud session: Linux CTest green, both engine rows byte-checked against the GOG 2.2.301 exe, Win32 build left to CI. **Needs the live test** (`Docs/RTS_COMMANDS.md`, checklist 11b) before merge.
+- **7. Radar order pings** (`[Gameplay] RtsRadarPings`). Branch `agent/radar-order-pings`, stacked on #900. Needs the live test (`Docs/RTS_MARKERS.md`).
 
 ## Waiting (in order)
-7. **Map pings on orders.**
 8. **FPS quick-commands:** research.
 9. **Loadout presets:** research. Handed to Copilot, see `Docs/COPILOT_BRIEF_LOADOUT_PRESETS.md`.
 10. **Tread texture scroll.**

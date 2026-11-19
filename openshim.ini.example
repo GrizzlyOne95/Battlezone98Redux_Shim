@@ -2657,6 +2657,16 @@ GroupStrip = 1
 ; Exposed on the OpenShim Settings page as "Command Pings".
 RtsCommandPings = 1
 
+; Radar pings. Each order you give also draws a short ring on the cockpit
+; radar at the order's position, in the same colour as the ground ring (green
+; Go, red attack, yellow other). It grows and fades over 1.5 seconds. An order
+; beyond radar range shows on the radar rim, like a distant contact. Works
+; with or without Command Pings. Local visuals only.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Radar Pings".
+RtsRadarPings = 0
+
 ; Artillery range rings. Around every selected own-team howitzer (never
 ; the piloted vehicle; the laser sight arc covers that),
 ; a ring at its flat-ground maximum range from the ODF shotSpeed and

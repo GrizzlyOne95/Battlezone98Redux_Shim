@@ -502,8 +502,8 @@ namespace BZROpenShim
             ReloadProducerBadgesConfig();
             // [Gameplay] RtsCommandPings / RtsArtilleryRange, and the placement
             // aids RtsBuildGhost / RtsPendingBuildGhost / RtsPowerRange /
-            // RtsWaypointLines, and the under-attack rings RtsAttackMarks,
-            // likewise.
+            // RtsWaypointLines, the under-attack rings RtsAttackMarks and the
+            // radar rings RtsRadarPings, likewise.
             ReloadRtsMarkersConfig();
             // [Gameplay] RtsOrderQueue (Shift-queued orders), likewise.
             ReloadRtsOrderQueueConfig();
