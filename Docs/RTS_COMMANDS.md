@@ -13,6 +13,7 @@ RTS Commands. Keys: Options > Input > RTS Actions (written to
 | Repair/Reload for the units that need it | `RtsSmartRepairReload` (on) | stock menu keys | Runs (UNVERIFIED live) |
 | Area select | `RtsAreaSelect` (on) | `RtsAreaSelectKey` (X), Shift+X wide | Runs (UNVERIFIED live) |
 | Hold | `RtsHold` (2) | `RtsHoldKey` (Z); Shift on the Defend entry | Off (single player only) |
+| Quick commands | `RtsQuickCommands` (off) | `RtsQuickFollowKey` (Numpad1), `RtsQuickDefendKey` (Numpad2), `RtsQuickAttackKey` (Numpad3), `RtsQuickStopKey` (Numpad5) | Off (single player only) |
 | Select next idle unit | none (always on) | `RtsIdleUnitKey` (J), Shift+J all | Runs (UNVERIFIED live) |
 | Idle unit alert | `RtsIdleUnitAlert` (off) | none (a sound) | Runs (live 2026-11-17: alert, 5 s limit, no start-up alerts) |
 | Build at Nav | `RtsBuildAtNav` (on) | stock menu keys (Go To Nav, then the nav) | Runs for local rigs (UNVERIFIED live) |
@@ -209,6 +210,65 @@ places:
 - **BZP.** BZP binds Shift+number to its line-up Go. With BZP loaded, Shift
   plus the Defend entry's number can fire both. Set `RtsHold = 1` (Options:
   Hold = Key Only) to keep only the Z key.
+
+## Quick commands (Numpad 1 / 2 / 3 / 0)
+
+`[Gameplay] RtsQuickCommands` (default off). Four plain keys give an order to
+the selected own units without the command menu (research:
+`Docs/FPS_QUICK_COMMANDS_RESEARCH.md`, PR #904):
+
+| Key (ini) | Default | Order | ModeList entry the unit must hold |
+| --- | --- | --- | --- |
+| `RtsQuickFollowKey` | Numpad1 | CMD_FOLLOW (5) on the player's vehicle | Follow Me, mode 2 (`kModeFollowMe`) |
+| `RtsQuickDefendKey` | Numpad2 | CMD_DEFEND (15) on the player's vehicle | Defend, mode 17 (`kModeDefend`) |
+| `RtsQuickAttackKey` | Numpad3 | CMD_ATTACK (4) on the player's current target | Attack, mode 14 (`kModeAttack`) |
+| `RtsQuickStopKey` | Numpad5 | CMD_STOP (2), no target | none (no mode constant; any commandable unit) |
+
+- **Target.** The player's target is the handle at GameObject +0x21C
+  (`kGameObjectTargetHandleOffset`, read as `DoRemoteTarget` does). Attack needs it
+  to resolve and not to be the player's own vehicle, and the target must pass
+  the stock explicit-attack rule: not on the player's team, and
+  `GameObject::EnemyP` (the row `GameObjectEnemyP`) true, with team 0 allowed
+  only under `AllowNeutralAttackOrders` (`AllowExplicitAttackTarget`, the
+  rule the `ControlPanelEnemyPAttackOrderHook` uses). An ally or neutral
+  target is refused with the buzz. A selected unit that is the target itself
+  is counted as refused.
+- **Each unit.** Own team, `CanCommand`, and (Follow, Defend, Attack) its
+  ModeList holds the mode in an enabled slot (`UnitTakesMode`, as Hold does).
+  The player's own vehicle is never ordered. The order is the stock
+  `SetCommandObj` wrapper already used by the other paths
+  (`SafeSetCommandObj` / `SafeSetCommand`), no new engine row.
+- **After.** One command ping (`NotifyRtsMarkersCommand`, not for Stop), the
+  order queue is cleared for the units ordered
+  (`NoteRtsOrderQueuePlainOrder`), the selection is kept. If nothing was
+  ordered (empty selection, no target, the target is the player, every unit
+  refused) the stock `mnu_buzz.wav` plays.
+- **Gate.** The same as the other RTS keys (live interactive world, no
+  editor, no text field) plus `IsSinglePlayerSession()` and the option. The
+  decision line `[RTS] quick commands enabled=%d sp=%d` is logged the first
+  time the state is read and on every change; each press logs
+  `[RTS] quick <name>: N unit(s) ordered, M refused` (budgeted).
+- **Why the numpad.** The game reads `input.map` through DirectInput
+  (`OIS.dll` imports DINPUT8), which does not see window messages, so
+  swallowing `WM_KEYDOWN` cannot hide a stock bind: a Shift or Ctrl chord on a
+  bound key would give the order and the stock action. The GOG `input.map`
+  binds Numpad0 (`weapon_fire`, plain Insert, lines 282-284), Numpad4 and
+  Numpad6 (LeftArrow/RightArrow steering, lines 223-231) and KeypadEnter
+  (weapon cycle); the other numpad digits are free, hence the defaults
+  Numpad1/2/3/5. `ReservedKeyReason` refuses VK 0x60, 0x64 and 0x66 (Enter is
+  already refused). Keys are plain only (Shift, Ctrl and Alt chords are never
+  taken). The four quick keys stay reserved for the clash checks (rally key,
+  QuickSave, other RTS rows) even while `RtsQuickCommands` is off.
+- **NumLock.** With NumLock off the numpad sends non-extended Home, End,
+  Insert and so on, which never match the quick keys (the grey-cluster keys
+  are the extended ones and stay QuickSave's), so the quick keys do nothing.
+  Keep NumLock on.
+- **Names.** `Numpad0`-`Numpad9` (also `Num0`-`Num9`, `Keypad0`-`Keypad9`) are
+  accepted in the ini and written by the rebind capture
+  (`QuickSaveKeyPolicy::ParseKeyToken`, VK 0x60-0x69, not extended).
+- **Unverified.** Whether each unit family carries the Attack (14) mode in
+  its menu (a wingman lists Hunt, Follow Close and Defend; if tanks lack
+  mode 14 Attack My Target refuses them) and every behaviour above live.
 
 ## Build at Nav
 
@@ -427,6 +487,16 @@ broadcast pings. An order without a target object (Hunt) gets no ping.
     unit finishing a move plays ping.wav at most every 5 s. In
     `openshim.log`, `idle state` lines show whether tugs and constructors
     read idle=0 while they work.
+
+11c. Quick commands (`RtsQuickCommands = 1`, single player, NumLock on):
+    select a group (F1-F7), press Numpad1: the units follow the player and
+    one ping shows; Numpad2: they defend; lock a target, Numpad3: they
+    attack it (check a wingman, a tank and a turret; note any that refuse in
+    the log line; an ally or own-team target buzzes); Numpad5: they stop. The selection stays after each. With
+    nothing selected, or Numpad3 with no target, the buzz plays. With the
+    option off nothing happens. Rebind a row to another key and back; the
+    ini holds `Numpad1`. In multiplayer the keys do nothing.
+    `openshim.log` shows the `quick commands enabled=` line.
 
 11b. Satellite follow (`RtsFollowCamera = 1`): enter satellite, select a
     moving unit, Shift+C: the view stays on it. Select another unit and

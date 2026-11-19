@@ -2,13 +2,14 @@
 // rts_commands_policy.h
 // Pure rules for the RTS command extras ([Gameplay] RtsRemoteTarget,
 // RtsSmartCommandMenu, RtsSmartRepairReload, RtsAreaSelect, RtsHold,
-// RtsIdleUnitAlert, RtsFollowCamera): the mixed-selection command-menu merge, which selected
+// RtsIdleUnitAlert, RtsFollowCamera, RtsQuickCommands): the mixed-selection command-menu merge, which selected
 // units an order is sent to, unit families, target cycles, the area-select
 // radius filter, idle units (definition, cycling, alert policy) and the
 // rebindable keys. No Windows or engine calls, so
 // tests/rts_commands_policy_tests.cpp runs them directly. The engine side is
 // src/patches/rts_commands.cpp; behaviour and evidence: Docs/RTS_COMMANDS.md.
 
+#include "lcbench_safety_policy.h"
 #include "quicksave_key_policy.h"
 #include "rts_placement_policy.h"
 
@@ -645,6 +646,10 @@ namespace BZROpenShim
             BuildingCycle,    // key: cycle the target through own buildings
             AreaSelect,       // key: 100 m, Shift+key: 200 m
             Hold,             // key: Hold the selection
+            QuickFollowMe,    // key: Follow the player's vehicle
+            QuickDefendMe,    // key: Defend the player's vehicle
+            QuickAttackTarget, // key: Attack the player's current target
+            QuickStop,        // key: Stop
             IdleUnit,         // key: select the next idle unit, Shift+key: all of them
             FollowCamera,     // Shift+key in the satellite view: follow a unit
             Count,
@@ -678,6 +683,10 @@ namespace BZROpenShim
                 { "RtsBuildingCycleKey", "OpenShim:RtsBuildingCycleKey", "Target Next Building", "B", false, false },
                 { "RtsAreaSelectKey", "OpenShim:RtsAreaSelectKey", "Select Same Type Nearby", "X", false, true },
                 { "RtsHoldKey", "OpenShim:RtsHoldKey", "Hold Position", "Z", false, false },
+                { "RtsQuickFollowKey", "OpenShim:RtsQuickFollowKey", "Quick: Follow Me", "Numpad1", false, false },
+                { "RtsQuickDefendKey", "OpenShim:RtsQuickDefendKey", "Quick: Defend Me", "Numpad2", false, false },
+                { "RtsQuickAttackKey", "OpenShim:RtsQuickAttackKey", "Quick: Attack My Target", "Numpad3", false, false },
+                { "RtsQuickStopKey", "OpenShim:RtsQuickStopKey", "Quick: Stop", "Numpad5", false, false },
                 { "RtsIdleUnitKey", "OpenShim:RtsIdleUnitKey", "Select Next Idle Unit", "J", false, true },
                 { "RtsFollowCameraKey", "OpenShim:RtsFollowCameraKey", "Satellite Follow Unit", "C", true, false },
             };
@@ -709,6 +718,13 @@ namespace BZROpenShim
             case 0x12: return "Alt is a modifier";
             case 0x0D: return "Enter is a game key";
             case 0x1B: return "Esc is a game key";
+            // Stock input.map binds Numpad0 (weapon_fire: plain Insert),
+            // Numpad4 and Numpad6 (LeftArrow/RightArrow steering), and
+            // KeypadEnter (Enter, above). DirectInput fires them whatever
+            // the window filter swallows.
+            case 0x60: return "Numpad0 is the game's fire key";
+            case 0x64: return "Numpad4 is the game's steering key";
+            case 0x66: return "Numpad6 is the game's steering key";
             default: return nullptr;
             }
         }
@@ -851,6 +867,61 @@ namespace BZROpenShim
             decision.act = true;
             decision.shift = key.shift;
             return decision;
+        }
+
+        // ---- Quick commands ----------------------------------------------------
+
+        // [Gameplay] RtsQuickCommands: four plain numpad keys that order the
+        // selection against the player. The game reads input.map through
+        // DirectInput, which swallowing window messages cannot block, so a
+        // key with a stock bind would fire both. The GOG input.map binds
+        // Numpad0 (weapon_fire, plain Insert), Numpad4 and Numpad6 (steering,
+        // LeftArrow/RightArrow) and KeypadEnter; the other numpad digits are
+        // free, so the defaults are Numpad1, 2, 3 and 5, and ReservedKeyReason
+        // refuses the bound ones. The quick keys stay reserved for the clash
+        // checks even with the option off. Single player only, like Hold.
+        constexpr int kCmdAttack = 4;
+        constexpr int kCmdFollow = 5;
+
+        inline bool QuickCommandsAvailable(bool enabled, bool hooksInstalled, bool singlePlayer)
+        {
+            return enabled && hooksInstalled && singlePlayer;
+        }
+
+        // Attack My Target: the player's target must not be on the player's
+        // team and must pass the same explicit-attack rule as the stock
+        // ControlPanel attack list (Team::EnemyP, plus team 0 only under
+        // [Gameplay] AllowNeutralAttackOrders): an ally is refused.
+        inline bool QuickAttackTargetAllowed(bool sameTeamAsPlayer, bool stockEnemy, int targetTeam,
+                                             bool allowNeutralAttackOrders)
+        {
+            return !sameTeamAsPlayer &&
+                   LcbenchSafetyPolicy::AllowExplicitAttackTarget(stockEnemy, targetTeam, allowNeutralAttackOrders);
+        }
+
+        struct QuickOrder
+        {
+            int what = 0;           // command id; 0 = not a quick key
+            int mode = kModeNone;   // ModeList entry a unit must hold; kModeNone = no filter
+            bool needsTarget = false; // an object order (the player or the player's target)
+            bool onPlayer = false;  // the target is the player's own vehicle
+        };
+
+        // Follow Me: CMD_FOLLOW (5) on the player, ModeList kModeFollowMe (2).
+        // Defend Me: CMD_DEFEND (15) on the player, kModeDefend (17).
+        // Attack My Target: CMD_ATTACK (4) on the player's target, kModeAttack
+        // (14). Stop: CMD_STOP (2), no target and no mode filter (Stop has no
+        // mode constant here; every commandable unit takes it).
+        inline QuickOrder QuickOrderFor(KeyId id)
+        {
+            switch (id)
+            {
+            case KeyId::QuickFollowMe: return { kCmdFollow, kModeFollowMe, true, true };
+            case KeyId::QuickDefendMe: return { kCmdDefend, kModeDefend, true, true };
+            case KeyId::QuickAttackTarget: return { kCmdAttack, kModeAttack, true, false };
+            case KeyId::QuickStop: return { RtsPlacement::kCmdStop, kModeNone, false, false };
+            default: return {};
+            }
         }
 
         // ---- Hold -------------------------------------------------------------

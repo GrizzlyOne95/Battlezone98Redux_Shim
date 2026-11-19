@@ -637,6 +637,7 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsSmartRepairReload" = "1"
     "Gameplay/RtsAreaSelect" = "1"
     "Gameplay/RtsHold" = "2"
+    "Gameplay/RtsQuickCommands" = "0"
     "Gameplay/RtsBuildAtNav" = "1"
     "Gameplay/RtsBuildGhost" = "1"
     "Gameplay/RtsPendingBuildGhost" = "1"
