@@ -13,7 +13,7 @@ Standing: merge as you go (squash + auto-merge after local CI, a live test for n
 8. **FPS quick-commands:** research.
 9. **Loadout presets:** research. Handed to Copilot, see `Docs/COPILOT_BRIEF_LOADOUT_PRESETS.md`.
 10. **Tread texture scroll.**
-11. **Walker free-turning head:** research and plan first.
+11. **Walker free-turning head:** M0 done, M1 implemented (`Docs/WALKER_FREE_HEAD.md`); next the M1 live test, then M2 (leg pose, relaxation, shared helpers).
 
 ## Cleanup still owed
 - Worktree folders:

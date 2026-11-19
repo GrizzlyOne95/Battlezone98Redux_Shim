@@ -476,6 +476,7 @@ openshim_add_test(tracked_vehicle_physics_tests STD 17 SOURCES tracked_vehicle_p
 openshim_add_test(tracked_vehicle_treads_tests STD 17 SOURCES tracked_vehicle_treads_tests.cpp)
 openshim_add_test(tracked_vehicle_turret_tests STD 17 SOURCES tracked_vehicle_turret_tests.cpp)
 openshim_add_test(tracked_vehicle_net_tests STD 17 SOURCES tracked_vehicle_net_tests.cpp)
+openshim_add_test(walker_free_head_math_tests STD 17 SOURCES walker_free_head_math_tests.cpp)
 
 openshim_add_test(headlight_falloff_tests STD 20 SOURCES
     headlight_falloff_tests.cpp

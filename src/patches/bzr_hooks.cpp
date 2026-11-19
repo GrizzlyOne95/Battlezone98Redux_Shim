@@ -64,6 +64,7 @@
 #include "net_optimizer.h"
 #include "pond_class_label.h"
 #include "tracked_vehicle_class.h"
+#include "walker_free_head.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -1713,6 +1714,7 @@ namespace BZROpenShim
         HookEngine::CodePatchLock lock;
         InstallPondClassLabelSupportIfPossible();
         InstallTrackedVehicleClassIfPossible();
+        InstallWalkerFreeHeadIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallD3D11ConstantLookupCacheIfPossible();
         InstallD3DCompileCacheIfPossible();

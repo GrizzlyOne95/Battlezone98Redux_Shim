@@ -1,6 +1,6 @@
 # Walker free-turning head: research and plan (queue item 11)
 
-Status: research and design; M0 probe done statically (2026-11-19, section 5a), verdict GO for the frame swap with two amendments. Nothing implemented, nothing run live. Anything without a cite is UNVERIFIED.
+Status: M0 probe done statically (2026-11-19, section 5a), verdict GO for the frame swap with two amendments. M1 implemented (2026-11-19, `src/patches/walker_free_head.cpp`, doc of record `Docs/WALKER_FREE_HEAD.md`), not yet run live. Anything without a cite is UNVERIFIED.
 GX = shipping GOG `battlezone98redux.exe`, SHA256 8D71F56C...3377413 (bytes read offline, VA = file offset - 0x400 + 0x401000 for `.text`).
 Path keys: BZ = `Battlezone_Source\BZ1`; C15 = `BZ\1.5\functions\004b\` (PDB-named 1.5 decompile); T = `BZ\derived\bz15_pdb\raw\types.txt`;
 GD = `BZ\Redux\openshim_re_corpus\bzr_gog_best_effort\ghidrecomp\results\bins\battlezone98redux.exe-6777ca\decomps\` (GOG, no PDB names);
@@ -72,7 +72,7 @@ Gate: opted-in class (`torsoName` set), `ctrl` user flag (`kObj76FlagAimGate` 0x
 2. **Head slew**: `headCmd = mouse`; update with the tank's pure math (`include/tracked_vehicle_turret.h`: SlewRate, AdvanceDelta, Sanitize), limits from `yawMin/yawMax` (none unless set).
 3. **Rewrite controls for the legs**: `ctrl.steer = turnKeys`, `ctrl.strafe = 0` (the stock call now turns the legs from the keys, and sidestepping is disabled while twisting is on; A/D are the only strafe binding in stock `input.map`, so no separate strafe key is lost beyond what the user accepted).
    Save the originals and restore them after the call.
-4. **Swap in**: rotate the root's right/front about its up axis by `-delta` (`TU::HullAxes`, the tank's helper) so the transform is the legs frame; positions, velocity and omega are world vectors and are untouched.
+4. **Swap in**: rotate the root's right/front about its up axis by `-delta` (`TU::HullAxes`, the tank's helper) so the transform is the legs frame; positions and velocity are world vectors and are untouched. Omega is root-local (1.5 `Spinner` 0x004752A7 applies `R(-omega*dt)` in the body frame; GOG FUN_00444d50 has the same shape), but only the stock Simulate integrates it and it always runs in the legs frame, so stored omega stays legs-local. Impulses written between frames (collision, damage) land in the head frame; M2 rotates omega and alpha x/z head-to-legs on swap-in and back on swap-out (y needs no change).
 5. **Stock call** (`g_StockSimulate`): moves, picks the walk clip, turns the legs from the keys, runs the Craft tail. Measure `dLegs` = change in the root's front yaw across the call.
 6. **Swap out**: `delta_new = delta + headRate*dt - dLegs` (head is world-stabilised: turning the legs does not drag the aim; with limits the clamp drags the head), then rotate the root by `+delta_new`.
    UpdateWeaponAim ran inside the call (M0 Q4), so call stock slot 38 again here (only when `this+0x1A0` is non-null).
@@ -93,6 +93,7 @@ Save/load: `delta` is not saved; a loaded game starts with delta 0 and legs unde
 | later | AI opt-in, co-op/MP delta sync (reuse the `'T','Y'` message, TV:186-209), svwalk `sup` tree | S-M each | not in this plan |
 If M0 shows the frame swap cannot work (for example the weapon call order cannot be repaired), fall back to the earlier "root = head, legs follow" model (legs re-align at a fixed rate, no independent heading).
 M0 result: GO, no fallback (section 5a). M1 also wraps slot 16 (PostSimulate) for step 7's hook point (M2 uses it).
+M1 as built (2026-11-19): steps 1-6 plus the slot 16 wrapper (log only). Choices made in M1: the `[WalkerClass]` keys are read on the first Simulate of each ODF name (no WalkerClass BuildClass detour; the scope open loads the ODF then); the legs command is the arrows plus `-ctrl.strafe` (A turns left); omega/alpha are left untouched across the swap (omega is root-local, see section 4 step 4: walker dynamics stay correct, but a hit between frames at large delta mixes pitch and roll; M2 rotates x/z on the swap); not user-driven snaps delta to 0 (step 8 relaxation is M2); the torso check is a direct-root-child name match only (the `ty1`-variant rule is M2). The input addresses come from three new `UserInput::*` abs32_operand resolves read out of UserProcess::Execute, so they follow a relocated image.
 
 ## 5a. M0 results (static, 2026-11-19; no live run needed)
 Paths: GD as above; C15F = `BZ\1.5\functions\` (PDB-named); IM = game root `input.map` (stock bindings).
@@ -171,4 +172,4 @@ Fail closed (stock walker plus one log line, as TV:162-164): SyncNode unresolved
 - Sidestep: losing the stock strafe on twist-enabled walkers is accepted (user). Head aim: world-stabilised. Milestones: M1 and M2 as separate PRs, M0 gates both, fallback "legs follow the head" if M0 fails.
 
 ## Open questions (still open)
-None; next step is the M0 probe.
+None; next step is the M1 live test (checklist in `Docs/WALKER_FREE_HEAD.md` Verification), then M2.
