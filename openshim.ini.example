@@ -3335,6 +3335,28 @@ AttackRevealPerceivedTeam = 1
 ; Accepted: boolean. Default: ON.
 TurretAttackOrders = 1
 
+; Mobile repair units: gameplay for ODFs with classLabel = "mru" and an
+; [MruClass] section. Stock units are never affected.
+;
+; With this on, such a unit gets three command-menu entries:
+; - Drop Repair / Drop Ammo build the [MruClass] repairPodClass /
+;   ammoPodClass pod behind the unit, on a podCooldown and paid from the
+;   unit's own ammo (ammoPerRepairPod / ammoPerAmmoPod; 0 = free). A
+;   greyed entry is cooling down, short of ammo, or has no pod.
+; - Deploy stops the unit; it then repairs and reloads every friendly
+;   craft within serviceRadius each serviceInterval, paid from its own
+;   ammo (ammoPerRepair / ammoPerReload; 0 = free). Any move order, or
+;   Undeploy, packs it up. With serviceDeployed = 0 it services while
+;   moving too.
+; Deployed state and cooldowns are not saved.
+;
+; Off: the unit is a plain hover craft with stock menus and no service.
+; Single player only. Read once at startup; restart after changing.
+; Kill switch: set OPENSHIM_DISABLE_MRU_GAMEPLAY=1.
+; See Docs/MRU_CLASS.md.
+; Accepted: boolean. Default: OFF.
+MruGameplay = 0
+
 ; Hide undetected objects on the satellite view again.
 ;
 ; BZ 1.5 rendered the overview through Submit_Overview_Entities, which tested

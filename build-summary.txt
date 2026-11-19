@@ -1,0 +1,12 @@
+winmm.dll size: 134656 bytes
+winmm.dll SHA-256: 9e973c727da05c51e12233ae0ada3488360a546da197c3075bc4da524b96913d
+winmm.pdb size: 2134016 bytes
+winmm.pdb SHA-256: 04837d8aaee8ded0893b713d9faf00ccbda1cbe252385662b620fc806b758505
+bzloader.dll size: 46080 bytes
+bzloader.dll SHA-256: 94ec69db3f55ce8ac6bb6c8ee6073bc87bad482047729c1792fd5dfbb301fc4e
+bzloader.pdb size: 1036288 bytes
+bzloader.pdb SHA-256: 9119ccafa715a79a2f5fbf3d79d8d437fd278d02cbab8db0980f2f2f3908e92d
+plugins/openshim.dll size: 7015424 bytes
+plugins/openshim.dll SHA-256: 98f49e40d5dcb3f5434641a0425b37aab7950bf0cdc05b8859806bb044d7040c
+plugins/openshim.pdb size: 53760000 bytes
+plugins/openshim.pdb SHA-256: 9f178d64d8ef10e28826b91c50e14b4a889f36a2ab1217e25baa3dbee3d6039f

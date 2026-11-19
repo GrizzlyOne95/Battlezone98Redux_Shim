@@ -1,17 +1,29 @@
 # Mobile repair unit (`classLabel = "mru"`)
 
 Doc of record for the "Nightingale" class. Research, decisions and the full
-plan: `Docs/NIGHTINGALE_RESEARCH.md`. This build covers plan steps 1-2 only:
+plan: `Docs/NIGHTINGALE_RESEARCH.md` (sections 4a, 5, 6, 7). This build
+covers plan steps 1-6:
 
-1. the `mru` class alias with the `[MruClass]` key parse, and
-2. a **log-only menu probe**: three extra command-menu entries (Drop Repair,
-   Drop Ammo, Deploy) that are drawn, relabelled and logged when picked, but
-   do nothing.
+1. the `mru` class alias with the `[MruClass]` key parse;
+2. three command-menu entries (Drop Repair, Drop Ammo, Deploy);
+3. a native pod drop with a cooldown, paid from the MRU's ammo gauge;
+4. Deploy / Undeploy with a native deployed flag; a deployed MRU holds
+   position;
+5. a per-MRU radius service tick (repair and reload), single player only;
+6. Drop Repair / Drop Ammo wired to step 3.
 
-There is no openshim.ini option. An ODF without `classLabel = "mru"` is
-untouched. Kill switch: set the environment variable
-`OPENSHIM_DISABLE_MRU_CLASS=1`; `mru` is then an unknown classLabel, as in
-stock Redux.
+Step 7 (converting Resurgence's `avmru`/`svmru`) is out of scope: they stay
+unchanged (research section 7.2). Test ODFs are below.
+
+**Options.**
+- The class alias has no ini option. An ODF without `classLabel = "mru"` is
+  untouched. Kill switch `OPENSHIM_DISABLE_MRU_CLASS=1`: `mru` is then an
+  unknown classLabel, as in stock Redux.
+- The menu entries and all gameplay need `[SinglePlayer] MruGameplay = 1`
+  (default 0, read once at install) and a single-player session. Kill switch
+  `OPENSHIM_DISABLE_MRU_GAMEPLAY=1`. Off, an MRU is a plain hover craft with
+  the stock menu and no service (this replaces the step 1-2 probe, which drew
+  the entries without an option).
 
 Status: implemented, not live-tested. Every behaviour below that needs the
 game is UNVERIFIED until the live checklist at the end passes.
@@ -21,20 +33,21 @@ game is UNVERIFIED until the live checklist at the end passes.
 ```ini
 [GameObjectClass]
 classLabel = "mru"
+maxAmmo = 2000            ; the gauge every cost below is paid from
 ; everything else as for a hover craft
 
 [HoverCraftClass]
 ; the stock hover keys
 
 [MruClass]
-; all optional; nothing below is used yet (parsed and logged only)
+; all optional
 serviceRadius = 60.0      ; metres; 0 = no service (default 0)
 serviceInterval = 1.0     ; seconds per service tick (default 1.0, floor 0.05)
 repairPerTick = 100       ; health per unit per tick (default 100)
 reloadPerTick = 50        ; ammo per unit per tick (default 50)
 ammoPerRepair = 1         ; gauge cost per health point, 0 = free (default 1)
 ammoPerReload = 1         ; gauge cost per ammo point, 0 = free (default 1)
-serviceSelf = 0           ; may it service itself (default 0)
+serviceSelf = 0           ; may it repair itself (default 0)
 serviceDeployed = 1       ; service only while deployed (default 1)
 podCooldown = 30.0        ; seconds between pod drops (default 30)
 repairPodClass = "repamine" ; pod ODF for Drop Repair (default unset)
@@ -43,12 +56,13 @@ ammoPerRepairPod = 0      ; gauge cost per pod, 0 = free (default 0)
 ammoPerAmmoPod = 0
 ```
 
-Rules (include/mru_class_policy.h, tested by tests/mru_class_policy_tests.cpp):
+Parse rules (include/mru_class_policy.h, tested by
+tests/mru_class_policy_tests.cpp):
 
 - **Section present** = at least one of the keys above has a value. The
   ParameterDB has no section lookup, so an `[MruClass]` header with no known
   key reads as absent. Without the section the unit is a plain hover with
-  the label `mru`: stock menu, no probe.
+  the label `mru`: stock menu, no gameplay.
 - Numbers must be finite and not negative, else the default stands;
   `serviceInterval` is floored at 0.05 s. Booleans are integers (0 off).
 - Pod class names: quotes optional; longer than 15 characters is dropped
@@ -56,38 +70,108 @@ Rules (include/mru_class_policy.h, tested by tests/mru_class_policy_tests.cpp):
 - Not inherited: the keys are read from the ODF file itself, as tracked's
   `[TrackedClass]`.
 
-## Menu probe
+## Menu
 
 After the stock `HoverCraft::UpdateModeList` (0x004EBD60) fill, an MRU
 object's menu gets:
 
-| Slot | Entry | Mode id reused | Stock name of that id |
-|---|---|---|---|
-| 7 | Drop Repair | 0xB | Go To Geyser |
-| 8 | Drop Ammo | 0xF | Lay Mines |
-| 9 | Deploy | 0x4 | Drop Off |
+| Slot | Entry | Mode id reused | Stock name of that id | Enabled when |
+|---|---|---|---|---|
+| 7 | Drop Repair | 0xB | Go To Geyser | pod named, pod class found, cooldown over, gauge >= pod cost |
+| 8 | Drop Ammo | 0xF | Lay Mines | same, for the ammo pod |
+| 9 | Deploy / Undeploy | 0x4 | Drop Off | always |
 
-All three are enabled for the probe. The ids are ones the hover menu never
-shows. They are below 0x1B, so `ControlPanel::Render` draws their label.
-None of them opens a submenu: only 10, 0xE and 0x11 do (FUN_004a08e0.c lines
-1359-1371). Deploy (4) sits in slot 9, so it never shares a slot with the
-Howitzer's slot-7 Drop Off. The labels come from `ModeLabelDecide`
-(rts_commands.cpp, the `ModeLabelThunk` redirect at 0x004A57BE) via
-`ShimText("openshim_ui:mru_drop_repair_label" / "mru_drop_ammo_label" /
-"mru_deploy_label")`, only while the selection holds an MRU unit.
+The ids are ones the hover menu never shows. They are below 0x1B, so
+`ControlPanel::Render` draws their label. None of them opens a submenu: only
+10, 0xE and 0x11 do (FUN_004a08e0.c lines 1359-1371). Deploy (4) sits in
+slot 9, so it never shares a slot with the Howitzer's slot-7 Drop Off.
+Craft::Simulate calls UpdateModeList every frame for a unit on the user's
+team (`obj+0x174 == [0x00917B00]`, FUN_004ab380.c lines 326-328), so the
+enabled bits follow the cooldown and the gauge.
 
-A pick goes through `DispatchHook` (0x004A512A). For every selected
-commandable MRU unit, the shim logs one `[MRU] menu pick` line with the
-mode, the unit and its pending order `what` (+0xCC). A pick of one of the
-three MRU entries that is offered in its slot is **consumed**: the hook
-returns true without calling the stock `DispatchMode`, so no `ExecuteMode`,
-no order and no command ping. The selection clears, as after a stock pick.
-Stock entries (Follow, Go To Nav, Attack, ...) are logged and then dispatched
-as stock.
+Labels come from `ModeLabelDecide` (rts_commands.cpp, the `ModeLabelThunk`
+redirect at 0x004A57BE) via `ShimText("openshim_ui:mru_drop_repair_label" /
+"mru_drop_ammo_label" / "mru_deploy_label" / "mru_undeploy_label")`, only
+while the selection holds an MRU unit. Deploy reads **Undeploy** when every
+MRU in the selection is deployed.
 
-Single player only. In a network game the vtable copy's slot 23 runs the
-stock fill only (stock hover menu), labels are stock, and picks are not
-logged.
+A pick goes through `DispatchHook` (0x004A512A), which calls
+`NoteMruMenuPick` for every selected commandable unit. A pick of one of the
+three ids that sits in its MRU slot is **consumed**, enabled or not, so its
+reused id never reaches the stock `DispatchMode`:
+
+- **Deploy** on an undeployed MRU sets the deployed flag and gives
+  `GameObject::SetCommand(CMD_STOP)` (row `GameObjectSetCommand`,
+  0x004DBCE0: what at +0xCC, FUN_004dbce0). On a deployed MRU it clears the
+  flag (Undeploy); the unit keeps its Stop until given an order.
+- **Drop Repair / Drop Ammo**, when the drop could go now, queue it for the
+  unit's next Simulate (as `Dispenser::Trigger` arms and
+  `Dispenser::Simulate` builds); otherwise the pick is logged with the
+  reason and does nothing.
+
+Stock entries (Follow, Go To Nav, Attack, ...) are logged and dispatched as
+stock.
+
+## Gameplay
+
+All of it runs in the MRU vtable copy's Simulate (slot 15), after the stock
+Simulate, single player and `MruGameplay = 1` only. In order:
+
+1. **Cooldown.** `cooldownLeft -= dt`, floored at 0. It starts at 0 (ready)
+   for a new object. One cooldown is shared by both pod types.
+2. **Queued drop.** Re-checked (pod named, found, cooldown, gauge), then:
+   - `GameObjectClass` by name (row `GameObjectClassFindByName`, 0x004FF060:
+     StringToPrjID then `GameObjectClass::Find`, FUN_004ff060.c lines 7-8;
+     it loads the ODF if needed, as Lua BuildObject, FUN_005c82b0.c lines
+     11-34). A miss marks that pod failed for the class (its entry stays
+     disabled, one warning).
+   - The MRU's 64-byte transform (obj76 +0x20) with the posit moved 6 m
+     back along the front axis, then `GameObjectClass::Build(matrix, team,
+     0, -1, 0)` (resolve `GameObjectClass::Build`, 0x004E1190), team = the
+     MRU's team (+0x174). Dispenser passes the same trailing arguments
+     (0x004B5FF4-0x004B6017, FUN_004b5da0.c line 79).
+   - Unless the pod's class_id (+0x1C) is 2, 7 or 5: `SetVelocity(pod,
+     mru+0x12C)` (row `GameObjectSetVelocity`, 0x0046FB20; FUN_004b5da0.c
+     lines 80-83).
+   - `AiMission::GetCurrent()` (row `AiMissionGetCurrent`, 0x0045CA50)
+     vtable +0x1C(pod) (FUN_004b5da0.c lines 85-86).
+   - `SetOwner(pod, mru)` (row `GameObjectSetOwner`, 0x0046FC40; line 89).
+   - The pod cost through `AddAmmo(mru, -cost)`; the cooldown restarts at
+     `podCooldown`.
+3. **Deploy hold.** A deployed MRU packs (flag cleared, logged) as soon as
+   its pending order `what` (+0xCC) is not CMD_NONE/SELECT/STOP, or its
+   current order `what` (+0xAC) leaves that set after having been seen
+   idle once since the deploy (the Stop needs a frame to land).
+4. **AI deploy hook point** (`AiDeployHook`). Returns "no change": no AI
+   rule is built (see "AI deploy" below).
+5. **Service tick**, when `serviceRadius > 0` and (deployed, or
+   `serviceDeployed = 0`), once per `serviceInterval` (at most one tick per
+   frame; a long frame does not queue ticks):
+   - Scans the engine object vector (`GameObject::objectList`, at most 4096
+     entries) for up to 32 targets: class_id 1 or 6 (helicopter, vehicle:
+     the unit test Craft::GetCommand uses, FUN_004ae110.c lines 30-45),
+     team > 0 and the MRU's team or an ally (`GameObject::IsAlly`, row
+     `RtsPowerIsAlly`, 0x004DB510), inside the 3D radius (obj76 posit
+     doubles), health > 0. Itself only with `serviceSelf = 1`. Any order,
+     moving or not (research 7.3).
+   - Repair: `min(repairPerTick, gauge / ammoPerRepair)` through the Lua
+     `AddHealth(handle, float)` worker (row `MruAddHealthByHandle`,
+     0x005CCFD0, which calls GameObject::AddHealth 0x004DC030; it clamps to
+     max, FUN_004dc030.c lines 8-17). Health is read before and after
+     (`MruGetCurHealthByHandle`, 0x005CCF10), so only what was served is
+     charged.
+   - Reload (not itself): whole ammo, `min(reloadPerTick, gauge /
+     ammoPerReload)`, through `AddAmmo(handle, long)` (row
+     `MruAddAmmoByHandle`, 0x005CD100, calling GameObject::AddAmmo
+     0x004DC0D0: clamps, ignores maxAmmo <= 0, FUN_004dc0d0.c lines 29-37).
+     Ammo is read before and after (`MruGetCurAmmoByHandle`, 0x005CD040).
+     Ammo is never written raw: it is stored XOR 0x33333333.
+   - Drain: `served * cost` accumulates in a fractional carry; whole points
+     are taken from the MRU through `AddAmmo(mru, -n)`, capped at the gauge.
+     Cost 0 is free and drains nothing.
+
+Player and AI MRUs run the same tick; an AI MRU services only while
+deployed (no AI rule deploys it yet) or with `serviceDeployed = 0`.
 
 ## How it works
 
@@ -102,69 +186,137 @@ logged.
   resolves tracked uses).
 - **Vtable copy.** The `HoverCraftClass::Build` detour gives each object of
   an mru class with the section an OpenShim copy of the 42-slot
-  `HoverCraftVtable` (0x0087ABE4). Every slot is a `jmp [stock slot]` thunk
-  except slot 23 (UpdateModeList), which runs the stock slot through its
-  thunk and then calls `ModeList::SetMode` (0x0046FA60) for slots 7-9. The
-  stock hover, APC, Minelayer, Wingman and Tug vtables are never written.
-  An object is an MRU by that vptr. No per-object state, so no destructor
-  hook.
+  `HoverCraftVtable` (0x0087ABE4). Every slot is a `jmp [stock slot]` thunk,
+  so in-place rewrites of the stock table still chain, except:
+
+  | Slot | Stock | Wrapper | Does |
+  |---|---|---|---|
+  | 0 | 0x004E9EC0 scalar deleting destructor, thiscall(flags) ret 4 | `MruDestructorHook` | erases the per-object state, then the thunk |
+  | 15 | 0x004EBFD0 Simulate, thiscall(float dt) ret 4 (GameObject::Simulate calls vtable +0x3C, FUN_004deec0.c lines 71, 103) | `MruSimulateHook` | the thunk, then the gameplay above |
+  | 23 | 0x004EBD60 UpdateModeList, thiscall() | `MruUpdateModeListHook` | the thunk, then slots 7-9 via `ModeList::SetMode` (0x0046FA60) |
+
+  The stock hover, APC, Minelayer, Wingman and Tug vtables are never
+  written; tracked wraps the same slots in its own, separate copy. An object
+  is an MRU by that vptr.
+- **State.** Per object (deployed, cooldown, service accumulator, drain
+  carry, queued drop), in a map keyed by the object pointer under an SRW
+  lock, erased by the slot 0 wrapper. Per class: the parsed config and the
+  "pod class not found" flags.
 - **Install.** `InstallMruClassIfPossible` runs from the deferred-hook retry
-  loop after tracked. It needs tracked installed (it shares tracked's detours
-  and pond's compare hook), the `HoverCraftUpdateModeList` and
-  `ModeListSetMode` engine rows (guard bytes checked), the three ParameterDB
-  resolves, and a live `HoverCraftVtable` whose slot 23 is 0x004EBD60. Any
-  miss logs one `classLabel=mru not installed` warning and leaves `mru`
-  unknown.
-- **Fail closed.** Every engine read and write is under SEH. A fault in the
-  slot 7-9 fill leaves the stock fill. A class that cannot be stamped stays
-  a plain hover. An object whose vptr is not the stock hover table keeps
-  its vptr.
+  loop after tracked. It needs tracked installed, the
+  `HoverCraftUpdateModeList` and `ModeListSetMode` rows, the three
+  ParameterDB resolves, and a live `HoverCraftVtable` whose slot 23 is
+  0x004EBD60. Any miss logs one `classLabel=mru not installed` warning and
+  leaves `mru` unknown. Gameplay then also needs the option, the rows
+  `MruAddHealthByHandle`, `MruAddAmmoByHandle`, `MruGetCurHealthByHandle`,
+  `MruGetCurAmmoByHandle`, `GameObjectClassFindByName`,
+  `AiMissionGetCurrent`, `GameObjectSetVelocity`, `GameObjectSetOwner`,
+  `GameObjectSetCommand`, `RtsPowerIsAlly` (guard bytes checked), the
+  resolves `GameObjectClass::Build` and `GameObject::objectList`, and
+  `GameObject::GetHandle`; a miss logs `gameplay off: ...` and leaves the
+  plain hover menu.
+- **Fail closed.** Every engine read, write and call is under SEH, in small
+  helpers with no C++ objects inside `__try`. A fault in the slot 7-9 fill
+  leaves the stock fill. A class that cannot be stamped stays a plain hover.
+  An object whose vptr is not the stock hover table keeps its vptr.
 
-Log lines (tag `[MRU]`), all change-only except the per-pick line (capped at
-256 per process):
+## Decision log
 
-- `installed classLabel=mru (...)` / `classLabel=mru not installed: <why>` /
-  `classLabel=mru off (OPENSHIM_DISABLE_MRU_CLASS set)`
+Every gate that decides without a visible effect logs (tag `[MRU]`).
+Change-only unless marked "budgeted" (256 lines per process per kind):
+
+- `installed classLabel=mru (...); gameplay on|off (...)`,
+  `classLabel=mru not installed: <why>`, `classLabel=mru off
+  (OPENSHIM_DISABLE_MRU_CLASS set)`.
+- `gameplay off ([SinglePlayer] MruGameplay = 0)`, `gameplay off
+  (OPENSHIM_DISABLE_MRU_GAMEPLAY set)`, `gameplay off: an engine row did not
+  bind` / `...unresolved`.
 - `built ODF <name> as mru class=<p> [MruClass] present|absent ...` (once
-  per class build, with every parsed value)
-- `class <p>: objects get the MRU vtable copy ...` or `... no [MruClass]
-  section; objects stay plain hover` (when the decision for that class
-  changes)
-- `menu probe on (single player)` / `menu probe off (network game)` (when
-  the session kind changes)
-- `menu pick mode=0x.. (Drop Repair|Drop Ammo|Deploy|stock entry) on mru
-  obj=.. handle=.. pendingWhat=..: probe only, consumed ... | stock dispatch`
+  per class build, with every parsed value and the gameplay state).
+- `class <p>: objects get the MRU vtable copy ...` / `... no [MruClass]
+  section; objects stay plain hover`.
+- `menu on (single player)` / `menu and gameplay off (network game)` (when
+  the session kind changes).
+- `menu probe: obj=.. slot 7 holds stock Cloak/Decloak ...; MRU entry ..
+  skipped` (once).
+- `menu pick mode=0x.. (<entry>) on mru obj=.. handle=.. pendingWhat=..:
+  consumed, deployed|undeployed|already deployed|drop queued ...|<refusal reason>` or `stock
+  dispatch` (budgeted). Refusal reasons: `no pod class in [MruClass]`, `pod
+  class not found`, `cooldown`, `gauge too low`.
+- `obj=.. <entry> refused at drop time: <reason>` (budgeted).
+- `obj=.. <entry>: pod "<name>" built|Build returned null|Build
+  faulted|built, a follow-up call faulted team=.. at (x, y, z) cost=..`
+  (budgeted).
+- `class <p>: pod class "<name>" not found; Drop Repair|Ammo stays
+  disabled` (warning, once per class and pod).
+- `obj=.. deployed (menu|AI rule); Stop order given|faulted`, `obj=..
+  undeployed (menu|given a move order|AI rule)` (budgeted).
+- `obj=.. service on|off (radius .., serviceRadius 0|deployed|not
+  deployed|serviceDeployed 0)` (per object, change-only).
+- `obj=.. gauge empty: costed service stops` / `gauge refilled: service
+  resumes` (per object, change-only).
+- `obj=.. service tick: N unit(s) in range, healed=.. reloaded=..
+  drained=.. gauge=..` (budgeted, only when something was served).
 
-## Limits (this step)
+## AI deploy
 
-- Picks do nothing: no pod, no deploy flag, no service tick (plan steps 3-6).
-- Slot 7 is Cloak/Decloak on a cloak-capable craft (`FUN_004aefa0`, modes
-  0x18/0x19). On an MRU the probe overwrites it, so an MRU loses that toggle.
+No rule is built. The research only proposed "AI auto-deploy"
+(section 4a(c)) and no rule was chosen. The hook point is `AiDeployHook`
+in mru_class.cpp: called every Simulate with the object, its state and its
+config, it can ask for Deploy or Pack. A rule must skip player-team MRUs
+and must keep its own unit's orders still, or the deploy hold packs it at
+once. Candidates are listed in the build report.
+
+## Limits
+
+- Not saved: after a save load an MRU is undeployed with its cooldown ready
+  (the per-object state is keyed by the object pointer). The drain carry
+  (under one point) is lost too.
+- The deploy hold is the Stop order plus "pack on any move order". A
+  player piloting a deployed MRU can still drive it; it stays deployed
+  (orders, not physics, decide). UNVERIFIED whether the APC/RocketTank AI
+  process re-orders a stopped AI MRU and so packs it at once.
+- A pod spawns 6 m behind the MRU, at its height (no terrain snap). Whether
+  the pod falls, sits or floats, and whether the owner collects its own pod,
+  is UNVERIFIED (research 4a(a)).
+- The pod is built from inside the MRU's Simulate, the same frame phase as
+  Dispenser::Simulate builds from (a weapon's Simulate under its carrier).
+  Object-list safety of that is the engine's own pattern, UNVERIFIED for a
+  hover's Simulate.
+- Service targets are helicopters and vehicles only: not pilots, not
+  structures, not powerups. At most 32 per tick, in object-list order.
+- Health and ammo of the target are clamped by the engine; a full target is
+  scanned but costs nothing.
+- The gauge is the MRU's own ammo. An MRU with `maxAmmo = 0` and a
+  non-zero cost services nothing. On the player's MRU with an unlimited-ammo
+  cheat the engine ignores the negative AddAmmo (FUN_004dc0d0.c lines
+  29-37), so the drain is free.
 - Single-unit selection is the target. Two MRUs selected together share the
-  entries (same ids in the same slots), and a pick is logged and consumed
-  for each. A mixed selection loses the entries in the stock `Intersect`.
+  entries; a pick acts on each. Deploy acts on the selection as one: it
+  packs only when every selected MRU is deployed (the label then reads
+  Undeploy), otherwise it deploys the packed ones and leaves the rest. A
+  mixed selection loses the entries in the stock `Intersect`; if a reused id
+  (Go To Geyser 0xB, Lay Mines 0xF, Drop Off 0x4) is picked there, the
+  non-MRU units whose menu holds it still get it, and every MRU pick ends
+  that unit's RTS order queue.
+- Cloak-capable MRUs: the stock fill puts Cloak/Decloak (0x18/0x19) in slot
+  7 (FUN_004aefa0(7)); the shim leaves it there and skips Drop Repair on
+  that craft (logged once).
 - The MRU vtable is a different pointer from `HoverCraftVtable`, so code
-  that recognises hover craft by that exact vtable (as tracked objects
-  already are) does not see MRUs.
-- `ModeList::SetMode` clears the active slot when a slot's mode changes. The
-  stock fill writes 0 to slots 8-9 and our fill writes the MRU ids, so an
-  active slot of 7-9 is reset every UpdateModeList. The probe sets no
-  active slot, so this is expected to be invisible (UNVERIFIED).
-- How often the engine calls UpdateModeList: UNVERIFIED.
+  that recognises hover craft by that exact vtable does not see MRUs.
+  `satellite_visibility.cpp` (exe-image vtables only) skips them, as it
+  skips tracked objects.
+- `ModeList::SetMode` clears the active slot when a slot's mode changes; the
+  stock fill writes 0 to slots 8-9 and the shim writes the MRU ids every
+  call, so an active slot of 7-9 is reset each frame. The entries are
+  instant actions, so this is expected to be invisible (UNVERIFIED).
+- The thread-local pending flag (set at the label match, taken in
+  BuildClass) can leak to the next hover class built on that thread if Find
+  bails in between; tracked has the same pattern. Accepted.
 - Depends on tracked: if `classLabel=tracked` fails to install, `mru` does
   too.
 
-- Cloak-capable MRUs: the stock fill puts Cloak/Decloak (0x18/0x19) in slot 7 (GOG
-  HoverCraft::UpdateModeList 0x004EBD60 via FUN_004aefa0(7)). The probe leaves it there and skips Drop
-  Repair on that craft (logged once). A final layout for cloak MRUs is a later decision.
-- The thread-local pending flag (set at the label match, taken in BuildClass) can leak to the next
-  hover class built on that thread if Find bails in between; tracked has the same pattern. Accepted.
-- The MRU vptr points into the DLL, so `satellite_visibility.cpp` (which trusts only exe-image vtables)
-  skips MRU objects, as it does tracked objects.
-- The consumed pick skips the stock `DispatchMode`; whether stock dispatch has other side effects
-  (sound, menu close) is checked in live step 4 (UNVERIFIED).
-
-## Test ODF (live probe)
+## Test ODF (live)
 
 `svmruprb.odf`, a copy of Resurgence's `svmru.odf`
 (`addon\Resurgence\svmru.odf`). Changes: `classLabel = "mru"`, the AI
@@ -174,7 +326,7 @@ stock-label `hover` units ship with (`addon\ISDF Chronicles\hdrone.odf`).
 Resurgence's `APCFriend`/`APCEnemy` was written for a Tug object, and
 whether the APC process copes with a plain HoverCraft object is UNVERIFIED
 (NIGHTINGALE_RESEARCH.md section 3). Swap it back in as a second
-configuration once the probe passes. It must sit where the mission can load
+configuration once the menu checks pass. It must sit where the mission can load
 it, with the Resurgence assets it uses (`grepa`, `gammo`, the svmru
 geometry) available.
 
@@ -259,38 +411,72 @@ the "absent" path.
 
 ## Live checklist
 
-Preconditions: SP mission, the branch DLL and `scripts\patches.json`
-deployed and hash-checked, `[MRU] installed classLabel=mru` in the log, an
-own `svmruprb` unit spawned (Lua `BuildObject("svmruprb", 1, ...)` or a
-mission placement). A failed precondition is a fixture failure, not a FAIL.
+Preconditions (a failed precondition is a fixture failure, not a FAIL):
+
+- SP mission; the branch DLL, `scripts\patches.json` and
+  `openshim\localization` CSV deployed and hash-checked; `MruGameplay = 1`
+  in `[SinglePlayer]`.
+- Log shows `[MRU] installed classLabel=mru (...); gameplay on`.
+- An own `svmruprb` unit (Lua `BuildObject("svmruprb", 1, ...)` or a
+  mission placement); for the drop steps, the pod ODFs `repamine` and
+  `ammomine` loadable by the mission (else step 5 checks the "not found"
+  path instead).
+
+Steps:
 
 1. Log shows `built ODF svmruprb as mru ... [MruClass] present` with
    serviceRadius=60.0, podCooldown=30.0, repairPodClass=repamine,
-   ammoPodClass=ammomine, the rest defaults; then `class ...: objects get
-   the MRU vtable copy`.
+   ammoPodClass=ammomine, the rest defaults, `gameplay ... on`; then `class
+   ...: objects get the MRU vtable copy`.
 2. The unit moves and hovers like svmru.
-3. Select the MRU alone: the menu shows the stock hover entries (Go To,
-   Follow, Go To Nav, Attack, ..., Recycle) plus **Drop Repair** (7),
-   **Drop Ammo** (8), **Deploy** (9), all enabled. `[MRU] menu probe on
+3. Select the MRU alone: the stock hover entries plus **Drop Repair** (7),
+   **Drop Ammo** (8), **Deploy** (9), all enabled at spawn. `[MRU] menu on
    (single player)` once.
-4. Order Follow (stock), then pick Drop Repair, Drop Ammo and Deploy (mouse
-   and number keys 7/8/9). For each: one click sound, no submenu, the
-   selection clears, the unit keeps following, one `[MRU] menu pick ...
-   consumed` line, and `pendingWhat` stays the Follow order's value.
-5. Pick Follow and Go To Nav on the MRU: they work as stock, with `stock
-   dispatch` log lines.
-6. Select a stock Minelayer: its menu still reads Lay Mines (not Drop Ammo),
-   and laying mines works. Select a Howitzer: its slot 7 still reads Drop
-   Off. A scout and an APC have no slots 7-9 entries.
-7. Select the MRU together with a scout: the MRU entries are gone (stock
-   Intersect), and the rest of the menu works.
-8. `svmruprn` (no section): `[MruClass] absent`, `no [MruClass] section`,
-   stock hover menu, no pick log.
-9. With `OPENSHIM_DISABLE_MRU_CLASS=1`: `classLabel=mru off` in the log, and
-   `svmruprb` behaves as an unknown classLabel does in stock Redux.
+4. Order Follow, then pick Drop Repair (mouse, then key 7 after the
+   cooldown): one click, no submenu, the selection clears, the unit keeps
+   following, `menu pick ... consumed, drop queued`, then `pod "repamine"
+   built team=1 at (...)` about 6 m behind the MRU. Drop Repair and Drop
+   Ammo grey out for 30 s, then re-enable. A pick during the cooldown logs
+   `consumed, cooldown` and does nothing. Note whether the pod falls, sits or
+   floats, and whether the MRU picks up its own pod.
+5. Drop Ammo: as step 4 with `ammomine`. If the pod ODF is missing: one
+   `pod class "ammomine" not found; Drop Ammo stays disabled` warning and the
+   entry stays grey.
+6. Pick Deploy: `deployed (menu); Stop order given`, the unit stops, the
+   entry now reads **Undeploy**, `service on (radius 60.0, deployed)`.
+7. Damage two own units (and empty some ammo), bring them within 60 m of the
+   deployed MRU, one moving: each second `service tick: N unit(s) ...
+   healed=.. reloaded=.. drained=..`; their health and ammo bars rise to max;
+   the MRU's ammo bar falls by the served amount. A unit at 61 m+ and an
+   enemy unit are not serviced. A pilot on foot is not serviced.
+8. Give the deployed MRU a Go To: `undeployed (given a move order)`,
+   `service off`, the label reads Deploy again. Deploy again, then pick
+   Undeploy: `undeployed (menu)`.
+9. Gauge: let the service run until the MRU's ammo is 0: `gauge empty:
+   costed service stops`, no more healing. Reload the MRU at a supply point:
+   `gauge refilled`.
+10. Free service: an ODF copy with `ammoPerRepair = 0`, `ammoPerReload = 0`:
+    the MRU's ammo does not move while servicing.
+11. AI MRU: an enemy-team `svmruprb` with `serviceDeployed = 0` services its
+    own team's units in range while moving; with the default it services
+    nothing (no AI deploy rule). Note whether its AI process keeps
+    re-ordering it.
+12. Save, then load: the MRU is undeployed, the drops are ready, no crash.
+    Destroy a deployed MRU: no crash; the next MRU built works.
+13. Select a stock Minelayer: its menu still reads Lay Mines (not Drop Ammo),
+    and laying mines works. A Howitzer's slot 7 still reads Drop Off.
+14. Select the MRU together with a scout: the MRU entries are gone (stock
+    Intersect), and the rest of the menu works.
+15. `svmruprn` (no section): `[MruClass] absent`, `no [MruClass] section`,
+    stock hover menu, no service.
+16. `MruGameplay = 0`: `gameplay off ([SinglePlayer] MruGameplay = 0)`;
+    `svmruprb` has the stock hover menu, no service, and its picks are not
+    logged. Same with `OPENSHIM_DISABLE_MRU_GAMEPLAY=1`.
+17. With `OPENSHIM_DISABLE_MRU_CLASS=1`: `classLabel=mru off`, and
+    `svmruprb` behaves as an unknown classLabel does in stock Redux.
 
-UNVERIFIED until this runs: that the three entries draw and click without a
-submenu, the labels, that a consumed pick leaves the order alone, the
-UpdateModeList call rate, whether the APC process copes with a HoverCraft
-object, and that loading an `mru` ODF without the shim fails like any
-unknown label.
+UNVERIFIED until this runs: the entries draw and click without a submenu,
+the labels, a consumed pick leaves other orders alone, the pod spawn and its
+pickup, the deploy hold under the hover AI process, the service amounts, the
+gauge drain, save/load, and that loading an `mru` ODF without the shim fails
+like any unknown label.

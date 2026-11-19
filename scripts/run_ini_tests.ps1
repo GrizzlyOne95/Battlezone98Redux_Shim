@@ -625,6 +625,7 @@ $shippingPolicyChecks = @{
     "SinglePlayer/SatelliteVisibilityFix" = "1"
     "SinglePlayer/PilotTeamRestore" = "1"
     "SinglePlayer/TurretAttackOrders" = "1"
+    "SinglePlayer/MruGameplay" = "0"
     "Gameplay/ProducerRallyPoints" = "1"
     "Gameplay/AutoGroupNewUnits" = "0"
     "Gameplay/ExtendedUnitCap" = "0"
