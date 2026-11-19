@@ -12,7 +12,7 @@ Standing: merge as you go (squash + auto-merge after local CI, a live test for n
 - **7. Radar order pings** (`[Gameplay] RtsRadarPings`). Branch `agent/radar-order-pings`, stacked on #900. Needs the live test (`Docs/RTS_MARKERS.md`).
 
 ## Waiting (in order)
-8. **FPS quick-commands:** research.
+8. **FPS quick-commands:** research done (`Docs/FPS_QUICK_COMMANDS_RESEARCH.md`, PR #904). Proposed v1: Shift+F/D/A/S for Follow Me, Defend Me, Attack My Target, Stop; waits on the open questions at the end of that doc.
 9. **Loadout presets:** research. Handed to Copilot, see `Docs/COPILOT_BRIEF_LOADOUT_PRESETS.md`.
 10. **Tread texture scroll.**
 11. **Walker free-turning head:** research and plan first.
