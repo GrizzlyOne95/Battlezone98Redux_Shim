@@ -71,37 +71,45 @@ feature.
 
 ### Modifier chords
 
-- **Shift+letter works.** The RTS filter swallows the chord's keydown, its
-  autorepeats and its keyup, so the letter's stock action does not fire
-  (Shift+T leaves T's `frontal_target` alone; `Docs/RTS_COMMANDS.md`
-  "Keys"). Stock binds Shift only as a menu modifier and on
-  Shift+F1..F11 in `gamekey.map`; Shift+F-keys are blocked
-  (`Docs/OFFENSIVE_UNIT_SLOT_CAP.md` 158).
+- **Shift+letter does not hide the stock action.** The game reads its
+  `input.map` keys through OIS/DirectInput: `OIS.dll` imports `DINPUT8`
+  and `DirectInput8Create` and has `Win32Keyboard`, and the exe adds raw
+  input (`RegisterRawInputDevices`). DirectInput does not see window
+  messages, so the RTS filter swallowing `WM_KEYDOWN` cannot stop a stock
+  bind. The `input.map` blocks decide: `strafe_left` (A), `strafe_right`
+  (D), `throttle_down` (S), `pitch_down` (F) and `frontal_target` (T)
+  exclude only `EditMode`/`ControlMode`, not `LeftShift`. Shift+D therefore
+  gives the order and also strafes for as long as D is down. Only blocks
+  with `- keyboard LeftShift` (the `group_select_N` keys, `eject`) ignore
+  Shift. (`Docs/RTS_COMMANDS.md` says Shift+T keeps stock T from running;
+  by the same reasoning that is likely wrong. It is UNVERIFIED live.)
 - **Alt is out:** `alt_press` issues the reticle command on the Alt press
   itself, before any letter.
 - **Ctrl is out:** `cmd_multi` (multi-select), Ctrl+B ejects (`eject`
   binds B with LeftControl), Ctrl+F1..F7 bind groups, `gamekey.map` takes
   Ctrl+A/C/E/O/P/R/S, and OpenShim's rule is that Ctrl and Alt chords are
   never taken by RTS keys.
-- **Shift+letter catch.** The mnemonic letters (A, D, S, F) are movement
-  and pitch keys. A pilot holding D to strafe who then presses Shift gets
-  Shift+D autorepeats. The filter must act only on a fresh keydown (lParam
-  bit 30 clear) and must not swallow a key whose plain keydown went to the
-  game, or the strafe would stick. This needs a live check.
+- **Usable chords.** A Shift chord is clean only on a letter with no stock
+  in-play bind. Those are J, X and Z, and OpenShim already uses them plain.
+  Shift+Z is free; Shift+J and Shift+X are taken. The key latch already
+  acts only on a fresh keydown (lParam bit 30), so a held movement key
+  never fires an order.
 
 ## Recommended v1
 
 Native, in `rts_commands.cpp`, on the existing key path, default OFF:
 
-| Order | Call | Default key | Fallback (numpad) |
-| --- | --- | --- | --- |
-| Follow Me | `SetCommandObj(5, player)` | Shift+F | Numpad 1 |
-| Defend Me | `SetCommandObj(15, player)` | Shift+D | Numpad 2 |
-| Attack My Target | `SetCommandObj(4, player target +0x21C)` | Shift+A | Numpad 3 |
-| Stop | `SetCommand(2)` | Shift+S | Numpad 0 |
+| Order | Call | Default key |
+| --- | --- | --- |
+| Follow Me | `SetCommandObj(5, player)` | Numpad 1 |
+| Defend Me | `SetCommandObj(15, player)` | Numpad 2 |
+| Attack My Target | `SetCommandObj(4, player target +0x21C)` | Numpad 3 |
+| Stop | `SetCommand(2)` | Numpad 0 |
 
-All four are rebindable under Options > Input > RTS Actions, so a player
-can move them to the numpad or the grey block.
+The numpad has no stock bind at all, so nothing else fires. All four are
+rebindable under Options > Input > RTS Actions (grey Home/End/PgUp/PgDn
+for laptops). Shift+F/D/A/S was proposed first and dropped: see
+"Modifier chords".
 
 - Applies to the current selection (F1-F7 first), so each order is 2 keys.
   The selection is kept, as Hold does.
@@ -121,8 +129,9 @@ Not in v1: "go to aim" (Space does it), whole-group variants, a radial menu.
 
 ## Open questions for the user
 
-1. Keys: Shift+F/D/A/S (proposed; works without a numpad), the numpad, or
-   no defaults (rebind only)?
+1. Keys: the numpad (proposed), the grey Home/End/PgUp/PgDn block, or
+   Shift+F/D/A/S, accepting that the stock strafe, throttle or pitch also
+   moves the ship while the key is down?
 2. Single player only for v1?
 3. Is Attack My Target wanted, given Alt already orders on the reticle
    object? (The player's target and the reticle object differ.)
