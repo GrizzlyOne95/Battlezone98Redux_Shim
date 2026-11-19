@@ -97,7 +97,7 @@ The user's spec, modelled on BZ2's FactoryPanel:
       - Search with `python search.py <entity> --scope base`.
       - It indexes stock archive text, `.inf` inspection lore, briefings and debriefs, and GoombaBZ's manual VO transcripts, with filename and line citations. It excludes addon lore.
     - VO transcripts: GoombaBZ's CSVs (`campaigns.csv` holds campaign, briefing and training lines; `units.csv` holds unit chatter) are in CR at `Tools/TranscriptSources/GoombaBZ`. Cite the WAV filename and speaker.
-    - Red Odyssey is labelled separately in the reference (`--scope red_odyssey`). Whether it counts as base game is open; ask the user.
+    - The official Red Odyssey expansion counts as a source (user, 2026-11-19). Search it with `--scope red_odyssey`, and label its entries as Red Odyssey.
     - Verified examples: `tran02.des` (training briefing: "M173 Badger turret") and `avturr.inf` (unit description). Unit `.inf` files exist per ODF (`avturr.inf`, `bvturr.inf`, `avtump.inf` and others).
 - **Briefings tab:** each campaign's missions with their `.des` pages and images. It reuses the lobby Briefing overlay's reader (item 15), so build item 15 first.
 - **Out of scope:** unlocks, the in-game PDA, 3D model previews, multiplayer.
