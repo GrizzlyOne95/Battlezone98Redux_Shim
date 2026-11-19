@@ -142,8 +142,8 @@ along the belt), set the ODF keys.
 
 ## Open questions for the user
 
-1. Is DX11 Enhanced-only acceptable for v1, with stock and DX9 left clips-only?
-   Covering them means shipping a modified stock shader.
+1. **Decided 2026-11-18:** DX11 Enhanced only for v1; stock and DX9 stay
+   clips-only.
 2. Marker: explicit `treadMaterialL/R` keys (recommended) or a `*tread*`
    sub-mesh name convention?
 3. Is there a tracked test model with split tread sub-meshes? None found in this
