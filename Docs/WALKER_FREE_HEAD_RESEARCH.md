@@ -3,7 +3,7 @@
 Status: research and design only (2026-11-18, revised after the user's decisions). Nothing implemented, nothing run live. Anything without a cite is UNVERIFIED.
 Path keys: BZ = `Battlezone_Source\BZ1`; C15 = `BZ\1.5\functions\004b\` (PDB-named 1.5 decompile); T = `BZ\derived\bz15_pdb\raw\types.txt`;
 GD = `BZ\Redux\openshim_re_corpus\bzr_gog_best_effort\ghidrecomp\results\bins\battlezone98redux.exe-6777ca\decomps\` (GOG, no PDB names);
-GI = `BZ\Redux\openshim_re_corpus\bzr_gog_best_effort\inventory\symbols.csv`; TV = `Docs/TRACKED_VEHICLES.md`; TC = `src/patches/tracked_vehicle_class.cpp`;
+GI = `Battlezone_Source\BZ1\Redux\openshim_re_corpus\bzr_gog_best_effort\inventory\symbols.csv`; TV = `Docs/TRACKED_VEHICLES.md`; TC = `src/patches/tracked_vehicle_class.cpp`;
 B2 = `Battlezone_Source\BZ2\_analysis\global_decompile\bzone_b131p_best_effort\results\bins\bzone.exe-6f4367\decomps\`.
 
 ## Executive conclusion
