@@ -23,6 +23,7 @@ Updated 2026-11-19.
 | Tread texture scroll (`treadScrollU`, DX11 Enhanced) | #911, `agent/tread-texture-scroll` (base main) | `Docs/TRACKED_VEHICLES.md` (tread scroll steps) | **Blocked:** a tracked model with separate L/R tread materials. None exists yet | Tread pass whose instanced twin was built before the bind stays unscrolled |
 | Walker free head M1 (`[WalkerClass] torsoName`) | #914, `agent/walker-free-head-m1` (base #910) | `Docs/WALKER_FREE_HEAD.md` | avwalk copy `avwalkfh` with `torsoName = "AGE11TY1"`; board it >=10 s after HopOut. **Needs an unlocked desktop** (input injection) | Done 2026-11-19 (locked session): install, ODF lines, no crash, stock walker unaffected. Open: twist gate, mouse = head, keys = legs, fire along head, slopes |
 | MRU alias + menu probe (Nightingale steps 1-2) | #915, `agent/mru-menu-probe` (base #912) | `Docs/MRU_CLASS.md` live checklist | `svmruprb` / `svmruprn` test ODFs. **Needs an unlocked desktop** | Done 2026-11-19: install, class build, menu-probe decision log, absent-section copy, kill switch. Open: menu visuals, picks 7/8/9 consumed with order unchanged, stock Follow/Go To, other units' menus, mixed selection |
+| Daywrecker AI defence v1 | #917, `agent/daywrecker-ai-defence-v1` (base #913) | `Docs/DAYWRECKER_AI_DEFENCE_RESEARCH.md` section 4 (9 rows) | `DaywreckerDefence=1`, SP; Armory DW drops near AI units; needs a Comet (`radarmsl`) source for row 7 | Not started. Open: all 9 rows, incl. kill rate under 30% deciding the gravity lead |
 
 ## Merge order once tests pass
 
