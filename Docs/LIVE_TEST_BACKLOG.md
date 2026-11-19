@@ -9,7 +9,7 @@ Run the tests through the shared live-test harness, under `bzr_livetest.lock`,
 with deployed files hash-restored afterwards. Each checklist names its
 preconditions; a failed precondition is a fixture failure, not a FAIL.
 
-Updated 2026-11-18.
+Updated 2026-11-19.
 
 ## Waiting for a live test
 
@@ -20,7 +20,9 @@ Updated 2026-11-18.
 | Daywrecker `dropRate` ODF key | #902, `agent/daywrecker-drop-rate` (base #901) | `Docs/DAYWRECKER_DROP_RATE.md` | Test ODF with the key | (see doc) |
 | Radar order pings (`RtsRadarPings`) | #903, `agent/radar-order-pings` (base #900) | `Docs/RTS_MARKERS.md` 13 | none | Known cosmetic: rim-clamped ring spills a few pixels past the radar disc |
 | FPS quick-commands (`RtsQuickCommands`, Numpad 1/2/3/5) | #907, `agent/fps-quick-commands` (base #903) | `Docs/RTS_COMMANDS.md` 11c | none | Tanks and turrets list ModeList 14 (Attack); `GameObject::EnemyP` matches the panel's ally rule |
-| Tread texture scroll (`treadScrollU`, DX11 Enhanced) | PR pending, `agent/tread-texture-scroll` | `Docs/TRACKED_VEHICLES.md` (tread scroll steps) | **Blocked:** a tracked model with separate L/R tread materials. None exists yet | Tread pass whose instanced twin was built before the bind stays unscrolled |
+| Tread texture scroll (`treadScrollU`, DX11 Enhanced) | #911, `agent/tread-texture-scroll` (base main) | `Docs/TRACKED_VEHICLES.md` (tread scroll steps) | **Blocked:** a tracked model with separate L/R tread materials. None exists yet | Tread pass whose instanced twin was built before the bind stays unscrolled |
+| Walker free head M1 (`[WalkerClass] torsoName`) | #914, `agent/walker-free-head-m1` (base #910) | `Docs/WALKER_FREE_HEAD.md` | avwalk copy `avwalkfh` with `torsoName = "AGE11TY1"`; board it >=10 s after HopOut. **Needs an unlocked desktop** (input injection) | Done 2026-11-19 (locked session): install, ODF lines, no crash, stock walker unaffected. Open: twist gate, mouse = head, keys = legs, fire along head, slopes |
+| MRU alias + menu probe (Nightingale steps 1-2) | #915, `agent/mru-menu-probe` (base #912) | `Docs/MRU_CLASS.md` live checklist | `svmruprb` / `svmruprn` test ODFs. **Needs an unlocked desktop** | Done 2026-11-19: install, class build, menu-probe decision log, absent-section copy, kill switch. Open: menu visuals, picks 7/8/9 consumed with order unchanged, stock Follow/Go To, other units' menus, mixed selection |
 
 ## Merge order once tests pass
 
