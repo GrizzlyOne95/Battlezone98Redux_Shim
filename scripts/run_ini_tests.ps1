@@ -399,6 +399,7 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Turret tanks accept ATTACK and close in on out-of-range targets; player
     # team only, hard-disabled in network games. Default on by design.
     "SinglePlayer/TurretAttackOrders",
+    "SinglePlayer/DaywreckerDefence",
 
     # Producer rally points: V/Shift+V set and clear a Recycler/Factory rally
     # point that its new units drive to. Player team only, nothing happens until
@@ -625,6 +626,7 @@ $shippingPolicyChecks = @{
     "SinglePlayer/SatelliteVisibilityFix" = "1"
     "SinglePlayer/PilotTeamRestore" = "1"
     "SinglePlayer/TurretAttackOrders" = "1"
+    "SinglePlayer/DaywreckerDefence" = "0"
     "Gameplay/ProducerRallyPoints" = "1"
     "Gameplay/AutoGroupNewUnits" = "0"
     "Gameplay/ExtendedUnitCap" = "0"

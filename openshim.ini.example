@@ -3335,6 +3335,26 @@ AttackRevealPerceivedTeam = 1
 ; Accepted: boolean. Default: ON.
 TurretAttackOrders = 1
 
+; AI defence against an enemy Daywrecker in flight and an enemy Comet
+; (radarmsl). Stock AI ignores both: hovering over one offers only "Go To",
+; nobody shoots at it and nobody dodges it.
+;
+; With this on:
+; - An armed unit you command gets "Attack" on an enemy bomb instead of
+;   "Go To". The bomb keeps its yellow power-up colour.
+; - Every 0.5 s each bomb in flight looks for enemy AI units within 150 m
+;   that can see it. A unit sees it the way stock AI sees a pilot on foot:
+;   within 70 m and in front of it. Up to 4 idle or defending armed units
+;   per bomb are ordered to attack it; a unit is not re-ordered for 3 s.
+; - Units that saw the bomb and are not attacking it steer away from it,
+;   using the same rules stock AI uses to dodge incoming ordnance.
+;
+; Single player only. Read once at startup; restart after changing.
+; Kill switch: set OPENSHIM_DISABLE_DAYWRECKER_DEFENCE=1.
+; See Docs/DAYWRECKER_AI_DEFENCE_RESEARCH.md.
+; Accepted: boolean. Default: OFF.
+DaywreckerDefence = 0
+
 ; Hide undetected objects on the satellite view again.
 ;
 ; BZ 1.5 rendered the overview through Submit_Overview_Entities, which tested

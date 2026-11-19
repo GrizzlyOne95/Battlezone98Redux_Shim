@@ -5414,6 +5414,42 @@
       "identity": "RTTI .?AVDayWrecker@@ vtable of the Distributed subobject at +0x18"
     },
     {
+      "name": "CraftVtable",
+      "address": "0x008781EC",
+      "kind": "data",
+      "identity": "RTTI .?AVCraft@@ primary vtable; slot 13 = Craft::GetCommand 0x004AE110 (DaywreckerDefence)"
+    },
+    {
+      "name": "PersonVtable",
+      "address": "0x0088562C",
+      "kind": "data",
+      "identity": "RTTI .?AVPerson@@ primary vtable; slot 13 = Craft::GetCommand 0x004AE110 (DaywreckerDefence)"
+    },
+    {
+      "name": "WalkerVtable",
+      "address": "0x0088A0BC",
+      "kind": "data",
+      "identity": "RTTI .?AVWalker@@ primary vtable; slot 13 = Craft::GetCommand 0x004AE110 (DaywreckerDefence)"
+    },
+    {
+      "name": "TorpedoVtable",
+      "address": "0x00888778",
+      "kind": "data",
+      "identity": "RTTI .?AVTorpedo@@ primary vtable (Comet, radarmsl); slot 15 = Torpedo::Simulate 0x005E2D90"
+    },
+    {
+      "name": "TorpedoSimulate",
+      "address": "0x005E2D90",
+      "expected": "55 8B EC 81 EC CC 03 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Torpedo::Simulate(float dt), thiscall; TorpedoVtable slot 15, in no other vtable; DaywreckerDefence wraps the slot"
+    },
+    {
+      "name": "EvadeOrdnanceForce",
+      "address": "0x005FD5F0",
+      "expected": "55 8B EC 81 EC 98 01 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "cdecl VECTOR_3D* EvadeOrdnanceForce(ret, GameObject*, Ordnance* current, Ordnance** outThreat) (1.5 0x0046DD9D); 6 callers each followed by add esp,0x10 (0x00602166, 0x006024D8, 0x00605B89, 0x00606484, 0x00606C58, 0x00607842); DaywreckerDefence detours its first 9 bytes"
+    },
+    {
       "name": "BzrNetLogger",
       "address": "0x007D6A70",
       "expected": "55 8B EC 81 EC 1C 04 00 00 A1 00 70 8E 00 33 C5",
