@@ -10,6 +10,7 @@ Builds run one Opus at a time:
 2. MRU full pipeline (item 13).
 3. Unit loadouts (item 18).
 4. Lobby Briefing overlay (item 15).
+5. Database screen (item 16).
 
 ## Item 14a: Daywrecker AI defence
 
@@ -66,3 +67,26 @@ The user's spec, modelled on BZ2's FactoryPanel:
   - syncing which page each player has open
   - the single-player briefing screen
 - **First step:** find where the lobby stores the selected mission name. This is not yet verified.
+
+## Item 16: Database (single-player bestiary)
+
+- **Entry:** a **DATABASE** button on the stock Single Player screen. It goes in an empty spot at the middle top or bottom, chosen from a screenshot.
+- **Screen:**
+  - A native shell screen built like the Career screen (`career_screen.cpp`, `shell_screens.cpp`), with painted panel art. Back or Esc returns.
+  - Left side: faction tabs (NSDF, CCA, Black Dogs, Fury, plus Briefings), with a scrolling list under each.
+  - Right side: the selected entry's details.
+- **Contents (v1):** units only. The data format and the tabs must allow more categories later (relics, personnel and so on) without a redesign.
+- **Unit entry:**
+  - full model name and codename
+  - class
+  - stats read live from the unit ODF: scrap cost, armor/health, ammo, speed, weapons by slot
+  - a lore paragraph and the unit's icon
+- **Unit list:** a content file listing the unit ODFs per faction. OpenShim ships the stock list, and CR can override it.
+- **Lore text rule (user, strict):**
+  - Use only text validated against stock sources: verified VO transcripts, briefings, debriefings, or the game's unit description `.inf`/`.des` files.
+  - Nothing inferred or invented.
+  - Every lore line must cite the stock file it came from.
+  - A unit with no stock text gets an empty lore field.
+- **Briefings tab:** each campaign's missions with their `.des` pages and images. It reuses the lobby Briefing overlay's reader (item 15), so build item 15 first.
+- **Out of scope:** unlocks, the in-game PDA, 3D model previews, multiplayer.
+- **First step:** inventory the stock text sources (which unit `.inf`/`.des` files exist, and the VO transcript and debriefing locations) before writing any lore.
