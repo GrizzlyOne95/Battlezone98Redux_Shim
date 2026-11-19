@@ -11,6 +11,7 @@ Builds run one Opus at a time:
 3. Unit loadouts (item 18).
 4. Lobby Briefing overlay (item 15).
 5. Database screen (item 16).
+6. Custom tank skins (item 17).
 
 ## Item 14a: Daywrecker AI defence
 
@@ -103,11 +104,7 @@ The user's spec, modelled on BZ2's FactoryPanel:
 - **Out of scope:** unlocks, the in-game PDA, 3D model previews, multiplayer.
 - **First step:** inventory the stock text sources (which unit `.inf`/`.des` files exist, and the VO transcript and debriefing locations) before writing any lore.
 
----
-
-# Proposed designs (awaiting the user's approval; do not build)
-
-## Item 17: Custom tank skins (PROPOSED)
+## Item 17: Custom tank skins (approved 2026-11-19)
 
 **What already exists (verified 2026-11-19):**
 - CR's co-op team paint (`Scripts/CRTeamSkins.lua` on CR main) already paints one craft without touching other units of the same model.
@@ -122,10 +119,11 @@ The user's spec, modelled on BZ2's FactoryPanel:
   - Today the host gets green digital camo and guest teams get solid tints. Co-op only, and nothing is sent over the network.
 - Precedent: no player skin picker was found in BZ2 or BZCC. BZCC has a `TeamColor` shader constant, which is team colour, not a picker. This rests on a quick string search only.
 
-**Proposed design:**
+**Design:**
 - **Scope:** single player. The skin goes on the player's own ship only, re-applied when the player hops into another craft. AI units and other team units keep their paint.
-- **Picker:** a **Paint** row in OpenShim's native Options (or Career) screen.
-  - Choices: Stock, the existing green digital camo, and a few solid tints (the colours co-op guests already use).
+- **Co-op:** the setting never overrides co-op's fixed host and guest paint, to avoid confusion (user). In network games the SP rule is off.
+- **Picker:** a **Paint** row in OpenShim's native **Options** screen (user).
+  - Choices: only the existing patterns, as a test (user): Stock, the existing green digital camo, and the solid tints co-op guests already use.
   - The setting is stored in `openshim.ini`.
 - **Applying it:** CR's `CRTeamSkins.lua` gains an SP rule: read the setting and paint the player's current ship with the existing clone path. OpenShim exposes the setting to Lua through a getter.
 - **Without CR:** stock paint. The masks and the shader wrapper live in CR.
@@ -133,8 +131,7 @@ The user's spec, modelled on BZ2's FactoryPanel:
   - multiplayer replication (co-op keeps its current rule)
   - new camo patterns: each new pattern needs a new set of per-unit masks from `Build-TeamSkins.py`
   - medium/low quality and stock DX9/DX11 renderers
-
-**Open questions for the user:**
-- Where should the picker go (Options vs Career vs Single Player screen)?
-- Should co-op use the player's choice instead of the fixed host and guest colours?
-- Are new camo patterns (desert, arctic, urban) wanted in v1? Each is an art pass over 114 masks.
+- **Work split:**
+  - OpenShim: the Options row, the ini key and the Lua getter.
+  - CR: the SP rule in `CRTeamSkins.lua`.
+  - These are two PRs; the CR PR depends on the OpenShim getter.
