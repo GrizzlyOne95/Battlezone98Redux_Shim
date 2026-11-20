@@ -60,14 +60,22 @@ The user's spec, modelled on BZ2's FactoryPanel:
   - Arrows or the page keys turn pages.
   - Close or Esc returns to the lobby with its state untouched.
 - **Missions with no `.des` file:** the button is greyed out.
-- **Implementation:**
+- **Implementation (option A, user, 2026-11-19):**
   - The overlay is a native OpenShim panel, because no mission Lua runs in the lobby.
-  - It follows the precedent of the existing shell screens (`bans_screen.cpp`, `lan_screen.cpp`).
+  - It is drawn **inside the lobby screen** (cUI_Multiplayer_Create, shell id 0xF), not as a separate shell screen. The shell deletes the current screen on navigation, which would drop launch and kick handling and rebuild the lobby on return.
+  - The parts:
+    - A post-build observer for stock id 0xF.
+    - The z-order setter, so the panel draws above the lobby.
+    - Click blocking: the panel sits at the front of the child list.
+    - A slot-4 KeyPressed patch for Esc and paging.
+    - A scrolling text block for the page text.
+  - Known limits: typed characters may still reach the hidden chat entry, the map-filter box may still take clicks, and an alert could draw under the panel.
+- **Mission name:** the std::string at record+0xDC, where record = FUN_0056F900([screen+0x1BC]). Verified in the shipping exe (2026-11-19).
 - **In mission:** CR's PDA INTEL page stays as the briefing.
 - **Out of scope:**
   - syncing which page each player has open
   - the single-player briefing screen
-- **First step:** find where the lobby stores the selected mission name. This is not yet verified.
+
 
 ## Item 16: Database (single-player bestiary)
 
