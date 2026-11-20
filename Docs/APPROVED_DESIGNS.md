@@ -31,6 +31,11 @@ The full plan is in `Docs/DAYWRECKER_AI_DEFENCE_RESEARCH.md` (PR #913 plus the b
   - Drop Repair and Drop Ammo pods with a cooldown
   - Deploy
   - AI use: commands only (user, 2026-11-19). An MRU deploys only when ordered; otherwise it sits and responds to move orders and pod drops. No autonomous deploy rule.
+- **Faction models (user, 2026-11-20), art direction only, no build yet:**
+  - NSDF and Black Dogs share the existing avmru model, with a texture swap for bvmru.
+  - CCA (svmru): a new model of our own, using the Battlezone Classic "Hors" (workshop 2319157982) as reference only. Its model is not used directly.
+  - CRA (cvmru): a new model of our own, using the Total Command kvserv service truck as reference. The Battlezone Classic "Xunsu Fu" was rejected because it reads as a battle tank.
+  - Reference renders: `scratchpad\mru_renders` (session 2026-11-20); search report `mru_reference_search.md`.
 - **Non-combat (user, 2026-11-20):** pure utility, like the Tug or Scavenger. The MRU has no Attack order and no combat AI: it never picks attack targets, whatever its ODF's AI process or weapons say. It stays a hovercraft in the Utility category, with move/follow, pod drops and Deploy.
 
 ## Item 18: Unit loadouts
