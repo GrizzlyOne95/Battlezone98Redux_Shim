@@ -31,6 +31,7 @@ The full plan is in `Docs/DAYWRECKER_AI_DEFENCE_RESEARCH.md` (PR #913 plus the b
   - Drop Repair and Drop Ammo pods with a cooldown
   - Deploy
   - AI use: commands only (user, 2026-11-19). An MRU deploys only when ordered; otherwise it sits and responds to move orders and pod drops. No autonomous deploy rule.
+- **Non-combat (user, 2026-11-20):** pure utility, like the Tug or Scavenger. The MRU has no Attack order and no combat AI: it never picks attack targets, whatever its ODF's AI process or weapons say. It stays a hovercraft in the Utility category, with move/follow, pod drops and Deploy.
 
 ## Item 18: Unit loadouts
 
@@ -131,15 +132,16 @@ The user's spec, modelled on BZ2's FactoryPanel:
 - **Scope:** single player. The skin goes on the player's own ship only, re-applied when the player hops into another craft. AI units and other team units keep their paint.
 - **Co-op:** the setting never overrides co-op's fixed host and guest paint, to avoid confusion (user). In network games the SP rule is off.
 - **Picker:** a **Paint** row in OpenShim's native **Options** screen (user).
-  - Choices: only the existing patterns, as a test (user): Stock, the existing green digital camo, and the solid tints co-op guests already use.
+  - Choices: Stock plus the solid tints co-op guests already use (camo dropped for v1, user 2026-11-20).
   - The setting is stored in `openshim.ini`.
-- **Applying it:** CR's `CRTeamSkins.lua` gains an SP rule: read the setting and paint the player's current ship with the existing clone path. OpenShim exposes the setting to Lua through a getter.
-- **Without CR:** stock paint. The masks and the shader wrapper live in CR.
+- **Applying it (revised by the user, 2026-11-20):** native, inside OpenShim. EXU runs only when mission Lua loads it, so global skins cannot depend on EXU or CR Lua.
+  - OpenShim clones the player ship's material, sets the tint uniform, and re-applies it when the player changes ship.
+  - v1 is **tints only** (the option B mask set: alpha-only masks, no camo RGB). The variant list must be a data table so camo and new patterns can be added later without a redesign.
+  - The shader path (`TEAM_PAINT_ENABLED`) must compile in OpenShim's own en-high passes, not only CR's wrappers.
+  - Masks ship with OpenShim.
+- **Without CR:** works the same (native).
 - **Out of scope:**
   - multiplayer replication (co-op keeps its current rule)
   - new camo patterns: each new pattern needs a new set of per-unit masks from `Build-TeamSkins.py`
   - medium/low quality and stock DX9/DX11 renderers
-- **Work split:**
-  - OpenShim: the Options row, the ini key and the Lua getter.
-  - CR: the SP rule in `CRTeamSkins.lua`.
-  - These are two PRs; the CR PR depends on the OpenShim getter.
+- **Work split (2026-11-20):** OpenShim only (PR #920 grows to hold it). No CR PR. The Lua getter is dropped unless something still needs it.
