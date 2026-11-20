@@ -65,6 +65,13 @@ namespace BZROpenShim::ShellScreens
     bool RegisterScreen(const ScreenDef& def);
     bool IsAvailable();
 
+    // Runs `built` on each stock screen of id `stockId` right after the stock
+    // factory returns it, still inside the factory call (so widgets added
+    // there draw their frames). Runs under SEH; a fault is logged and the
+    // screen is returned as built. Installs the factory detour on first use.
+    using StockBuiltFn = void (*)(void* screen);
+    bool ObserveStockScreen(uint32_t stockId, StockBuiltFn built);
+
     // Navigation from a button callback. `fromScreen` is the live screen the
     // click came from (any stock or OpenShim screen); its shell manager does
     // the transition, at the end of the frame, exactly as for a stock button.

@@ -716,6 +716,12 @@ openshim_ui:lan_refresh~Refresh~Actualiser~Neu laden~Actualizar~Aggiorna~Обновит
 openshim_ui:lan_next_page~Next page~Suivante~Weiter~Siguiente~Pagina succ.~Далее~Prуx. pбgina
 openshim_ui:lan_address_label~Address:~Adresse :~Adresse:~Direcciуn:~Indirizzo:~Адрес:~Endereзo:
 openshim_ui:lan_use_address~Use address~Utiliser~Nutzen~Usar~Usa~Исп. адрес~Usar
+openshim_ui:lobbybrief_page~Page %s~~~~~~
+openshim_ui:lobbybrief_button~Briefing~~~~~~
+openshim_ui:lobbybrief_none~No Briefing~~~~~~
+openshim_ui:lobbybrief_prev~Prev~~~~~~
+openshim_ui:lobbybrief_next~Next~~~~~~
+openshim_ui:lobbybrief_close~Close~~~~~~
 openshim_ui:mapfilter_5plus_players~5+ Players~5+ joueurs~5+ Spieler~5+ jugadores~5+ giocatori~5+ игроков~5+ jogadores
 openshim_ui:mapfilter_stock_maps~Stock Maps~Cartes d'origine~Standardkarten~Mapas originales~Mappe originali~Стандартные карты~Mapas originais
 openshim_ui:mapfilter_search_placeholder~Search: click here~Recherche : cliquez ici~Suche: hier klicken~Buscar: haz clic aquн~Cerca: clicca qui~Поиск: нажмите здесь~Buscar: clique aqui

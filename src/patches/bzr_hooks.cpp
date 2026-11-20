@@ -1083,6 +1083,7 @@ namespace BZROpenShim
             {"InstallProducerScriptPredicateHooksIfPossible", &InstallProducerScriptPredicateHooksIfPossible},
             {"InstallBriefingPageStrideFixIfPossible", &InstallBriefingPageStrideFixIfPossible},
             {"InstallBriefingPagesIfPossible", &InstallBriefingPagesIfPossible},
+            {"InstallLobbyBriefingIfPossible", &InstallLobbyBriefingIfPossible},
             {"InstallMultiRenderCountClampIfPossible", &InstallMultiRenderCountClampIfPossible},
             {"InstallThumbnailBmpGuardIfPossible", &InstallThumbnailBmpGuardIfPossible},
             {"InstallSplinterUndeadFixIfPossible", &InstallSplinterUndeadFixIfPossible},
@@ -1743,6 +1744,7 @@ namespace BZROpenShim
         InstallProducerScriptPredicateHooksIfPossible();
 		InstallBriefingPageStrideFixIfPossible();
 		InstallBriefingPagesIfPossible();
+		InstallLobbyBriefingIfPossible();
 		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();

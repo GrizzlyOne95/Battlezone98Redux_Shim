@@ -266,6 +266,7 @@
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
     <ClCompile Include="src\patches\planet_video.cpp" />
     <ClCompile Include="src\patches\briefing_pages.cpp" />
+    <ClCompile Include="src\patches\lobby_briefing.cpp" />
     <ClCompile Include="src\patches\tro_menu_movie.cpp" />
     <ClCompile Include="src\patches\never_activate.cpp" />
     <ClCompile Include="src\patches\window_unclamp.cpp" />
@@ -411,6 +412,7 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\briefing_pages_policy.h" />
+    <ClInclude Include="include\lobby_briefing_policy.h" />
     <ClInclude Include="include\ordnance_entity_leak_policy.h" />
     <ClInclude Include="include\live_object_gate.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />

@@ -122,6 +122,15 @@ namespace BZROpenShim::ShellScreens
         ScreenDef g_Defs[kMaxScreens] = {};
         size_t g_DefCount = 0;
 
+        struct StockObserver
+        {
+            uint32_t id;
+            StockBuiltFn built;
+        };
+        constexpr size_t kMaxStockObservers = 8;
+        StockObserver g_StockObservers[kMaxStockObservers] = {};
+        size_t g_StockObserverCount = 0;
+
         struct LiveEntry
         {
             uint32_t id;
@@ -302,6 +311,36 @@ namespace BZROpenShim::ShellScreens
             return screen;
         }
 
+        bool RunStockObserverGuarded(StockBuiltFn built, void* screen, DWORD& faultCode)
+        {
+            faultCode = 0;
+            __try
+            {
+                built(screen);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                faultCode = GetExceptionCode();
+                return false;
+            }
+        }
+
+        void NotifyStockObservers(void* screen, int id)
+        {
+            if (!screen)
+                return;
+            for (size_t i = 0; i < g_StockObserverCount; ++i)
+            {
+                if (g_StockObservers[i].id != static_cast<uint32_t>(id))
+                    continue;
+                DWORD fault = 0;
+                if (!RunStockObserverGuarded(g_StockObservers[i].built, screen, fault))
+                    Log(L"[SHELLUI] observer for stock screen 0x%X faulted (0x%08X); screen left as built\n",
+                        static_cast<uint32_t>(id), fault);
+            }
+        }
+
         void* __fastcall ShellFactoryHook(void* manager, void* /*edx*/, int id)
         {
             // First main-thread seam with a live Ogre Root on the menus.
@@ -310,6 +349,8 @@ namespace BZROpenShim::ShellScreens
             ModeStressRenderTick();
             const ScreenDef* def = FindDef(static_cast<uint32_t>(id));
             void* screen = def ? CreateCustomScreen(manager, *def, id) : g_FactoryOriginal(manager, id);
+            if (!def)
+                NotifyStockObservers(screen, id);
             g_LastBuiltScreen = screen;
             g_LastBuiltId = static_cast<uint32_t>(id);
             return screen;
@@ -472,6 +513,23 @@ namespace BZROpenShim::ShellScreens
         }
         g_Defs[g_DefCount++] = def;
         Log(L"[SHELLUI] registered screen %hs (id 0x%08X)\n", def.name, def.id);
+        return true;
+    }
+
+    bool ObserveStockScreen(uint32_t stockId, StockBuiltFn built)
+    {
+        if (!built || stockId >= kCustomScreenIdBase || !EnsureFactoryDetour())
+            return false;
+        for (size_t i = 0; i < g_StockObserverCount; ++i)
+            if (g_StockObservers[i].id == stockId && g_StockObservers[i].built == built)
+                return true;
+        if (g_StockObserverCount >= kMaxStockObservers)
+        {
+            Log(L"[SHELLUI] cannot observe stock screen 0x%X: observer table full\n", stockId);
+            return false;
+        }
+        g_StockObservers[g_StockObserverCount++] = { stockId, built };
+        Log(L"[SHELLUI] observing stock screen 0x%X\n", stockId);
         return true;
     }
 

@@ -5726,6 +5726,54 @@
       "identity": "cUI_TextBlock set RGB, thiscall(rgb), RET 4: replaces the low 24 bits of +0x100 and reflows. The cUI_Mission ctor applies the mission record colour with it (0x00790081..0x007900CA); briefing pages re-apply the captured RGB after each SetText."
     },
     {
+      "name": "ScrollingTextBlockCtor",
+      "address": "0x007CD8D0",
+      "expected": "55 8B EC 6A FF 68 F8 26 86 00 64 A1 00 00 00 00",
+      "identity": "cUI_ScrollingTextBlock ctor (object 0x295C), thiscall(char flag, const char* name, float x, y, w, h, cdecl onPageUp(), cdecl onPageDown(), uint flags, parent), RET 0x28: base TextBlock ctor 0x007CCB70 then pageUp/pageDn arrow buttons at (w+5, h-70)/(w+5, h-35) relative, z 4, hidden. cUI_Mission builds its Mission block with it at 0x0078FD91..0x0078FD9E (flags 0x20). Lobby briefing overlay text."
+    },
+    {
+      "name": "ScrollingTextBlockScrollUp",
+      "address": "0x007CE0E0",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
+      "identity": "cUI_ScrollingTextBlock scroll up, thiscall(), plain RET: --[this+0x2958] then reflow 0x007CCFC0 (no clamp). cUI_Mission's page-up thunk 0x0078ED20 calls it."
+    },
+    {
+      "name": "ScrollingTextBlockScrollDown",
+      "address": "0x007CE110",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 58 29 00 00",
+      "identity": "cUI_ScrollingTextBlock scroll down, thiscall(), plain RET: ++[this+0x2958] then reflow (no clamp). cUI_Mission's page-down thunk 0x0078ED30 calls it."
+    },
+    {
+      "name": "UiViewSetZOrder",
+      "address": "0x007D3F20",
+      "expected": "55 8B EC 83 EC 14 89 4D FC 8B 45 FC 8A 4D 08 88",
+      "identity": "cUI_View set z, thiscall(byte z), RET 4: stores +0xE8, sets the Ogre object's render queue to 0x3C + the z summed up the +0x13C parent chain (0x007D3EE0), then re-applies each child's own z. Stock: Middle_Overlay children 1, please_wait 0xE, overlaymsg 0x10."
+    },
+    {
+      "name": "UiButtonSetEnabled",
+      "address": "0x007C3040",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC 8B 45 FC 8A 4D 08 88",
+      "identity": "cUI_Button enable, thiscall(byte), RET 4: stores +0x148 (cUI_Button MousePressed 0x007C2BB0 needs it set); disabling with flag 0x10 also resets the texture. Stock tab rows call it (FUN_007958C0)."
+    },
+    {
+      "name": "MultiCreateKeyPressed",
+      "address": "0x0079CD40",
+      "expected": "55 8B EC 51 89 4D FC 83 7D 08 26 75 14 6A 01 8B",
+      "identity": "cUI_Multiplayer_Create KeyPressed, vtable 0x0089EBE0 slot 4, thiscall(key, mods, repeat), RET 0xC: VK_UP/VK_DOWN step the map list (0x007A3BD0), anything else goes to the children (0x007D2330). Lobby briefing wraps the slot."
+    },
+    {
+      "name": "MultiCreateChar",
+      "address": "0x0079CD20",
+      "expected": "55 8B EC 51 89 4D FC 0F B6 45 08 50 8B 4D FC 8B",
+      "identity": "cUI_Multiplayer_Create char, vtable 0x0089EBE0 slot 2, thiscall(byte ch), RET 4: appends to the chat entry at +0x1D0 (TextEntry AppendChar 0x007CFA70). Lobby briefing wraps the slot."
+    },
+    {
+      "name": "UiViewKeyReleased",
+      "address": "0x007D2490",
+      "expected": "55 8B EC 83 EC 0C 89 4D F8 C7 45 FC 00 00 00 00",
+      "identity": "cUI_View KeyReleased, thiscall(key, mods), RET 8: offers the key to each child. Slot 5 of the cUI_Multiplayer_Create vtable 0x0089EBE0 (shared with other classes, so only that slot is wrapped, by lobby briefing)."
+    },
+    {
       "name": "UiViewLoadMovie",
       "address": "0x007D3850",
       "expected": "55 8B EC 6A FF 68 37 2C 86 00 64 A1 00 00 00 00",
