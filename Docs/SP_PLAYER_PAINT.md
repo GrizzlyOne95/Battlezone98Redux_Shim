@@ -33,7 +33,7 @@ Native (`src/patches/sp_player_paint.cpp`, render thread, frame start):
 2. Every frame: resolve the player handle's root Entity. If it is not the last painted ship, put the last ship's materials back (when it is still in the scene).
 3. For each SubEntity whose stock material has a mask, clone its current material as `<current>@ospaint_<variant>`. In every en-high pass with a `teamMap` unit and a `teamPaint` constant, bind the mask and set `teamPaint`. Then assign the clone to that SubEntity only.
    - A pass that also binds `actMap` runs a CR program, which reads alpha. It gets CR's own crteam mask, taken from CR's `<material>_tm` twin. Without CR's twin, that pass is skipped.
-   - GPU skinning: the clone of a skinned clone keeps its vertex programs, and the change is handed to `OpenShimAdoptSurfaceVariant`. If GPU skinning refuses, the SubEntity is put back and stays stock.
+   - GPU skinning: the clone of a skinned clone keeps its vertex programs, and the change is handed to `OpenShimAdoptSurfaceVariant`. If GPU skinning refuses, the SubEntity is put back and stays stock. If something reverts a painted slot more than 3 times, that material is left stock for the mission (`[PAINT] <material>: paint kept being reverted; stock paint`) instead of flickering.
 4. At mission end, the ship's materials are restored and every clone is removed from the MaterialManager. At world teardown the clones are removed. A load or restart starts clean.
 
 Each material that cannot be painted is logged once per mission, with the reason: no mask, no en-high technique, no teamMap pass, no teamPaint constant, CR program without CR mask, or clone failed. The frame also logs the active material scheme when it changes, so en-medium shows up in the log.
@@ -62,3 +62,4 @@ Live checklist (CR off and on, DX11 Enhanced, en-high):
 6. Reload the mission and restart it twice: `[PAINT] removed N clone material(s)` each time, with no growth in the clone count and no stale paint.
 7. Change the row to Stock mid-mission: the ship goes back to stock at once.
 8. BC4 loads on D3D11: a painted ship, not a blank or fully painted hull. A load failure shows up in Ogre.log for `openshim_paint_*.dds`.
+9. Walker with GPU skinning on: the walker is painted, or stays stock with one `[PAINT]` line. It must never flicker between the two.

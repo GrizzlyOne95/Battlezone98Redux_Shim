@@ -59,6 +59,7 @@ namespace BZROpenShim
         constexpr uint32_t kPruneIntervalFrames = 300;
         constexpr uint32_t kAwaitTeardownFrameLimit = 300;
         constexpr unsigned kMaxSubEntities = 64;
+        constexpr unsigned kMaxRepaints = 3;  // reverts tolerated per slot before giving up
         constexpr uint16_t kMaxTechniques = 128;
         constexpr uint16_t kMaxPasses = 32;
         constexpr uint16_t kMaxUnits = 32;
@@ -460,6 +461,19 @@ namespace BZROpenShim
                 const std::string current = NameOf(material->rep);
                 if (Policy::PaintedWith(current, *g_variant) || g_unpaintable.count(current))
                     continue;
+                // Something (GPU skinning refusing a queued variant) keeps
+                // reverting this slot: stop instead of flickering every frame.
+                bool revertLoop = false;
+                for (const Slot& slot : g_painted.slots)
+                {
+                    if (slot.index == i && slot.repaints >= kMaxRepaints)
+                        revertLoop = true;
+                }
+                if (revertLoop)
+                {
+                    Unpaintable(current, "paint kept being reverted");
+                    continue;
+                }
                 const std::string key(Policy::SourceKey(current));
                 const char* const mask = Policy::FindMask(key);
                 if (!mask)
