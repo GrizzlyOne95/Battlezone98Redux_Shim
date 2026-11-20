@@ -68,7 +68,7 @@ companions):
 | `SimDamage` | victim handle | damager handle | victim is local player | damager is local player |
 | `SimKill` | victim handle | damager handle | victim is local player | damager is local player |
 | `SimTeamDeath` | killed team | killer team | — | — |
-| `SimDamageApplied` | victim handle | local damager handle | 0 | 1 |
+| `SimDamageApplied` | victim handle | local damager handle | 1 = killshot (health reached 0) | 1 |
 
 The four `int32` slots are packed into the record's `arg0`/`arg1` by
 `PublishSimEvent` and unpacked by `SimEventArg`.

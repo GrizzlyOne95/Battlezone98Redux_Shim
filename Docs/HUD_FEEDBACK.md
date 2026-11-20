@@ -110,6 +110,20 @@ there too. Unreadable session state fails
 closed. Steam, Proton and Wine are not qualified; the initial adapter is
 disabled for Steam executables and the Options rows explain that restriction.
 
+### Kill flash
+
+A confirmed hit that takes the victim's health from above zero to zero or
+below draws its marker and ripple in red (RGB 255, 50, 40) instead of
+`HitMarkerColor`, at `HitMarkerOpacity`, for the normal `HitMarkerDuration`
+(the ripple for its own longer duration). A later hit that does not kill never
+cancels a red flash in progress; a new kill restarts it. The kill flag rides in
+`SimDamageApplied` arg slot 2. There is no INI option.
+
+Live test (owed): with Hit Markers on and `HitMarkerColor` not red, shoot a
+unit that survives (marker stays `HitMarkerColor`), then kill one (marker and
+ripple are red, then revert); hit another unit just after a kill and confirm the
+red stays until the duration ends.
+
 ## Native boundaries
 
 `hud_feedback_policy.h` owns portable drawing, clipping, hit eligibility and
