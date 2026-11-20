@@ -30,7 +30,7 @@ The full plan is in `Docs/DAYWRECKER_AI_DEFENCE_RESEARCH.md` (PR #913 plus the b
   - ammo gauge
   - Drop Repair and Drop Ammo pods with a cooldown
   - Deploy
-  - AI use
+  - AI use: commands only (user, 2026-11-19). An MRU deploys only when ordered; otherwise it sits and responds to move orders and pod drops. No autonomous deploy rule.
 
 ## Item 18: Unit loadouts
 
