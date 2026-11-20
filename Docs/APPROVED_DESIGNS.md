@@ -86,11 +86,13 @@ The user's spec, modelled on BZ2's FactoryPanel:
   - Left side: faction tabs (NSDF, CCA, Black Dogs, Fury, plus Briefings), with a scrolling list under each.
   - Right side: the selected entry's details.
 - **Contents (v1):** units only. The data format and the tabs must allow more categories later (relics, personnel and so on) without a redesign.
-- **Unit entry:**
-  - full model name and codename
-  - class
-  - stats read live from the unit ODF: scrap cost, armor/health, ammo, speed, weapons by slot
-  - a lore paragraph and the unit's icon
+- **Unit entry (v1, user 2026-11-20):**
+  - unit name (the role, e.g. "Medium Tank")
+  - model name (e.g. Grizzly, Bobcat)
+  - model number, where stock text gives one (e.g. "M173 Badger"), with every cited variant
+  - stock stats read live from the unit ODF: scrap cost, armor/health, ammo, speed, weapons by slot
+  - the unit's icon
+  - **Lore paragraph: deferred.** It is added later if more stock lore turns up. The data format keeps an empty lore field ready for it.
 - **Unit list:** a content file listing the unit ODFs per faction. OpenShim ships the stock list, and CR can override it.
 - **Lore text rule (user, strict):**
   - Use only text validated against stock sources: verified VO transcripts, briefings, debriefings, or the game's unit description `.inf`/`.des` files.
