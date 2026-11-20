@@ -154,3 +154,22 @@ The user's spec, modelled on BZ2's FactoryPanel:
   - new camo patterns: each new pattern needs a new set of per-unit masks from `Build-TeamSkins.py`
   - medium/low quality and stock DX9/DX11 renderers
 - **Work split (2026-11-20):** OpenShim only (PR #920 grows to hold it). No CR PR. The Lua getter is dropped unless something still needs it.
+
+## Item 18: Hitmarker kill flash (approved 2026-11-20)
+
+- A confirmed player hit that takes the victim's health from above 0 to 0 or below is a killshot.
+- That marker and its ghost ripple draw red (255 50 40), using `HitMarkerOpacity`, instead of `HitMarkerColor`, for the normal `HitMarkerDuration`.
+- A later non-kill hit does not override the red while it shows.
+- No new INI option. The kill flag travels in the existing hit event (`SimDamageApplied`, arg 2).
+
+## Item 19: CR NSDF/Black Dog gun tower stabber (approved 2026-11-20)
+
+- Today `abtowe` → `gspstabn` → `rocket3n` borrows the CRA green `rocket3a.render` (light 150 255 50).
+- `rocket3n` gets its own flare and light render, and a muzzle flash tint, in blue-white (light 150 200 255). That colour differs from stock orange (255 150 50) and CRA green.
+- The Black Dog tower `bbtowe` switches from `gblastb` (Blue Blast Cannon) to the same stabber variant.
+
+## Queue note: MP "Not Ready" with IPv6 (research 2026-11-20, no design yet)
+
+- Readiness needs the BZRNet websocket to reach state 3 (`reverse_engineering/notes/mp_not_ready_readiness_chain.md`).
+- The likely IPv6 link is a getaddrinfo or connect stall on a broken IPv6 DNS path (confidence about 45%). The matchmaking host has only an A record.
+- Candidate fix: in the existing `Hook_getaddrinfo` (`src/patches/net_optimizer.cpp`), force AF_INET for BZRNet names. It needs an affected player's `[MPREADY]` log first.
