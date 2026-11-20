@@ -149,3 +149,11 @@ Manual (M p19-21 [34-39]) has text only; guide (G L1044-1755) has stat blocks. V
 14. Pilot/Black Dogs: manual calls Red Brigade vs "American Black Dog Brigade"; guide has Black Dogs as NSDF secondary force on Io (G L7455-7457).
 15. OCR-uncertain raw readings (UNVERIFIED): "187 SMG" (maybe 1S7), "Haaval" (Heaval), "Racyclar" (Recycler), "Ml 73" (M173), "LMAE" (LMA6), "TUI 2"/"TUI 5" (TU12/TU15), "Smimovitch", "Golum/Galum", "Sasguatch", "Slobber/Slabber" (Stabber), "Scrap Cost/Value: 10/B".
 16. Manual says Heaval's code name; the guide's Scout/Razor "Scout" in mission text is the Razor.
+
+## Resolved against stock ODFs (2026-11-20)
+
+Stock ODF values win over both books. The Database reads stats live from the ODF.
+
+- **Longbow range:** about 560 m in stock (user). `avartl.odf:16` fires `ghartill` (class mortar, ordnance `shell`); `shell.odf:15` sets `shotSpeed = 75.0`. A ballistic arc at 75 m/s and 9.8 m/s² peaks at about 574 m, which agrees. The manual (750 m) and the guide (1000 m) are both wrong for stock.
+- **Hornet blast radius:** 5 m. `ghornet.odf` fires `heatmsl`, whose explosions `xmslcar.odf:9`, `xmslgnd.odf:9` and `xmslbld.odf:9` all set `damageRadius = 5.0` (50 concussion damage); `heatmsl.odf` sets `damageBallistic = 900`. This matches the manual; the guide's 1.5 m is wrong.
+- **Bobcat producer:** the Factory. `avmuf.odf:71` has `buildItem2 = "avltnk"` (user confirmed). The guide's "Recycler" is wrong.
