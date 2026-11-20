@@ -268,6 +268,18 @@ no autonomous AI deploy rule. `AiDeployHook` in mru_class.cpp always returns
 rule there would have to skip player-team MRUs and keep its own unit's
 orders still, or the deploy hold packs it at once.
 
+## Unit panel category
+
+MRUs are listed under **Utility** (team slots 25-34), not Offense (user,
+2026-11-19). The class setup writes the class's slot range (+0x13C/+0x140)
+right after the hover craft constructor, which copied Offense from its
+prototype (1.5 `all_decompiled.c` 189591-189592). The build gate and the unit
+panel read that range (GOG `FUN_005ae660.c` lines 69-74). As with other
+Utility units, an MRU can't be built while all 10 Utility slots are taken.
+
+Live check: build an MRU and confirm it appears under Utility (F3, keys 1-0),
+not Offense, and that Ctrl+Offense does not select it.
+
 ## Limits
 
 - Not saved: after a save load an MRU is undeployed with its cooldown ready

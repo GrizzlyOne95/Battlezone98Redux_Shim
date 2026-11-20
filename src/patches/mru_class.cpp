@@ -52,6 +52,12 @@ namespace BZROpenShim
         // are the ones Dispenser::Simulate builds without the carrier's
         // velocity, FUN_004b5da0.c lines 64 and 80).
         constexpr size_t kClassLabelOffset = 0x18;
+        // GameObjectClass team-slot range (categoryMin/Max) and the Utility
+        // range from the MENU_ITEM table (Docs/OFFENSIVE_UNIT_SLOT_CAP.md).
+        constexpr size_t kClassMinSlotOffset = 0x13C;
+        constexpr size_t kClassMaxSlotOffset = 0x140;
+        constexpr int kUtilityMinSlot = 25;
+        constexpr int kUtilityMaxSlot = 34;
         constexpr size_t kClassPackedNameOffset = 0x30;
         constexpr size_t kClassId = 0x1C;
         // GameObject: obj76 (transform owner), class pointer, ModeList
@@ -311,8 +317,15 @@ namespace BZROpenShim
         {
             __try
             {
-                *reinterpret_cast<const char**>(reinterpret_cast<uint8_t*>(objectClass) + kClassLabelOffset) =
-                    kMruClassLabel;
+                uint8_t* const bytes = reinterpret_cast<uint8_t*>(objectClass);
+                *reinterpret_cast<const char**>(bytes + kClassLabelOffset) = kMruClassLabel;
+                // Team-slot range: the Utility category (user, 2026-11-19), not
+                // the hover craft's Offense range the class ctor copied from
+                // its prototype (1.5 GameObjectClass ctor, all_decompiled.c
+                // 189591-189592). The build gate and unit panel read
+                // +0x13C/+0x140 (GOG FUN_005ae660.c lines 69-74).
+                *reinterpret_cast<int*>(bytes + kClassMinSlotOffset) = kUtilityMinSlot;
+                *reinterpret_cast<int*>(bytes + kClassMaxSlotOffset) = kUtilityMaxSlot;
                 return true;
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
