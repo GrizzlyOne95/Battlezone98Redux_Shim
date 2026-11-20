@@ -26,6 +26,7 @@ Updated 2026-11-19.
 | Daywrecker AI defence v1 | #917, `agent/daywrecker-ai-defence-v1` (base #913) | `Docs/DAYWRECKER_AI_DEFENCE_RESEARCH.md` section 4 (9 rows) | `DaywreckerDefence=1`, SP; Armory DW drops near AI units; needs a Comet (`radarmsl`) source for row 7 | Not started. Open: all 9 rows, incl. kill rate under 30% deciding the gravity lead |
 | MRU gameplay (Nightingale steps 3-6) | #918, `agent/mru-full` (base #915) | `Docs/MRU_CLASS.md` live checklist (17 steps) | `MruGameplay=1`, SP; `repamine`/`ammomine` pod ODFs loadable; damaged and low-ammo friendlies near a deployed MRU | Not started. Open: pod build inside Simulate, pod pickup, deploy hold, gauge drain, ammoPer*=0, AI re-order packing |
 | Unit loadouts M1 | #919, `agent/unit-loadouts` | `Docs/UNIT_LOADOUTS.md` live checklist (12 items) | `UnitLoadouts=1` and `[ProducerBuildMenus] Enabled=1`, SP; Armory built; Recycler or Factory selected | Not started. Open: Alt+pick reaches PRODMENU, greyed entries clickable, surcharge display/charge/refund, swap at FinishBuild, unfitted credit, reset on mission change without EXU |
+| Lobby Briefing overlay | #921, `agent/lobby-briefing` | `Docs/LOBBY_BRIEFING.md` live checklist | MP lobby as host and as client; a mission with `.des` pages and one without | Not started. Open: button greyed with no `.des`, paging/Esc, lobby state untouched on close, "kick while open" (does a stock alert draw under the panel?) |
 
 ## Merge order once tests pass
 
