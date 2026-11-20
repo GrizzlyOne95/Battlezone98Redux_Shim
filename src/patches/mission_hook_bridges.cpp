@@ -129,26 +129,6 @@ namespace BZROpenShim
         return SetProducerRallyPointsNetworkAllowed(allowed);
     }
 
-    // [SinglePlayer] PlayerPaint: a CRTeamSkins key (Docs/SP_PLAYER_PAINT.md).
-    // Read on each call so the Options row applies without a restart. Returns
-    // string literals only, so the pointer stays valid for the caller.
-    const char* GetPlayerPaintFromBridge()
-    {
-        static const char* const kKeys[] = { "stock", "host", "t2", "t3", "t4" };
-        // Never override co-op's fixed host and guest paint.
-        if (ReadLocalPlayerNetIdValue() != 0)
-            return kKeys[0];
-        std::string value;
-        if (!TryGetUserConfigString("SinglePlayer", "PlayerPaint", value))
-            return kKeys[0];
-        for (const char* key : kKeys)
-        {
-            if (_stricmp(value.c_str(), key) == 0)
-                return key;
-        }
-        return kKeys[0];
-    }
-
     bool SetBomberAiRangeEnabledFromBridge(bool enabled)
     {
         // Bomber range is now part of AI ODF gameplay tuning; the export

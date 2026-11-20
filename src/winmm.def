@@ -302,4 +302,3 @@ EXPORTS
     OpenShimSetAiDefendRefreshEnabled
     OpenShimSetAiHold
     OpenShimSetRallyPointsAllowedInNetwork
-    OpenShimGetPlayerPaint

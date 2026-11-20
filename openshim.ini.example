@@ -2937,11 +2937,12 @@ PlayerReticleConvergence = 1
 ; Legacy INI alias: ReticleRange
 SmartReticleRange = 500
 
-; Paint your own ship in single player. Campaign Reimagined reads this through
-; the OpenShimGetPlayerPaint SDK export and repaints the ship you pilot; without
-; Campaign Reimagined, on lower render quality than en-high, or in a network
-; game the paint stays stock. See Docs/SP_PLAYER_PAINT.md.
-; Accepted: stock, host (green digital camo), t2 (red), t3 (blue), t4 (gold).
+; Paint your own ship in single player. OpenShim repaints the ship you pilot
+; (no mod needed) and puts its stock paint back when you leave it. Other units
+; keep stock paint, and so does every ship on render quality below en-high,
+; outside DX11 Enhanced, or in a network game. Applies live.
+; See Docs/SP_PLAYER_PAINT.md.
+; Accepted: stock, t2 (red), t3 (blue), t4 (gold).
 ; Default: stock.
 PlayerPaint = stock
 
