@@ -78,11 +78,11 @@ static const char* const kShimCategoryFixes[] = {
     "Effect Sort", "Map List Fixes" };
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions",
-    "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes",
+    "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Lobby Briefing", "Persistent Mutes",
     "MP Setup Screen", "Map Letter Jump", "Block Free Camera", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install", "Skip Launcher", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
-    "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching" };
+    "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching", "Briefing Pages", "Database" };
 
 struct ShimSettingsCategory
 {

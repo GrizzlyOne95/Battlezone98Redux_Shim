@@ -11,7 +11,9 @@ unlocks, a PDA, 3D previews, multiplayer, and lore text (the content format
 keeps an empty `lore` field for it).
 
 Gate: `[Features] Database = 1` (default on). Env kill switch
-`OPENSHIM_DISABLE_DATABASE=1` (alias `BZR_DISABLE_DATABASE`).
+`OPENSHIM_DISABLE_DATABASE=1` (alias `BZR_DISABLE_DATABASE`). Options row
+"Database" (System page) writes the key; read each time Single Player is
+built, so no restart. Stock value for Reset to Stock is off.
 
 Code: `src/patches/database_screen.cpp`; policy `include/database_policy.h`
 (tests `tests/database_policy_tests.cpp`); the briefing page reader shared
@@ -172,8 +174,10 @@ mod that ships an `oshdb.cfg`.
     from the game file system merged`.
 11. Regression: the MP lobby Briefing overlay still opens and pages
     (`Docs/LOBBY_BRIEFING.md` steps 1-5); it now uses the shared reader.
-12. `[Features] Database = 0`, then `OPENSHIM_DISABLE_DATABASE=1`: no button,
-    log says disabled.
+12. `[Features] Database = 0`, then `OPENSHIM_DISABLE_DATABASE=1`: no button
+    next time Single Player opens.
+13. Options row off, then Reset to Stock: the feature is gone (and the row
+    shows Off after Reset to Stock).
 
 ## Known limits
 

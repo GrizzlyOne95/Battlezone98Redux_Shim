@@ -777,9 +777,11 @@ namespace BZROpenShim
                 Log(L"[LOBBYBRIEF] Briefing button and overlay built\n");
             }
 
+            bool ShouldEnable();
+
             void OnCreateScreenBuilt(void* screen)
             {
-                if (!g_Active || !screen)
+                if (!g_Active || !screen || !ShouldEnable())
                     return;
                 if (*static_cast<uintptr_t*>(screen) != g_CreateVtable)
                 {
@@ -791,7 +793,12 @@ namespace BZROpenShim
 
             bool ShouldEnable()
             {
-                return !EnvFlagEnabled("OPENSHIM_DISABLE_LOBBY_BRIEFING");
+                // The env kill switch wins; otherwise [Features] LobbyBriefing
+                // (default on), read each time a lobby is built.
+                if (EnvFlagEnabled("OPENSHIM_DISABLE_LOBBY_BRIEFING"))
+                    return false;
+                bool enabled = true;
+                return !TryGetUserConfigBool("Features", "LobbyBriefing", enabled) || enabled;
             }
 
             bool SlotHolds(uintptr_t slot, uint32_t expected)
@@ -811,7 +818,7 @@ namespace BZROpenShim
         {
             if (g_Active || g_GaveUp)
                 return;
-            if (!ShouldEnable())
+            if (EnvFlagEnabled("OPENSHIM_DISABLE_LOBBY_BRIEFING"))
             {
                 g_GaveUp = true;
                 Log(L"[LOBBYBRIEF] disabled by OPENSHIM_DISABLE_LOBBY_BRIEFING\n");

@@ -1004,6 +1004,13 @@ BriefingPages = 1
 ; Env kill switch: OPENSHIM_DISABLE_DATABASE
 Database = 1
 
+; Lobby briefing. A Briefing button in the multiplayer waiting room (host and
+; client) opens the map's <m>.des / <m>_N.des pages and <m>_N.png pictures.
+; Client-local UI; cannot affect a network game. Guide: Docs/LOBBY_BRIEFING.md.
+; Accepted: boolean. Default: ON.
+; Env kill switch: OPENSHIM_DISABLE_LOBBY_BRIEFING (wins over this key)
+LobbyBriefing = 1
+
 [Startup]
 
 ; Early D3D startup-hook path used for renderer/startup development.

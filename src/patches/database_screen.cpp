@@ -843,9 +843,11 @@ namespace BZROpenShim
                     Log(L"[DATABASE] could not request the Database screen\n");
             }
 
+            bool ShouldEnable();
+
             void OnSinglePlayerBuilt(void* screen)
             {
-                if (!g_Active || !screen)
+                if (!g_Active || !screen || !ShouldEnable())
                     return;
                 uintptr_t vtable = 0;
                 void* vtablePointer = nullptr;
@@ -890,12 +892,8 @@ namespace BZROpenShim
         {
             if (g_Active || g_GaveUp)
                 return;
-            if (!ShouldEnable())
-            {
-                g_GaveUp = true;
-                Log(L"[DATABASE] disabled ([Features] Database = 0 or OPENSHIM_DISABLE_DATABASE)\n");
-                return;
-            }
+            // The setting is read per Single Player build (OnSinglePlayerBuilt),
+            // so the Options row applies without a restart.
             // Shared UI bindings resolve later on some launches; ask again next
             // time rather than giving up for good.
             if (!g_BzrFn_ButtonCtor || !g_BzrFn_LabelCtor || !g_BzrFn_OverlayCtor || !g_BzrFn_AddChild ||
