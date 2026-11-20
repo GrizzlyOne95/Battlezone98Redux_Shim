@@ -291,6 +291,28 @@ namespace BZROpenShim
         constexpr int kWhatSelect = 1;
         constexpr int kWhatStop = 2;
 
+        // Non-combat (user, 2026-11-20): an MRU is pure utility, like the
+        // Tug. It refuses CMD_ATTACK and CMD_HUNT (AiCommand 4 and 20,
+        // bz15_pdb enum_values.tsv) from any source, and its menu loses the
+        // Attack entry HoverCraft::UpdateModeList puts in slot 3 (mode 0xE,
+        // FUN_004ebd60.c line 19), cleared as stock TurretTank does
+        // (FUN_005f5a50.c line 19: SetMode(3, 0, 0)).
+        constexpr int kWhatAttack = 4;
+        constexpr int kWhatHunt = 20;
+        constexpr int kSlotAttack = 3;
+        constexpr int kModeAttack = 0xE;
+
+        inline bool RefusesOrder(int what)
+        {
+            return what == kWhatAttack || what == kWhatHunt;
+        }
+
+        // Slot 3 is cleared only while it holds the stock Attack entry.
+        inline bool ClearsAttackSlot(const int32_t (&modes)[kModeSlots])
+        {
+            return modes[kSlotAttack] == kModeAttack;
+        }
+
         inline bool IsPodAction(Action action)
         {
             return action == Action::DropRepair || action == Action::DropAmmo;

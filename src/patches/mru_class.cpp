@@ -194,7 +194,20 @@ namespace BZROpenShim
             // Change-only log state.
             bool serviceWasActive = false;
             bool gaugeWasEmpty = false;
+            // Non-combat: the AI process was seen not to be a UnitProcess
+            // (a pilot's UserProcess), so independence is left alone.
+            bool processSkipLogged = false;
+            // Non-combat: an attack sub-state was already saved when
+            // independence was first cleared (logged once).
+            bool retaliationLogged = false;
         };
+
+        // Non-combat refusal log, change-only per object: the last order
+        // `what` refused (0 after an order that passed). Separate from
+        // g_ObjectStates because the SetCommand detours run outside MruTick,
+        // which holds a copy of that state. Erased with the object.
+        SRWLOCK g_RefusedLock = SRWLOCK_INIT;
+        std::unordered_map<uintptr_t, int> g_LastRefused;
 
         SRWLOCK g_ObjectStateLock = SRWLOCK_INIT;
         std::unordered_map<uintptr_t, MruObjectState> g_ObjectStates;
@@ -206,6 +219,9 @@ namespace BZROpenShim
         volatile long g_DeployLogBudget = 256;
         volatile long g_DropLogBudget = 256;
         volatile long g_ServiceLogBudget = 256;
+        volatile long g_RefuseLogBudget = 256;
+        volatile long g_EnemyQueryLogBudget = 256;
+        volatile long g_IndependenceLogBudget = 256;
 
         bool IsExecutableAddress(uintptr_t address)
         {
@@ -371,6 +387,8 @@ namespace BZROpenShim
         }
 
         bool ReadModeList(const void* object, int32_t (&modes)[Policy::kModeSlots], uint32_t& enabled);
+        void EnforceNoIndependence(void* object, MruObjectState& state);
+        void ClearAttackSlot(void* self);
 
         // ---- per-object state ------------------------------------------------
 
@@ -404,6 +422,30 @@ namespace BZROpenShim
             AcquireSRWLockExclusive(&g_ObjectStateLock);
             g_ObjectStates.erase(reinterpret_cast<uintptr_t>(object));
             ReleaseSRWLockExclusive(&g_ObjectStateLock);
+            AcquireSRWLockExclusive(&g_RefusedLock);
+            g_LastRefused.erase(reinterpret_cast<uintptr_t>(object));
+            ReleaseSRWLockExclusive(&g_RefusedLock);
+        }
+
+        // Records the refusal decision for `object`; true when it differs
+        // from the last one (refused `what`, or 0 for an order that passed).
+        bool RefusalChanged(const void* object, int refusedWhat)
+        {
+            bool changed = false;
+            AcquireSRWLockExclusive(&g_RefusedLock);
+            try
+            {
+                int& last = g_LastRefused[reinterpret_cast<uintptr_t>(object)];
+                changed = last != refusedWhat;
+                last = refusedWhat;
+            }
+            catch (...)
+            {
+                // Out of memory: log it as a change.
+                changed = true;
+            }
+            ReleaseSRWLockExclusive(&g_RefusedLock);
+            return changed;
         }
 
         // ---- engine calls (each under SEH, no C++ objects inside) -------------
@@ -918,6 +960,8 @@ namespace BZROpenShim
                 }
             }
 
+            EnforceNoIndependence(object, state);
+
             if (state.deployed)
             {
                 int pendingWhat = 0;
@@ -1005,12 +1049,15 @@ namespace BZROpenShim
         constexpr int32_t kModeDecloak = 0x19;
         bool g_CloakSkipLogged = false;
 
-        void FillMruMenu(void* self, const int (&enables)[Policy::kMenuEntryCount])
+        // attackInSlot3: the list read before the fill shows the stock
+        // Attack entry (0xE) in slot 3; non-combat clears it then.
+        void FillMruMenu(void* self, const int (&enables)[Policy::kMenuEntryCount], bool& attackInSlot3)
         {
             auto* modeList = static_cast<uint8_t*>(self) + kObjModeList;
             int32_t modes[Policy::kModeSlots] = {};
             uint32_t enabled = 0;
             const bool listRead = ReadModeList(self, modes, enabled);
+            attackInSlot3 = listRead && Policy::ClearsAttackSlot(modes);
             for (int i = 0; i < Policy::kMenuEntryCount; ++i)
             {
                 const Policy::MenuEntry& e = Policy::kMenuEntries[i];
@@ -1043,14 +1090,17 @@ namespace BZROpenShim
                 return;
             int enables[Policy::kMenuEntryCount] = {};
             MenuEnables(self, enables);
+            bool attackInSlot3 = false;
             __try
             {
-                FillMruMenu(self, enables);
+                FillMruMenu(self, enables, attackInSlot3);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 // Fail closed: the stock fill above stands.
             }
+            if (attackInSlot3)
+                ClearAttackSlot(self);
         }
 
         bool ReadModeList(const void* object, int32_t (&modes)[Policy::kModeSlots], uint32_t& enabled)
@@ -1079,6 +1129,315 @@ namespace BZROpenShim
             {
                 return false;
             }
+        }
+
+        // ---- non-combat (user, 2026-11-20) -----------------------------------
+        //
+        // An MRU is pure utility, like the Tug or Scavenger: no Attack entry,
+        // no attack order from any source, and no targets picked on its own,
+        // whatever its aiName or weapons. Same gate as the rest of the
+        // gameplay: an object with the MRU vtable copy, MruGameplay on,
+        // single player.
+        //
+        //  * Menu: slot 3 (HoverCraft::UpdateModeList puts Attack 0xE there,
+        //    FUN_004ebd60.c line 19) is set to 0, as stock
+        //    TurretTank::UpdateModeList does (FUN_005f5a50.c line 19).
+        //  * Orders: entry detours on both GameObject::SetCommand variants
+        //    drop CMD_ATTACK for an MRU before anything is written, so its
+        //    pending order (+0xC8..) stays as it was:
+        //    - SetCommand(what, GameObject*) 0x004DBD60, which
+        //      ControlPanel::BroadcastCommand calls per selected unit
+        //      (FUN_004a7050.c lines 9-13): right-click, the Attack submenu,
+        //      OverView. The other selected units still get the order.
+        //    - SetCommand(AiCmdInfo*) 0x004DBAF0, which copies the 8-dword
+        //      command to +0xC8 (FUN_004dbaf0.c; what is dword 1, +0xCC):
+        //      the native Attack(me, him, priority) builds what = 4 and calls
+        //      it (FUN_005cb820.c, the Lua "Attack" binding 0x00504440).
+        //  * Own targets: the AI process's independence (UnitProcess +0x18;
+        //    1.5 PDB fields.tsv UnitProcess.independence at 20, Redux +4) is
+        //    held at 0, the write stock SetIndependence makes
+        //    (FUN_005cb620.c: process = [obj+0xFC], process+0x18 = v), so
+        //    OffensiveProcess::DoSubTask returns at once (FUN_00583520.c
+        //    lines 29-31) and picks no target. The closest-enemy query
+        //    0x00463240 answers none for an MRU, which covers the FollowTask
+        //    cover fire independence does not gate (FUN_004d3b80.c lines
+        //    113-151, non-dispenser weapons only).
+
+        using FnSetCommandObj = void (__thiscall*)(void*, int, void*);
+        using FnSetCommandInfo = void (__thiscall*)(void*, const void*);
+        using FnSetCommandWhat = void (__thiscall*)(void*, int);
+        using FnEnemyWithin = void* (__cdecl*)(void*, float*);
+
+        // Stolen prologues, all position independent.
+        // 0x004DBD60: push ebp; mov ebp,esp; push -1 (SEH frame setup follows).
+        constexpr uint8_t kSetCommandObjPrologue[5] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF };
+        // 0x004DBAF0: push ebp; mov ebp,esp; push ecx; push esi.
+        constexpr uint8_t kSetCommandInfoPrologue[5] = { 0x55, 0x8B, 0xEC, 0x51, 0x56 };
+        // 0x004DBCE0: push ebp; mov ebp,esp; push ecx; mov [ebp-4],ecx
+        // (1+2+1+3 bytes: a 5-byte steal would split the mov).
+        constexpr uint8_t kSetCommandWhatPrologue[7] = { 0x55, 0x8B, 0xEC, 0x51, 0x89, 0x4D, 0xFC };
+        // 0x00463240: push ebp; mov ebp,esp; sub esp,100h.
+        constexpr uint8_t kEnemyWithinPrologue[9] = { 0x55, 0x8B, 0xEC, 0x81, 0xEC, 0x00, 0x01, 0x00, 0x00 };
+        constexpr size_t kCmdInfoWhat = 4;
+        constexpr size_t kObjAiProcess = 0xFC;
+        constexpr size_t kProcessIndependence = 0x18;
+        constexpr size_t kProcessSaveState = 0x24;
+        constexpr char kUnitProcessType[] = ".?AVUnitProcess@@";
+
+        InlineDetour32 g_SetCommandObjDetour;
+        InlineDetour32 g_SetCommandInfoDetour;
+        InlineDetour32 g_SetCommandWhatDetour;
+        InlineDetour32 g_EnemyWithinDetour;
+        FnSetCommandObj g_OrigSetCommandObj = nullptr;
+        FnSetCommandInfo g_OrigSetCommandInfo = nullptr;
+        FnSetCommandWhat g_OrigSetCommandWhat = nullptr;
+        FnEnemyWithin g_OrigEnemyWithin = nullptr;
+        bool g_AttackSlotLogged = false;
+
+        bool IsNonCombatMru(const void* object)
+        {
+            return g_Installed && g_GameplayOn && HasMruVtable(object) && Hooks::IsSinglePlayerSession();
+        }
+
+        bool ReadCmdInfoWhat(const void* info, int& what)
+        {
+            if (!info)
+                return false;
+            __try
+            {
+                std::memcpy(&what, static_cast<const uint8_t*>(info) + kCmdInfoWhat, sizeof(what));
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // True when the order must be dropped for `object`. Called only
+        // for an MRU (HasMruVtable already true). Logs change-only per
+        // object and order (an order that passes resets it), with the global
+        // budget as a backstop against a script that alternates orders.
+        bool RefuseForMru(const void* object, int what, const char* path)
+        {
+            if (!IsNonCombatMru(object))
+                return false;
+            const bool refuse = Policy::RefusesOrder(what);
+            const bool changed = RefusalChanged(object, refuse ? what : 0);
+            if (refuse && changed && BudgetLeft(g_RefuseLogBudget))
+            {
+                LogShimA(LogLevel::Info, kComponent,
+                    "obj=%p order what=%d (%s) via %s refused: mru takes no attack or hunt orders (pending order kept)",
+                    object, what, what == Policy::kWhatHunt ? "Hunt" : "Attack", path);
+            }
+            return refuse;
+        }
+
+        // GameObject::SetCommand(AiCommand what, GameObject* who), thiscall ret 8.
+        void __fastcall SetCommandObjHook(void* self, void* /*edx*/, int what, void* who)
+        {
+            if (HasMruVtable(self) && RefuseForMru(self, what, "SetCommand(what, target)"))
+                return;
+            g_OrigSetCommandObj(self, what, who);
+        }
+
+        // GameObject::SetCommand(const AiCmdInfo*), thiscall ret 4.
+        void __fastcall SetCommandInfoHook(void* self, void* /*edx*/, const void* info)
+        {
+            int what = 0;
+            if (HasMruVtable(self) && ReadCmdInfoWhat(info, what) && RefuseForMru(self, what, "SetCommand(AiCmdInfo)"))
+                return;
+            g_OrigSetCommandInfo(self, info);
+        }
+
+        // GameObject::SetCommand(AiCommand what), thiscall ret 4
+        // (FUN_004dbce0: priority, who and path cleared, what at +0xCC).
+        // Also the path of the MRU's own Deploy Stop (SafeSetCommand), which
+        // passes.
+        void __fastcall SetCommandWhatHook(void* self, void* /*edx*/, int what)
+        {
+            if (HasMruVtable(self) && RefuseForMru(self, what, "SetCommand(what)"))
+                return;
+            g_OrigSetCommandWhat(self, what);
+        }
+
+        // Closest-enemy query (craft, float* range), cdecl; null = none.
+        void* __cdecl EnemyWithinHook(void* craft, float* range)
+        {
+            if (IsNonCombatMru(craft))
+            {
+                if (BudgetLeft(g_EnemyQueryLogBudget))
+                {
+                    LogShimA(LogLevel::Info, kComponent,
+                        "obj=%p closest-enemy query answered none: mru picks no targets", craft);
+                }
+                return nullptr;
+            }
+            return g_OrigEnemyWithin(craft, range);
+        }
+
+        bool ReadAiProcess(const void* object, uintptr_t& process, uintptr_t& vtable)
+        {
+            process = 0;
+            vtable = 0;
+            __try
+            {
+                process = *reinterpret_cast<const uintptr_t*>(static_cast<const uint8_t*>(object) + kObjAiProcess);
+                if (process)
+                    vtable = *reinterpret_cast<const uintptr_t*>(process);
+                return process != 0 && vtable != 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // Reads the field into `before`; writes 0 when it was not 0.
+        bool ClearIndependence(uintptr_t process, int& before)
+        {
+            __try
+            {
+                auto* field = reinterpret_cast<int*>(process + kProcessIndependence);
+                before = *field;
+                if (before != 0)
+                    *field = 0;
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // UnitProcess.saveState (1.5 PDB fields.tsv: 32, Redux +4 = 0x24).
+        bool ReadSaveState(uintptr_t process, int& saveState)
+        {
+            __try
+            {
+                saveState = *reinterpret_cast<const int*>(process + kProcessSaveState);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // From MruTick (slot 15, gameplay gated), every frame: a script's
+        // SetIndependence(h, 1) or a fresh process is undone within a frame.
+        void EnforceNoIndependence(void* object, MruObjectState& state)
+        {
+            uintptr_t process = 0;
+            uintptr_t vtable = 0;
+            if (!ReadAiProcess(object, process, vtable))
+                return;
+            // Only a UnitProcess has independence at +0x18; a piloted MRU
+            // runs a UserProcess, whose +0x18 is something else (1.5 PDB
+            // fields.tsv: UserProcess.nav at 20).
+            if (!Hooks::VtableDerivesFrom(vtable, kUnitProcessType))
+            {
+                if (!state.processSkipLogged)
+                {
+                    state.processSkipLogged = true;
+                    LogShimA(LogLevel::Info, kComponent,
+                        "obj=%p AI process %p is not a UnitProcess (piloted?); independence left alone",
+                        object, reinterpret_cast<void*>(process));
+                }
+                return;
+            }
+            state.processSkipLogged = false;
+            int before = 0;
+            if (!ClearIndependence(process, before) || before == 0)
+                return;
+            if (BudgetLeft(g_IndependenceLogBudget))
+            {
+                LogShimA(LogLevel::Info, kComponent,
+                    "obj=%p independence %d -> 0: mru picks no targets", object, before);
+            }
+            // S1: an attack sub-state entered before the clamp (FUN_00583520.c
+            // lines 160-178 save state/who into +0x24/+0x28) is not reverted
+            // here. The stock revert (lines 179-189) runs only inside
+            // DoSubTask, which now returns early on independence 0 (lines
+            // 29-31), and its return 1 drives the transition in the caller;
+            // writing nextState from outside is not verified safe. Log it.
+            int saveState = 0;
+            if (!state.retaliationLogged && ReadSaveState(process, saveState) && saveState != 0)
+            {
+                state.retaliationLogged = true;
+                LogShimA(LogLevel::Info, kComponent,
+                    "obj=%p retaliation in progress at clamp (saveState=%d); attack sub-state left to finish",
+                    object, saveState);
+            }
+        }
+
+        bool SafeClearAttackSlot(void* self)
+        {
+            __try
+            {
+                g_SetMode(static_cast<uint8_t*>(self) + kObjModeList, Policy::kSlotAttack, 0, 0);
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // From MruUpdateModeListHook after the MRU entries: no Attack entry.
+        void ClearAttackSlot(void* self)
+        {
+            if (SafeClearAttackSlot(self) && !g_AttackSlotLogged)
+            {
+                g_AttackSlotLogged = true;
+                LogShimA(LogLevel::Info, kComponent,
+                    "menu: obj=%p slot %d Attack removed (mru takes no attack orders)", self, Policy::kSlotAttack);
+            }
+        }
+
+        // The order and query gates. Each row is verified before its detour
+        // goes in (ResolveEngineAddress then keeps it bound, so the features
+        // that call these functions still bind after the JMP). A detour that
+        // does not install leaves that path stock and says so.
+        void InstallNonCombatGates()
+        {
+            uint32_t setCommandObj = 0, setCommandInfo = 0, setCommandWhat = 0, enemyWithin = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "GameObjectSetCommandObj", &setCommandObj },
+                { "GameObjectSetCommandInfo", &setCommandInfo },
+                { "GameObjectSetCommand", &setCommandWhat },
+                { "AiFireBlockHelperGetEnemyWithin", &enemyWithin },
+            };
+            if (!HookEngine::BindEngineRows("MRU non-combat", rows))
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "non-combat order gates off: an engine row did not bind (attack orders reach the mru)");
+                return;
+            }
+            const bool obj = InstallInlineDetour32(g_SetCommandObjDetour, setCommandObj,
+                reinterpret_cast<void*>(&SetCommandObjHook), sizeof(kSetCommandObjPrologue),
+                kSetCommandObjPrologue, sizeof(kSetCommandObjPrologue),
+                reinterpret_cast<void* volatile*>(&g_OrigSetCommandObj));
+            const bool info = InstallInlineDetour32(g_SetCommandInfoDetour, setCommandInfo,
+                reinterpret_cast<void*>(&SetCommandInfoHook), sizeof(kSetCommandInfoPrologue),
+                kSetCommandInfoPrologue, sizeof(kSetCommandInfoPrologue),
+                reinterpret_cast<void* volatile*>(&g_OrigSetCommandInfo));
+            const bool what = InstallInlineDetour32(g_SetCommandWhatDetour, setCommandWhat,
+                reinterpret_cast<void*>(&SetCommandWhatHook), sizeof(kSetCommandWhatPrologue),
+                kSetCommandWhatPrologue, sizeof(kSetCommandWhatPrologue),
+                reinterpret_cast<void* volatile*>(&g_OrigSetCommandWhat));
+            const bool enemy = InstallInlineDetour32(g_EnemyWithinDetour, enemyWithin,
+                reinterpret_cast<void*>(&EnemyWithinHook), sizeof(kEnemyWithinPrologue),
+                kEnemyWithinPrologue, sizeof(kEnemyWithinPrologue),
+                reinterpret_cast<void* volatile*>(&g_OrigEnemyWithin));
+            LogShimA((obj && info && what && enemy) ? LogLevel::Info : LogLevel::Warn, kComponent,
+                "non-combat gates: SetCommand(what, target) 0x%08X %s, SetCommand(AiCmdInfo) 0x%08X %s, "
+                "SetCommand(what) 0x%08X %s, closest-enemy query 0x%08X %s; "
+                "attack and hunt refused, menu slot 3 cleared when it holds Attack, independence held at 0",
+                setCommandObj, obj ? "detoured" : "NOT installed (stock)",
+                setCommandInfo, info ? "detoured" : "NOT installed (stock)",
+                setCommandWhat, what ? "detoured" : "NOT installed (stock)",
+                enemyWithin, enemy ? "detoured" : "NOT installed (stock)");
         }
 
         // ---- install ---------------------------------------------------------
@@ -1471,6 +1830,8 @@ namespace BZROpenShim
         g_HoverVtable = hoverVtable;
         g_GameplayOn = BindGameplay();
         g_Installed = true;
+        if (g_GameplayOn)
+            InstallNonCombatGates();
         LogShimA(LogLevel::Info, kComponent,
             "installed classLabel=mru (HoverCraftClass alias; vtable copy slots %u UpdateModeList, %u Simulate, "
             "%u destructor; kill switch %s); gameplay %s",

@@ -3300,13 +3300,19 @@
       "name": "GameObjectSetCommandObj",
       "address": "0x004DBD60",
       "expected": "55 8B EC 6A FF 68 BC 77 84 00 64 A1 00 00 00 00",
-      "identity": "GameObject::SetCommand(AiCommand what, GameObject* who), thiscall ret 8 (FUN_004dbd60): the stock per-unit order the Defend target pick uses (called from ControlPanel::BroadcastCommand 0x004A7050). RtsSmartCommandMenu calls it for each unit it keeps. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+      "identity": "GameObject::SetCommand(AiCommand what, GameObject* who), thiscall ret 8 (FUN_004dbd60): the stock per-unit order the Defend target pick uses (called from ControlPanel::BroadcastCommand 0x004A7050). RtsSmartCommandMenu calls it for each unit it keeps. MRU non-combat (mru_class.cpp) binds this row, then inline-detours the entry (5-byte steal: push ebp; mov ebp,esp; push -1) to drop CMD_ATTACK (4) for an MRU object; everything else passes to the trampoline. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+    },
+    {
+      "name": "GameObjectSetCommandInfo",
+      "address": "0x004DBAF0",
+      "expected": "55 8B EC 51 56 57 89 4D FC 8B 45 FC 83 B8 D4 00",
+      "identity": "GameObject::SetCommand(const AiCmdInfo*), thiscall ret 4 (FUN_004dbaf0): releases the old path at +0xD4 (FUN_00460600), then copies the 8-dword command to +0xC8 (priority +0xC8, what +0xCC, who +0xD0). The native Attack(me, him, priority) 0x005CB820 (Lua \"Attack\" binding 0x00504440, table row 0x008720C8) builds what = 4 and calls it; 27 callers (Ghidra xrefs 2026-11-20). MRU non-combat (mru_class.cpp) inline-detours the entry (5-byte steal: push ebp; mov ebp,esp; push ecx; push esi) to drop CMD_ATTACK for an MRU object. Exact GOG Redux 2.2.301, bytes read through the Ghidra bridge 2026-11-20."
     },
     {
       "name": "GameObjectSetCommand",
       "address": "0x004DBCE0",
       "expected": "55 8B EC 51 89 4D FC 8B 45 FC 83 B8 D4 00 00 00",
-      "identity": "GameObject::SetCommand(AiCommand what), thiscall ret 4 (0x004DBD52; FUN_004dbce0): priority +0xC8 = 0, what +0xCC, who +0xD0 = 0, as Lua Defend(h, 0). RtsHold gives CMD_DEFEND (0xF) this way before the native hold. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
+      "identity": "GameObject::SetCommand(AiCommand what), thiscall ret 4 (0x004DBD52; FUN_004dbce0): priority +0xC8 = 0, what +0xCC, who +0xD0 = 0, as Lua Defend(h, 0). RtsHold gives CMD_DEFEND (0xF) this way before the native hold. The MRU class inline-detours it (7-byte steal on instruction boundaries: push ebp; mov ebp,esp; push ecx; mov [ebp-4],ecx) and refuses CMD_ATTACK (4) and CMD_HUNT (20) for a non-combat MRU; other callers and orders pass to the trampoline. Exact GOG Redux 2.2.301 (SHA256 8D71F56C...3377413), bytes read from the shipped image 2026-11-16."
     },
     {
       "name": "GameObjectSetTarget",
@@ -6952,7 +6958,7 @@
       "name": "AiFireBlockHelperGetEnemyWithin",
       "address": "0x00463240",
       "expected": "55 8B EC 81 EC 00 01 00 00 A1 00 70 8E 00 33 C5",
-      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) cdecl closest-enemy search (craft, float* range) returning the enemy or null, called at 0x004D3EA7 in the FollowTask fire block (add esp,8)."
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) cdecl closest-enemy search (craft, float* range) returning the enemy or null, called at 0x004D3EA7 in the FollowTask fire block (add esp,8). MRU non-combat (mru_class.cpp) binds this row, then inline-detours the entry (9-byte steal: push ebp; mov ebp,esp; sub esp,100h) to answer null for an MRU craft; every other craft passes to the trampoline. Other callers (Ghidra xrefs): GunTower DoSubTask 0x004E8780, OffensiveProcess 0x00583500, 0x005BFBA0, TurretTank DoSubTask 0x005F6FF0."
     },
     {
       "name": "AiFireBlockHelperCanFire",

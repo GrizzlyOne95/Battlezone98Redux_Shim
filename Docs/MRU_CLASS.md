@@ -10,7 +10,10 @@ covers plan steps 1-6:
 4. Deploy / Undeploy with a native deployed flag; a deployed MRU holds
    position;
 5. a per-MRU radius service tick (repair and reload), single player only;
-6. Drop Repair / Drop Ammo wired to step 3.
+6. Drop Repair / Drop Ammo wired to step 3;
+
+plus the non-combat rule (user, 2026-11-20; section "Non-combat" below):
+no Attack entry, no attack orders, no target picks of its own.
 
 Step 7 (converting Resurgence's `avmru`/`svmru`) is out of scope: they stay
 unchanged (research section 7.2). Test ODFs are below.
@@ -109,8 +112,34 @@ reused id never reaches the stock `DispatchMode`:
   `Dispenser::Simulate` builds); otherwise the pick is logged with the
   reason and does nothing.
 
-Stock entries (Follow, Go To Nav, Attack, ...) are logged and dispatched as
-stock.
+Stock entries (Follow, Go To Nav, ...) are logged and dispatched as stock.
+Slot 3 is cleared when it holds Attack (mode 0xE); see "Non-combat".
+
+## Non-combat
+
+**Decision (user, 2026-11-20): the MRU is pure utility, like the Tug or
+Scavenger.** It keeps the hover base, the Utility slots 25-34, move and
+follow orders, the pod drops and Deploy (commands only). It has no Attack
+entry, takes no Attack (CMD 4) or Hunt (CMD 20) order (user, 2026-11-20:
+the MRU does not need Hunt), and picks no targets on its own, whatever its
+`aiName`/`aiName2` (the test ODF uses RocketTankFriend/Enemy) or weapons say.
+Same gate as the rest of the gameplay: an MRU vtable object, `MruGameplay =
+1`, single player. Without it the MRU is a plain hover and can attack.
+
+| Path | Stock | What the MRU does |
+|---|---|---|
+| Menu | `HoverCraft::UpdateModeList` puts Attack (mode 0xE) in slot 3, enabled when the weapon field +0x1A0 is set (`FUN_004ebd60.c` line 19) | After the MRU entries, and only when the mode list read shows slot 3 = 0xE, `ModeList::SetMode(3, 0, 0)`, as stock `TurretTank::UpdateModeList` does (`FUN_005f5a50.c` line 19). In a mixed selection the stock Intersect then drops Attack from the shared menu, as it does for a Tug. |
+| Player orders | `ControlPanel::BroadcastCommand(what, target)` calls `GameObject::SetCommand(what, target)` 0x004DBD60 on each selected, commandable unit (`FUN_004a7050.c` lines 9-13): right-click, the Attack submenu, OverView | An entry detour on 0x004DBD60 returns at once for CMD_ATTACK (4) or CMD_HUNT (20) on an MRU, before anything is written, so its pending order stays as it was. The other units in the group get the order as stock. |
+| Script and AI orders | `GameObject::SetCommand(const AiCmdInfo*)` 0x004DBAF0 copies the 8-dword command to +0xC8 (`FUN_004dbaf0.c`); the native `Attack(me, him, priority)` builds what = 4 and calls it (`FUN_005cb820.c`; Lua binding 0x00504440) | An entry detour on 0x004DBAF0 drops what = 4 and 20 the same way. |
+| Bare orders | `GameObject::SetCommand(AiCommand what)` 0x004DBCE0 (`FUN_004dbce0`, 17 callers) releases +0xD4 and writes priority 0, what, who 0 | An entry detour on 0x004DBCE0 (row `GameObjectSetCommand`, 7-byte steal on instruction boundaries) drops what = 4 and 20 the same way. The MRU's own Deploy Stop (what = 2) passes. |
+| Own targets | `OffensiveProcess::DoSubTask` returns 0 when the process's independence (+0x18) is 0 (`FUN_00583520.c` lines 29-31); otherwise it retaliates or picks a target. Stock `SetIndependence` writes `process+0x18` with `process = [obj+0xFC]` (`FUN_005cb620.c`) | Every Simulate, the MRU holds its process's independence at 0, but only when the process derives from `UnitProcess` (RTTI). A piloted MRU's `UserProcess` has something else at +0x18 (1.5 PDB `fields.tsv`: `UserProcess.nav` at 20). An attack sub-state already entered at the clamp is left to finish and logged (see Limits). |
+| Follow cover fire | `FollowTask` fires at the closest enemy (`FUN_00463240`) while following, for a reference weapon that is not a dispenser ('DISP'), and does not check independence (`FUN_004d3b80.c` lines 113-151) | An entry detour on 0x00463240 answers "no enemy" for an MRU craft. That also covers the OffensiveProcess caller 0x00583500. The test ODF's `grepa`/`gammo` are dispensers, so for it this path was closed anyway. |
+
+The cursor still reads Attack when an MRU alone is over an enemy: the
+cursor comes from the first selected unit's `GetCommand` (slot 13,
+`Craft::GetCommand` 0x004AE110 returns 4 when +0x1A0 is set). The click is
+then refused by the 0x004DBD60 gate and logged. The slot is not wrapped, so
+that a group with an MRU first can still attack with its combat units.
 
 ## Gameplay
 
@@ -214,7 +243,12 @@ deployed (no AI rule deploys it yet) or with `serviceDeployed = 0`.
   `GameObjectSetCommand`, `RtsPowerIsAlly` (guard bytes checked), the
   resolves `GameObjectClass::Build` and `GameObject::objectList`, and
   `GameObject::GetHandle`; a miss logs `gameplay off: ...` and leaves the
-  plain hover menu.
+  plain hover menu. With gameplay on, the non-combat gates bind
+  `GameObjectSetCommandObj`, `GameObjectSetCommandInfo`,
+  `GameObjectSetCommand` and `AiFireBlockHelperGetEnemyWithin` (guard bytes
+  checked, which also keeps them bound for the other features that call
+  them), then inline-detour all four entries (stolen prologues checked: 5,
+  5, 7 and 9 bytes, whole instructions, no relative operands). A miss leaves that path stock and logs a warning.
 - **Fail closed.** Every engine read, write and call is under SEH, in small
   helpers with no C++ objects inside `__try`. A fault in the slot 7-9 fill
   leaves the stock fill. A class that cannot be stamped stays a plain hover.
@@ -257,6 +291,23 @@ Change-only unless marked "budgeted" (256 lines per process per kind):
   resumes` (per object, change-only).
 - `obj=.. service tick: N unit(s) in range, healed=.. reloaded=..
   drained=.. gauge=..` (budgeted, only when something was served).
+- `non-combat gates: SetCommand(what, target) 0x.. detoured|NOT installed
+  (stock), SetCommand(AiCmdInfo) ..., SetCommand(what) ..., closest-enemy
+  query ...` (once at install; a warning when any is missing), `non-combat
+  order gates off: an engine row did not bind` (warning).
+- `menu: obj=.. slot 3 Attack removed (mru takes no attack orders)` (once).
+- `obj=.. order what=4|20 (Attack|Hunt) via SetCommand(what, target)|
+  SetCommand(AiCmdInfo)|SetCommand(what) refused: mru takes no attack or hunt
+  orders (pending order kept)` (change-only per object and order, plus
+  budgeted: a repeat of the same refused order is not logged again until
+  the object takes another order).
+- `obj=.. retaliation in progress at clamp (saveState=N); attack sub-state
+  left to finish` (once per object).
+- `obj=.. closest-enemy query answered none: mru picks no targets`
+  (budgeted).
+- `obj=.. independence N -> 0: mru picks no targets` (budgeted, only when
+  it was not 0), `obj=.. AI process .. is not a UnitProcess (piloted?);
+  independence left alone` (per object, change-only).
 
 ## AI deploy
 
@@ -298,6 +349,22 @@ not Offense, and that Ctrl+Offense does not select it.
   hover's Simulate.
 - Service targets are helicopters and vehicles only: not pilots, not
   structures, not powerups. At most 32 per tick, in object-list order.
+- Non-combat: the Attack cursor still shows for an MRU alone over an enemy
+  (the click does nothing). Only Attack (4) and Hunt (20) are refused; an
+  order written to +0xCC by a path other than the three SetCommand entries
+  is not refused (UNVERIFIED that none exists). If the MRU had already
+  entered an attack sub-state (retaliation, `FUN_00583520.c` lines 160-178
+  save the state into +0x24/+0x28) before its independence was clamped,
+  that sub-state is not reverted: the stock revert (lines 179-189) only runs
+  inside DoSubTask, which returns early once independence is 0 (lines
+  29-31), and its `return 1` drives the transition in the caller, so a
+  write of nextState from outside is not verified safe. It is logged once
+  per object (`retaliation in progress at clamp`); the clamp runs from the
+  MRU's first Simulate, so this is expected only after a script's
+  `SetIndependence(h, 1)` (UNVERIFIED). A piloted MRU is the player's own craft and fires as the
+  player does. UNVERIFIED that the `Wingman`/`RocketTank` processes have no
+  other target path besides DoSubTask and FollowTask; the live checklist
+  checks the result.
 - Health and ammo of the target are clamped by the engine; a full target is
   scanned but costs nothing.
 - The gauge is the MRU's own ammo. An MRU with `maxAmmo = 0` and a
@@ -487,8 +554,30 @@ Steps:
     logged. Same with `OPENSHIM_DISABLE_MRU_GAMEPLAY=1`.
 17. With `OPENSHIM_DISABLE_MRU_CLASS=1`: `classLabel=mru off`, and
     `svmruprb` behaves as an unknown classLabel does in stock Redux.
+18. Non-combat, menu: at install the log shows `non-combat gates: ...` with
+    all four `detoured`. Select the MRU alone: no Attack entry (slot 3 is
+    empty); `menu: obj=.. slot 3 Attack removed` once.
+19. Non-combat, group attack: select the MRU with two tanks, right-click an
+    enemy. The tanks attack; the MRU keeps its previous order (Follow or
+    stopped) and does not fire; `order what=4 via SetCommand(what, target)
+    refused`. Repeat with the MRU selected first, then last.
+20. Non-combat, no auto-engage: park the MRU (stopped, not deployed) with an
+    enemy driving within 100 m and shooting it. The MRU neither turns to
+    nor fires at it; `independence 1 -> 0` logged once after spawn. Then
+    order it to Follow a friendly tank that fights: the MRU follows and does
+    not fire.
+21. Non-combat, script: Lua `Attack(mru, enemy)` logs `via
+    SetCommand(AiCmdInfo) refused`, and the MRU does not go after the
+    enemy. An enemy-team MRU (RocketTankEnemy) does not attack the player.
+22. Non-combat, still working: move (Go To), Follow, Drop Repair, Drop Ammo
+    and Deploy/Undeploy all still work as in steps 4-8. A stock tank's
+    Attack and auto-engage are unchanged.
+23. Non-combat, Hunt order is ignored: Lua `Hunt(mru)` logs `what=20 (Hunt)
+    via ... refused` once, and the MRU keeps its previous order (stopped or
+    Follow) and does not go looking for enemies. A stock tank's `Hunt` is
+    unchanged.
 
-UNVERIFIED until this runs: the entries draw and click without a submenu,
+UNVERIFIED until this runs: the non-combat gates (steps 18-23), the entries draw and click without a submenu,
 the labels, a consumed pick leaves other orders alone, the pod spawn and its
 pickup, the deploy hold under the hover AI process, the service amounts, the
 gauge drain, save/load, and that loading an `mru` ODF without the shim fails

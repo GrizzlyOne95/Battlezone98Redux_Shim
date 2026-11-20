@@ -295,6 +295,35 @@ namespace
     }
 }
 
+namespace
+{
+    void TestNonCombatRules()
+    {
+        Check(RefusesOrder(kWhatAttack), "Attack is refused");
+        Check(RefusesOrder(kWhatHunt), "Hunt is refused");
+        Check(kWhatAttack == 4 && kWhatHunt == 20, "CMD_ATTACK is AiCommand 4, CMD_HUNT 20");
+        int refused = 0;
+        for (int what = -1; what <= 64; ++what)
+            refused += RefusesOrder(what) ? 1 : 0;
+        Check(refused == 2, "only Attack and Hunt are refused: move, follow, stop, defend and the rest pass");
+        Check(!RefusesOrder(15), "Defend passes");
+
+        int32_t modes[kModeSlots] = { 1, 2, 10, kModeAttack, 7, 5, 6, 0, 0, 0, 8 };
+        Check(ClearsAttackSlot(modes), "stock hover slot 3 Attack is cleared");
+        modes[kSlotAttack] = 0;
+        Check(!ClearsAttackSlot(modes), "an empty slot 3 is left alone");
+        modes[kSlotAttack] = 4;
+        Check(!ClearsAttackSlot(modes), "another entry in slot 3 is left alone");
+        Check(!RefusesOrder(kWhatNone) && !RefusesOrder(kWhatStop) && !RefusesOrder(3) && !RefusesOrder(5),
+              "None, Stop, Go and Follow pass");
+        Check(kSlotAttack == 3, "the hover menu's Attack entry is slot 3");
+        bool usedByMru = false;
+        for (const MenuEntry& e : kMenuEntries)
+            usedByMru = usedByMru || e.slot == kSlotAttack;
+        Check(!usedByMru, "no MRU entry lives in the cleared Attack slot");
+    }
+}
+
 int main()
 {
     TestDefaultsMatchTheResearchTable();
@@ -309,6 +338,7 @@ int main()
     TestServiceRules();
     TestDeployRules();
     TestTargetRules();
+    TestNonCombatRules();
     if (OpenShimTest::ExitCode() == 0)
         std::printf("mru_class_policy_tests: all checks passed\n");
     return OpenShimTest::ExitCode();
