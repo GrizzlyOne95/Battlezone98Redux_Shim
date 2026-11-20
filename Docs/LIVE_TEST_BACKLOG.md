@@ -25,6 +25,7 @@ Updated 2026-11-19.
 | MRU alias + menu probe (Nightingale steps 1-2) | #915, `agent/mru-menu-probe` (base #912) | `Docs/MRU_CLASS.md` live checklist | `svmruprb` / `svmruprn` test ODFs. **Needs an unlocked desktop** | Done 2026-11-19: install, class build, menu-probe decision log, absent-section copy, kill switch. Open: menu visuals, picks 7/8/9 consumed with order unchanged, stock Follow/Go To, other units' menus, mixed selection |
 | Daywrecker AI defence v1 | #917, `agent/daywrecker-ai-defence-v1` (base #913) | `Docs/DAYWRECKER_AI_DEFENCE_RESEARCH.md` section 4 (9 rows) | `DaywreckerDefence=1`, SP; Armory DW drops near AI units; needs a Comet (`radarmsl`) source for row 7 | Not started. Open: all 9 rows, incl. kill rate under 30% deciding the gravity lead |
 | MRU gameplay (Nightingale steps 3-6) | #918, `agent/mru-full` (base #915) | `Docs/MRU_CLASS.md` live checklist (17 steps) | `MruGameplay=1`, SP; `repamine`/`ammomine` pod ODFs loadable; damaged and low-ammo friendlies near a deployed MRU | Not started. Open: pod build inside Simulate, pod pickup, deploy hold, gauge drain, ammoPer*=0, AI re-order packing |
+| Unit loadouts M1 | #919, `agent/unit-loadouts` | `Docs/UNIT_LOADOUTS.md` live checklist (12 items) | `UnitLoadouts=1` and `[ProducerBuildMenus] Enabled=1`, SP; Armory built; Recycler or Factory selected | Not started. Open: Alt+pick reaches PRODMENU, greyed entries clickable, surcharge display/charge/refund, swap at FinishBuild, unfitted credit, reset on mission change without EXU |
 
 ## Merge order once tests pass
 
