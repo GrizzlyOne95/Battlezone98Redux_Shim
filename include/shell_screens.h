@@ -30,6 +30,8 @@ namespace BZROpenShim::ShellScreens
     inline constexpr uint32_t kLanScreenId = kCustomScreenIdBase + 5;
     // Banned Players list with per-entry Unban (bans_screen.cpp).
     inline constexpr uint32_t kBansScreenId = kCustomScreenIdBase + 6;
+    // Single-player Database: unit entries and campaign briefings (database_screen.cpp).
+    inline constexpr uint32_t kDatabaseScreenId = kCustomScreenIdBase + 7;
     inline constexpr uint32_t kOptionsCategoryScreenIdBase = kCustomScreenIdBase + 0x10;
     // Category screens are kOptionsCategoryScreenIdBase + 0 .. + count - 1.
     inline constexpr uint32_t kOptionsCategoryScreenIdCount = 32;

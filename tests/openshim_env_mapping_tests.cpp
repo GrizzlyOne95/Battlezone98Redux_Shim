@@ -117,6 +117,11 @@ namespace
         Check(Mapped(ini, "BZR_DISABLE_ORDNANCE_ENTITY_LEAK_FIX") == "1", "ordnance leak BZR_ alias reads the same key");
         ini.Set("Fixes", "OrdnanceEntityLeak", "1");
         Check(Mapped(ini, "OPENSHIM_DISABLE_ORDNANCE_ENTITY_LEAK_FIX") == "0", "ordnance leak fix on reads as DISABLE=0");
+        ini.Set("Features", "Database", "0");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_DATABASE") == "1", "Database off reads as DISABLE=1");
+        Check(Mapped(ini, "BZR_DISABLE_DATABASE") == "1", "Database BZR_ alias reads the same key");
+        ini.Set("Features", "Database", "1");
+        Check(Mapped(ini, "OPENSHIM_DISABLE_DATABASE") == "0", "Database on reads as DISABLE=0");
 
         // ENABLE_ and DISABLE_ spellings of one key always disagree.
         ini.Set("Network", "LobbyBanButton", "yes");

@@ -313,6 +313,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Features", "BriefingPages", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_DATABASE") ||
+            Equals(name, "BZR_DISABLE_DATABASE"))
+        {
+            return TryReadMappedBool(ini, "Features", "Database", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_DG_PIECE_REUSE") ||
             Equals(name, "BZR_DISABLE_DG_PIECE_REUSE"))
         {

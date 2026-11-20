@@ -1084,6 +1084,7 @@ namespace BZROpenShim
             {"InstallBriefingPageStrideFixIfPossible", &InstallBriefingPageStrideFixIfPossible},
             {"InstallBriefingPagesIfPossible", &InstallBriefingPagesIfPossible},
             {"InstallLobbyBriefingIfPossible", &InstallLobbyBriefingIfPossible},
+            {"InstallDatabaseScreenIfPossible", &InstallDatabaseScreenIfPossible},
             {"InstallMultiRenderCountClampIfPossible", &InstallMultiRenderCountClampIfPossible},
             {"InstallThumbnailBmpGuardIfPossible", &InstallThumbnailBmpGuardIfPossible},
             {"InstallSplinterUndeadFixIfPossible", &InstallSplinterUndeadFixIfPossible},
@@ -1745,6 +1746,7 @@ namespace BZROpenShim
 		InstallBriefingPageStrideFixIfPossible();
 		InstallBriefingPagesIfPossible();
 		InstallLobbyBriefingIfPossible();
+		InstallDatabaseScreenIfPossible();
 		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();

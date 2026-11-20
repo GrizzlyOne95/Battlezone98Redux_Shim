@@ -177,6 +177,7 @@ openshim_add_test(ordnance_entity_leak_policy_tests STD 17 SOURCES ordnance_enti
 openshim_add_test(live_object_gate_tests STD 14 SOURCES live_object_gate_tests.cpp)
 openshim_add_test(briefing_pages_policy_tests STD 17 SOURCES briefing_pages_policy_tests.cpp)
 openshim_add_test(lobby_briefing_policy_tests STD 17 SOURCES lobby_briefing_policy_tests.cpp)
+openshim_add_test(database_policy_tests STD 17 SOURCES database_policy_tests.cpp)
 openshim_add_test(lan_discovery_tests STD 17 SOURCES lan_discovery_tests.cpp)
 openshim_add_test(lan_no_auth_policy_tests STD 17 SOURCES lan_no_auth_policy_tests.cpp)
 openshim_add_test(embedded_lan_model_tests STD 17 SOURCES embedded_lan_model_tests.cpp ../src/network/embedded_lan_model.cpp)

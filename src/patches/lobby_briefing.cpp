@@ -24,6 +24,7 @@
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "bzr_string.h"
+#include "des_reader.h"
 #include "hook_engine.h"
 #include "lobby_briefing_policy.h"
 #include "openshim_l10n_text.h"
@@ -75,7 +76,6 @@ namespace BZROpenShim
             constexpr size_t kScrollDownArrow = 0x2954;
             constexpr size_t kScrollPosition = 0x2958;
 
-            constexpr size_t kDesBufferSize = 0x1F401; // loader caps at 0x1F400 + NUL
             constexpr size_t kMapNameMax = 260;
             constexpr int kTextColour = 3;             // green, the stock briefing text colour
             constexpr uint32_t kVkEscape = 0x1B;
@@ -114,8 +114,6 @@ namespace BZROpenShim
             using FnSetByte = void(__thiscall*)(void* widget, uint8_t value);
             using FnLobbyRecord = uint8_t*(__thiscall*)(void* netLobby);
             using FnSelectedEntry = const uint8_t*(__thiscall*)(void* component);
-            using FnDesLoad = uintptr_t(__cdecl*)(const char* name, char* buffer);
-            using FnResourceSize = size_t(__cdecl*)(const char* name);
             using FnGameNew = void*(__cdecl*)(size_t size);
             using FnDeletingDtor = void*(__thiscall*)(void* self, unsigned flags);
             using FnUpdate = void(__thiscall*)(void* self);
@@ -127,11 +125,7 @@ namespace BZROpenShim
             uint32_t g_KeyPressedAddr = 0, g_CharAddr = 0, g_KeyReleasedAddr = 0;
             uint32_t g_TextCtorAddr = 0, g_SetTextAddr = 0, g_ScrollUpAddr = 0, g_ScrollDownAddr = 0;
             uint32_t g_SetZAddr = 0, g_SetEnabledAddr = 0, g_RecordAddr = 0, g_SelectedEntryAddr = 0;
-            uint32_t g_DesLoadAddr = 0;
-            FnResourceSize g_ResourceSize = nullptr;
             FnGameNew g_GameNew = nullptr;
-            void*(__cdecl* g_OgreGroupManager)() = nullptr;
-            bool(__thiscall* g_OgreResourceExists)(void*, const std::string&) = nullptr;
 
             FnDeletingDtor g_ViewDtor = nullptr;
             FnUpdate g_ViewUpdate = nullptr;
@@ -291,54 +285,20 @@ namespace BZROpenShim
 
             // ---- resources ----
 
+            // Page reads go through the shared reader (des_reader.cpp).
             bool ResourceExists(const std::string& name)
             {
-                return name.size() <= Pages::kMaxNameLength && g_ResourceSize(name.c_str()) > 0;
+                return DesReader::ResourceExists(name);
             }
 
-            void* OgreManagerSeh()
-            {
-                __try
-                {
-                    return g_OgreGroupManager();
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    return nullptr;
-                }
-            }
-
-            bool OgreExistsSeh(void* manager, const std::string& name, bool& exists)
-            {
-                __try
-                {
-                    exists = g_OgreResourceExists(manager, name);
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER)
-                {
-                    return false;
-                }
-                return true;
-            }
-
-            // Images load through Ogre's resource groups, so look them up there.
             bool ImageExists(const std::string& name)
             {
-                if (!g_OgreGroupManager || !g_OgreResourceExists)
-                    return false;
-                void* manager = OgreManagerSeh();
-                bool exists = false;
-                return manager && OgreExistsSeh(manager, name, exists) && exists;
+                return DesReader::ImageExists(name);
             }
 
             std::string LoadDes(const std::string& file)
             {
-                std::vector<char> buffer(kDesBufferSize, '\0');
-                std::vector<char> name(file.begin(), file.end());
-                name.push_back('\0');
-                reinterpret_cast<FnDesLoad>(static_cast<uintptr_t>(g_DesLoadAddr))(name.data(), buffer.data());
-                buffer.back() = '\0';
-                return Policy::ClipPageText(buffer.data());
+                return DesReader::LoadPage(file);
             }
 
             // ---- overlay state ----
@@ -880,7 +840,6 @@ namespace BZROpenShim
                 { "UiButtonSetEnabled", &g_SetEnabledAddr },
                 { "AnyNationLobbyRecord", &g_RecordAddr },
                 { "MapComponentSelectedEntry", &g_SelectedEntryAddr },
-                { "DescriptionFileLoad", &g_DesLoadAddr },
             };
             if (!HookEngine::BindEngineRows("Lobby briefing", rows))
                 return;
@@ -889,21 +848,15 @@ namespace BZROpenShim
                 Log(L"[LOBBYBRIEF] vtable RTTI mismatch; lobby briefing off\n");
                 return;
             }
-            g_ResourceSize = reinterpret_cast<FnResourceSize>(
-                static_cast<uintptr_t>(HookEngine::ResolveNamedAddress("Music::ResourceSize")));
             HMODULE crt = GetModuleHandleW(L"MSVCR120.dll");
             g_GameNew = crt ? reinterpret_cast<FnGameNew>(GetProcAddress(crt, "??2@YAPAXI@Z")) : nullptr;
-            if (!g_ResourceSize || !g_GameNew)
+            // The page reader binds DescriptionFileLoad, Music::ResourceSize
+            // and the Ogre image lookup (des_reader.cpp).
+            if (!DesReader::Bind() || !g_GameNew)
             {
-                Log(L"[LOBBYBRIEF] resource-size or game allocator unresolved; lobby briefing off\n");
+                Log(L"[LOBBYBRIEF] page reader or game allocator unresolved; lobby briefing off\n");
                 return;
             }
-            g_OgreGroupManager = ResolveOgreProc<decltype(g_OgreGroupManager)>(
-                "?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ");
-            g_OgreResourceExists = ResolveOgreProc<decltype(g_OgreResourceExists)>(
-                "?resourceExistsInAnyGroup@ResourceGroupManager@Ogre@@QAE_NABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@@Z");
-            if (!g_OgreGroupManager || !g_OgreResourceExists)
-                Log(L"[LOBBYBRIEF] Ogre resource lookup unavailable; page images off\n");
 
             // The overlay view's own vtable: cUI_View's with the dtor and the
             // per-frame update replaced.

@@ -688,6 +688,26 @@ openshim_ui:career_class_support~Support~Soutien~Support~Apoyo~Supporto~Ïîääåğæê
 openshim_ui:career_class_buildings~Buildings~Bâtiments~Gebäude~Edificaciones~Edifici~Çäàíèÿ~Construções
 openshim_ui:career_class_other~Other~Autres~Andere~Otros~Altro~Äğóãîå~Outros
 openshim_ui:career_title~CAREER~CARRIÈRE~KARRIERE~CARRERA~CARRIERA~ÊÀĞÜÅĞÀ~CARREIRA
+openshim_ui:database_prev~Prev~~~~~~
+openshim_ui:database_next~Next~~~~~~
+openshim_ui:database_page~Page %s~~~~~~
+openshim_ui:database_role~Role~~~~~~
+openshim_ui:database_model~Model~~~~~~
+openshim_ui:database_designations~Model numbers~~~~~~
+openshim_ui:database_scrap~Scrap cost~~~~~~
+openshim_ui:database_armor~Armor~~~~~~
+openshim_ui:database_ammo~Ammo~~~~~~
+openshim_ui:database_speed~Speed~~~~~~
+openshim_ui:database_speed_unit~m/s~~~~~~
+openshim_ui:database_weapons~Weapons~~~~~~
+openshim_ui:database_slot~Slot~~~~~~
+openshim_ui:database_no_weapons~none~~~~~~
+openshim_ui:database_odf~ODF~~~~~~
+openshim_ui:database_no_odf~ODF not found~~~~~~
+openshim_ui:database_notes~Notes~~~~~~
+openshim_ui:database_no_briefing~No briefing found (%s).~~~~~~
+openshim_ui:database_title~DATABASE~~~~~~
+openshim_ui:database_button~DATABASE~~~~~~
 openshim_ui:groupstrip_assign_hint~Ctrl+F1-F7: assign~Ctrl+F1-F7 : assigner~Strg+F1-F7: zuweisen~Ctrl+F1-F7: asignar~Ctrl+F1-F7: assegna~Ctrl+F1-F7: íàçíà÷èòü~Ctrl+F1-F7: atribuir
 openshim_ui:lan_err_redirect~A test redirect owns the server address.~Une redirection de test détient l'adresse du serveur.~Eine Testumleitung belegt die Serveradresse.~Una redirección de prueba controla la dirección del servidor.~Un reindirizzamento di test occupa l'indirizzo del server.~Àäğåñ ñåğâåğà çàíÿò òåñòîâûì ïåğåíàïğàâëåíèåì.~Um redirecionamento de teste controla o endereço do servidor.
 openshim_ui:lan_err_private_ip~Enter a private numeric LAN IPv4 address (optional :port).~Saisissez une adresse IPv4 LAN privée numérique (:port facultatif).~Gib eine numerische private LAN-IPv4-Adresse ein (optional :Port).~Introduce una dirección IPv4 LAN privada numérica (:puerto opcional).~Inserisci un indirizzo IPv4 LAN privato numerico (:porta facoltativa).~Ââåäèòå ÷èñëîâîé ÷àñòíûé LAN-àäğåñ IPv4 (ïîğò :port íåîáÿçàòåëåí).~Digite um endereço IPv4 LAN privado numérico (:porta opcional).
