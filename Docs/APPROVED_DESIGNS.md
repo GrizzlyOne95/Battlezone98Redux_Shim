@@ -99,7 +99,7 @@ The user's spec, modelled on BZ2's FactoryPanel:
   - Nothing inferred or invented.
   - Every lore line must cite the stock file it came from.
   - A unit with no stock text gets an empty lore field.
-  - Manuals (user, 2026-11-20): the BZ98 Redux manual and the 1998 Brady "Official Strategy Guide" are sources, labelled as such. Copyrighted text is paraphrased, never copied, and a paraphrase must not change any fact.
+  - Manuals (user, 2026-11-20): the BZ98 Redux manual and the 1998 Brady "Official Strategy Guide" are sources, labelled as such. Copyrighted text is paraphrased, never copied, and a paraphrase must not change any fact. The text ships in the game, so entries hold facts only: names, designations, stats, roles, and short factual statements. No retelling of the books' narrative passages (prologues, character letters, mission walkthroughs).
   - Conflicting names (user, 2026-11-20): show every variant, each with its citation. Example: the Badger is "M173 Badger" in `tran02.des:1` and `misn03.des:7`, but "T-4 Badger" (`campaigns.csv:57`) and "T-7 Badger" (`campaigns.csv:64,76`) in VO. See `Docs/DATABASE_TEXT_INVENTORY.md`.
   - Full model names come from the same sources. Example from the user: a training briefing names the `avturr` model (the "M173 Badger" turret).
   - **Base game only.** The bundled community packs (`addon\BzE Map Pack`, `addon\Legacy Instant Action`, other `addon\` folders) are not sources (user, 2026-11-19).
