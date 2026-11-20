@@ -757,9 +757,9 @@ namespace BZROpenShim
             return built;
         }
 
-        // Hook point for an AI deploy rule. No rule is built: the research
-        // only proposed "AI auto-deploy" and the user has not chosen one
-        // (Docs/MRU_CLASS.md "AI deploy"). A rule must leave player-team
+        // Hook point for an AI deploy rule. None by design: the user chose
+        // "commands only" (2026-11-19). MRUs deploy only when ordered
+        // (Docs/MRU_CLASS.md "AI deploy"). A future rule must leave player-team
         // MRUs alone (the user's team is [0x00917B00], FUN_004ab380.c lines
         // 326-328) and must hold its own order still: the deploy hold packs
         // an MRU whose pending or current order moves.

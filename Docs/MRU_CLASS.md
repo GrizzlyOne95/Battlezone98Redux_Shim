@@ -260,12 +260,13 @@ Change-only unless marked "budgeted" (256 lines per process per kind):
 
 ## AI deploy
 
-No rule is built. The research only proposed "AI auto-deploy"
-(section 4a(c)) and no rule was chosen. The hook point is `AiDeployHook`
-in mru_class.cpp: called every Simulate with the object, its state and its
-config, it can ask for Deploy or Pack. A rule must skip player-team MRUs
-and must keep its own unit's orders still, or the deploy hold packs it at
-once. Candidates are listed in the build report.
+**Decision (user, 2026-11-19): commands only.** An MRU never deploys on its
+own. It deploys when ordered to (by the player's Deploy pick), and otherwise
+it sits and responds to orders such as move and the pod drops. So there is
+no autonomous AI deploy rule. `AiDeployHook` in mru_class.cpp always returns
+"no change". It stays as the single place where a rule could go later; a
+rule there would have to skip player-team MRUs and keep its own unit's
+orders still, or the deploy hold packs it at once.
 
 ## Limits
 
