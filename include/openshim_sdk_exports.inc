@@ -127,6 +127,9 @@ OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetAiHold, OpenShimImpl_SetAiHo
 // Mission-scoped network-game (co-op) opt-in for producer rally points (Docs/PRODUCER_RALLY_POINTS.md).
 OPENSHIM_SDK_EXPORT_APPEND(BOOL, WINAPI, OpenShimSetRallyPointsAllowedInNetwork, OpenShimImpl_SetRallyPointsAllowedInNetwork, (BOOL allowed), (allowed), FALSE)
 
+// Single-player player paint (Docs/SP_PLAYER_PAINT.md): a static, never-freed key string; "stock" in network games.
+OPENSHIM_SDK_EXPORT_APPEND(const char*, WINAPI, OpenShimGetPlayerPaint, OpenShimImpl_GetPlayerPaint, (void), (), "stock")
+
 #ifdef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED
 #undef OPENSHIM_SDK_EXPORT_APPEND
 #undef OPENSHIM_SDK_EXPORT_APPEND_WAS_DEFAULTED

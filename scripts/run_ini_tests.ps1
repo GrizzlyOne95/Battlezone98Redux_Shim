@@ -534,6 +534,7 @@ $stockValueChecks = @{
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightReach" = "0"
     "SinglePlayer/HeadlightBrightness" = "1.00"
+    "SinglePlayer/PlayerPaint" = "stock"
 }
 foreach ($entry in $stockValueChecks.GetEnumerator()) {
     if (-not $playerValues.ContainsKey($entry.Key) -or

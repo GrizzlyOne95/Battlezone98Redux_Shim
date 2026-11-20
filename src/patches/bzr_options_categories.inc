@@ -25,7 +25,7 @@ static const char* const kShimCategoryVideo[] = {
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
     "Faction Color Jets", "Destruction Chunks",
-    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs" };
+    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs", "Paint" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
@@ -132,7 +132,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     BZR_SHIM_CATEGORY("Radar Fading", "RADAR FADING",
         "Cockpit radar opacity and timing, with an independent compass exception.", kShimCategoryRadar),
     BZR_SHIM_CATEGORY("Effects", "VISUAL EFFECTS",
-        "Faction color jets, destruction chunks, muzzle effects, shell casings and person gibs.",
+        "Faction color jets, destruction chunks, muzzle effects, shell casings, person gibs and player paint.",
         kShimCategoryEffects),
     // Subpage reached from Controls.
     BZR_SHIM_CATEGORY("RTS Commands", "RTS COMMANDS",

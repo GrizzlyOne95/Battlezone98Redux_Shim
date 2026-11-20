@@ -321,3 +321,4 @@ OpenShimSetAiFollowEngageEnabled@4
 OpenShimSetAiDefendRefreshEnabled@4
 OpenShimSetAiHold@8
 OpenShimSetRallyPointsAllowedInNetwork@4
+OpenShimGetPlayerPaint@0
