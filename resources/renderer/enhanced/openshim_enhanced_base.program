@@ -252,6 +252,15 @@ vertex_program OSE_BaseLowestNoShadow_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 vertex_program OSE_BaseLowestShadow_vertexHLSL4 hlsl
@@ -261,6 +270,15 @@ vertex_program OSE_BaseLowestShadow_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 vertex_program OSE_BaseLowestPSSM_vertexHLSL4 hlsl
@@ -270,6 +288,15 @@ vertex_program OSE_BaseLowestPSSM_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines VERTEX_LIGHTING,MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 //LOW
@@ -281,6 +308,15 @@ vertex_program OSE_BaseLowNoShadow_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 vertex_program OSE_BaseLowShadow_vertexHLSL4 hlsl
@@ -290,6 +326,15 @@ vertex_program OSE_BaseLowShadow_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 vertex_program OSE_BaseLowPSSM_vertexHLSL4 hlsl
@@ -299,6 +344,15 @@ vertex_program OSE_BaseLowPSSM_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=1,SHADOWRECEIVER=1,PSSM_ENABLED=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 //MEDIUM
@@ -310,6 +364,15 @@ vertex_program OSE_BaseMediumNoShadow_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=8
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 vertex_program OSE_BaseMediumShadow_vertexHLSL4 hlsl
@@ -319,6 +382,15 @@ vertex_program OSE_BaseMediumShadow_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 vertex_program OSE_BaseMediumPSSM_vertexHLSL4 hlsl
@@ -328,6 +400,15 @@ vertex_program OSE_BaseMediumPSSM_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=8,SHADOWRECEIVER=1,PSSM_ENABLED=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 //HIGH
@@ -339,6 +420,15 @@ vertex_program OSE_BaseHighNoShadow_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=24,NORMALMAP_ENABLED
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 vertex_program OSE_BaseHighShadow_vertexHLSL4 hlsl
@@ -348,6 +438,15 @@ vertex_program OSE_BaseHighShadow_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,NORMALMAP_ENABLED=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 vertex_program OSE_BaseHighPSSM_vertexHLSL4 hlsl
@@ -357,6 +456,15 @@ vertex_program OSE_BaseHighPSSM_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,NORMALMAP_ENABLED=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 // Enhanced-only PSSM v2 vertex path. The classic program remains unchanged.
@@ -367,6 +475,15 @@ vertex_program OSE_BaseENHighPSSMV2_vertexHLSL4 hlsl
 	entry_point base_vertex
 
 	preprocessor_defines MAX_LIGHTS=24,SHADOWRECEIVER=1,PSSM_ENABLED=1,NORMALMAP_ENABLED=1,ENHANCED_MODE=1,OSE_ENHANCED_PSSM_V2=1
+
+	// Tread texture scroll (Docs/TRACKED_VEHICLES.md). DX11 only: the
+	// HLSL/GLSL siblings have no such uniform. A plain constant so the pass
+	// stays instanceable; OpenShim binds it to custom 1411 at run time only
+	// on ODF-named tread materials.
+	default_params
+	{
+		param_named osTreadUV float4 0 0 0 0
+	}
 }
 
 
