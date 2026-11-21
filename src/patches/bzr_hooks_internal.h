@@ -1721,6 +1721,8 @@ namespace BZROpenShim
         extern bool g_ThumbnailBmpGuardInstalled;
         void InstallBriefingPageStrideFixIfPossible();
         void InstallBriefingPagesIfPossible();
+        // Briefing button and page overlay on the MP lobby (lobby_briefing.cpp).
+        void InstallLobbyBriefingIfPossible();
         void InstallMultiRenderCountClampIfPossible();
         void InstallThumbnailBmpGuardIfPossible();
         extern FnEarthQuakeSimulate g_BzrFn_EarthQuakeSimulateOriginal;

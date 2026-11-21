@@ -68,6 +68,10 @@ HOOKS = [
     ("TugPostLoad", "TugPostLoad", [VT("TugVtable", 22)]),
     ("FlagDisplaySubmit", "FlagDisplaySubmit", [VT("FlagDisplayVtable", 8)]),
     ("MultiCreateUpdate", ("slot", "MultiplayerCreateVtable", 13), [VT("MultiplayerCreateVtable", 13)]),
+    ("MultiCreateChar", "MultiCreateChar", [VT("MultiplayerCreateVtable", 2)]),
+    ("MultiCreateKeyPressed", "MultiCreateKeyPressed", [VT("MultiplayerCreateVtable", 4)]),
+    ("UiViewKeyReleased (lobby briefing)", "UiViewKeyReleased", [VT("MultiplayerCreateVtable", 5)],
+     "shared cUI_View KeyReleased; only the lobby screen's slot is wrapped"),
     ("OffensiveProcessDoSubTask", "OffensiveProcessDoSubTask",
      [VT(f"{c}ProcessVtable", 11) for c in AI] +
      [VT(f"{c}{s}Vtable", 11) for c in AI_SUB for s in ("Friend", "Enemy")]),
