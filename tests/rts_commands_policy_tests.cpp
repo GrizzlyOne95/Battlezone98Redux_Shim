@@ -278,8 +278,36 @@ namespace
                   std::string("default key accepted: ") + GetKeyDef(id).iniKey);
             keys[i] = k;
         }
-        Check(keys[0].vk == 'T' && keys[1].vk == 'B' && keys[2].vk == 'X' && keys[3].vk == 'Z' && keys[4].vk == 'J',
-              "defaults T B X Z J");
+        const auto at = [&](KeyId id) { return keys[static_cast<int>(id)]; };
+        Check(at(KeyId::RemoteTarget).vk == 'T' && at(KeyId::BuildingCycle).vk == 'B' &&
+                  at(KeyId::AreaSelect).vk == 'X' && at(KeyId::Hold).vk == 'Z' && at(KeyId::IdleUnit).vk == 'J' &&
+                  at(KeyId::FollowCamera).vk == 'C',
+              "defaults T B X Z J C");
+        Check(at(KeyId::QuickFollowMe).vk == 0x61 && at(KeyId::QuickDefendMe).vk == 0x62 &&
+                  at(KeyId::QuickAttackTarget).vk == 0x63 && at(KeyId::QuickStop).vk == 0x65 &&
+                  !at(KeyId::QuickFollowMe).extended,
+              "quick defaults Numpad1 Numpad2 Numpad3 Numpad5");
+        for (int i = 0; i < kKeyCount; ++i)
+        {
+            for (int j = i + 1; j < kKeyCount; ++j)
+                Check(!(keys[i] == keys[j]),
+                      std::string("default keys are distinct: ") + GetKeyDef(static_cast<KeyId>(i)).iniKey);
+        }
+        const KeyDef& quickDef = GetKeyDef(KeyId::QuickFollowMe);
+        Check(std::string(quickDef.iniKey) == "RtsQuickFollowKey" &&
+                  std::string(quickDef.rowCommand) == "OpenShim:RtsQuickFollowKey" &&
+                  std::string(quickDef.displayText) == "Quick: Follow Me" && !quickDef.needsShift &&
+                  !quickDef.shiftVariant,
+              "quick follow key row: plain key");
+        Check(std::string(GetKeyDef(KeyId::QuickDefendMe).iniKey) == "RtsQuickDefendKey" &&
+                  std::string(GetKeyDef(KeyId::QuickAttackTarget).iniKey) == "RtsQuickAttackKey" &&
+                  std::string(GetKeyDef(KeyId::QuickStop).iniKey) == "RtsQuickStopKey",
+              "quick key ini names");
+        const KeyDef& followDef = GetKeyDef(KeyId::FollowCamera);
+        Check(std::string(followDef.iniKey) == "RtsFollowCameraKey" &&
+                  std::string(followDef.rowCommand) == "OpenShim:RtsFollowCameraKey" &&
+                  std::string(followDef.defaultText) == "C" && followDef.needsShift && !followDef.shiftVariant,
+              "follow camera key row: Shift+C only");
         const KeyDef& idleDef = GetKeyDef(KeyId::IdleUnit);
         Check(std::string(idleDef.iniKey) == "RtsIdleUnitKey" &&
                   std::string(idleDef.rowCommand) == "OpenShim:RtsIdleUnitKey" &&
@@ -304,13 +332,43 @@ namespace
               "idle unit (Shift variant) refuses a Shift-only QuickSave chord");
         Check(CheckKeyText(KeyId::Hold, "Q", keys, rally, shiftQ, load, k) == nullptr,
               "plain-only action ignores a Shift QuickSave chord");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad1", keys, rally, save, load, k) != nullptr,
+              "a quick key refuses another quick key");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad9", keys, rally, save, load, k) == nullptr && k.vk == 0x69,
+              "a quick key takes a free numpad key");
+        Check(CheckKeyText(KeyId::QuickStop, "Insert", keys, rally, save, load, k) == nullptr && k.extended,
+              "a quick key takes a grey-cluster key");
+        Check(CheckKeyText(KeyId::Hold, "Numpad2", keys, rally, save, load, k) != nullptr,
+              "Hold refuses a quick key");
+        const Key numpadRally{ 0x67, false };
+        Check(CheckKeyText(KeyId::QuickFollowMe, "Numpad7", keys, numpadRally, save, load, k) != nullptr,
+              "a quick key refuses the rally key");
+        // Stock-bound numpad keys: Numpad0 (fire), Numpad4 and Numpad6 (steer).
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad0", keys, rally, save, load, k) != nullptr,
+              "Numpad0 (weapon_fire) is refused");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad4", keys, rally, save, load, k) != nullptr,
+              "Numpad4 (steering) is refused");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad6", keys, rally, save, load, k) != nullptr,
+              "Numpad6 (steering) is refused");
+        Check(CheckKeyText(KeyId::Hold, "Numpad0", keys, rally, save, load, k) != nullptr,
+              "no RTS key takes Numpad0");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad7", keys, rally, save, load, k) == nullptr,
+              "Numpad7 is free");
+        Check(ReservedKeyReason(0x60) && ReservedKeyReason(0x64) && ReservedKeyReason(0x66) &&
+                  !ReservedKeyReason(0x61) && !ReservedKeyReason(0x65),
+              "reserved numpad keys: 0, 4, 6 only");
     }
 
     void TestChordClashes()
     {
         Key keys[kKeyCount] = {};
         for (int i = 0; i < kKeyCount; ++i)
-            keys[i] = Key{ static_cast<unsigned>(GetKeyDef(static_cast<KeyId>(i)).defaultText[0]), false };
+        {
+            BZROpenShim::QuickSaveKeyPolicy::Chord chord;
+            Check(BZROpenShim::QuickSaveKeyPolicy::ParseChord(GetKeyDef(static_cast<KeyId>(i)).defaultText, chord),
+                  "default key text parses");
+            keys[i] = Key{ chord.vk, chord.extended };
+        }
         // Remote target (T) takes only Shift+T: plain T stays frontal_target.
         Check(ActionTakingChord(keys, 'T', false, true, false, false) == KeyId::RemoteTarget, "Shift+T is ours");
         Check(ActionTakingChord(keys, 'T', false, false, false, false) == KeyId::Count, "plain T is stock");
@@ -326,10 +384,95 @@ namespace
         // Idle unit (J) takes J and Shift+J.
         Check(ActionTakingChord(keys, 'J', false, false, false, false) == KeyId::IdleUnit, "J is ours");
         Check(ActionTakingChord(keys, 'J', false, true, false, false) == KeyId::IdleUnit, "Shift+J is ours");
+        // Follow camera (C) takes only Shift+C: plain C stays center_player.
+        Check(ActionTakingChord(keys, 'C', false, true, false, false) == KeyId::FollowCamera, "Shift+C is ours");
+        Check(ActionTakingChord(keys, 'C', false, false, false, false) == KeyId::Count, "plain C is stock");
+        Check(ActionTakingChord(keys, 'C', false, true, true, false) == KeyId::Count, "Ctrl+Shift+C is stock");
+        // Quick commands take only the plain numpad key.
+        Check(ActionTakingChord(keys, 0x61, false, false, false, false) == KeyId::QuickFollowMe, "Numpad1 is ours");
+        Check(ActionTakingChord(keys, 0x62, false, false, false, false) == KeyId::QuickDefendMe, "Numpad2 is ours");
+        Check(ActionTakingChord(keys, 0x63, false, false, false, false) == KeyId::QuickAttackTarget,
+              "Numpad3 is ours");
+        Check(ActionTakingChord(keys, 0x65, false, false, false, false) == KeyId::QuickStop, "Numpad5 is ours");
+        Check(ActionTakingChord(keys, 0x60, false, false, false, false) == KeyId::Count, "Numpad0 is not a quick key");
+        Check(ActionTakingChord(keys, 0x61, false, true, false, false) == KeyId::Count, "Shift+Numpad1 is not taken");
+        Check(ActionTakingChord(keys, 0x61, false, false, true, false) == KeyId::Count, "Ctrl+Numpad1 is not taken");
+        Check(ActionTakingChord(keys, 0x61, true, false, false, false) == KeyId::Count,
+              "an extended 0x61 is not the numpad key");
+        Check(ActionUsingKey(keys, 0x61, false) == KeyId::QuickFollowMe, "the rally key may not be Numpad1");
         Check(ActionTakingChord(keys, 'Q', false, false, false, false) == KeyId::Count, "unbound key");
         Check(ActionUsingKey(keys, 'T', false) == KeyId::RemoteTarget, "the rally key may not be T");
         Check(ActionUsingKey(keys, 'V', false) == KeyId::Count, "V is free for the rally key");
         Check(ActionTakingChord(nullptr, 'X', false, false, false, false) == KeyId::Count, "no keys");
+    }
+
+    void TestQuickCommands()
+    {
+        const QuickOrder follow = QuickOrderFor(KeyId::QuickFollowMe);
+        Check(follow.what == 5 && follow.mode == kModeFollowMe && follow.needsTarget && follow.onPlayer,
+              "follow me: CMD_FOLLOW on the player, Follow Me mode");
+        const QuickOrder defend = QuickOrderFor(KeyId::QuickDefendMe);
+        Check(defend.what == kCmdDefend && defend.what == 15 && defend.mode == kModeDefend && defend.needsTarget &&
+                  defend.onPlayer,
+              "defend me: CMD_DEFEND on the player, Defend mode");
+        const QuickOrder attack = QuickOrderFor(KeyId::QuickAttackTarget);
+        Check(attack.what == 4 && attack.mode == kModeAttack && attack.needsTarget && !attack.onPlayer,
+              "attack: CMD_ATTACK on the players target, Attack mode");
+        const QuickOrder stop = QuickOrderFor(KeyId::QuickStop);
+        Check(QuickAttackTargetAllowed(false, true, 2, false), "attack: an enemy is allowed");
+        Check(!QuickAttackTargetAllowed(true, true, 1, false), "attack: the player's own team is refused");
+        Check(!QuickAttackTargetAllowed(false, false, 3, false), "attack: an ally (not enemy) is refused");
+        Check(!QuickAttackTargetAllowed(false, false, 0, false), "attack: neutral refused by default");
+        Check(QuickAttackTargetAllowed(false, false, 0, true), "attack: neutral allowed by AllowNeutralAttackOrders");
+        Check(!QuickAttackTargetAllowed(true, false, 0, true), "attack: same team stays refused");
+        Check(stop.what == 2 && stop.mode == kModeNone && !stop.needsTarget && !stop.onPlayer,
+              "stop: CMD_STOP, no target, no mode filter");
+        Check(QuickOrderFor(KeyId::Hold).what == 0 && QuickOrderFor(KeyId::Count).what == 0,
+              "other keys are not quick orders");
+
+        Check(QuickCommandsAvailable(true, true, true), "quick: on, hooked, single player");
+        Check(!QuickCommandsAvailable(false, true, true), "quick: off by option");
+        Check(!QuickCommandsAvailable(true, false, true), "quick: needs the hooks");
+        Check(!QuickCommandsAvailable(true, true, false), "quick: single player only");
+
+        // The key filter: a plain key is ours when the gate is open, Shift is not.
+        const Key key{ 0x61, false };
+        KeyLatch latch;
+        KeyEvent down;
+        down.msg = kWmKeyDown;
+        down.vk = 0x61;
+        Check(ClassifyKey(down, KeyId::QuickFollowMe, key, true, latch).act, "Numpad1 down acts");
+        KeyLatch closed;
+        Check(!ClassifyKey(down, KeyId::QuickFollowMe, key, false, closed).swallow,
+              "a closed gate (option off) leaves the key alone");
+        down.shift = true;
+        KeyLatch shifted;
+        Check(!ClassifyKey(down, KeyId::QuickFollowMe, key, true, shifted).act, "Shift+Numpad1 is not ours");
+    }
+
+    void TestFollowCamera()
+    {
+        // A press: a new selected unit wins, the same one stops, nothing
+        // selected follows the player (or stops while following).
+        Check(FollowKeyTarget(0x11, 0x99, 0) == 0x11, "follow the first selected unit");
+        Check(FollowKeyTarget(0x22, 0x99, 0x11) == 0x22, "a different selected unit switches");
+        Check(FollowKeyTarget(0x11, 0x99, 0x11) == 0, "the same unit again stops");
+        Check(FollowKeyTarget(0, 0x99, 0x11) == 0, "no selection while following stops");
+        Check(FollowKeyTarget(0, 0x99, 0) == 0x99, "no selection follows the player");
+        Check(FollowKeyTarget(0, 0, 0) == 0, "no selection and no player: nothing");
+        Check(FollowKeyTarget(0, 0x99, 0x99) == 0, "second press on the player stops");
+
+        // A tick: stops outrank the hold, the hold outranks the recentre.
+        Check(ClassifyFollowTick(true, true, true, true) == FollowTick::Recenter, "recentre");
+        Check(ClassifyFollowTick(true, true, false, true) == FollowTick::Hold, "pause holds the follow");
+        Check(ClassifyFollowTick(false, true, true, true) == FollowTick::StopDisabled, "option off stops");
+        Check(ClassifyFollowTick(true, false, true, true) == FollowTick::StopLeftSatellite, "leaving satellite stops");
+        Check(ClassifyFollowTick(true, false, false, true) == FollowTick::StopLeftSatellite,
+              "leaving satellite stops even when paused");
+        Check(ClassifyFollowTick(true, true, true, false) == FollowTick::StopTargetGone, "a dead unit stops");
+        Check(ClassifyFollowTick(true, true, false, false) == FollowTick::StopTargetGone,
+              "a dead unit stops even when paused");
+        Check(std::string(FollowTickName(FollowTick::StopTargetGone)) == "unit gone", "tick names");
     }
 
     KeyEvent Down(unsigned vk, bool shift = false, bool ctrl = false)
@@ -514,6 +657,135 @@ namespace
         Check(t.Count() == 0, "Clear empties the table");
     }
 
+    void TestAmmoAlert()
+    {
+        Check(AmmoTracksFamily(Family::Combat) && AmmoTracksFamily(Family::TurretTank) &&
+                  AmmoTracksFamily(Family::Howitzer) && AmmoTracksFamily(Family::Minelayer),
+              "armed families are tracked for ammo");
+        Check(!AmmoTracksFamily(Family::Scavenger) && !AmmoTracksFamily(Family::Tug) &&
+                  !AmmoTracksFamily(Family::ConstructionRig) && !AmmoTracksFamily(Family::None),
+              "unarmed families are not");
+        Check(AmmoLow(4, 100) && !AmmoLow(5, 100) && AmmoLow(0, 100), "low is under 5% of max");
+        Check(AmmoLow(49, 1000) && !AmmoLow(50, 1000), "5% boundary at 1000");
+        Check(!AmmoLow(0, 0) && !AmmoLow(0, -1), "no max is never low");
+
+        AmmoTracker t;
+        t.BeginPass();
+        AmmoObservation o = t.Observe(1, 0, 100, 1000);
+        Check(o.first && o.low && !o.alert, "ammo: a unit first seen empty never alerts");
+        o = t.Observe(2, 100, 100, 1000);
+        Check(o.first && !o.low && !o.alert, "ammo: a unit first seen full does not alert");
+        o = t.Observe(3, 0, 0, 1000);
+        Check(o.skipped && !o.first && !o.alert, "ammo: max ammo 0 is skipped");
+        t.EndPass();
+        Check(t.Count() == 2, "ammo: skipped unit is not tracked");
+
+        t.BeginPass();
+        o = t.Observe(1, 0, 100, 1500);
+        Check(!o.changed && !o.alert, "ammo: still low, no alert");
+        o = t.Observe(2, 4, 100, 1500);
+        Check(o.changed && o.low && o.alert, "ammo: not-low->low alerts");
+        t.EndPass();
+
+        // Every pass below observes both units, so neither is dropped and
+        // re-added (a re-add would be a first sighting, not a re-arm).
+        t.BeginPass();
+        o = t.Observe(2, 0, 100, 40000);
+        Check(!o.changed && !o.alert, "ammo: no re-alert while it stays low");
+        o = t.Observe(1, 0, 100, 40000);
+        Check(!o.first && !o.changed && !o.alert, "ammo: unit 1 still tracked and low");
+        t.EndPass();
+
+        t.BeginPass();
+        o = t.Observe(2, 4, 100, 41000);
+        Check(!o.changed && !o.alert, "ammo: still under 5% does not re-arm");
+        o = t.Observe(1, 50, 100, 41000);
+        Check(!o.first && o.changed && !o.low && !o.alert, "ammo: unit 1 refilled re-arms");
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(2, 5, 100, 42000);
+        Check(!o.first && o.changed && !o.low && !o.alert, "ammo: seen at 5% re-arms");
+        o = t.Observe(1, 1, 100, 42000);
+        Check(!o.first && o.changed && o.low && o.alert, "ammo: a re-armed unit alerts again");
+        t.EndPass();
+
+        t.BeginPass();
+        o = t.Observe(2, 1, 100, 42000 + kAmmoAlertIntervalMs - 1);
+        Check(!o.first && o.changed && o.low && !o.alert, "ammo: a second alert inside 30 s is suppressed");
+        o = t.Observe(1, 1, 100, 42000 + kAmmoAlertIntervalMs - 1);
+        Check(!o.changed && !o.alert, "ammo: unit 1 stays low");
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(2, 1, 100, 42000 + kAmmoAlertIntervalMs);
+        Check(!o.changed && !o.alert, "ammo: a suppressed flip does not alert late");
+        o = t.Observe(1, 100, 100, 42000 + kAmmoAlertIntervalMs);
+        Check(!o.first && o.changed && !o.low, "ammo: unit 1 rearmed");
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(2, 1, 100, 42000 + kAmmoAlertIntervalMs);
+        Check(!o.changed && !o.alert, "ammo: unit 2 stays low");
+        o = t.Observe(1, 0, 100, 42000 + kAmmoAlertIntervalMs);
+        Check(!o.first && o.changed && o.alert, "ammo: exactly 30 s later alerts again");
+        t.EndPass();
+
+        t.BeginPass();
+        t.Observe(1, 0, 100, 90000);
+        t.EndPass();
+        Check(t.Count() == 1, "ammo: an unobserved unit is dropped");
+
+        AmmoTracker full;
+        full.BeginPass();
+        for (int i = 1; i <= kAmmoTrackCapacity + 5; ++i)
+            full.Observe(static_cast<uint32_t>(i), 100, 100, 0);
+        full.EndPass();
+        Check(full.Count() == kAmmoTrackCapacity, "ammo: the table is fixed size");
+        t.Clear();
+        Check(t.Count() == 0, "ammo: Clear empties the table");
+    }
+
+    void TestScrapFullAlert()
+    {
+        Check(ScrapFull(30, 30) && ScrapFull(40, 30) && !ScrapFull(29, 30), "full is scrap at or above max");
+        Check(!ScrapFull(20, 20) && !ScrapFull(29, 29), "scrap max under 30 is never full");
+
+        ScrapFullDetector d;
+        Check(!d.Observe(60, 60, 1000), "scrap: starting full is silent");
+        Check(!d.Observe(60, 60, 2000), "scrap: staying full is silent");
+        Check(!d.Observe(59, 60, 3000), "scrap: dropping below max re-arms silently");
+        Check(d.Observe(60, 60, 4000), "scrap: not-full->full alerts");
+        Check(!d.Observe(60, 60, 5000), "scrap: no re-alert while full");
+        Check(!d.Observe(50, 60, 6000), "scrap: below max");
+        Check(!d.Observe(60, 60, 4000 + kScrapAlertIntervalMs - 1), "scrap: inside 60 s is suppressed");
+        Check(!d.Observe(60, 60, 4000 + kScrapAlertIntervalMs + 1), "scrap: a suppressed flip does not alert late");
+        Check(!d.Observe(10, 60, 70000), "scrap: below max again");
+        Check(d.Observe(60, 60, 4000 + kScrapAlertIntervalMs + 2000), "scrap: after 60 s it alerts again");
+
+        ScrapFullDetector small;
+        Check(!small.Observe(0, 20, 0), "scrap max < 30: first");
+        Check(!small.Observe(20, 20, 1000) && !small.Observe(0, 20, 2000) && !small.Observe(20, 20, 3000),
+              "scrap max < 30 never alerts");
+
+        ScrapFullDetector fresh;
+        Check(!fresh.Observe(10, 60, 0), "scrap: first observation not full");
+        Check(fresh.Observe(60, 60, 250), "scrap: first full after an observation alerts");
+        fresh.Clear();
+        Check(!fresh.Observe(60, 60, 500), "scrap: after Clear (new mission) starting full is silent");
+
+        Check(std::string(AmmoAlertSound('a')) == "abetty5.wav" && std::string(AmmoAlertSound('b')) == "abetty5.wav",
+              "NSDF and Black Dog ammo clip");
+        Check(std::string(AmmoAlertSound('s')) == "sbetty5.wav" && std::string(AmmoAlertSound('c')) == "sbetty5.wav",
+              "CCA and CRA ammo clip");
+        Check(std::string(AmmoAlertSound('x')) == "abetty5.wav" && std::string(AmmoAlertSound('\0')) == "abetty5.wav",
+              "unknown nation: American ammo clip");
+        Check(std::string(ScrapFullAlertSound('a')) == "avrecyvn.wav" &&
+                  std::string(ScrapFullAlertSound('b')) == "avrecyvn.wav",
+              "NSDF and Black Dog scrap clip");
+        Check(std::string(ScrapFullAlertSound('s')) == "svrecyvn.wav" &&
+                  std::string(ScrapFullAlertSound('c')) == "svrecyvn.wav",
+              "CCA and CRA scrap clip");
+        Check(std::string(ScrapFullAlertSound('z')) == "avrecyvn.wav", "unknown nation: American scrap clip");
+    }
+
     void TestBuildAtNav()
     {
         const uint32_t cls = 0x0A1B2C30u;
@@ -586,8 +858,12 @@ int main()
     TestHoldLabel();
     TestKeys();
     TestChordClashes();
+    TestQuickCommands();
+    TestFollowCamera();
     TestKeyMessages();
     TestIdleUnits();
+    TestAmmoAlert();
+    TestScrapFullAlert();
     TestBuildAtNav();
     if (OpenShimTest::FailureCount() != 0)
     {

@@ -45,6 +45,9 @@ namespace BZROpenShim::ContextualHud
         // The slot wrapper is in (fade, EXU claim or post-draw callback);
         // g_commandsReady additionally means the command fade samples input.
         std::atomic<bool> g_commandSlotReady{false};
+        // Same for the radar render slot: in for the fade or a post-draw callback.
+        std::atomic<bool> g_radarSlotReady{false};
+        std::atomic<RadarPostDraw> g_radarPostDraw{nullptr};
         std::atomic<CommandPanelPostDraw> g_commandPostDraw{nullptr};
         std::atomic<CommandPanelBeforeRender> g_commandBefore{nullptr};
         std::atomic<CommandPanelAfterRender> g_commandAfter{nullptr};
@@ -205,16 +208,44 @@ namespace BZROpenShim::ContextualHud
             using Diamond = void(__cdecl*)(void*,int,int,int,uint32_t,uint32_t);
             reinterpret_cast<Diamond>(g_radarDiamond)(v,x,y,radius,ScaleAlpha(color,RadarDrawOpacity()),mode);
         }
+        // A fault in the post-draw consumer must not reach the engine.
+        void CallRadarPostDraw(RadarPostDraw post, void* self, float opacity) noexcept
+        {
+            __try { post(self,opacity); }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        // Only while the radar is actually shown (same gate as ReadRadarFrame).
+        bool RadarPostDrawAllowed(const void* self) noexcept
+        {
+            __try
+            {
+                // Same identity check as ReadRadarFrame: only the CockpitRadar.
+                return self && *reinterpret_cast<const uintptr_t*>(self) + 6*sizeof(uintptr_t) == g_radarSlot &&
+                    !ExternallyOwned(Group::Radar) && *reinterpret_cast<const int*>(g_radarShow) != 0 &&
+                    *reinterpret_cast<const uint8_t*>(g_radarAlt) == 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        }
         void __fastcall RadarDraw(void* self, void*)
         {
             const auto original = reinterpret_cast<CommandRender>(g_radarRender);
-            if (!g_radarReady.load(std::memory_order_acquire) || g_inRadar) { original(self); return; }
+            const auto post = g_radarPostDraw.load(std::memory_order_acquire);
+            if (!g_radarReady.load(std::memory_order_acquire) || g_inRadar)
+            {
+                original(self);
+                if (post && !g_inRadar && RadarPostDrawAllowed(self)) CallRadarPostDraw(post,self,1.0f);
+                return;
+            }
             StartRadarFrame(self);
             g_beforeRadarOpacity = g_drawOpacity;
             const float previous = BeginDraw(Group::Radar);
             g_inRadar = true;
             // Native ping, command links, sounds and radar refresh always run.
-            __try { original(self); }
+            __try
+            {
+                original(self);
+                if (post && RadarPostDrawAllowed(self)) CallRadarPostDraw(post,self,RadarDrawOpacity());
+            }
             __finally { FinishRadarFrame(); g_inRadar = false; EndDraw(previous); }
         }
         bool BindRadar()
@@ -244,6 +275,21 @@ namespace BZROpenShim::ContextualHud
             }
             return g_radarBound > 0;
         }
+        // The one writer of the radar render slot. With the fade off the
+        // wrapper is stock plus the post-draw callback.
+        bool InstallRadarSlot()
+        {
+            if (g_radarSlotReady.load(std::memory_order_acquire)) return true;
+            if (!BindRadar()) return false;
+            HookEngine::CodePatchLock lock;
+            if (g_radarSlotReady.load(std::memory_order_acquire)) return true;
+            uint32_t target = 0; SIZE_T read = 0;
+            if (!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(g_radarSlot),&target,4,&read) || read!=4 || target!=g_radarRender) return false;
+            const uint32_t hook = reinterpret_cast<uint32_t>(RadarDraw);
+            if (!WritePatchBytes(g_radarSlot,reinterpret_cast<const uint8_t*>(&hook),4)) return false;
+            g_radarSlotReady.store(true,std::memory_order_release);
+            return true;
+        }
         bool InstallRadar()
         {
             if (g_radarReady.load(std::memory_order_acquire)) return true;
@@ -252,12 +298,7 @@ namespace BZROpenShim::ContextualHud
             ok = RedirectCallTarget(g_radarContactCall,g_radarContactTime,reinterpret_cast<uintptr_t>(RadarContactTime)) && ok;
             ok = RedirectCallTarget(g_radarCompass,g_sprite,reinterpret_cast<uintptr_t>(RadarCompass)) && ok;
             ok = RedirectCallTarget(g_radarDiamondCall,g_radarDiamond,reinterpret_cast<uintptr_t>(RadarDiamond)) && ok;
-            if (!ok) return false;
-            HookEngine::CodePatchLock lock;
-            uint32_t target = 0; SIZE_T read = 0;
-            if (!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(g_radarSlot),&target,4,&read) || read!=4 || target!=g_radarRender) return false;
-            const uint32_t hook = reinterpret_cast<uint32_t>(RadarDraw);
-            if (!WritePatchBytes(g_radarSlot,reinterpret_cast<const uint8_t*>(&hook),4)) return false;
+            if (!ok || !InstallRadarSlot()) return false;
             g_radarReady.store(true,std::memory_order_release);
             Log(L"[HUDFADE] Complete cockpit radar and compass scopes installed\n");
             return true;
@@ -816,6 +857,19 @@ namespace BZROpenShim::ContextualHud
         if (InstallCommandSlot()) return true;
         g_commandPostDraw.store(nullptr,std::memory_order_release);
         Log(L"[HUDFADE] Command panel post-draw not installed: render slot unavailable\n");
+        return false;
+    }
+    bool RegisterRadarPostDraw(RadarPostDraw callback)
+    {
+        if (!callback || !IsCompatibleGameVersion()) return false;
+        RadarPostDraw expected = nullptr;
+        if (!g_radarPostDraw.compare_exchange_strong(expected,callback,std::memory_order_acq_rel) &&
+            expected != callback)
+            return false;
+        HookEngine::FrameThreadSitesScope frameSites;
+        if (InstallRadarSlot()) return true;
+        g_radarPostDraw.store(nullptr,std::memory_order_release);
+        Log(L"[HUDFADE] Radar post-draw not installed: render slot unavailable\n");
         return false;
     }
     bool RegisterCommandPanelRenderScope(CommandPanelBeforeRender before, CommandPanelAfterRender after)
