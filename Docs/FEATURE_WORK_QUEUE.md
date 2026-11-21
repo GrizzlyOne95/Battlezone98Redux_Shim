@@ -17,7 +17,7 @@ Live tests still owed: `Docs/LIVE_TEST_BACKLOG.md`.
 ## Waiting (in order)
 9. **Loadout presets:** research. Handed to Copilot, see `Docs/COPILOT_BRIEF_LOADOUT_PRESETS.md`.
 10. **Tread texture scroll.**
-11. **Walker free-turning head:** research and plan first.
+11. **Walker free-turning head:** M0 done, M1 implemented (`Docs/WALKER_FREE_HEAD.md`); next the M1 live test, then M2 (leg pose, relaxation, shared helpers).
 
 ## New ideas (added 2026-11-18, not yet scoped)
 

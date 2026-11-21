@@ -1422,6 +1422,9 @@ namespace BZROpenShim
         void InstallTurretAttackOrdersHooksIfPossible();
         void RefreshTurretAttackOrdersState();
         void ResetTurretAttackOrders();
+        void InstallDaywreckerDefenceIfPossible();
+        void RefreshDaywreckerDefenceState();
+        void ResetDaywreckerDefence();
 
         // --- Producer rally points (producer_rally_points.cpp) -----------------
         void InstallProducerRallyPointsIfPossible();

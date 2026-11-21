@@ -324,6 +324,7 @@
     <ClCompile Include="src\patches\steam_tunnel_join.cpp" />
     <ClCompile Include="src\patches\net_tag_dispatch.cpp" />
     <ClCompile Include="src\patches\mp_daywrecker_armory_collision.cpp" />
+    <ClCompile Include="src\patches\daywrecker_defence.cpp" />
     <ClCompile Include="src\patches\daywrecker_spawn_fall.cpp" />
     <ClCompile Include="src\patches\lua_handle_sync.cpp" />
     <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
@@ -391,6 +392,7 @@
     <ClCompile Include="src\patches\planet_environment.cpp" />
     <ClCompile Include="src\patches\pond_class_label.cpp" />
     <ClCompile Include="src\patches\tracked_vehicle_class.cpp" />
+    <ClCompile Include="src\patches\walker_free_head.cpp" />
     <ClCompile Include="src\patches\redux_compatibility.cpp" />
     <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
@@ -482,6 +484,8 @@
     <ClInclude Include="include\tracked_vehicle_treads.h" />
     <ClInclude Include="include\tracked_vehicle_net.h" />
     <ClInclude Include="include\tracked_vehicle_turret.h" />
+    <ClInclude Include="include\walker_free_head.h" />
+    <ClInclude Include="include\walker_free_head_math.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\steam_launcher_skip.h" />
     <ClInclude Include="include\launcher_proxy_logic.h" />
@@ -602,6 +606,7 @@
     <ClInclude Include="include\steam_tunnel_join.h" />
     <ClInclude Include="include\net_tag_dispatch.h" />
     <ClInclude Include="include\mp_daywrecker_armory_collision_install.h" />
+    <ClInclude Include="include\daywrecker_defence_policy.h" />
     <ClInclude Include="include\daywrecker_spawn_policy.h" />
     <ClInclude Include="include\lua_handle_sync.h" />
     <ClInclude Include="include\lua_handle_sync_install.h" />
