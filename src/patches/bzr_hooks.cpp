@@ -27,6 +27,7 @@
 #include "gpu_instancing.h"
 #include "gpu_skinning.h"
 #include "local_damage.h"
+#include "sp_player_paint.h"
 #include "soak_telemetry.h"
 #include "mode_stress_driver.h"
 #include "mp_vehicle_preview_fix.h"
@@ -1932,6 +1933,7 @@ namespace BZROpenShim
         FogWakeRenderFrameTick();
         GpuSkinningRenderFrameTick();
         LocalDamageRenderFrameTick();
+        SpPlayerPaintRenderFrameTick();
         GpuInstancingRenderFrameTick();
         PlanetEnvironmentRenderFrameTick();
         // Drives the pending terrain seam blend once the new world's terrain is
