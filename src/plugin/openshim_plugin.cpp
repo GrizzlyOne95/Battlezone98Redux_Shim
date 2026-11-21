@@ -47,6 +47,7 @@
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
 #include "soak_telemetry.h"
+#include "fp_trap_log.h"
 #include "mode_stress_driver.h"
 #include "music_refill_catchup.h"
 #include "music_single_fill.h"
@@ -324,6 +325,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     // Opt-in soak telemetry ([Diagnostics] SoakTelemetry): GPU-stall
     // watchdog, heartbeat and lighting-change lines. Dormant unless asked.
     PATCH_STAGE(BZROpenShim::InitializeSoakTelemetry());
+    // Opt-in floating-point trap logger ([Diagnostics] FpTrapLog): records
+    // where the main thread produces NaN/inf. Installs nothing unless asked.
+    PATCH_STAGE(BZROpenShim::InitializeFpTrapLog());
     // Release-qualification mode-transition stress driver. Dormant unless
     // OPENSHIM_MODE_STRESS_PLAN names a plan file.
     PATCH_STAGE(BZROpenShim::InitializeModeStressDriver());
@@ -430,6 +434,7 @@ namespace BZROpenShim
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownPerfTelemetry();
         BZROpenShim::ShutdownSoakTelemetry();
+        BZROpenShim::ShutdownFpTrapLog("plugin shutdown");
         BZROpenShim::ShutdownModeStressDriver();
         BZROpenShim::ShutdownThreadScheduling();
         BZROpenShim::ShutdownOpenShimAssetSync();

@@ -761,6 +761,19 @@ openshim_add_test(soak_telemetry_policy_tests STD 17 SOURCES
     soak_telemetry_policy_tests.cpp
 )
 
+# [Diagnostics] FpTrapLog: pure mask/decode/table logic, and the Win32 x86
+# recovery proven against the real OS (unmask, trap, recover, continue).
+openshim_add_test(fp_trap_log_policy_tests STD 17 SOURCES
+    fp_trap_log_policy_tests.cpp
+)
+if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+    openshim_add_test(fp_trap_recovery_win32_tests STD 17 SOURCES
+        fp_trap_recovery_win32_tests.cpp
+    )
+    target_compile_definitions(fp_trap_recovery_win32_tests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    set_tests_properties(fp_trap_recovery_win32_tests PROPERTIES TIMEOUT 15)
+endif()
+
 # The mode-transition stress driver's plan-file parser (header-only).
 openshim_add_test(mode_stress_plan_tests STD 17 SOURCES
     mode_stress_plan_tests.cpp

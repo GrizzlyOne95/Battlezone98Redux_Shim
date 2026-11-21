@@ -6,6 +6,7 @@
 #include "scene_mutation_drain_policy.h"
 #include "bzr_hooks_internal.h"
 #include "shim_log.h"
+#include "fp_trap_log.h"
 
 namespace BZROpenShim::Hooks
 {
@@ -30,6 +31,9 @@ namespace BZROpenShim::Hooks
         public:
             virtual bool frameStarted(const void*)
             {
+                // Once per frame on the main thread: the opt-in FP trap
+                // logger re-arms here. One branch when it is off.
+                FpTrapLogFrameTick();
                 if (g_Gate.OnFrameStarted())
                     RunDeferredSceneMutations();
                 return true;

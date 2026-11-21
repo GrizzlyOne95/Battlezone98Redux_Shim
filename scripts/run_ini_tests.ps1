@@ -691,6 +691,8 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsBuildQueue" = "0"
     "Gameplay/UnitLoadouts" = "0"
     "Gameplay/RtsFollowCamera" = "0"
+    # Diagnostic: unmasks FP exceptions on the main thread; never ship on.
+    "Diagnostics/FpTrapLog" = "0"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }

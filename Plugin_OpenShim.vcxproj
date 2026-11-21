@@ -342,6 +342,7 @@
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\perf_telemetry.cpp" />
     <ClCompile Include="src\patches\soak_telemetry.cpp" />
+    <ClCompile Include="src\patches\fp_trap_log.cpp" />
     <ClCompile Include="src\patches\mode_stress_driver.cpp" />
     <ClCompile Include="src\patches\music_single_fill.cpp" />
     <ClCompile Include="src\patches\music_refill_catchup.cpp" />
@@ -579,6 +580,9 @@
     <ClInclude Include="include\perf_telemetry.h" />
     <ClInclude Include="include\soak_telemetry.h" />
     <ClInclude Include="include\soak_telemetry_policy.h" />
+    <ClInclude Include="include\fp_trap_log.h" />
+    <ClInclude Include="include\fp_trap_log_policy.h" />
+    <ClInclude Include="include\fp_trap_recovery.h" />
     <ClInclude Include="include\mode_stress_driver.h" />
     <ClInclude Include="include\mode_stress_plan.h" />
     <ClInclude Include="include\music_single_fill.h" />
