@@ -630,6 +630,7 @@ $shippingPolicyChecks = @{
     "SinglePlayer/PilotTeamRestore" = "1"
     "SinglePlayer/TurretAttackOrders" = "1"
     "SinglePlayer/DaywreckerDefence" = "0"
+    "SinglePlayer/MruGameplay" = "0"
     "Gameplay/ProducerRallyPoints" = "1"
     "Gameplay/AutoGroupNewUnits" = "0"
     "Gameplay/ExtendedUnitCap" = "0"

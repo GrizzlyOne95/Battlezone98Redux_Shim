@@ -835,20 +835,67 @@ namespace BZROpenShim::Hooks
             bool haveBefore[Policy::kSelectCapacity] = {};
             for (int i = 0; i < n; ++i)
                 haveBefore[i] = ReadPendingOrder(SafeGetObj(handles[i]), before[i]);
-            // classLabel = mru menu probe (mru_class.cpp): every pick on an
-            // MRU unit is logged; an MRU entry (Drop Repair, Drop Ammo,
-            // Deploy) is consumed here, so it gives no order and the stock
-            // dispatch never sees its reused mode id. True deselects, as a
-            // stock pick does.
-            bool mruConsumed = false;
+            // classLabel = mru (mru_class.cpp): every pick on an MRU unit is
+            // logged; an MRU entry (Drop Repair, Drop Ammo, Deploy) is
+            // handled and consumed there (Deploy gives Stop, a drop is
+            // queued), so the stock dispatch never sees its reused mode id.
+            // True deselects, as a stock pick does.
+            // Deploy acts on the selection as one: it packs only when every
+            // selected MRU is deployed (the entry then reads Undeploy).
+            bool anyMru = false;
+            bool allDeployed = true;
             for (int i = 0; i < n; ++i)
             {
                 void* const obj = SafeGetObj(handles[i]);
-                if (obj && SafeCanCommand(obj) && NoteMruMenuPick(obj, handles[i], mode))
-                    mruConsumed = true;
+                if (!obj || !IsMruMenuObject(obj))
+                    continue;
+                anyMru = true;
+                allDeployed = allDeployed && IsMruDeployed(obj);
             }
-            if (mruConsumed)
+            const bool packAll = anyMru && allDeployed;
+            bool consumed[Policy::kSelectCapacity] = {};
+            uint32_t consumedHandles[Policy::kSelectCapacity];
+            int consumedCount = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                if (obj && SafeCanCommand(obj) && NoteMruMenuPick(obj, handles[i], mode, packAll))
+                {
+                    consumed[i] = true;
+                    consumedHandles[consumedCount++] = handles[i];
+                }
+            }
+            if (consumedCount > 0)
+            {
+                // The MRU entries reuse stock ids (Go To Geyser, Lay Mines,
+                // Drop Off): the other selected units whose own menu holds
+                // the mode still get it, unit by unit.
+                uint32_t sentHandles[Policy::kSelectCapacity];
+                int sentCount = 0;
+                for (int i = 0; i < n; ++i)
+                {
+                    if (consumed[i])
+                        continue;
+                    void* const obj = SafeGetObj(handles[i]);
+                    if (!obj || !SafeCanCommand(obj))
+                        continue;
+                    Policy::ModeList own;
+                    if (!ReadModeList(obj, own) || !Policy::UnitTakesMode(own, mode))
+                        continue;
+                    bool accepted = true;
+                    if (SafeExecuteMode(obj, mode, accepted) && accepted)
+                        sentHandles[sentCount++] = handles[i];
+                }
+                // An MRU pick is a plain order too: it ends any queue, so a
+                // queued order cannot follow Deploy's Stop and pack the MRU.
+                NoteRtsOrderQueuePlainOrder(consumedHandles, consumedCount);
+                if (sentCount > 0)
+                {
+                    PingMenuOrder(handles, n, before, haveBefore);
+                    NoteRtsOrderQueuePlainOrder(sentHandles, sentCount);
+                }
                 return true;
+            }
             const unsigned smart = g_SmartMask.load(std::memory_order_acquire);
             if (!Policy::IsSmartMode(mode, smart))
             {
@@ -981,6 +1028,25 @@ namespace BZROpenShim::Hooks
                     return true;
             }
             return false;
+        }
+
+        // Every MRU in the selection is deployed: the Deploy entry reads
+        // Undeploy. A pick toggles each MRU on its own.
+        bool SelectionMrusAllDeployed()
+        {
+            uint32_t handles[Policy::kSelectCapacity];
+            const int n = ReadSelection(handles);
+            int mrus = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                if (!IsMruMenuObject(obj))
+                    continue;
+                if (!IsMruDeployed(obj))
+                    return false;
+                ++mrus;
+            }
+            return mrus > 0;
         }
 
         bool SafeRigGetCommand(void* rig, const float (&pos)[3], int& result)
@@ -1356,7 +1422,9 @@ namespace BZROpenShim::Hooks
                         text = ShimText("openshim_ui:mru_drop_ammo_label", "Drop Ammo");
                         break;
                     default:
-                        text = ShimText("openshim_ui:mru_deploy_label", "Deploy");
+                        text = SelectionMrusAllDeployed()
+                            ? ShimText("openshim_ui:mru_undeploy_label", "Undeploy")
+                            : ShimText("openshim_ui:mru_deploy_label", "Deploy");
                         break;
                     }
                     return text && text[0] ? text : stock;

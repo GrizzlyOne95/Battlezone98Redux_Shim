@@ -5,13 +5,16 @@
 namespace BZROpenShim
 {
     // ODF-driven `classLabel = "mru"` (mobile repair unit, Docs/MRU_CLASS.md):
-    // a HoverCraftClass alias like `tracked`, with an [MruClass] section. Step
-    // 1-2 of the plan in Docs/NIGHTINGALE_RESEARCH.md: the alias, the key
-    // parse and a log-only command-menu probe (slots 7-9). It rides on the
-    // Find label-compare hook (pond_class_label.cpp) and the HoverCraftClass
-    // BuildClass/Build detours (tracked_vehicle_class.cpp), so it waits for
-    // tracked to install. Kill switch: OPENSHIM_DISABLE_MRU_CLASS. Safe to
-    // call from the normal deferred-hook retry loop.
+    // a HoverCraftClass alias like `tracked`, with an [MruClass] section.
+    // Steps 1-6 of the plan in Docs/NIGHTINGALE_RESEARCH.md: the alias, the
+    // key parse, and (with [SinglePlayer] MruGameplay = 1, single player)
+    // the command-menu entries in slots 7-9, pod drops, the deployed flag and
+    // the radius service tick. It rides on the Find label-compare hook
+    // (pond_class_label.cpp) and the HoverCraftClass BuildClass/Build
+    // detours (tracked_vehicle_class.cpp), so it waits for tracked to
+    // install. Kill switches: OPENSHIM_DISABLE_MRU_CLASS (everything),
+    // OPENSHIM_DISABLE_MRU_GAMEPLAY (menu and gameplay). Safe to call from
+    // the normal deferred-hook retry loop.
     void InstallMruClassIfPossible();
     bool IsMruClassInstalled();
 
@@ -33,11 +36,18 @@ namespace BZROpenShim
     void OnHoverObjectBuilt(void* objectClass, void* object);
 
     // rts_commands.cpp DispatchHook, once per selected commandable unit:
-    // logs a unit-menu pick on an MRU object (single player, probe active)
+    // logs a unit-menu pick on an MRU object (single player, gameplay on)
     // and returns true when `mode` is one of its MRU entries (Drop Repair,
-    // Drop Ammo, Deploy). Such a pick must not reach the stock dispatch.
-    bool NoteMruMenuPick(void* object, uint32_t handle, int mode);
+    // Drop Ammo, Deploy) in its slot. Such a pick must not reach the stock
+    // dispatch. Deploy toggles the deployed flag now; a drop is queued for
+    // the unit's next Simulate when it can go.
+    // packAll: every selected MRU is deployed, so Deploy packs them all;
+    // otherwise Deploy deploys every packed one and leaves deployed ones.
+    bool NoteMruMenuPick(void* object, uint32_t handle, int mode, bool packAll);
     // rts_commands.cpp ModeLabelDecide: true when `object` is an MRU object
     // whose menu shows the MRU entries now.
     bool IsMruMenuObject(void* object);
+    // True for an MRU menu object that is deployed (the Deploy entry then
+    // reads Undeploy).
+    bool IsMruDeployed(void* object);
 }
