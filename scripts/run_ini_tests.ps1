@@ -236,6 +236,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Client-local UI: extra briefing pages only for missions that ship
     # <mission>_2.des; every other mission keeps the stock screen.
     "Features/BriefingPages",
+    # Client-local UI: DATABASE button on Single Player and the Database screen.
+    "Features/Database",
+    # Client-local UI: Briefing button and panel in the multiplayer waiting room.
+    "Features/LobbyBriefing",
     # Local-only: rebuilds the shooter's own sniper aim for a tilted (ejected) pilot;
     # identical to stock for a level pilot, no sync field written.
     "Fixes/SniperEjectAimFix",
@@ -582,6 +586,8 @@ $shippingPolicyChecks = @{
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/BriefingPageStride" = "1"
     "Features/BriefingPages" = "1"
+    "Features/Database" = "1"
+    "Features/LobbyBriefing" = "1"
     "Fixes/SniperEjectAimFix" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"

@@ -269,6 +269,8 @@
     <ClCompile Include="src\patches\planet_video.cpp" />
     <ClCompile Include="src\patches\briefing_pages.cpp" />
     <ClCompile Include="src\patches\lobby_briefing.cpp" />
+    <ClCompile Include="src\patches\des_reader.cpp" />
+    <ClCompile Include="src\patches\database_screen.cpp" />
     <ClCompile Include="src\patches\tro_menu_movie.cpp" />
     <ClCompile Include="src\patches\never_activate.cpp" />
     <ClCompile Include="src\patches\window_unclamp.cpp" />
@@ -420,6 +422,9 @@
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\briefing_pages_policy.h" />
     <ClInclude Include="include\lobby_briefing_policy.h" />
+    <ClInclude Include="include\des_reader.h" />
+    <ClInclude Include="include\database_policy.h" />
+    <ClInclude Include="include\database_content_resources.h" />
     <ClInclude Include="include\ordnance_entity_leak_policy.h" />
     <ClInclude Include="include\live_object_gate.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />
@@ -653,6 +658,7 @@
     </ResourceCompile>
     <ResourceCompile Include="dx11_enhanced_fxaa.rc" />
     <ResourceCompile Include="options_ui_l10n.rc" />
+    <ResourceCompile Include="database_content.rc" />
     <ResourceCompile Include="fracture_interior_textures.rc" />
     <ResourceCompile Include="launcher_proxy.rc">
       <AdditionalIncludeDirectories>$(SolutionDir)bin\$(Configuration);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

@@ -1723,6 +1723,8 @@ namespace BZROpenShim
         void InstallBriefingPagesIfPossible();
         // Briefing button and page overlay on the MP lobby (lobby_briefing.cpp).
         void InstallLobbyBriefingIfPossible();
+        // DATABASE button on Single Player and the Database screen (database_screen.cpp).
+        void InstallDatabaseScreenIfPossible();
         void InstallMultiRenderCountClampIfPossible();
         void InstallThumbnailBmpGuardIfPossible();
         extern FnEarthQuakeSimulate g_BzrFn_EarthQuakeSimulateOriginal;
