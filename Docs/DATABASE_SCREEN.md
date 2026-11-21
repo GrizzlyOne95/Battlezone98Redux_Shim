@@ -50,6 +50,9 @@ The screen uses a painted 1440x1080 panel, `osh_database_center.png`
   the text block (660,618,536,240) and a briefing Prev / Next footer.
 - Tabs, rows and footer buttons use the flat `osh_tool_hv/ck` skins (stock
   skins when the art is not deployed). Back stays the top-corner button.
+- Without `osh_database_center.png` (DLL updated without running the deploy
+  script), the list and detail boxes get stock `uiplate.png` plates with
+  `uiline.png` borders instead, at the same rects, and the log says so.
 - The selected tab and row are shown by tinted quads (`osh_preview_white.png`,
   moved with `Shell::SetPanelRectColor`), created before the buttons so they
   sit behind them. The old `> ` caption prefixes are gone.
