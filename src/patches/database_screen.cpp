@@ -672,14 +672,65 @@ namespace BZROpenShim
                     if (!g_View || !g_Ours || !Enabled())
                         return;
                     const std::string stem = odf.substr(0, 8);
-                    const bool exists = DesReader::ResourceExists(stem + ".mesh");
-                    Log(L"[DBPREVIEW] select odf=%hs stem=%hs mesh exists=%d; FUN_0067D180(0x%08X)\n", odf.c_str(),
+                    // Ogre's resource groups see the zfs archives; the game file-system check does not.
+                    const bool exists = DesReader::ImageExists(stem + ".mesh");
+                    Log(L"[DBPREVIEW] select odf=%hs stem=%hs ogre mesh exists=%d; FUN_0067D180(0x%08X)\n", odf.c_str(),
                         stem.c_str(), exists ? 1 : 0, static_cast<unsigned>(kModelBuild));
                     if (!exists)
                         return;
-                    if (const DWORD code = ShowSeh(stem.c_str()))
+                    LARGE_INTEGER f, a, b;
+                    QueryPerformanceFrequency(&f);
+                    QueryPerformanceCounter(&a);
+                    const DWORD code = ShowSeh(stem.c_str());
+                    QueryPerformanceCounter(&b);
+                    if (code)
+                    {
                         Fault(L"model build", code);
+                        return;
+                    }
+                    Log(L"[DBPREVIEW] model build stem=%hs took %.2f ms\n", stem.c_str(),
+                        1000.0 * static_cast<double>(b.QuadPart - a.QuadPart) / static_cast<double>(f.QuadPart));
                     LogGlobals(L"after model build");
+                }
+
+                // OPENSHIM_DB_PREVIEW_SPIKE_CYCLE=a,b,c: show each stem in turn every 3 s (harness aid).
+                void CycleTick()
+                {
+                    static std::vector<std::string> stems;
+                    static bool read = false;
+                    static size_t next = 0;
+                    static DWORD last = 0;
+                    if (!read)
+                    {
+                        read = true;
+                        char buf[512] = {};
+                        if (GetEnvironmentVariableA("OPENSHIM_DB_PREVIEW_SPIKE_CYCLE", buf, sizeof(buf)) > 0)
+                        {
+                            std::string cur;
+                            for (const char* p = buf;; ++p)
+                            {
+                                if (*p == ',' || *p == '\0')
+                                {
+                                    if (!cur.empty())
+                                        stems.push_back(cur);
+                                    cur.clear();
+                                    if (*p == '\0')
+                                        break;
+                                }
+                                else
+                                    cur += *p;
+                            }
+                        }
+                    }
+                    if (stems.empty() || !g_View)
+                        return;
+                    const DWORD now = GetTickCount();
+                    if (last && now - last < 3000)
+                        return;
+                    last = now;
+                    const std::string& stem = stems[next++ % stems.size()];
+                    Log(L"[DBPREVIEW] cycle -> %hs\n", stem.c_str());
+                    ShowUnit(stem);
                 }
 
                 DWORD TickSeh()
@@ -707,6 +758,7 @@ namespace BZROpenShim
                     if (++g_Ticks == 1 || g_Ticks == 120)
                         Log(L"[DBPREVIEW] per-frame update 0x%08X tick %u ok\n", static_cast<unsigned>(kPreviewUpdate),
                             g_Ticks);
+                    CycleTick();
                 }
 
                 // Replicates the stock screen dtor FUN_007AA360 (never called with a fake this).
