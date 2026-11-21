@@ -192,5 +192,42 @@ int main()
         Check((MakeGhostPlan(0.1f, 0, 1, 0xFFFFFF, 25).rings[0].argb >> 24) <
               (MakeGhostPlan(0.1f, 0, 1, 0xFFFFFF, 100).rings[0].argb >> 24), "hit opacity scales the rings");
     }
+    {
+        // Killshot flash.
+        DamageSample s; s.victim = 7; s.attacker = 9; s.sameLifetime = true; s.localAttacker = true;
+        s.weaponSource = true; s.singlePlayer = true;
+        s.before = 0.4f; s.after = 0.0f;
+        Check(IsKillshot(s), "health reaching zero is a killshot");
+        s.after = -0.1f;
+        Check(IsKillshot(s), "health below zero is a killshot");
+        s.after = 0.1f;
+        Check(ConfirmsHit(s) && !IsKillshot(s), "a surviving hit is not a killshot");
+        s.before = 0.0f; s.after = 0.0f;
+        Check(!ConfirmsHit(s) && !IsKillshot(s), "an already dead victim is not a hit or kill");
+        Check(kKillColor == 0xFFFF3228u, "kill colour is ARGB 255,50,40");
+
+        const uint32_t normal = 0xFF40FF40u;
+        Pulse p;
+        p.Start(1000, 7, false);
+        Check(p.ColorFor(1000, 120, normal) == normal, "a plain hit keeps the marker colour");
+        p.Start(2000, 7, true);
+        Check(p.ColorFor(2000, 120, normal) == kKillColor && p.ColorFor(2119, 120, normal) == kKillColor,
+              "a kill is red while the pulse is live");
+        p.Start(2050, 8, false);
+        Check(p.ColorFor(2060, 120, normal) == kKillColor, "a later non-kill hit keeps red");
+        Check(p.ColorFor(2120, 120, normal) == normal, "colour reverts after the duration");
+        p.Start(2100, 9, true);
+        Check(p.ColorFor(2200, 120, normal) == kKillColor, "a new kill restarts the red window");
+        p.Reset();
+        Check(p.ColorFor(2200, 120, normal) == normal, "reset clears the kill flash");
+
+        Settings marker; marker.hits = true; marker.hitColor = 0xFF40FF40u;
+        const auto red = MakeDrawPlan(marker, 500, 350, 1, 1, pane, false, 1, Relation::None, 0, 1, kKillColor);
+        const auto green = MakeDrawPlan(marker, 500, 350, 1, 1, pane, false, 1);
+        Check(red.count && (red.rects[0].color & 0xFFFFFFu) == 0xFF3228u, "marker draws the kill colour");
+        Check(green.count && (green.rects[0].color & 0xFFFFFFu) == 0x40FF40u, "default marker keeps hitColor");
+        Check((MakeGhostPlan(0.1f, 0, 1, kKillColor, 100).rings[0].argb & 0xFFFFFFu) == 0xFF3228u,
+              "ghost ripple takes the kill colour");
+    }
     return OpenShimTest::ExitCode();
 }

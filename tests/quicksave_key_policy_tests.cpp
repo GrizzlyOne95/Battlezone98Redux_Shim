@@ -145,6 +145,16 @@ namespace
         Check(ParseChord("Ctrl+GreyUpArrow", c) && c.vk == 0x26 && c.extended, "editor spelling GreyUpArrow parses");
         Check(ParseChord("Ctrl+PageDown", c) && c.vk == 0x22 && c.extended, "PageDown is extended");
         Check(ParseChord("Ctrl+F24", c) && c.vk == 0x87, "F24 parses");
+        Check(ParseChord("Numpad1", c) && !c.ctrl && !c.shift && !c.alt && c.vk == 0x61 && !c.extended,
+              "Numpad1 is VK_NUMPAD1, not extended");
+        Check(ParseChord("numpad0", c) && c.vk == 0x60 && !c.extended, "Numpad0, any case");
+        Check(ParseChord("NUM9", c) && c.vk == 0x69 && !c.extended, "Num9 alias");
+        Check(ParseChord("Keypad5", c) && c.vk == 0x65 && !c.extended, "Keypad5 alias");
+        Check(ParseChord("Ctrl+Numpad3", c) && c.ctrl && c.vk == 0x63, "numpad with a modifier");
+        Check(!ParseChord("Numpad", c), "Numpad alone is rejected");
+        Check(!ParseChord("Numpad10", c), "two digits are rejected");
+        Check(!ParseChord("Numpadx", c), "a non-digit is rejected");
+        Check(ParseChord("Home", c) && c.vk == 0x24 && c.extended, "grey Home is still extended");
 
         Check(!ParseChord("", c), "empty is rejected");
         Check(!ParseChord(nullptr, c), "null is rejected");

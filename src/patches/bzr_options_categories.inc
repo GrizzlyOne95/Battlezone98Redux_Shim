@@ -25,7 +25,7 @@ static const char* const kShimCategoryVideo[] = {
     kShimRowEffects, kShimRowMenuTheme };
 static const char* const kShimCategoryEffects[] = {
     "Faction Color Jets", "Destruction Chunks",
-    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs" };
+    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs", "Paint" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",
@@ -35,7 +35,7 @@ static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix", "Music Refill" };
 static const char* const kShimCategoryHud[] = {
     "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
-    "MP Vehicle Flags", "Kill Ticker", "Command Pings", "Artillery Range", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
+    "MP Vehicle Flags", "Kill Ticker", "Command Pings", "Radar Pings", "Artillery Range", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
 static const char* const kShimCategoryRadar[] = {
     "Radar Fade", "Radar Idle", "Radar Delay", "Radar Speed", "Keep Compass" };
 static const char* const kShimCategoryMeters[] = {
@@ -63,9 +63,10 @@ static const char* const kShimCategoryControls[] = {
     "Run in Background", "Rally Points", "Auto Group", "Extended Unit Cap", "Group Member Menu", "Group Strip",
     kShimRowRtsCommands };
 static const char* const kShimCategoryRtsCommands[] = {
-    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold",
+    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold", "Quick Commands",
     "Build at Nav", "Build Ghost", "Pending Build Ghost", "Power Range", "Waypoint Lines",
-    "Producer Badges", "Idle Unit Alert", "Attack Marks", "Queue Orders", "Build Queue" };
+    "Producer Badges", "Idle Unit Alert", "Ammo Alert", "Scrap Full Alert", "Satellite Follow", "Attack Marks", "Weapon Range", "Radar Range", "Mine Range", "Range Labels",
+    "Queue Orders", "Build Queue", "Unit Loadouts" };
 static const char* const kShimCategoryGameplay[] = {
     "Target Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
@@ -132,7 +133,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     BZR_SHIM_CATEGORY("Radar Fading", "RADAR FADING",
         "Cockpit radar opacity and timing, with an independent compass exception.", kShimCategoryRadar),
     BZR_SHIM_CATEGORY("Effects", "VISUAL EFFECTS",
-        "Faction color jets, destruction chunks, muzzle effects, shell casings and person gibs.",
+        "Faction color jets, destruction chunks, muzzle effects, shell casings, person gibs and player paint.",
         kShimCategoryEffects),
     // Subpage reached from Controls.
     BZR_SHIM_CATEGORY("RTS Commands", "RTS COMMANDS",
