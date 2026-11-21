@@ -32,6 +32,7 @@
 #include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "shell_screens.h"
+#include "ui_decor.h"
 
 #include <array>
 #include <cstdarg>
@@ -113,7 +114,7 @@ namespace BZROpenShim
             // Selected tab / row highlight: a tinted quad behind the buttons
             // (SLOT_PRESS and SLOT_HOVER of mkscreens.py).
             constexpr const char* kHighlightTexture = "osh_preview_white.png";
-            constexpr uint32_t kTabHighlightColour = 0xFF007F00;
+            constexpr uint32_t kTabHighlightColour = 0xFF005400; // as the row: brighter greens hide the caption
             constexpr uint32_t kRowHighlightColour = 0xFF005400;
             // Fallback skins when the painted art is not deployed.
             const Shell::ButtonSkin kStockTabSkin{ "MultiplayerModeButton_off.png", "MultiplayerModeButton_over.png",
@@ -1345,6 +1346,35 @@ namespace BZROpenShim
                 }
             }
 
+            // Fallback when the painted panel is missing: stock plates and
+            // borders around the list and detail boxes (list_box / detail_box
+            // in mkscreens.py), so the screen does not float on the bare
+            // shell background.
+            const Shell::Rect kListBoxRect{ 228.0f, 288.0f, 400.0f, 630.0f };
+            const Shell::Rect kDetailBoxRect{ 644.0f, 288.0f, 568.0f, 630.0f };
+
+            void BuildFrame(void* panel, const Shell::Rect& frame, const char* tag)
+            {
+                if (!Shell::IsTextureDeployed("uiplate.png"))
+                    return;
+                char name[64] = {};
+                _snprintf_s(name, _TRUNCATE, "OpenShimDatabase_%sPlate", tag);
+                Shell::AddPanel(panel, panel, name, frame, "uiplate.png", Shell::kControlFlags);
+                if (!Shell::IsTextureDeployed("uiline.png"))
+                    return;
+                UiDecorPanelDesc desc;
+                desc.rect = { frame.x, frame.y, frame.w, frame.h };
+                UiDecorPiece pieces[kUiDecorMaxPanelPieces] = {};
+                const size_t count = BuildUiDecorPanel(desc, pieces, kUiDecorMaxPanelPieces);
+                for (size_t i = 0; i < count; ++i)
+                {
+                    _snprintf_s(name, _TRUNCATE, "OpenShimDatabase_%sBorder%zu", tag, i);
+                    Shell::AddPanel(panel, panel, name, { pieces[i].rect.x, pieces[i].rect.y, pieces[i].rect.width,
+                                                          pieces[i].rect.height }, pieces[i].texture,
+                                    Shell::kControlFlags);
+                }
+            }
+
             void* MakeTextBlock(void* panel)
             {
                 void* memory = g_GameNew(kScrollingTextBlockSize);
@@ -1373,12 +1403,17 @@ namespace BZROpenShim
 
                 const bool hasArt = Shell::IsTextureDeployed(kPanelTexture);
                 if (!hasArt)
-                    Log(L"[DATABASE] %hs is not deployed; the Database screen shows the bare stock background\n",
+                    Log(L"[DATABASE] %hs is not deployed; the Database screen falls back to stock plates and skins\n",
                         kPanelTexture);
                 void* panel = Shell::AddPanel(screen, nullptr, "OpenShimDatabase_Overlay",
                                               { 0.0f, 0.0f, 1440.0f, 1080.0f }, hasArt ? kPanelTexture : nullptr);
                 if (!panel)
                     return false;
+                if (!hasArt)
+                {
+                    BuildFrame(panel, kListBoxRect, "List");
+                    BuildFrame(panel, kDetailBoxRect, "Detail");
+                }
                 Shell::AddLabel(panel, panel, "OpenShimDatabase_Title", kTitleRect,
                                 ShimText("openshim_ui:database_title", "DATABASE"), Shell::kTitleLabelFlags);
 
