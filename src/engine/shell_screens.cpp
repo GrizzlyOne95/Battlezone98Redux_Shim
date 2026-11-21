@@ -53,12 +53,14 @@
 #include <cstring>
 #include <cmath>
 #include <filesystem>
+#include <string>
 
 namespace BZROpenShim
 {
     namespace Hooks
     {
         bool VtableTypeNameMatches(uintptr_t vtableAddress, const char* expectedName);
+        void* ResolveOgreProcRaw(const char* name);
     }
 }
 
@@ -345,6 +347,9 @@ namespace BZROpenShim::ShellScreens
         {
             // First main-thread seam with a live Ogre Root on the menus.
             InstallFrameCaptureListener();
+            // Before any screen (the main menu first) asks for an OpenShim
+            // texture or the TRO banner movie by bare name.
+            EnsureOpenShimUiResourceLocation();
             SoakTelemetryRenderTick();
             ModeStressRenderTick();
             const ScreenDef* def = FindDef(static_cast<uint32_t>(id));
@@ -801,17 +806,115 @@ namespace BZROpenShim::ShellScreens
             g_BzrFn_LabelState(label, reinterpret_cast<void*>(1));
     }
 
+    namespace
+    {
+        std::filesystem::path GameDirectory()
+        {
+            wchar_t modulePath[MAX_PATH] = {};
+            const DWORD length = GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
+            if (length == 0 || length >= MAX_PATH)
+                return {};
+            return std::filesystem::path(modulePath).parent_path();
+        }
+    }
+
     bool IsTextureDeployed(const char* textureName)
     {
         if (!textureName || !*textureName)
             return false;
-        wchar_t modulePath[MAX_PATH] = {};
-        const DWORD length = GetModuleFileNameW(nullptr, modulePath, MAX_PATH);
-        if (length == 0 || length >= MAX_PATH)
+        const std::filesystem::path gameDir = GameDirectory();
+        if (gameDir.empty())
             return false;
         std::error_code ec;
-        const std::filesystem::path path = std::filesystem::path(modulePath).parent_path() /
-            "BZ_ASSETS_CORE" / "common" / "ui" / "CustomWidgets" / textureName;
-        return std::filesystem::exists(path, ec) && !ec;
+        // openshim\ui is the home since the move, but a file there counts only
+        // once Ogre can find it by bare name. The legacy folder is still
+        // accepted for one release so an install the new DLL reaches before
+        // its installer or asset sync does keeps its art.
+        if (EnsureOpenShimUiResourceLocation() &&
+            std::filesystem::exists(gameDir / "openshim" / "ui" / textureName, ec) && !ec)
+            return true;
+        ec.clear();
+        const std::filesystem::path legacy =
+            gameDir / "BZ_ASSETS_CORE" / "common" / "ui" / "CustomWidgets" / textureName;
+        return std::filesystem::exists(legacy, ec) && !ec;
+    }
+
+    bool EnsureOpenShimUiResourceLocation()
+    {
+        static bool s_Registered = false;
+        static bool s_Usable = false;
+        static bool s_LoggedMissingDir = false;
+        static bool s_LoggedResolveFailure = false;
+        if (s_Registered)
+            return s_Usable;
+
+        const std::filesystem::path gameDir = GameDirectory();
+        if (gameDir.empty())
+            return false;
+        const std::filesystem::path uiDir = gameDir / "openshim" / "ui";
+        std::error_code ec;
+        if (!std::filesystem::is_directory(uiDir, ec))
+        {
+            // The asset sync may still create it later in this session, so
+            // this is retried on the next call rather than given up on.
+            if (!s_LoggedMissingDir)
+            {
+                s_LoggedMissingDir = true;
+                Log(L"[SHELLUI] %ls not found; OpenShim UI images resolve only from the legacy folder\n",
+                    uiDir.c_str());
+            }
+            return false;
+        }
+
+        using FnGetResourceGroupManager = void*(__cdecl*)();
+        using FnAddResourceLocation = void(__thiscall*)(void*, const std::string&, const std::string&,
+                                                        const std::string&, bool, bool);
+        auto getResourceGroupManager = reinterpret_cast<FnGetResourceGroupManager>(
+            Hooks::ResolveOgreProcRaw("?getSingletonPtr@ResourceGroupManager@Ogre@@SAPAV12@XZ"));
+        auto addResourceLocation = reinterpret_cast<FnAddResourceLocation>(
+            Hooks::ResolveOgreProcRaw(
+                "?addResourceLocation@ResourceGroupManager@Ogre@@QAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@00_N1@Z"));
+        if (!getResourceGroupManager || !addResourceLocation)
+        {
+            if (!s_LoggedResolveFailure)
+            {
+                s_LoggedResolveFailure = true;
+                Log(L"[SHELLUI] openshim\\ui resource location: Ogre exports unresolved "
+                    L"(getSingletonPtr=%hs addResourceLocation=%hs)\n",
+                    getResourceGroupManager ? "ok" : "null",
+                    addResourceLocation ? "ok" : "null");
+            }
+            return false;
+        }
+
+        // Same group the engine's own bare-name lookups use: widget textures
+        // and the banner movie (SetMovie FUN_007d3850 calls
+        // OgreTheoraVideoManager::createClip with DEFAULT_RESOURCE_GROUP_NAME).
+        const std::string dir = uiDir.string();
+        const std::string type = "FileSystem";
+        const std::string group = "General";
+        try
+        {
+            void* manager = getResourceGroupManager();
+            if (!manager)
+                return false;  // Ogre not up yet; retried on the next call.
+            addResourceLocation(manager, dir, type, group, false, false);
+        }
+        catch (...)
+        {
+            // Same reasoning as the lobby flag preview location: Ogre throws
+            // across a toolset boundary (MSVC120 vs v143). Give up for the
+            // session rather than throwing on every texture probe.
+            s_Registered = true;
+            Log(L"[SHELLUI] openshim\\ui resource location: addResourceLocation threw dir=%hs group=%hs\n",
+                dir.c_str(), group.c_str());
+            return false;
+        }
+
+        s_Registered = true;
+        s_Usable = true;
+        Log(L"[SHELLUI] registered OpenShim UI resource location dir=%hs group=%hs\n",
+            dir.c_str(), group.c_str());
+        return true;
     }
 }

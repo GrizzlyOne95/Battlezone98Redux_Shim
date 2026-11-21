@@ -31,8 +31,11 @@ GAME_PATH="${BZR_GAME_PATH:-}"
 PURGE_CONFIG="${OPENSHIM_PURGE_CONFIG:-0}"
 DRY_RUN="${OPENSHIM_DRY_RUN:-0}"
 
-# UI tiles the installer writes into the game's custom-widget resource tree.
-UI_TILES=("uiline.png" "uiplate.png" "uibtn.png" "uibtnhv.png")
+# UI files the installer writes to openshim/ui (and older releases to
+# BZ_ASSETS_CORE/common/ui/CustomWidgets). Everything else there is not ours.
+UI_TILES=("uiline.png" "uiplate.png" "uibtn.png" "uibtnhv.png" "osh_career_center.png" "osh_prelobby_center.png" "osh_lan_center.png" "osh_bans_center.png" "osh_database_center.png"
+    "osh_options_center.png" "osh_hub_center.png" "osh_category_center.png" "osh_tile_hv.png" "osh_tile_ck.png" "osh_value_hv.png" "osh_value_ck.png"
+    "osh_keys_center.png" "osh_key_hv.png" "osh_key_ck.png" "osh_tool_hv.png" "osh_tool_ck.png" "osh_preview_white.png" "osh_reticle_center.png" "osh_menu_theme_center.png" "odyssey.ogv")
 
 usage() {
     cat <<EOF
@@ -193,19 +196,22 @@ uninstall_from() {
     [[ -d "$render_dir" ]] && remove_planned "$render_dir"
     remove_if_present "$openshim_dir/OpenShimAssets.ini"
     remove_dir_if_empty "$openshim_dir/renderer"
+
+    # UI images: openshim/ui now, BZ_ASSETS_CORE/common/ui/CustomWidgets in
+    # older releases. Only OpenShim's own files go; either folder may also hold
+    # the game's or the player's files, so it goes only when it is then empty.
+    for ui_dir in "$openshim_dir/ui" "$game_dir/BZ_ASSETS_CORE/common/ui/CustomWidgets"; do
+        for tile in "${UI_TILES[@]}" openshim_widgets.sha256; do
+            remove_if_present "$ui_dir/$tile"
+        done
+        remove_dir_if_empty "$ui_dir"
+    done
+
     remove_dir_if_empty "$openshim_dir"
     if [[ "$DRY_RUN" != "1" && -d "$openshim_dir" ]]; then
         echo "  KEEPING $openshim_dir : it still holds files the installer did not put there"
         kept=$((kept + 1))
     fi
-
-    # The four widget tiles; the folder may hold the game's or the player's own
-    # widgets, so it goes only when those four were all it contained.
-    ui_dir="$game_dir/BZ_ASSETS_CORE/common/ui/CustomWidgets"
-    for tile in "${UI_TILES[@]}"; do
-        remove_if_present "$ui_dir/$tile"
-    done
-    remove_dir_if_empty "$ui_dir"
 
     # Installer-owned copy of the shipped preset, and the updater's status file.
     remove_if_present "$game_dir/openshim.ini.canonical"

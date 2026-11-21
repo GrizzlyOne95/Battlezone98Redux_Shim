@@ -57,11 +57,15 @@ new_game_fixture() {
     write_fixture "$root/openshim/renderer/enhanced/openshim_enhanced_base.program" "program"
     write_fixture "$root/openshim/OpenShimAssets.ini" "[Assets]"
 
-    local tile
-    for tile in uiline.png uiplate.png uibtn.png uibtnhv.png; do
-        write_fixture "$root/BZ_ASSETS_CORE/common/ui/CustomWidgets/$tile" "png"
+    # Widget tiles beside a file that is not the installer's, in the current
+    # folder and in the legacy one older releases used.
+    local tile ui_dir
+    for ui_dir in openshim/ui BZ_ASSETS_CORE/common/ui/CustomWidgets; do
+        for tile in uiline.png uiplate.png uibtn.png uibtnhv.png odyssey.ogv openshim_widgets.sha256; do
+            write_fixture "$root/$ui_dir/$tile" "png"
+        done
+        write_fixture "$root/$ui_dir/player_widget.png" "png"
     done
-    write_fixture "$root/BZ_ASSETS_CORE/common/ui/CustomWidgets/player_widget.png" "png"
 
     write_fixture "$root/openshim.ini" "[Player]"
     write_fixture "$root/openshim.ini.bak-20260101-000000" "[Player]"
@@ -96,9 +100,12 @@ for relative in \
     plugins/openshim.dll plugins/openshim.dll.bak-20260101-000000 plugins \
     scripts/patches.json scripts/patches.json.previous scripts/patches.json.bak-20260101-000000 \
     openshim/renderer/enhanced/resources.version openshim/renderer/enhanced openshim/renderer \
-    openshim/OpenShimAssets.ini openshim \
+    openshim/OpenShimAssets.ini \
+    openshim/ui/uiline.png openshim/ui/uiplate.png openshim/ui/uibtn.png openshim/ui/uibtnhv.png \
+    openshim/ui/odyssey.ogv openshim/ui/openshim_widgets.sha256 \
     BZ_ASSETS_CORE/common/ui/CustomWidgets/uiline.png BZ_ASSETS_CORE/common/ui/CustomWidgets/uiplate.png \
     BZ_ASSETS_CORE/common/ui/CustomWidgets/uibtn.png BZ_ASSETS_CORE/common/ui/CustomWidgets/uibtnhv.png \
+    BZ_ASSETS_CORE/common/ui/CustomWidgets/odyssey.ogv BZ_ASSETS_CORE/common/ui/CustomWidgets/openshim_widgets.sha256 \
     openshim.ini.canonical openshim_update.status; do
     check "$(absent "$game/$relative")" "removed: $relative"
 done
@@ -106,6 +113,7 @@ for relative in \
     battlezone98redux.exe winmm.dll.bak-20260102-000000 \
     scripts/stock_mission.lua scripts \
     BZ_ASSETS_CORE/common/ui/CustomWidgets/player_widget.png BZ_ASSETS_CORE/common/ui/CustomWidgets \
+    openshim/ui/player_widget.png openshim/ui openshim \
     openshim.ini openshim.ini.bak-20260101-000000 openshim.ini.pre-reset-20260101-000000.bak \
     net.ini net.ini.bak-20260101-000000 net.ini.previous \
     logs/openshim.log; do
@@ -114,6 +122,16 @@ done
 check "$([[ "$output" == *"KEEPING"*"winmm.dll.bak-20260102-000000"* ]] && echo 1 || echo 0)" "the foreign backup is reported as kept"
 check "$([[ "$output" == *"left in place"* ]] && echo 1 || echo 0)" "the closing note says what was left"
 check "$([[ "$output" == *"WINEDLLOVERRIDES"* ]] && echo 1 || echo 0)" "the closing note reminds about the launch option"
+
+# --- UI folders holding only OpenShim's files are removed, openshim/ too ------
+new_game_fixture "$game"
+rm -f "$game/openshim/ui/player_widget.png" "$game/BZ_ASSETS_CORE/common/ui/CustomWidgets/player_widget.png"
+output="$(bash "$uninstaller" --game-path "$game" 2>&1)" && ok=1 || ok=0
+check "$ok" "owned-only UI run exits cleanly: $output"
+for relative in openshim/ui openshim BZ_ASSETS_CORE/common/ui/CustomWidgets; do
+    check "$(absent "$game/$relative")" "owned-only UI run removed: $relative"
+done
+check "$(present "$game/BZ_ASSETS_CORE/common/ui")" "owned-only UI run keeps the game's ui folder"
 
 # --- purge run also removes the player ini and its backups --------------------
 new_game_fixture "$game"

@@ -47,8 +47,10 @@ RENDER_SRC=""
 UI_SRC=""
 MANIFEST_SRC=""
 
-# UI tiles the game actually loads out of the custom-widget resource tree.
-UI_TILES=(uiline.png uiplate.png uibtn.png uibtnhv.png)
+# UI files OpenShim ships (resources/ui/custom_widgets), installed to openshim/ui.
+UI_TILES=(uiline.png uiplate.png uibtn.png uibtnhv.png osh_career_center.png osh_prelobby_center.png osh_lan_center.png osh_bans_center.png osh_database_center.png
+    osh_options_center.png osh_hub_center.png osh_category_center.png osh_tile_hv.png osh_tile_ck.png osh_value_hv.png osh_value_ck.png
+    osh_keys_center.png osh_key_hv.png osh_key_ck.png osh_tool_hv.png osh_tool_ck.png osh_preview_white.png osh_reticle_center.png osh_menu_theme_center.png odyssey.ogv)
 
 usage() {
     cat <<EOF
@@ -416,7 +418,7 @@ deploy_matched() {
     fi
 
     if [[ -n "$UI_SRC" ]]; then
-        local ui_target="$game_dir/BZ_ASSETS_CORE/common/ui/CustomWidgets"
+        local ui_target="$game_dir/openshim/ui"
         mkdir -p "$ui_target"
         local ui_file
         for ui_file in "${UI_TILES[@]}"; do
@@ -424,7 +426,21 @@ deploy_matched() {
                 cp -f "$UI_SRC/$ui_file" "$ui_target/"
             fi
         done
+        # The in-game asset sync trusts this marker to describe the folder.
+        rm -f "$ui_target/openshim_widgets.sha256"
         echo "  deployed UI widget tiles"
+
+        # Older releases put the same files in the game's own CustomWidgets
+        # folder. Remove only OpenShim's files there (the game and the player
+        # keep theirs) and the folder only if that empties it.
+        local ui_legacy="$game_dir/BZ_ASSETS_CORE/common/ui/CustomWidgets"
+        if [[ -d "$ui_legacy" ]]; then
+            for ui_file in "${UI_TILES[@]}" openshim_widgets.sha256; do
+                rm -f "$ui_legacy/$ui_file"
+            done
+            rmdir "$ui_legacy" 2>/dev/null || true
+            echo "  removed old UI widget tiles from BZ_ASSETS_CORE/common/ui/CustomWidgets"
+        fi
     fi
 
     verify_patches_json "$PATCHES" "$game_dir/scripts/patches.json"

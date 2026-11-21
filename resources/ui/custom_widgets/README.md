@@ -4,9 +4,14 @@ Four flat tiles that the injected Settings and Keybind pages
 (`src/patches/bzr_options_ui.cpp`) apply to widgets they create at runtime.
 This is **not** a replacement screen background.
 
-Regenerate with `python mkui.py`. `scripts/Deploy-OpenShim.ps1` copies all four
-into `BZ_ASSETS_CORE/common/ui/CustomWidgets/` and hash-verifies them, so a
-clean install cannot fall back to missing-texture panels.
+Regenerate with `python mkui.py`. `scripts/Deploy-OpenShim.ps1` copies every
+shipped file in this folder (the `*.png` files and `odyssey.ogv`) into the game's
+`openshim/ui/` and hash-verifies them, so a clean install cannot fall back to
+missing-texture panels. OpenShim registers `openshim/ui` with Ogre at startup,
+so the engine finds these files by bare name. Older releases put them in
+`BZ_ASSETS_CORE/common/ui/CustomWidgets/`; deploy, the installers and the asset
+sync remove OpenShim's copies from there and leave the game's and the
+player's files alone.
 
 | Asset | Colour | Used by |
 |---|---|---|

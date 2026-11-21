@@ -159,6 +159,9 @@ namespace BZROpenShim
                              set.name.c_str(), outcome.detail.c_str());
                     break;
                 }
+                if (outcome.legacyFilesRemoved > 0)
+                    LogShimA(LogLevel::Info, kComponent, "%s: removed %u old copies from the legacy widget folder",
+                             set.name.c_str(), outcome.legacyFilesRemoved);
             }
         }
 

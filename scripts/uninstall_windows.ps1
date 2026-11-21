@@ -32,8 +32,9 @@ $steamAppId = "301650"
 $defaultInstallDir = "Battlezone 98 Redux"
 $requestedGamePath = if ($env:OPENSHIM_GAME_PATH) { $env:OPENSHIM_GAME_PATH } else { "" }
 
-# UI tiles the installer writes into the game's custom-widget resource tree.
-# Everything else in that folder belongs to the game or to the player.
+# UI files the installer writes to openshim\ui (and older releases to
+# BZ_ASSETS_CORE\common\ui\CustomWidgets). Everything else in those folders
+# belongs to the game or to the player.
 $uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png", "osh_prelobby_center.png", "osh_lan_center.png", "osh_bans_center.png", "osh_database_center.png",
     "osh_options_center.png", "osh_hub_center.png", "osh_category_center.png", "osh_tile_hv.png", "osh_tile_ck.png", "osh_value_hv.png", "osh_value_ck.png",
     "osh_keys_center.png", "osh_key_hv.png", "osh_key_ck.png", "osh_tool_hv.png", "osh_tool_ck.png", "osh_preview_white.png", "osh_reticle_center.png", "osh_menu_theme_center.png", "odyssey.ogv")
@@ -509,18 +510,21 @@ foreach ($gameDir in $gamePaths) {
     }
     Remove-IfPresent (Join-Path $openshimDir "OpenShimAssets.ini")
     Remove-DirectoryIfEmpty (Join-Path $openshimDir "renderer")
+
+    # UI images: openshim\ui now, BZ_ASSETS_CORE\common\ui\CustomWidgets in
+    # older releases. Only OpenShim's own files go; either folder may also hold
+    # the game's or the player's files, so it goes only when it is then empty.
+    foreach ($uiDir in @((Join-Path $openshimDir "ui"), (Join-Path $gameDir "BZ_ASSETS_CORE\common\ui\CustomWidgets"))) {
+        foreach ($tile in $uiTiles) { Remove-IfPresent (Join-Path $uiDir $tile) }
+        Remove-IfPresent (Join-Path $uiDir "openshim_widgets.sha256")
+        Remove-DirectoryIfEmpty $uiDir
+    }
+
     Remove-DirectoryIfEmpty $openshimDir
     if (-not $dryRun -and (Test-Path -LiteralPath $openshimDir -PathType Container)) {
         Write-Host "  KEEPING $openshimDir : it still holds files the installer did not put there"
         $script:kept++
     }
-
-    # The four widget tiles; the folder may hold the game's or the player's own
-    # widgets, so it goes only when those four were all it contained.
-    $uiDir = Join-Path $gameDir "BZ_ASSETS_CORE\common\ui\CustomWidgets"
-    foreach ($tile in $uiTiles) { Remove-IfPresent (Join-Path $uiDir $tile) }
-    Remove-IfPresent (Join-Path $uiDir "openshim_widgets.sha256")
-    Remove-DirectoryIfEmpty $uiDir
 
     # Installer-owned copy of the shipped preset, and the updater's status file.
     Remove-IfPresent (Join-Path $gameDir "openshim.ini.canonical")

@@ -83,7 +83,11 @@ namespace BZROpenShim
             if (len == 0 || len >= MAX_PATH)
                 return false;
             std::filesystem::path gameDir = std::filesystem::path(modPath).parent_path();
+            const bool uiRegistered = ShellScreens::EnsureOpenShimUiResourceLocation();
+            // openshim\ui first; the legacy CustomWidgets folder is accepted
+            // for one release while installs migrate.
             std::filesystem::path candidates[] = {
+                gameDir / "openshim" / "ui" / textureName,
                 gameDir / "BZ_ASSETS_CORE" / "common" / "ui" / "CustomWidgets" / textureName,
                 gameDir / "BZ_ASSETS" / "common" / "ui" / textureName,
                 gameDir / "resources" / "ui" / "custom_widgets" / textureName,
@@ -92,6 +96,9 @@ namespace BZROpenShim
             std::error_code ec;
             for (auto &cand : candidates)
             {
+                // openshim\ui counts only once Ogre can resolve names there.
+                if (!uiRegistered && &cand == &candidates[0])
+                    continue;
                 if (std::filesystem::exists(cand, ec) && !ec)
                     return true;
             }

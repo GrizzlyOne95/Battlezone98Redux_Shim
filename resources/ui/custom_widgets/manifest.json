@@ -4,7 +4,7 @@
   "consumer": "src/patches/bzr_options_ui.cpp",
   "deploy": {
     "script": "scripts/Deploy-OpenShim.ps1",
-    "target": "BZ_ASSETS_CORE/common/ui/CustomWidgets",
+    "target": "openshim/ui",
     "verified": "sha256"
   },
   "palette_source": {

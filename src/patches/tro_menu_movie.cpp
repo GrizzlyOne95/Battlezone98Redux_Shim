@@ -18,6 +18,7 @@
 #include "tro_menu_movie.h"
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
+#include "shell_screens.h"
 #include "shim_log.h"
 #include <Windows.h>
 #include <cstring>
@@ -169,6 +170,9 @@ namespace BZROpenShim
             const char* want = mode ? kTroMovie : kStockMovie;
             if (std::strcmp(g_BannerMovie, want) == 0) return;
             strcpy_s(g_BannerMovie, want);
+            // odyssey.ogv ships in openshim\ui and SetMovie opens it by bare
+            // name through Ogre's General group, so register that folder.
+            ShellScreens::EnsureOpenShimUiResourceLocation();
             ApplyToBuiltBanner();
         }
     }

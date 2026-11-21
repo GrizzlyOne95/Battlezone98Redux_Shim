@@ -47,7 +47,7 @@ if ($ref -notmatch '^[A-Za-z0-9._/-]+$' -or $ref -match '^-|\.\.|//|/$') {
 $steamAppId = "301650"
 $defaultInstallDir = "Battlezone 98 Redux"
 
-# UI tiles the game actually loads out of the custom-widget resource tree.
+# UI files OpenShim ships (resources\ui\custom_widgets), installed to openshim\ui.
 $uiTiles = @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "osh_career_center.png", "osh_prelobby_center.png", "osh_lan_center.png", "osh_bans_center.png", "osh_database_center.png",
     "osh_options_center.png", "osh_hub_center.png", "osh_category_center.png", "osh_tile_hv.png", "osh_tile_ck.png", "osh_value_hv.png", "osh_value_ck.png",
     "osh_keys_center.png", "osh_key_hv.png", "osh_key_ck.png", "osh_tool_hv.png", "osh_tool_ck.png", "osh_preview_white.png", "osh_reticle_center.png", "osh_menu_theme_center.png", "odyssey.ogv")
@@ -970,7 +970,7 @@ try {
         }
 
         if ($artifacts.UiSource) {
-            $uiTarget = Join-Path $gameDir "BZ_ASSETS_CORE\common\ui\CustomWidgets"
+            $uiTarget = Join-Path $gameDir "openshim\ui"
             if (-not (Test-Path -LiteralPath $uiTarget)) {
                 New-Item -ItemType Directory -Force -Path $uiTarget | Out-Null
             }
@@ -982,6 +982,20 @@ try {
             }
             Remove-Item -LiteralPath (Join-Path $uiTarget "openshim_widgets.sha256") -Force -ErrorAction SilentlyContinue
             Write-Host "  deployed UI widget tiles"
+
+            # Older releases put the same files in the game's own CustomWidgets
+            # folder. Remove only OpenShim's files there (the game and the
+            # player keep theirs) and the folder only if that empties it.
+            $uiLegacy = Join-Path $gameDir "BZ_ASSETS_CORE\common\ui\CustomWidgets"
+            if (Test-Path -LiteralPath $uiLegacy -PathType Container) {
+                foreach ($tile in @($uiTiles) + "openshim_widgets.sha256") {
+                    Remove-Item -LiteralPath (Join-Path $uiLegacy $tile) -Force -ErrorAction SilentlyContinue
+                }
+                if (-not (Get-ChildItem -LiteralPath $uiLegacy -Force | Select-Object -First 1)) {
+                    Remove-Item -LiteralPath $uiLegacy -Force -ErrorAction SilentlyContinue
+                }
+                Write-Host "  removed old UI widget tiles from BZ_ASSETS_CORE\common\ui\CustomWidgets"
+            }
         }
     }
 

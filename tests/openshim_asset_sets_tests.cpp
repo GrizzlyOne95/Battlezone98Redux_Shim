@@ -101,7 +101,7 @@ namespace
 return {
     assetSets = {
         renderer = { source = "openshim\\renderer\\enhanced", destination = "openshim\\renderer\\enhanced", sha256 = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", files = 2 },
-        customWidgets = { source = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", destination = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", files = 1 },
+        customWidgets = { source = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", destination = "openshim\\ui", sha256 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", files = 1 },
         futureSet = { source = "x", destination = "y", sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", files = 9 },
     },
     assetFiles = {
@@ -160,6 +160,7 @@ return {
                   "file entry fields");
             Check(sets.sets[1].name == "customWidgets" && sets.sets[1].entries.size() == 1,
                   "customWidgets set shape");
+            Check(sets.sets[1].destination == "openshim\\ui", "customWidgets destination comes from the manifest");
         }
 
         Check(ParseOpenShimAssetSets("return { formatVersion = 3 }", sets, error) && sets.sets.empty(),
@@ -294,9 +295,10 @@ return {
         const fs::path item = temp.path / "item";
         const fs::path game = temp.path / "game";
         const OpenShimAssetSet set = MakeSet("customWidgets", "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets",
-            "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", item,
+            "openshim\\ui", item,
             { { "osh_a.png", "new-a" }, { "uiline.png", "new-line" } });
-        const fs::path live = game / "BZ_ASSETS_CORE" / "common" / "ui" / "CustomWidgets";
+        const fs::path live = game / "openshim" / "ui";
+        const fs::path legacy = game / "BZ_ASSETS_CORE" / "common" / "ui" / "CustomWidgets";
 
         // Corrupt source with an empty destination: nothing is created.
         Put(item / "BZ_ASSETS_CORE" / "common" / "ui" / "CustomWidgets" / "osh_a.png", "tampered");
@@ -307,22 +309,91 @@ return {
 
         Put(live / "foreign.png", "players own");
         Put(live / "uiline.png", "stale");
+        // An older install: OpenShim's copies plus the game's own file in the
+        // legacy folder.
+        Put(legacy / "uiline.png", "old-line");
+        Put(legacy / "openshim_widgets.sha256", "old marker");
+        Put(legacy / "WIDGET_Atlas.png", "games own");
         outcome = SyncOpenShimAssetSet(item, game, set, nullptr);
         Check(outcome.result == OpenShimAssetSyncResult::Installed && outcome.filesInstalled == 2,
               std::string("widgets install both files: ") + outcome.detail);
+        Check(outcome.legacyFilesRemoved == 2 && !fs::exists(legacy / "uiline.png") &&
+              !fs::exists(legacy / "openshim_widgets.sha256"),
+              "installing elsewhere removes OpenShim's legacy copies and marker");
+        Check(Get(legacy / "WIDGET_Atlas.png") == "games own", "the game's legacy widget file is kept");
         Check(Get(live / "uiline.png") == "new-line" && Get(live / "osh_a.png") == "new-a", "widget files replaced");
         Check(Get(live / "foreign.png") == "players own", "foreign files are kept");
         Check(Get(live / "openshim_widgets.sha256") == set.sha256 + "\n", "widgets marker written");
         Check(!fs::exists(live / "uiline.png.tmp") && !fs::exists(live / "osh_a.png.tmp"), "no temporary files remain");
 
+        // A legacy copy that was locked last time goes on a later, current run.
+        Put(legacy / "osh_a.png", "locked earlier");
         outcome = SyncOpenShimAssetSet(item, game, set, nullptr);
         Check(outcome.result == OpenShimAssetSyncResult::Current, "second run is a marker skip");
+        Check(outcome.legacyFilesRemoved == 1 && !fs::exists(legacy / "osh_a.png"),
+              "a current run still finishes the legacy cleanup");
 
         // Marker lost but files already right: marker is rewritten, nothing copied.
         fs::remove(live / "openshim_widgets.sha256");
         outcome = SyncOpenShimAssetSet(item, game, set, nullptr);
         Check(outcome.result == OpenShimAssetSyncResult::Installed && outcome.filesInstalled == 0,
               "matching files are not rewritten");
+    }
+
+    // A manifest that still names the legacy folder installs there and must
+    // not clean up what it just installed.
+    void TestWidgetsLegacyDestination()
+    {
+        TempDir temp;
+        const fs::path item = temp.path / "item";
+        const fs::path game = temp.path / "game";
+        const OpenShimAssetSet set = MakeSet("customWidgets", "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets",
+            "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", item, { { "uiline.png", "new-line" } });
+        const fs::path legacy = game / "BZ_ASSETS_CORE" / "common" / "ui" / "CustomWidgets";
+        auto outcome = SyncOpenShimAssetSet(item, game, set, nullptr);
+        Check(outcome.result == OpenShimAssetSyncResult::Installed && outcome.legacyFilesRemoved == 0,
+              std::string("legacy destination installs without cleanup: ") + outcome.detail);
+        Check(Get(legacy / "uiline.png") == "new-line" &&
+              Get(legacy / "openshim_widgets.sha256") == set.sha256 + "\n",
+              "legacy destination keeps its files and marker");
+        outcome = SyncOpenShimAssetSet(item, game, set, nullptr);
+        Check(outcome.result == OpenShimAssetSyncResult::Current && fs::exists(legacy / "uiline.png"),
+              "a current legacy destination is left alone");
+    }
+
+    void TestRemoveLegacyWidgetFiles()
+    {
+        TempDir temp;
+        const fs::path legacy = temp.path / "CustomWidgets";
+        const std::vector<std::string> owned = { "uiline.png", "odyssey.ogv", "osh_absent.png" };
+
+        Check(RemoveOpenShimLegacyWidgetFiles(legacy, owned) == 0 && !fs::exists(legacy),
+              "a missing legacy folder is a no-op");
+
+        // Owned files and the marker go, foreign files stay, so the folder stays.
+        Put(legacy / "uiline.png", "ours");
+        Put(legacy / "odyssey.ogv", "ours");
+        Put(legacy / "openshim_widgets.sha256", "marker");
+        Put(legacy / "player_widget.png", "players own");
+        Check(RemoveOpenShimLegacyWidgetFiles(legacy, owned) == 3, "owned files and the marker are counted");
+        Check(!fs::exists(legacy / "uiline.png") && !fs::exists(legacy / "odyssey.ogv") &&
+              !fs::exists(legacy / "openshim_widgets.sha256"), "owned files and the marker are removed");
+        Check(Get(legacy / "player_widget.png") == "players own", "foreign files are kept");
+        Check(fs::is_directory(legacy), "a folder with foreign files is kept");
+
+        // A foreign subfolder also keeps the folder; an unsafe name is ignored.
+        fs::remove(legacy / "player_widget.png");
+        Put(temp.path / "outside.png", "not in the folder");
+        fs::create_directories(legacy / "sub");
+        Check(RemoveOpenShimLegacyWidgetFiles(legacy, { "..\\outside.png" }) == 0 &&
+              fs::exists(temp.path / "outside.png"), "a path outside the folder is never removed");
+        Check(fs::is_directory(legacy), "a folder with a subfolder is kept");
+
+        // Only OpenShim's files left: the folder goes once they do.
+        fs::remove(legacy / "sub");
+        Put(legacy / "uiline.png", "ours");
+        Check(RemoveOpenShimLegacyWidgetFiles(legacy, owned) == 1 && !fs::exists(legacy),
+              "a folder emptied by the cleanup is removed");
     }
 }
 
@@ -333,6 +404,8 @@ int main()
     TestRendererSync();
     TestRendererPayloadNamedSource();
     TestWidgetsSync();
+    TestWidgetsLegacyDestination();
+    TestRemoveLegacyWidgetFiles();
 
     if (OpenShimTest::FailureCount() == 0)
         std::puts("openshim_asset_sets_tests: PASS");

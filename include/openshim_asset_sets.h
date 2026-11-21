@@ -57,6 +57,20 @@ namespace BZROpenShim
     // unknown set.
     const char* OpenShimAssetSetMarkerName(const std::string& setName);
 
+    // Where OpenShim's UI images lived before they moved to openshim\ui,
+    // relative to the game directory. Still read as a fallback for one
+    // release, and cleaned up by the installers and the customWidgets sync.
+    constexpr char kOpenShimLegacyWidgetsDir[] = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets";
+
+    // Removes from `legacyDir` only the files OpenShim owns there: each name
+    // in `ownedNames` (relative, as in the manifest) plus the
+    // openshim_widgets.sha256 marker. Every other file stays. The folder
+    // itself goes only when it is then empty. A file that cannot be removed
+    // (locked) is skipped and left for the next run. Returns the number of
+    // files removed.
+    uint32_t RemoveOpenShimLegacyWidgetFiles(const std::filesystem::path& legacyDir,
+                                             const std::vector<std::string>& ownedNames);
+
     enum class OpenShimAssetSyncResult
     {
         Current,   // marker already matches; game files were not hashed
@@ -69,6 +83,8 @@ namespace BZROpenShim
     {
         OpenShimAssetSyncResult result = OpenShimAssetSyncResult::Refused;
         uint32_t filesInstalled = 0;
+        // customWidgets only: OpenShim files removed from the legacy folder.
+        uint32_t legacyFilesRemoved = 0;
         std::string detail;
     };
 
@@ -82,7 +98,10 @@ namespace BZROpenShim
     // "<path>", and is always installed as "<path>". renderer swaps the whole
     // destination directory atomically (and runs `validator` on the pending
     // copy before the swap); customWidgets replaces only the listed files and
-    // never removes anything else in the folder.
+    // never removes anything else in the folder. Once customWidgets is
+    // current at a destination other than kOpenShimLegacyWidgetsDir, its
+    // listed files are also removed from the legacy folder
+    // (RemoveOpenShimLegacyWidgetFiles), so a CR update migrates old installs.
     OpenShimAssetSyncOutcome SyncOpenShimAssetSet(
         const std::filesystem::path& itemDir,
         const std::filesystem::path& gameDir,

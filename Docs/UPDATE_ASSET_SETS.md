@@ -21,7 +21,7 @@ backslash.
 ```lua
     assetSets = {
         renderer = { source = "openshim\\renderer\\enhanced", destination = "openshim\\renderer\\enhanced", sha256 = "<64 hex>", files = 21 },
-        customWidgets = { source = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", destination = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", sha256 = "<64 hex>", files = 18 },
+        customWidgets = { source = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", destination = "openshim\\ui", sha256 = "<64 hex>", files = 25 },
     },
     assetFiles = {
         { set = "renderer", path = "resources.version", sha256 = "<64 hex>", size = 2 },
@@ -56,7 +56,7 @@ Each destination holds a marker whose content is the set hash plus `\n`:
 | Set | Marker |
 | --- | --- |
 | `renderer` | `openshim\renderer\enhanced\openshim_set.sha256` |
-| `customWidgets` | `BZ_ASSETS_CORE\common\ui\CustomWidgets\openshim_widgets.sha256` |
+| `customWidgets` | `openshim\ui\openshim_widgets.sha256` (the manifest's `destination`) |
 
 If the marker equals the manifest's set hash the set is skipped without hashing
 any game file. `install_windows.ps1` deletes the matching marker whenever it
@@ -99,11 +99,39 @@ renamed (locked) the pending copy is removed, the set is `deferred` and the next
 start retries. If the live directory does not exist the pending directory is
 just renamed into place.
 
-`customWidgets` shares its folder with the game's and the player's own widgets,
-so the directory is never swapped or deleted. Each file is copied to
-`<name>.tmp` in the same folder, verified, and renamed over the target. A file
-that already matches is left alone. The marker is written last, only if every
-file succeeded; any failure is `deferred` and retried next start.
+`customWidgets` may share its folder with the player's own files, so the
+directory is never swapped or deleted. Each file is copied to `<name>.tmp` in
+the same folder, verified, and renamed over the target. A file that already
+matches is left alone. The marker is written last, only if every file
+succeeded; any failure is `deferred` and retried next start.
+
+## The UI folder move (done in OpenShim)
+
+OpenShim's UI images (`resources/ui/custom_widgets/*.png` and `odyssey.ogv`)
+moved from the game's `BZ_ASSETS_CORE\common\ui\CustomWidgets` to
+`openshim\ui`. OpenShim registers `openshim\ui` with Ogre (group `General`,
+`ShellScreens::EnsureOpenShimUiResourceLocation`), so the bare names it hands
+the engine still resolve. For one release the texture checks also accept the
+legacy folder.
+
+Migration removes only OpenShim's own files from the legacy folder (the shipped
+names plus `openshim_widgets.sha256`) and removes the folder only when that
+empties it; the game's `WIDGET_*` files and anything the player put there stay.
+Who does it:
+
+- `install_windows.ps1`, `install_linux.sh`, `Deploy-OpenShim.ps1`: after
+  deploying to `openshim\ui`.
+- The `customWidgets` sync: whenever the set is installed or current at a
+  `destination` other than the legacy folder, it removes the set's listed
+  files and the marker from the legacy folder
+  (`RemoveOpenShimLegacyWidgetFiles`). A manifest whose `destination` is still
+  the legacy folder installs there and cleans nothing.
+- The uninstallers clean both folders by the same rule.
+
+What remains for Campaign Reimagined: change the `customWidgets` `destination`
+in its manifest to `openshim\\ui` (the `source` inside the Workshop item can stay
+as it is). Until then a CR-delivered sync keeps writing the legacy folder, which
+this OpenShim release still reads.
 
 ## Known race
 
@@ -112,7 +140,9 @@ renderer set internally consistent (the game sees the old folder or the new one,
 never a mix), but a session that has already read resources keeps using the
 previous copy. Worst case, one session runs on the previous assets and the next
 start is correct. Individual widget images may likewise be picked up a start
-late.
+late; Ogre also indexes a FileSystem location when it is registered, so a
+file the sync adds to `openshim\ui` after that is found through Ogre's
+per-location fallback lookup or on the next start.
 
 ## Not covered
 
@@ -138,7 +168,7 @@ set's `source` from the manifest, moving them needs no OpenShim change.
 3. Move the files to a non-content directory in the item (for example
    `OpenShimPayload\renderer\enhanced` and `OpenShimPayload\ui\CustomWidgets`)
    and point the manifest `source` fields there. Only the destination keeps
-   the game-relative path.
+   the game-relative path (`openshim\ui` for `customWidgets`, see above).
 4. Remaining exposure after the move: a player whose running OpenShim
    differs from the Workshop manifest version (sync is gated off) and who has
    no game-folder copy loses Enhanced resources and the custom tiles until

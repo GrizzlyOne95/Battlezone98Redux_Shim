@@ -158,8 +158,17 @@ namespace BZROpenShim::ShellScreens
         return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
     }
 
-    // True when an OpenShim UI texture is deployed (loose file in the
-    // CustomWidgets folder). Screens fall back to the bare stock background
-    // when their panel art is missing rather than showing a missing texture.
+    // True when an OpenShim UI texture is deployed (loose file in openshim\ui,
+    // or for one release the legacy BZ_ASSETS_CORE\common\ui\CustomWidgets
+    // folder). Screens fall back to the bare stock background when their
+    // panel art is missing rather than showing a missing texture.
     bool IsTextureDeployed(const char* textureName);
+
+    // Registers <game dir>\openshim\ui as a FileSystem location in Ogre's
+    // "General" group (non-recursive), so the bare names OpenShim gives the
+    // engine (widget textures, odyssey.ogv) resolve there. Main thread only.
+    // Registers once; until it succeeds (Ogre not ready, folder not there
+    // yet) every call retries, and each failure kind is logged once.
+    // Returns true only once openshim\ui is registered with Ogre.
+    bool EnsureOpenShimUiResourceLocation();
 }
