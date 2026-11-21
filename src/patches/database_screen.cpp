@@ -672,7 +672,8 @@ namespace BZROpenShim
                     if (!g_View || !g_Ours || !Enabled())
                         return;
                     const std::string stem = odf.substr(0, 8);
-                    // Ogre's resource groups see the zfs archives; the game file-system check does not.
+                    // Meshes are loose files in Ogre resource locations (BZ_ASSETS\common\models, mods\<id>);
+                    // DesReader::ResourceExists searches the BZ PathBlock, so ask Ogre's resource groups instead.
                     const bool exists = DesReader::ImageExists(stem + ".mesh");
                     Log(L"[DBPREVIEW] select odf=%hs stem=%hs ogre mesh exists=%d; FUN_0067D180(0x%08X)\n", odf.c_str(),
                         stem.c_str(), exists ? 1 : 0, static_cast<unsigned>(kModelBuild));
