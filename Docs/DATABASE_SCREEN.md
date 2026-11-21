@@ -1,8 +1,8 @@
 # Database screen
 
 A **DATABASE** button on the stock Single Player screen opens an OpenShim
-screen with faction tabs on the left (NSDF, CCA, Black Dogs, Fury,
-Briefings), a paged entry list under them, and the selected entry on the
+screen with faction tabs on the left (NSDF, CCA, Black Dogs, CRA,
+Fury, Briefings), a paged entry list under them, and the selected entry on the
 right. Back or Esc returns to Single Player. Nothing is sent over the network
 and no Lua runs.
 
@@ -118,8 +118,9 @@ Nothing is inferred.
   preview"); the picture below is the fallback.
 - Picture: stock Redux ships no per-unit icon texture. Units whose
   loading-screen picture ships (`LoadingScreen avfigh_v1.png` and so on, and
-  the three Black Dogs `LoadingScreenBV*.png`) show it; the others show none.
-- The Black Dogs and Fury entries need the Red Odyssey content; without it
+  the three Black Dogs `LoadingScreenBV*.png` and the three CRA
+  `LoadingScreenCV*.png`) show it; the others show none.
+- The Black Dogs, CRA and Fury entries need the Red Odyssey content; without it
   their ODFs are not found and the entries say so.
 
 ## Briefings tab
@@ -258,18 +259,18 @@ mod that ships an `oshdb.cfg`.
 2. The training-prompt variant of Single Player (fresh profile) shows no
    DATABASE button and works as stock.
 3. Click DATABASE: the screen opens on the NSDF tab with the first unit
-   selected. Tabs read NSDF, CCA, Black Dogs, Fury, Briefings; the selected
+   selected. Tabs read NSDF, CCA, Black Dogs, CRA, Fury, Briefings; the selected
    tab and row show the tinted highlight quad.
 4. NSDF list: captions are `MODEL - ROLE`; 14 rows a page, with Prev/Next
    and "Page 1/n" when there are more. Captions fit the wells.
 5. Select avturr: role, model, the six cited Badger model numbers with
    citations; scrap cost, armor, ammo, speed and weapons match
    `avturr.odf`. Select avfigh: the loading-screen picture shows.
-6. CCA, Black Dogs, Fury: each lists its units; Black Dogs show the Red
-   Odyssey model numbers; no entry reads "ODF not found".
-7. Briefings: Training, NSDF, CCA and Black Dogs missions listed; selecting
-   one shows its `.des` text and the title names the campaign (Black Dogs
-   ends "(Red Odyssey)"); a multi-page mission pages with Prev/Next; long
+6. CCA, Black Dogs, CRA, Fury: each lists its units; Black Dogs show the Red
+   Odyssey model numbers (CRA entries show none, because the manual gives CRA units no designations); no entry reads "ODF not found".
+7. Briefings: Training, NSDF, CCA, Black Dogs and CRA missions listed; selecting
+   one shows its `.des` text and the title names the campaign (Black Dogs and CRA
+   end "(Red Odyssey)"); a multi-page mission pages with Prev/Next; long
    text scrolls with the block's arrows.
 8. Unused list rows and hidden page buttons show no caption and do nothing
    when clicked.

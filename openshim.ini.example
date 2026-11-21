@@ -994,7 +994,7 @@ DX11LegacyMaterialAggressive = 0
 BriefingPages = 1
 
 ; Database screen. A DATABASE button at the top centre of the Single Player
-; screen opens faction tabs (NSDF, CCA, Black Dogs, Fury) of unit entries --
+; screen opens faction tabs (NSDF, CCA, Black Dogs, CRA, Fury) of unit entries --
 ; role and model from <odf>.inf, cited model numbers, live scrap cost, armor,
 ; ammo, speed and weapons from <odf>.odf -- and a Briefings tab with each
 ; campaign mission's .des pages. Content is built in; a mod ships its own
