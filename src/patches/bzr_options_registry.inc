@@ -707,6 +707,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Each order you give draws a short ring on the ground: green where units go, red "
       "around an attack target (it follows the target), yellow for other orders. Only you "
       "see it, so it also works in multiplayer." },
+    // [Gameplay], HUD page next to Command Pings. Ships OFF: default "Off" (0).
+    { "Radar Pings", "Gameplay", "RtsRadarPings", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "The radar also shows a short fading ring at the position of each order you give, in "
+      "the same colour as the ground ring. Orders beyond radar range show on the rim. Only "
+      "you see it." },
     // [Gameplay], Controls page next to Command Pings. Ships ON: default "On" (0).
     { "Artillery Range", "Gameplay", "RtsArtilleryRange", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -1140,7 +1147,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
-    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsFollowCamera", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "UnitLoadouts", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsRadarPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsFollowCamera", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "UnitLoadouts", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },

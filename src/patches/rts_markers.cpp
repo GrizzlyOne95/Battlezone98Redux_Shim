@@ -56,6 +56,7 @@
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
+#include "contextual_hud.h"
 #include "engine_globals.h"
 #include "game_state.h"
 #include "hook_engine.h"
@@ -65,6 +66,7 @@
 #include "rts_markers_policy.h"
 #include "rts_placement.h"
 #include "rts_placement_policy.h"
+#include "rts_radar_pings_policy.h"
 #include "scene_mutation_drain.h"
 #include "shell_casing_physics.h"
 #include "shim_log.h"
@@ -93,6 +95,7 @@ namespace BZROpenShim
         {
             namespace RM = RtsMarkers;
             namespace SC = ShellCasings;
+            namespace RRP = RtsRadarPings;
             using Vec3 = SC::Vec3;
 
             constexpr const char* kComponent = "rtsmarkers";
@@ -141,8 +144,12 @@ namespace BZROpenShim
             bool g_RangeOn = true;
             bool g_AttackOn = false;
             int g_AttackLoggedState = -1; // change-only "enabled" line
+            bool g_RadarPingsOn = false;
+            bool g_RadarPostDrawRegistered = false; // the registration succeeded
+            int g_RadarLoggedState = -1;            // change-only "enabled/installed" line
 
             void OnGroundCommand(void* panel, int what, const float* where);
+            void RadarPingsPostDraw(void* radar, float opacity);
 
             void LoadConfig()
             {
@@ -156,6 +163,19 @@ namespace BZROpenShim
                 {
                     g_AttackLoggedState = g_AttackOn ? 1 : 0;
                     LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] attack marks enabled=%d", g_AttackLoggedState);
+                }
+                value = false;
+                g_RadarPingsOn = TryGetUserConfigBool("Gameplay", "RtsRadarPings", value) ? value : false;
+                if (g_RadarPingsOn && !g_RadarPostDrawRegistered)
+                    g_RadarPostDrawRegistered = ContextualHud::RegisterRadarPostDraw(&RadarPingsPostDraw);
+                {
+                    const int state = (g_RadarPingsOn ? 1 : 0) | (g_RadarPostDrawRegistered ? 2 : 0);
+                    if (g_RadarLoggedState != state)
+                    {
+                        g_RadarLoggedState = state;
+                        LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] radar pings enabled=%d installed=%d",
+                                 g_RadarPingsOn ? 1 : 0, g_RadarPostDrawRegistered ? 1 : 0);
+                    }
                 }
                 g_ConfigLoaded = true;
                 // The ground-order listener on the rally detour; registered
@@ -497,14 +517,216 @@ namespace BZROpenShim
             {
                 if (!g_ConfigLoaded)
                     LoadConfig();
-                if (!g_PingsOn || !BindApi() || reinterpret_cast<uintptr_t>(panel) != g_Api.panel)
+                if ((!g_PingsOn && !g_RadarPingsOn) || !BindApi() || reinterpret_cast<uintptr_t>(panel) != g_Api.panel)
                     return false;
                 int count = 0;
                 return ReadInt(g_Api.panel + kSelectCountOffset, count) && count > 0;
             }
 
+            // ---- Radar pings -------------------------------------------------
+            // A short ring on the cockpit radar at the order's position, drawn
+            // from the radar post-draw seam (contextual_hud.cpp). Local only.
+            using FnHudLine = void(__cdecl*)(void* buf, int x1, int y1, int x2, int y2, uint32_t argb, uint32_t mode);
+
+            struct RadarPingApi
+            {
+                FnHudLine line = nullptr;
+                FnGetTime getTime = nullptr;
+                uintptr_t paneBuffer = 0;
+                uintptr_t spriteZ = 0;
+                uintptr_t projRadius = 0, centreX = 0, centreY = 0;
+                bool attempted = false;
+                bool usable = false;
+            };
+            RadarPingApi g_RadarApi;
+            RRP::RadarPingQueue g_RadarPings;
+            volatile long g_RadarPingLogBudget = 8;
+            constexpr size_t kRadarScannerOffset = 0x08;
+            constexpr size_t kRadarUserOffset = 0x0C;
+            constexpr size_t kRadarRangeOffset = 0x10;
+            constexpr size_t kRadarUserPosOffset = 0x20;
+            constexpr size_t kRadarBasisOffset = 0x30; // right, up, front: three float[3] rows
+            constexpr float kRadarRingZStep = 0.0005f; // as the native radar's overlay bump
+
+            bool BindRadarPingApi()
+            {
+                if (g_RadarApi.attempted)
+                    return g_RadarApi.usable;
+                g_RadarApi.attempted = true;
+                uint32_t line = 0, time = 0, pane = 0, z = 0, radius = 0, cx = 0, cy = 0;
+                const HookEngine::EngineRow rows[] = {
+                    {"HudLine", &line},
+                    {"HudFadeRadarTime", &time},
+                    {"HudPaneBuffer", &pane},
+                    {"HudSpriteZ", &z},
+                    {"RadarProjRadius", &radius},
+                    {"RadarProjCentreX", &cx},
+                    {"RadarProjCentreY", &cy},
+                };
+                if (!HookEngine::BindEngineRows("RTS radar pings", rows))
+                {
+                    LogShimA(LogLevel::Warn, kComponent, "[RTSMARKERS] radar pings stand down: engine rows unresolved");
+                    return false;
+                }
+                g_RadarApi.line = reinterpret_cast<FnHudLine>(static_cast<uintptr_t>(line));
+                g_RadarApi.getTime = reinterpret_cast<FnGetTime>(static_cast<uintptr_t>(time));
+                g_RadarApi.paneBuffer = pane;
+                g_RadarApi.spriteZ = z;
+                g_RadarApi.projRadius = radius;
+                g_RadarApi.centreX = cx;
+                g_RadarApi.centreY = cy;
+                g_RadarApi.usable = true;
+                return true;
+            }
+
+            // Game-local clock; NaN when it faults.
+            float ReadRadarClock() noexcept
+            {
+                __try
+                {
+                    return g_RadarApi.getTime();
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return std::nanf("");
+                }
+            }
+
+            // CockpitRadar: +0x08 scanner and +0x0C user object (non-null when
+            // the radar works), +0x10 range, +0x20 user position, +0x30 basis.
+            // The projection globals are read live (radar_layout.cpp rescales).
+            bool ReadRadarSeh(void* radar, RRP::Radar& out, void*& paneBuffer) noexcept
+            {
+                __try
+                {
+                    const auto* bytes = static_cast<const uint8_t*>(radar);
+                    if (!bytes || !*reinterpret_cast<void* const*>(bytes + kRadarScannerOffset) ||
+                        !*reinterpret_cast<void* const*>(bytes + kRadarUserOffset))
+                        return false;
+                    out.range = *reinterpret_cast<const float*>(bytes + kRadarRangeOffset);
+                    const auto* user = reinterpret_cast<const float*>(bytes + kRadarUserPosOffset);
+                    const auto* basis = reinterpret_cast<const float*>(bytes + kRadarBasisOffset);
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        out.userPos[i] = user[i];
+                        out.right[i] = basis[i];
+                        out.up[i] = basis[3 + i];
+                        out.front[i] = basis[6 + i];
+                    }
+                    out.projRadius = *reinterpret_cast<const int*>(g_RadarApi.projRadius);
+                    out.centreX = *reinterpret_cast<const int*>(g_RadarApi.centreX);
+                    out.centreY = *reinterpret_cast<const int*>(g_RadarApi.centreY);
+                    paneBuffer = *reinterpret_cast<void* const*>(g_RadarApi.paneBuffer);
+                    return true;
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+            }
+
+            // One ring: the native overlay z bump around the line segments.
+            void DrawRadarRingSeh(void* paneBuffer, int cx, int cy, float radius, uint32_t argb) noexcept
+            {
+                __try
+                {
+                    float* z = reinterpret_cast<float*>(g_RadarApi.spriteZ);
+                    const float previous = *z;
+                    *z = previous + kRadarRingZStep;
+                    __try
+                    {
+                        int px = 0, py = 0;
+                        RRP::RingPoint(cx, cy, radius, 0, px, py);
+                        for (int i = 1; i <= RRP::kRingSegments; ++i)
+                        {
+                            int nx = 0, ny = 0;
+                            RRP::RingPoint(cx, cy, radius, i, nx, ny);
+                            g_RadarApi.line(paneBuffer, px, py, nx, ny, argb, 0);
+                            px = nx;
+                            py = ny;
+                        }
+                    }
+                    __finally
+                    {
+                        *z = previous;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                }
+            }
+
+            uint32_t ToArgb(const RM::Colour& colour)
+            {
+                const auto channel = [](float v) {
+                    return static_cast<uint32_t>(std::lround(std::fmin(std::fmax(v, 0.0f), 1.0f) * 255.0f));
+                };
+                return 0xFF000000u | (channel(colour.r) << 16) | (channel(colour.g) << 8) | channel(colour.b);
+            }
+
+            void QueueRadarPing(RM::PingKind kind, const float pos[3])
+            {
+                if (!BindRadarPingApi())
+                    return;
+                const float now = ReadRadarClock();
+                if (!std::isfinite(now))
+                    return;
+                RRP::Ping ping;
+                ping.pos[0] = pos[0];
+                ping.pos[1] = pos[1];
+                ping.pos[2] = pos[2];
+                ping.argb = ToArgb(RM::StyleFor(kind).colour);
+                ping.birth = now;
+                g_RadarPings.Push(ping);
+            }
+
+            // Radar post-draw (frame thread, inside SEH): the live rings.
+            void RadarPingsPostDraw(void* radar, float opacity)
+            {
+                if (!g_RadarPingsOn || !radar || !BindRadarPingApi())
+                    return;
+                const float now = ReadRadarClock();
+                if (!std::isfinite(now) || g_RadarPings.Prune(now) == 0)
+                    return;
+                RRP::Radar view;
+                void* paneBuffer = nullptr;
+                if (!ReadRadarSeh(radar, view, paneBuffer) || !paneBuffer || !std::isfinite(view.range) ||
+                    !(view.range > 0.0f) || view.projRadius <= 0)
+                    return;
+                const float* fields[] = {view.userPos, view.right, view.up, view.front};
+                for (const float* row : fields)
+                    for (int i = 0; i < 3; ++i)
+                        if (!std::isfinite(row[i]))
+                            return;
+                if (!std::isfinite(opacity))
+                    opacity = 1.0f;
+                opacity = std::fmin(std::fmax(opacity, 0.0f), 1.0f);
+                for (size_t i = 0; i < RRP::kMaxPings; ++i)
+                {
+                    RRP::Ping ping;
+                    if (!g_RadarPings.Get(i, ping))
+                        continue;
+                    const RRP::Frame frame = RRP::Evaluate(now - ping.birth);
+                    const RRP::Projected at = RRP::Project(view, ping.pos);
+                    if (!frame.alive || !at.valid)
+                        continue;
+                    const uint32_t alpha = static_cast<uint32_t>(std::lround(frame.alpha * opacity * 255.0f));
+                    if (alpha == 0)
+                        continue;
+                    DrawRadarRingSeh(paneBuffer, at.x, at.y, RRP::RadiusPixels(frame.radiusFrac, view.projRadius),
+                                     (ping.argb & 0x00FFFFFFu) | (alpha << 24));
+                    if (g_RadarPings.TakeLogToken(i) && InterlockedDecrement(&g_RadarPingLogBudget) >= 0)
+                        LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] radar ping drawn at %d,%d%s", at.x, at.y,
+                                 at.clamped ? " (clamped to the rim)" : "");
+                }
+            }
+
             void QueuePing(RM::PingKind kind, const float pos[3], uint32_t targetHandle, float baseRadius, int what)
             {
+                if (g_RadarPingsOn)
+                    QueueRadarPing(kind, pos);
+                if (!g_PingsOn)
+                    return;
                 RM::PingSlot ping;
                 ping.kind = kind;
                 ping.baseRadius = baseRadius;
@@ -1739,7 +1961,7 @@ namespace BZROpenShim
             {
                 if (!g_ConfigLoaded)
                     LoadConfig();
-                if (!target || !g_PingsOn || !BindApi())
+                if (!target || (!g_PingsOn && !g_RadarPingsOn) || !BindApi())
                     return;
                 // Same gate as the broadcast detour: the local ControlPanel
                 // with units selected (the caller runs before the stock
@@ -1802,6 +2024,8 @@ namespace BZROpenShim
                 LogShimW(LogLevel::Info, kComponent, L"[RTSMARKERS] hid rings (%ls)", reason ? reason : L"unspecified");
             }
             g_Pings.Clear();
+            g_RadarPings.Clear();
+            g_RadarPingLogBudget = 8;
             ClearAttackMarks();
             g_AttackLogBudget = 64;
             g_PoolFailed = false;

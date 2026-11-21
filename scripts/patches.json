@@ -3873,6 +3873,12 @@
       "identity": "Native diamond marker, viewport/x/y/radius/color plus caller mode slot; radar caller cleanup 0x18. Helper submits direct raw-color vertices through 0x00687550 and bypasses mode-to-color helpers. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
     },
     {
+      "name": "HudLine",
+      "address": "0x0068AF40",
+      "expected": "55 8B EC 8B 45 20 50 8B 4D 1C 51 E8 00 FD FF FF 83 C4 08 50 8B 55 18 52",
+      "identity": "Native 2D HUD line: viewport (unused)/x1/y1/x2/y2/ARGB/mode, cdecl; mode via 0x0068AC50 (0 = passthrough). Native cockpit radar grid caller FUN_00493ec0. Released GOG 2.2.301 SHA256 8D71F56C...3377413; bytes read from the shipping exe file on 2026-11-18."
+    },
+    {
       "name": "HudFadeRadarDiamondCall0",
       "address": "0x00496334",
       "expected": "E8 97 4B 1F 00 83 C4 18 E9 71 E5 FF FF F3 0F 10 85 1C FE FF FF",
