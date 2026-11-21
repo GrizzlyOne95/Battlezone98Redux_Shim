@@ -2849,6 +2849,28 @@ RtsProducerBadges = 0
 ; Exposed on the OpenShim Settings page as "Idle Unit Alert".
 RtsIdleUnitAlert = 0
 
+; Ammo Alert. Plays the stock "out of ammo" voice line when one of your
+; armed units (combat units, turret tanks, howitzers, minelayers) drops
+; under 5% of its maximum ammo. The voice follows your nation: NSDF and
+; Black Dog abetty5.wav, CCA and CRA sbetty5.wav. At most one alert every
+; 30 seconds; none for a unit's first observed state, and a unit alerts
+; again only after it is seen at 5% or more. Your own vehicle is skipped.
+;
+; Accepted: boolean. Default: 0.
+; Exposed on the OpenShim Settings page as "Ammo Alert".
+RtsAmmoAlert = 0
+
+; Scrap Full Alert. Plays the stock "scrap full" voice line when your team's
+; scrap reaches its maximum (only when that maximum is 30 or more). NSDF and
+; Black Dog avrecyvn.wav ("Scrap tank's full."), CCA and CRA svrecyvn.wav
+; ("The scrap storage is full."). At most one alert every 60 seconds; never
+; for a mission that starts full, and again only after scrap drops below
+; the maximum.
+;
+; Accepted: boolean. Default: 0.
+; Exposed on the OpenShim Settings page as "Scrap Full Alert".
+RtsScrapFullAlert = 0
+
 ; Attack Marks. A pulsing red ring on the ground around each of your units
 ; and buildings for 2 seconds after an enemy hits it, the same window the
 ; radar blip flashes for. At most 16 rings, the most recently hit. Drawn for

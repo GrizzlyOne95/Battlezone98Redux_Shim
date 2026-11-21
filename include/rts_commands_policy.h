@@ -2,9 +2,10 @@
 // rts_commands_policy.h
 // Pure rules for the RTS command extras ([Gameplay] RtsRemoteTarget,
 // RtsSmartCommandMenu, RtsSmartRepairReload, RtsAreaSelect, RtsHold,
-// RtsIdleUnitAlert, RtsFollowCamera, RtsQuickCommands): the mixed-selection command-menu merge, which selected
+// RtsIdleUnitAlert, RtsAmmoAlert, RtsScrapFullAlert, RtsFollowCamera, RtsQuickCommands): the mixed-selection command-menu merge, which selected
 // units an order is sent to, unit families, target cycles, the area-select
-// radius filter, idle units (definition, cycling, alert policy) and the
+// radius filter, idle units (definition, cycling, alert policy), the
+// ammo-out and scrap-full alert policies and the
 // rebindable keys. No Windows or engine calls, so
 // tests/rts_commands_policy_tests.cpp runs them directly. The engine side is
 // src/patches/rts_commands.cpp; behaviour and evidence: Docs/RTS_COMMANDS.md.
@@ -628,6 +629,198 @@ namespace BZROpenShim
             bool alerted_ = false;
             unsigned long long lastAlertMs_ = 0;
         };
+
+        // ---- ammo-out and scrap-full alerts ----------------------------------
+
+        // [Gameplay] RtsAmmoAlert: one stock voice line when an own armed unit
+        // runs out of ammo. Low = current ammo under 5% of its maximum; units
+        // with no ammo maximum are skipped. Alerts only on an observed
+        // not-low->low flip, never a unit's first observed state; a unit
+        // re-arms once it is seen at or above 5% again. A flip that the 30 s
+        // global limit suppresses stays low (no late alert), like the idle
+        // alert.
+        constexpr int kAmmoTrackCapacity = 512;
+        constexpr unsigned long long kAmmoAlertIntervalMs = 30000;
+        constexpr int kAmmoLowPercent = 5;
+
+        // The families with weapons.
+        inline bool AmmoTracksFamily(Family family)
+        {
+            return family == Family::Combat || family == Family::TurretTank || family == Family::Howitzer ||
+                   family == Family::Minelayer;
+        }
+
+        inline bool AmmoLow(int ammo, int maxAmmo)
+        {
+            return maxAmmo > 0 &&
+                   static_cast<long long>(ammo) * 100 < static_cast<long long>(maxAmmo) * kAmmoLowPercent;
+        }
+
+        struct AmmoObservation
+        {
+            bool skipped = false; // no ammo maximum: not tracked
+            bool first = false;   // the unit was seen for the first time
+            bool changed = false; // an existing unit's low state flipped
+            bool low = false;     // the state now
+            bool alert = false;   // a not-low->low flip that is not rate-limited
+        };
+
+        class AmmoTracker
+        {
+        public:
+            void Clear()
+            {
+                count_ = 0;
+                alerted_ = false;
+                lastAlertMs_ = 0;
+            }
+
+            // Each scan: BeginPass, Observe every eligible unit, EndPass.
+            // EndPass drops the units that were not observed (gone, dead,
+            // no longer eligible, or skipped).
+            void BeginPass()
+            {
+                for (int i = 0; i < count_; ++i)
+                    entries_[i].seen = false;
+            }
+
+            AmmoObservation Observe(uint32_t handle, int ammo, int maxAmmo, unsigned long long nowMs)
+            {
+                AmmoObservation result;
+                if (maxAmmo <= 0)
+                {
+                    result.skipped = true;
+                    return result;
+                }
+                const bool low = AmmoLow(ammo, maxAmmo);
+                result.low = low;
+                for (int i = 0; i < count_; ++i)
+                {
+                    Entry& e = entries_[i];
+                    if (e.handle != handle)
+                        continue;
+                    e.seen = true;
+                    if (e.low != low)
+                    {
+                        result.changed = true;
+                        if (low && (!alerted_ || nowMs - lastAlertMs_ >= kAmmoAlertIntervalMs))
+                        {
+                            result.alert = true;
+                            alerted_ = true;
+                            lastAlertMs_ = nowMs;
+                        }
+                        e.low = low;
+                    }
+                    return result;
+                }
+                if (count_ < kAmmoTrackCapacity)
+                {
+                    entries_[count_].handle = handle;
+                    entries_[count_].low = low;
+                    entries_[count_].seen = true;
+                    ++count_;
+                    result.first = true;
+                }
+                return result;
+            }
+
+            void EndPass()
+            {
+                int kept = 0;
+                for (int i = 0; i < count_; ++i)
+                {
+                    if (entries_[i].seen)
+                        entries_[kept++] = entries_[i];
+                }
+                count_ = kept;
+            }
+
+            int Count() const { return count_; }
+
+        private:
+            struct Entry
+            {
+                uint32_t handle = 0;
+                bool low = false;
+                bool seen = false;
+            };
+            Entry entries_[kAmmoTrackCapacity];
+            int count_ = 0;
+            bool alerted_ = false;
+            unsigned long long lastAlertMs_ = 0;
+        };
+
+        // [Gameplay] RtsScrapFullAlert: one stock voice line when the local
+        // team's scrap reaches its maximum. Full = maximum at least 30 and
+        // scrap at or above it. Alerts on a not-full->full flip, never on the
+        // first observation (cleared per mission, so a mission that starts
+        // full is silent); re-arms once scrap is seen below the maximum. At
+        // most one alert per 60 s; a suppressed flip stays full.
+        constexpr int kScrapFullMinimumMax = 30;
+        constexpr unsigned long long kScrapAlertIntervalMs = 60000;
+
+        inline bool ScrapFull(int scrap, int maxScrap)
+        {
+            return maxScrap >= kScrapFullMinimumMax && scrap >= maxScrap;
+        }
+
+        class ScrapFullDetector
+        {
+        public:
+            void Clear()
+            {
+                observed_ = false;
+                full_ = false;
+                alerted_ = false;
+                lastAlertMs_ = 0;
+            }
+
+            // True when this observation is an allowed not-full->full flip.
+            bool Observe(int scrap, int maxScrap, unsigned long long nowMs)
+            {
+                const bool full = ScrapFull(scrap, maxScrap);
+                if (!observed_)
+                {
+                    observed_ = true;
+                    full_ = full;
+                    return false;
+                }
+                const bool flip = full && !full_;
+                full_ = full;
+                if (!flip || (alerted_ && nowMs - lastAlertMs_ < kScrapAlertIntervalMs))
+                    return false;
+                alerted_ = true;
+                lastAlertMs_ = nowMs;
+                return true;
+            }
+
+            bool Full() const { return full_; }
+
+        private:
+            bool observed_ = false;
+            bool full_ = false;
+            bool alerted_ = false;
+            unsigned long long lastAlertMs_ = 0;
+        };
+
+        // The voice line by the player's nation: the first letter of the
+        // player's current object's ODF name (BZP GetNation). 'a' (NSDF) and
+        // 'b' (Black Dog) take the American clip, 's' (CCA) and 'c' (CRA) the
+        // Soviet one (there is no CRA clip); anything else the American one.
+        inline bool SovietVoice(char nation)
+        {
+            return nation == 's' || nation == 'S' || nation == 'c' || nation == 'C';
+        }
+
+        inline const char* AmmoAlertSound(char nation)
+        {
+            return SovietVoice(nation) ? "sbetty5.wav" : "abetty5.wav";
+        }
+
+        inline const char* ScrapFullAlertSound(char nation)
+        {
+            return SovietVoice(nation) ? "svrecyvn.wav" : "avrecyvn.wav";
+        }
 
         // ---- the Shift alternate on the Defend entry --------------------------
 

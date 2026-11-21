@@ -16,6 +16,7 @@ RTS Commands. Keys: Options > Input > RTS Actions (written to
 | Quick commands | `RtsQuickCommands` (off) | `RtsQuickFollowKey` (Numpad1), `RtsQuickDefendKey` (Numpad2), `RtsQuickAttackKey` (Numpad3), `RtsQuickStopKey` (Numpad5) | Off (single player only) |
 | Select next idle unit | none (always on) | `RtsIdleUnitKey` (J), Shift+J all | Runs (UNVERIFIED live) |
 | Idle unit alert | `RtsIdleUnitAlert` (off) | none (a sound) | Runs (live 2026-11-17: alert, 5 s limit, no start-up alerts) |
+| Ammo-out and scrap-full alerts | `RtsAmmoAlert` (off), `RtsScrapFullAlert` (off) | none (a voice line) | Runs (UNVERIFIED live) |
 | Build at Nav | `RtsBuildAtNav` (on) | stock menu keys (Go To Nav, then the nav) | Runs for local rigs (UNVERIFIED live) |
 | Build ghost | `RtsBuildGhost` (on) | none (shows while placing) | Local visual (UNVERIFIED live) |
 | Pending build ghost | `RtsPendingBuildGhost` (on) | none (shows until the rig starts building) | Local visual (UNVERIFIED live) |
@@ -162,6 +163,52 @@ The tests pin both cases.
   per alert; with the alert on, `idle state handle=<h> idle=<0|1>
   what=<cur>/<pending> family=<name>` once per unit and per flip (budget 300
   per mission).
+
+## Ammo-out and scrap-full alerts
+
+Two default-off voice alerts. Both run in the idle alert's 250 ms pass (in
+an interactive world, outside the editor); the pass runs while any of the
+three alerts is on and takes one `GameObject::objectList` snapshot.
+
+- **Engine values.** No new hooks or addresses: the part binds its own copies
+  of the `scripts/patches.json` rows `contextual_hud.cpp` uses
+  (`HookEngine::BindEngineRows("RTS ammo/scrap alerts")`): `HudFadeGetAmmo`
+  0x00417C80 and `HudFadeMaxAmmo` 0x0046D060 (thiscall on a complete
+  GameObject), `HudFadeGetTeam` 0x00462370 (cdecl, the local `Team*`), and
+  `HudFadeGetScrap` 0x005E10B0 / `HudFadeGetMaxScrap` 0x005E1190 (thiscall on
+  that Team). Each call is SEH-guarded; a value over 100000000 is dropped,
+  as in `contextual_hud.cpp`. If the rows do not bind, both options read
+  Unavailable and `[RTS] ammo/scrap alerts: getter rows did not bind` is
+  logged once.
+- **Nation.** The first letter of the player's current object's ODF name
+  (BZP `GetNation`), read with `TryGetCraftOdfName` (engine_flames.cpp, the
+  GetOdf chain). `a` or `b` take the American clip, `s` or `c` the Soviet
+  one, anything else (or an unreadable name) the American one. There is no
+  CRA clip.
+- **Ammo** (`RtsAmmoAlert`, default 0). Eligible: the idle features'
+  `EvaluateOwnUnit` (player's team, commandable, not the player's own
+  piloted object, a known family) and a family with weapons (Combat,
+  TurretTank, Howitzer, Minelayer; `AmmoTracksFamily`). Units whose max ammo
+  is 0 or less are skipped. Low = ammo under 5% of max (`AmmoLow`). The
+  `AmmoTracker` (512 entries, units that leave the snapshot drop) alerts only
+  on an observed not-low to low flip; a unit's first observation never
+  alerts, and it re-arms only once seen at 5% or more. At most one ammo
+  alert per 30 s overall; a flip inside that window stays low and does not
+  alert later. Sound: `abetty5.wav` / `sbetty5.wav`. Their words are
+  UNVERIFIED (no transcript).
+- **Scrap** (`RtsScrapFullAlert`, default 0). Full = max scrap 30 or more and
+  scrap at or above it (`ScrapFull`). `ScrapFullDetector` alerts on a
+  not-full to full flip; its first observation never alerts, so a mission
+  that starts full is silent, and it re-arms when scrap is seen below max.
+  At most one per 60 s. Sound: `avrecyvn.wav` ("Scrap tank's full.") /
+  `svrecyvn.wav` ("The scrap storage is full."); `cvrecyvn.wav` does not
+  exist.
+- **Reset.** Like the idle table: `ResetRtsCommands` (mission end/load) and
+  turning an alert off queue a clear that the drain thread runs, so each
+  mission's first observation is silent.
+- **Log.** `[RTS] ammo alert handle=<h> ammo=<cur>/<max>` and `[RTS] scrap
+  full alert scrap=<s>/<max>` per alert (budget 300 per mission); the start-up
+  `[RTS] Baseline` line lists `RtsAmmoAlert` and `RtsScrapFullAlert`.
 
 ## Hold (Z, and Shift on the Defend entry)
 
@@ -487,6 +534,19 @@ broadcast pings. An order without a target object (Hunt) gets no ping.
     unit finishing a move plays ping.wav at most every 5 s. In
     `openshim.log`, `idle state` lines show whether tugs and constructors
     read idle=0 while they work.
+
+11d. Ammo and scrap alerts (`RtsAmmoAlert = 1`, `RtsScrapFullAlert = 1`,
+    `RtsIdleUnitAlert = 0`, so the pass runs without the idle alert):
+    as NSDF, let a wingman fire until under 5% ammo: `abetty5.wav` plays once
+    and `ammo alert handle=... ammo=<cur>/<max>` is logged; note its words
+    (UNVERIFIED). A second unit running dry inside 30 s stays silent. Reload
+    the first unit and empty it again after 30 s: it alerts again. A unit
+    that starts the mission empty, scavengers and tugs never alert. Collect
+    scrap until full: `avrecyvn.wav` plays once with `scrap full alert`; spend
+    some and refill inside 60 s: silent; after 60 s: it alerts. Start a
+    mission with full scrap: silent. Repeat both as CCA (`sbetty5.wav`,
+    `svrecyvn.wav`). With both options off, nothing plays. The `Baseline`
+    line lists both options.
 
 11c. Quick commands (`RtsQuickCommands = 1`, single player, NumLock on):
     select a group (F1-F7), press Numpad1: the units follow the player and

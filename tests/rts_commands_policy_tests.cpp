@@ -657,6 +657,135 @@ namespace
         Check(t.Count() == 0, "Clear empties the table");
     }
 
+    void TestAmmoAlert()
+    {
+        Check(AmmoTracksFamily(Family::Combat) && AmmoTracksFamily(Family::TurretTank) &&
+                  AmmoTracksFamily(Family::Howitzer) && AmmoTracksFamily(Family::Minelayer),
+              "armed families are tracked for ammo");
+        Check(!AmmoTracksFamily(Family::Scavenger) && !AmmoTracksFamily(Family::Tug) &&
+                  !AmmoTracksFamily(Family::ConstructionRig) && !AmmoTracksFamily(Family::None),
+              "unarmed families are not");
+        Check(AmmoLow(4, 100) && !AmmoLow(5, 100) && AmmoLow(0, 100), "low is under 5% of max");
+        Check(AmmoLow(49, 1000) && !AmmoLow(50, 1000), "5% boundary at 1000");
+        Check(!AmmoLow(0, 0) && !AmmoLow(0, -1), "no max is never low");
+
+        AmmoTracker t;
+        t.BeginPass();
+        AmmoObservation o = t.Observe(1, 0, 100, 1000);
+        Check(o.first && o.low && !o.alert, "ammo: a unit first seen empty never alerts");
+        o = t.Observe(2, 100, 100, 1000);
+        Check(o.first && !o.low && !o.alert, "ammo: a unit first seen full does not alert");
+        o = t.Observe(3, 0, 0, 1000);
+        Check(o.skipped && !o.first && !o.alert, "ammo: max ammo 0 is skipped");
+        t.EndPass();
+        Check(t.Count() == 2, "ammo: skipped unit is not tracked");
+
+        t.BeginPass();
+        o = t.Observe(1, 0, 100, 1500);
+        Check(!o.changed && !o.alert, "ammo: still low, no alert");
+        o = t.Observe(2, 4, 100, 1500);
+        Check(o.changed && o.low && o.alert, "ammo: not-low->low alerts");
+        t.EndPass();
+
+        // Every pass below observes both units, so neither is dropped and
+        // re-added (a re-add would be a first sighting, not a re-arm).
+        t.BeginPass();
+        o = t.Observe(2, 0, 100, 40000);
+        Check(!o.changed && !o.alert, "ammo: no re-alert while it stays low");
+        o = t.Observe(1, 0, 100, 40000);
+        Check(!o.first && !o.changed && !o.alert, "ammo: unit 1 still tracked and low");
+        t.EndPass();
+
+        t.BeginPass();
+        o = t.Observe(2, 4, 100, 41000);
+        Check(!o.changed && !o.alert, "ammo: still under 5% does not re-arm");
+        o = t.Observe(1, 50, 100, 41000);
+        Check(!o.first && o.changed && !o.low && !o.alert, "ammo: unit 1 refilled re-arms");
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(2, 5, 100, 42000);
+        Check(!o.first && o.changed && !o.low && !o.alert, "ammo: seen at 5% re-arms");
+        o = t.Observe(1, 1, 100, 42000);
+        Check(!o.first && o.changed && o.low && o.alert, "ammo: a re-armed unit alerts again");
+        t.EndPass();
+
+        t.BeginPass();
+        o = t.Observe(2, 1, 100, 42000 + kAmmoAlertIntervalMs - 1);
+        Check(!o.first && o.changed && o.low && !o.alert, "ammo: a second alert inside 30 s is suppressed");
+        o = t.Observe(1, 1, 100, 42000 + kAmmoAlertIntervalMs - 1);
+        Check(!o.changed && !o.alert, "ammo: unit 1 stays low");
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(2, 1, 100, 42000 + kAmmoAlertIntervalMs);
+        Check(!o.changed && !o.alert, "ammo: a suppressed flip does not alert late");
+        o = t.Observe(1, 100, 100, 42000 + kAmmoAlertIntervalMs);
+        Check(!o.first && o.changed && !o.low, "ammo: unit 1 rearmed");
+        t.EndPass();
+        t.BeginPass();
+        o = t.Observe(2, 1, 100, 42000 + kAmmoAlertIntervalMs);
+        Check(!o.changed && !o.alert, "ammo: unit 2 stays low");
+        o = t.Observe(1, 0, 100, 42000 + kAmmoAlertIntervalMs);
+        Check(!o.first && o.changed && o.alert, "ammo: exactly 30 s later alerts again");
+        t.EndPass();
+
+        t.BeginPass();
+        t.Observe(1, 0, 100, 90000);
+        t.EndPass();
+        Check(t.Count() == 1, "ammo: an unobserved unit is dropped");
+
+        AmmoTracker full;
+        full.BeginPass();
+        for (int i = 1; i <= kAmmoTrackCapacity + 5; ++i)
+            full.Observe(static_cast<uint32_t>(i), 100, 100, 0);
+        full.EndPass();
+        Check(full.Count() == kAmmoTrackCapacity, "ammo: the table is fixed size");
+        t.Clear();
+        Check(t.Count() == 0, "ammo: Clear empties the table");
+    }
+
+    void TestScrapFullAlert()
+    {
+        Check(ScrapFull(30, 30) && ScrapFull(40, 30) && !ScrapFull(29, 30), "full is scrap at or above max");
+        Check(!ScrapFull(20, 20) && !ScrapFull(29, 29), "scrap max under 30 is never full");
+
+        ScrapFullDetector d;
+        Check(!d.Observe(60, 60, 1000), "scrap: starting full is silent");
+        Check(!d.Observe(60, 60, 2000), "scrap: staying full is silent");
+        Check(!d.Observe(59, 60, 3000), "scrap: dropping below max re-arms silently");
+        Check(d.Observe(60, 60, 4000), "scrap: not-full->full alerts");
+        Check(!d.Observe(60, 60, 5000), "scrap: no re-alert while full");
+        Check(!d.Observe(50, 60, 6000), "scrap: below max");
+        Check(!d.Observe(60, 60, 4000 + kScrapAlertIntervalMs - 1), "scrap: inside 60 s is suppressed");
+        Check(!d.Observe(60, 60, 4000 + kScrapAlertIntervalMs + 1), "scrap: a suppressed flip does not alert late");
+        Check(!d.Observe(10, 60, 70000), "scrap: below max again");
+        Check(d.Observe(60, 60, 4000 + kScrapAlertIntervalMs + 2000), "scrap: after 60 s it alerts again");
+
+        ScrapFullDetector small;
+        Check(!small.Observe(0, 20, 0), "scrap max < 30: first");
+        Check(!small.Observe(20, 20, 1000) && !small.Observe(0, 20, 2000) && !small.Observe(20, 20, 3000),
+              "scrap max < 30 never alerts");
+
+        ScrapFullDetector fresh;
+        Check(!fresh.Observe(10, 60, 0), "scrap: first observation not full");
+        Check(fresh.Observe(60, 60, 250), "scrap: first full after an observation alerts");
+        fresh.Clear();
+        Check(!fresh.Observe(60, 60, 500), "scrap: after Clear (new mission) starting full is silent");
+
+        Check(std::string(AmmoAlertSound('a')) == "abetty5.wav" && std::string(AmmoAlertSound('b')) == "abetty5.wav",
+              "NSDF and Black Dog ammo clip");
+        Check(std::string(AmmoAlertSound('s')) == "sbetty5.wav" && std::string(AmmoAlertSound('c')) == "sbetty5.wav",
+              "CCA and CRA ammo clip");
+        Check(std::string(AmmoAlertSound('x')) == "abetty5.wav" && std::string(AmmoAlertSound('\0')) == "abetty5.wav",
+              "unknown nation: American ammo clip");
+        Check(std::string(ScrapFullAlertSound('a')) == "avrecyvn.wav" &&
+                  std::string(ScrapFullAlertSound('b')) == "avrecyvn.wav",
+              "NSDF and Black Dog scrap clip");
+        Check(std::string(ScrapFullAlertSound('s')) == "svrecyvn.wav" &&
+                  std::string(ScrapFullAlertSound('c')) == "svrecyvn.wav",
+              "CCA and CRA scrap clip");
+        Check(std::string(ScrapFullAlertSound('z')) == "avrecyvn.wav", "unknown nation: American scrap clip");
+    }
+
     void TestBuildAtNav()
     {
         const uint32_t cls = 0x0A1B2C30u;
@@ -733,6 +862,8 @@ int main()
     TestFollowCamera();
     TestKeyMessages();
     TestIdleUnits();
+    TestAmmoAlert();
+    TestScrapFullAlert();
     TestBuildAtNav();
     if (OpenShimTest::FailureCount() != 0)
     {
