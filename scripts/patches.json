@@ -6944,6 +6944,54 @@
       "identity": "Lua registration table row { \"GetIndependence\" (0x0087CC24), 0x005041F0 } on GOG Redux 2.2.301, in .rdata between { 0x0087CB48, 0x005041B0 } at 0x008720B0 and { 0x0087CC34, 0x00504230 } at 0x008720C0. The installer reads the row at patch time and requires the name string to read GetIndependence and the function pointer to equal the byte-guarded stock binding before it rewrites the pointer at +4."
     },
     {
+      "name": "ObjectiveListAdd",
+      "address": "0x004F39B0",
+      "expected": "55 8B EC 6A FF 68 78 A6 84 00 64 A1 00 00 00 00 50 81 EC A4 00 00 00 A1",
+      "identity": "Objective list Add, __thiscall(this, const char* name, uint32 color, float duration, const char* text), on GOG Redux 2.2.301 (Steam 2.2.301 shares the layout). Copies name (16 bytes) into entry [this+0x0C + count*0x18], mallocs the text at entry+0x10, stores color at +0x14, raises the display-until float at this+0xFC, then count++ at this+0x08 with no bounds check on the 10-entry array. Callers: the thin wrapper 0x004F6AB0 (this = 0x009B7998; Lua AddObjective 0x00503A40 and mission DLLs) and the save loader 0x004F4370 (Clear 0x004F3920, then N unchecked re-adds). objective_cap_guard.cpp inline-detours the first 5 bytes (55 8B EC 6A FF) so an 11th add first drops entry 0 through ObjectiveListRemove."
+    },
+    {
+      "name": "ObjectiveListRemove",
+      "address": "0x004F3E70",
+      "expected": "55 8B EC 83 EC 0C 89 4D FC C7 45 F8 00 00 00 00",
+      "identity": "Objective list Remove, __thiscall(this, const char* name), on GOG Redux 2.2.301: finds the first entry whose name matches with _strnicmp(.., 16), frees its text with the engine's CRT free, count--, memmoves the tail down and zeroes the vacated last slot. objective_cap_guard.cpp calls it with a local copy of entry 0's name to drop the oldest objective; it is never patched."
+    },
+    {
+      "name": "AnchorRocketLinearDragCompare",
+      "address": "0x0046D9C3",
+      "expected": "F3 0F 10 85 70 FF FF FF 0F 2F 85 6C FF FF FF 76 76",
+      "identity": "Inside AnchorRocket::Simulate (FUN_0046D8C0) on GOG Redux 2.2.301: movss xmm0,[ebp-0x90] (target speed); comiss xmm0,[ebp-0x94] (accelDrag * dt); jbe +0x76 to the zero-velocity branch at 0x0046DA4A, else falls through to the 1 - drag/speed scale at 0x0046D9D4. No branch targets inside the 17 bytes. anchor_drag_guard.cpp replaces them with a jmp to a guarded decision."
+    },
+    {
+      "name": "AnchorRocketSpinDragCompare",
+      "address": "0x0046DAF5",
+      "expected": "F3 0F 10 85 68 FF FF FF 0F 2F 85 74 FF FF FF 76 70",
+      "identity": "Inside AnchorRocket::Simulate (FUN_0046D8C0) on GOG Redux 2.2.301: movss xmm0,[ebp-0x98] (target spin); comiss xmm0,[ebp-0x8C] (alphaDrag * dt); jbe +0x70 to the zero-omega branch at 0x0046DB76, else falls through to the scale at 0x0046DB06. No branch targets inside the 17 bytes. anchor_drag_guard.cpp replaces them with a jmp to a guarded decision."
+    },
+    {
+      "name": "TerrainBuildZoneTables",
+      "address": "0x0077E230",
+      "expected": "55 8B EC 83 EC 34 F3 0F 10 05 B0 54 94 00 F3 0F 5E 05 38 25 8A 00 F3 0F 2C C0 66 89 45 FC C7 45 F8 00 00 00 00 EB 09 8B 4D F8 83 C1 01 89 4D F8 81 7D F8 00 00 01 00 7D 11 8B 55 F8 66 8B 45 FC 66 89 04 55 D0 19 C1 02 EB DD C7 45 F8 00 00 00 00 EB 09 8B 4D F8 83 C1 01 89 4D F8 81 7D F8 00 10 00 00 7D 6B FF 15 A0 94 86 00 89 45 DC 8B 55 DC C1 FA 0C 83 E2 07 89 55 CC 8B 45 DC C1 F8 08 83 E0 0F 89 45 F4 83 7D F4 08 7C 09 C7 45 F4 00 00 00 00 EB 25 83 7D F4 04 7C 09 C7 45 F4 01 00 00 00 EB 16 83 7D F4 02 7C 09 C7 45 F4 02 00 00 00 EB 07 C7 45 F4 03 00 00 00 8B 4D CC C1 E1 04 0B 4D F4 8B 55 F8 66 89 0C 55 D0 F9 C0 02 EB 83 C7 05 04 51 CC 02 D0 19 C1 02 C7 45 F8 00 00 00 00 EB 09 8B 45 F8 83 C0 01 89 45 F8 81 7D F8 00 40 00 00 7D 27 8B 4D F8 C7 04 8D 08 51 CC 02 D0 19 C1 02 BA 02 00 00 00 6B C2 00 05 D0 F9 C0 02 8B 4D F8 89 04 8D A0 99 CD 02 EB C7 8B 15 B0 40 CC 02 89 55 E4 A1 AC 40 CC 02 89 45 E0 8B 4D E4 03 0D A8 40 CC 02 89 4D D4 8B 55 E0 03 15 B4 40 CC 02 89 55 D0 C7 45 E8 00 00 00 00 8B 45 E0 89 45 F0 EB 09 8B 4D F0 83 C1 01 89 4D F0 8B 55 F0 3B 55 D0 7D 65 8B 45 E4 89 45 EC EB 09 8B 4D EC 83 C1 01 89 4D EC 8B 55 EC 3B 55 D4 7D 4A 8B 45 F0 83 C0 18 C1 E0 07 8B 4D EC 8D 54 08 18 89 55 D8 8B 45 E8 50 E8 36 78 00 00 83 C4 04 8B 4D D8 89 04 8D 08 51 CC 02 8B 55 E8 52 E8 40 78 00 00 83 C4 04 8B 4D D8 89 04 8D A0 99 CD 02 8B 55 E8 83 C2 01 89 55 E8 EB A5 EB 8A 8B 45 E4 C1 E0 08 A3 C0 99 CE 02 8B 4D D4 C1 E1 08 89 0D A0 99 CE 02 8B 55 E0 C1 E2 08 89 15 84 99 CD 02 8B 45 D0 C1 E0 08 A3 C4 99 CE 02 F3 0F 2A 05 C0 99 CE 02 F3 0F 59 05 5C 28 8A 00 F3 0F 11 05 2C 91 CD 02 F3 0F 2A 05 A0 99 CE 02 F3 0F 59 05 5C 28 8A 00 F3 0F 11 05 24 91 CD 02 F3 0F 2A 05 84 99 CD 02 F3 0F 59 05 5C 28 8A 00 F3 0F 11 05 30 91 CD 02 F3 0F 2A 05 C4 99 CE 02 F3 0F 59 05 5C 28 8A 00 F3 0F 11 05 28 91 CD 02 8B E5 5D C3",
+      "identity": "Terrain zone-table build (FUN_0077E230), void __cdecl(void), on GOG Redux 2.2.301: fills the 128x128 height (0x02CC5108) and material (0x02CD99A0) zone-pointer tables with the defaults, then for each TRN zone z = MinZ..MinZ+Depth-1, x = MinX..MinX+Width-1 stores hg2 zone n at (z+24)*128+24+x with no bounds check, calls the engine rand() and writes the eight terrain-bound globals. Whole body guarded because terrain_zone_guard.cpp re-implements the out-of-range case."
+    },
+    {
+      "name": "TerrainHeightSample",
+      "address": "0x00784100",
+      "expected": "55 8B EC 83 EC 08 8B 45 08 25 FF 00 00 00 89 45 F8 8B 4D 0C 81 E1 FF 00 00 00 C1 E1 08 03 4D F8 89 4D F8 C7 45 FC 18 0C 00 00 8B 55 08 C1 FA 08 03 55 FC 89 55 FC 8B 45 0C C1 F8 08 C1 E0 07 03 45 FC 89 45 FC 78 09 81 7D FC 00 40 00 00 7C 14 8B 4D F8 8B 15 04 51 CC 02 0F B7 04 4A 25 FF 0F 00 00 EB 16 8B 45 FC 8B 0C 85 08 51 CC 02 8B 55 F8 0F B7 04 51 25 FF 0F 00 00 8B E5 5D C3",
+      "identity": "Terrain height sample (FUN_00784100), uint32 __cdecl(x, z) on GOG Redux 2.2.301: zone index (z>>8)*128+(x>>8)+0xC18, the zone pointer from heightTable or DAT_02CC5104 when the index is outside the table, then the uint16 at the low-byte offset masked to 0xFFF. Whole body guarded because terrain_zone_guard.cpp replaces it."
+    },
+    {
+      "name": "TerrainZoneHeightPointer",
+      "address": "0x00785C00",
+      "expected": "55 8B EC 8B 45 08 C1 E0 11 8B 0D D8 19 C3 02 8D 44 01 0C 5D C3",
+      "identity": "Height zone pointer for hg2 zone n (FUN_00785C00) on GOG Redux 2.2.301: hg2 base [0x02C319D8] + 0xC + n * 0x20000. terrain_zone_guard.cpp calls it; never patched."
+    },
+    {
+      "name": "TerrainZoneMaterialPointer",
+      "address": "0x00785C20",
+      "expected": "55 8B EC 8B 45 08 C1 E0 0D 03 05 D0 19 C3 02 5D C3",
+      "identity": "Material zone pointer for zone n (FUN_00785C20) on GOG Redux 2.2.301: [0x02C319D0] + n * 0x2000. terrain_zone_guard.cpp calls it; never patched."
+    },
+    {
       "name": "ScavengerProcessGetScrapPosition",
       "address": "0x005C40B0",
       "expected": "55 8B EC 83 EC 24 A1 00 70 8E 00 33 C5 89 45 FC 89 4D EC 8B 45 EC 83 C0 38"

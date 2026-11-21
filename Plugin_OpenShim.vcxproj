@@ -317,6 +317,10 @@
     <ClCompile Include="src\patches\campaign_manifest_id.cpp" />
     <ClCompile Include="src\patches\lua_formation_fix.cpp" />
     <ClCompile Include="src\patches\lua_getindependence_guard.cpp" />
+    <ClCompile Include="src\patches\objective_cap_guard.cpp" />
+    <ClCompile Include="src\patches\anchor_drag_guard.cpp" />
+    <ClCompile Include="src\patches\terrain_zone_guard.cpp" />
+    <ClCompile Include="src\patches\nan_transform_guard.cpp" />
     <ClCompile Include="src\patches\lua_send_length.cpp" />
     <ClCompile Include="src\patches\mp_mission_end_sync.cpp" />
     <ClCompile Include="src\patches\mp_splinter_sync.cpp" />
@@ -605,6 +609,14 @@
     <ClInclude Include="include\lua_formation_fix_install.h" />
     <ClInclude Include="include\lua_getindependence_guard.h" />
     <ClInclude Include="include\lua_getindependence_guard_install.h" />
+    <ClInclude Include="include\objective_cap_guard.h" />
+    <ClInclude Include="include\objective_cap_guard_install.h" />
+    <ClInclude Include="include\anchor_drag_guard.h" />
+    <ClInclude Include="include\anchor_drag_guard_install.h" />
+    <ClInclude Include="include\terrain_zone_guard.h" />
+    <ClInclude Include="include\terrain_zone_guard_install.h" />
+    <ClInclude Include="include\nan_transform_guard.h" />
+    <ClInclude Include="include\nan_transform_guard_install.h" />
     <ClInclude Include="include\lua_send_length.h" />
     <ClInclude Include="include\lua_send_length_install.h" />
     <ClInclude Include="include\mp_mission_end_sync_install.h" />

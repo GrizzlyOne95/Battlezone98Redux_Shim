@@ -676,6 +676,61 @@ LuaFormationBinding = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_GETINDEPENDENCE_GUARD
 LuaGetIndependenceGuard = 1
 
+; Keep the objective list inside its 10 entries. Stock Add writes the 11th
+; objective (Lua AddObjective, a mission DLL, or a save holding 11 or more)
+; past the end of the list and corrupts the memory behind it. With this on, a
+; full list drops its oldest objective, through the engine's own remove, before
+; adding the new one; a list whose count is already out of range is left alone
+; and the add is skipped. Both cases are logged. Stands down on any build where
+; a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_OBJECTIVE_CAP_GUARD
+ObjectiveCapGuard = 1
+
+; Keep AnchorRocket drag finite and bounded. Each frame the anchor scales its
+; target's velocity and spin by 1 - drag / speed. With a custom ODF's negative
+; accelDrag/alphaDrag and a stationary target (a building) that divides by zero
+; and writes NaN into the target; a negative drag also boosts a moving target
+; without bound. With this on, a speed below 1e-4 stops instead, and a boost
+; may raise speed to at most max(speed, 100 m/s) and spin to max(spin,
+; 10 rad/s). Positive drag (every stock ODF) is unchanged. Stands down on any
+; build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_ANCHOR_DRAG_GUARD
+AnchorDragGuard = 1
+
+; Keep the terrain zone tables inside their bounds. The engine stores terrain
+; zones (1280 m each) in a 128x128 table that holds zones -24..103 on each axis,
+; and writes a TRN area (MinX/MinZ/Width/Depth) outside that range past the end
+; of the table, corrupting other terrain state. With this on, out-of-range
+; zones are skipped (mostly read as flat default terrain) and the log names the
+; TRN value to adjust; a map that fits runs the stock code unchanged. Also logs
+; a .hg2 that holds fewer zones than the TRN area. Stands down on any build
+; where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_TERRAIN_ZONE_TABLE_GUARD
+TerrainZoneTableGuard = 1
+
+; Make terrain height reads fail closed. The height sampler (used by
+; GetTerrainHeightAndNormal and most height lookups) reads through a zone
+; pointer it never checks. With this on, a pointer that is neither the default
+; flat zone nor a zone of the loaded .hg2 reads flat default terrain instead
+; and is logged. Same arithmetic as stock otherwise. Stands down on any build
+; where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_TERRAIN_HEIGHT_SAMPLE_GUARD
+TerrainHeightSampleGuard = 1
+
+; Repair NaN or infinite object state. Once a position, rotation, velocity or
+; spin becomes NaN or infinite it spreads and never recovers. With this on, each
+; object step zeroes non-finite motion first and, if the step leaves a
+; non-finite transform, restores the transform from before the step (or resets
+; a bad rotation to identity) and zeroes the motion. Logged; finite state is
+; never touched. Stands down on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_NAN_TRANSFORM_GUARD
+NaNTransformGuard = 1
+
 ; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
 ; stores a length above 30 in one extension byte, and the stock decoders read it
 ; signed: a Send string of 128..255 bytes faults every receiving peer (access

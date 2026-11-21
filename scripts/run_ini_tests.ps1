@@ -252,6 +252,20 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Lua GetIndependence returns 0 instead of faulting on a save-load
     # placeholder AI process; real processes keep the stock path.
     "Fixes/LuaGetIndependenceGuard",
+    # The objective list stays inside its 10 entries: a full list drops its
+    # oldest objective instead of writing the 11th past the array.
+    "Fixes/ObjectiveCapGuard",
+    # AnchorRocket drag cannot divide by a zero speed or boost without bound;
+    # positive drag (every stock ODF) keeps the stock result.
+    "Fixes/AnchorDragGuard",
+    # Terrain zones outside the 128x128 table are skipped instead of written
+    # past it; maps that fit run the stock build unchanged.
+    "Fixes/TerrainZoneTableGuard",
+    # Terrain height reads fall back to the flat default zone for a pointer
+    # that is not a zone of the loaded .hg2.
+    "Fixes/TerrainHeightSampleGuard",
+    # Only already-NaN/infinite object state is repaired; finite state is untouched.
+    "Fixes/NaNTransformGuard",
     # Lua Send lengths 128..255 decode unsigned; lengths above 255 are refused
     # by the sender instead of wrapping. Unpatched receivers still crash.
     "Fixes/LuaSendLengthUnsigned",
@@ -595,6 +609,11 @@ $shippingPolicyChecks = @{
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"
     "Fixes/LuaGetIndependenceGuard" = "1"
+    "Fixes/ObjectiveCapGuard" = "1"
+    "Fixes/AnchorDragGuard" = "1"
+    "Fixes/TerrainZoneTableGuard" = "1"
+    "Fixes/TerrainHeightSampleGuard" = "1"
+    "Fixes/NaNTransformGuard" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/MissionEndSync" = "1"
     "Fixes/DaywreckerArmoryCollision" = "1"

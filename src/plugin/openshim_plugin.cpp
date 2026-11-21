@@ -67,6 +67,10 @@
 #include "ui_file_scan_hooks.h"
 #include "lua_formation_fix_install.h"
 #include "lua_getindependence_guard_install.h"
+#include "objective_cap_guard_install.h"
+#include "anchor_drag_guard_install.h"
+#include "terrain_zone_guard_install.h"
+#include "nan_transform_guard_install.h"
 #include "lua_send_length_install.h"
 #include "mp_mission_end_sync_install.h"
 #include "mp_splinter_sync_install.h"
@@ -206,6 +210,26 @@ static unsigned __stdcall PatchThreadProc(void*)
     // fail-closed; [Fixes] LuaGetIndependenceGuard = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::LuaGetIndependence::InstallLuaGetIndependenceGuardIfPossible());
 
+    // The objective list holds 10 entries and stock Add writes the 11th past the
+    // array. Inline-detours Add so a full list drops its oldest entry (through
+    // the engine's own Remove) first. Byte-guarded and fail-closed;
+    // [Fixes] ObjectiveCapGuard = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::ObjectiveCap::InstallObjectiveCapGuardIfPossible());
+
+    // AnchorRocket drag on a stationary or near-stationary target with a
+    // negative (custom ODF) drag divides by ~0 and writes NaN into its velocity
+    // or spin; a negative drag also boosts without bound. Two byte-guarded
+    // compare sites go through a guarded decision; [Fixes] AnchorDragGuard = 0
+    // leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::AnchorDrag::InstallAnchorDragGuardIfPossible());
+
+    // The terrain zone-table build writes a TRN area outside -24..103 zones past
+    // its tables, and the height sampler then trusts whatever pointer it finds.
+    // Byte-guarded and fail-closed; [Fixes] TerrainZoneTableGuard = 0 and
+    // [Fixes] TerrainHeightSampleGuard = 0 leave each function untouched.
+    PATCH_STAGE(BZROpenShim::TerrainZones::InstallTerrainZoneTableGuardIfPossible());
+    PATCH_STAGE(BZROpenShim::TerrainZones::InstallTerrainHeightSampleGuardIfPossible());
+
     // Lua Send strings and tables longer than 127 entries crash every receiver:
     // the packet decoders sign-extend the length byte. Two decoder loads become
     // movzx and the encoders refuse lengths above 255. Byte-guarded and
@@ -308,6 +332,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // Guest RKIT repair pick of allied damaged buildings (always on, fail closed).
     PATCH_STAGE(BZROpenShim::InitializeArmoryRepairPick());
     PATCH_STAGE(BZROpenShim::InitializeRemoteObjectSmoothing());
+
+    // Repairs a NaN/infinite object transform or motion at GameObject::Simulate.
+    // Must follow InitializeRemoteObjectSmoothing: it chains over that entry
+    // detour. Byte-guarded and fail-closed; [Fixes] NaNTransformGuard = 0 leaves
+    // the engine untouched.
+    PATCH_STAGE(BZROpenShim::NanTransform::InstallNanTransformGuardIfPossible());
     // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
     PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
     // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf
