@@ -87,7 +87,8 @@ namespace BZROpenShim
         SimKill                    = 10,
         SimTeamDeath               = 11,
         // Qualified local-player weapon damage with a verified health decrease.
-        // Same identity slots as SimDamage; in-process only, single player.
+        // Same identity slots as SimDamage, plus slot 2 = 1 when the hit was a
+        // killshot (health from >0 to <=0); in-process only, single player.
         // Optional producer: active only when hit feedback is enabled.
         SimDamageApplied           = 12,
     };
