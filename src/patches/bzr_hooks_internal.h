@@ -1422,6 +1422,9 @@ namespace BZROpenShim
         void InstallTurretAttackOrdersHooksIfPossible();
         void RefreshTurretAttackOrdersState();
         void ResetTurretAttackOrders();
+        void InstallDaywreckerDefenceIfPossible();
+        void RefreshDaywreckerDefenceState();
+        void ResetDaywreckerDefence();
 
         // --- Producer rally points (producer_rally_points.cpp) -----------------
         void InstallProducerRallyPointsIfPossible();
@@ -1597,6 +1600,35 @@ namespace BZROpenShim
         // Badge scan/painter (producer_badges.cpp): the producer's queue size
         // and whether its next entry waits for scrap or pilots. False: no queue.
         bool RtsBuildQueueBadgeQuery(uint32_t handle, RtsBuildQueuePolicy::BadgeInfo& out);
+        // PRODMENU services for UnitLoadouts (producer_build_menu.cpp): the stock
+        // Producer::UpdateModeList over an empty page, a button whose cost text
+        // is hidden, and a mode-list rebuild through vtable slot 23.
+        bool RunProducerUpdateModeListEmptyPage(void* self);
+        void HideProducerMenuButtonCost(const void* button);
+        void RefreshProducerMenuModeList(void* self);
+
+        // --- Unit loadouts (unit_loadouts.cpp, Docs/UNIT_LOADOUTS.md) ----------
+        // [Gameplay] UnitLoadouts: per-unit weapon choices picked in the
+        // Recycler/Factory menu (Alt+pick), charged through the build cost and
+        // fitted when the unit is built. Install: patch thread, retried from
+        // InstallAiTuningHooksIfPossible. Everything else: game thread.
+        void InstallUnitLoadoutsIfPossible();
+        void ReloadUnitLoadoutsConfig();
+        // Mission gate reconcile and option changes: on, bound, single player.
+        void RefreshUnitLoadoutsState();
+        // Mission end / load: drops loadouts, menus and frozen quotes.
+        void ResetUnitLoadouts();
+        // ProducerUpdateModeListHook: true when a loadout page was laid out
+        // (the stock build page must not be).
+        bool UnitLoadoutsUpdateModeList(void* self);
+        // ProducerSetActiveModeHook, before PRODMENU: true when the mode was a
+        // loadout action (the panel stays open).
+        bool UnitLoadoutsOnSetActiveMode(void* self, int mode);
+        // ProducerDeselectHook: closes the producer's loadout pages.
+        void UnitLoadoutsForgetProducer(void* self);
+        // The shared FinishBuild hook (producer_rally_points.cpp), after the
+        // stock call: fits the chosen weapons on the new unit.
+        void UnitLoadoutsOnUnitBuilt(void* producer, void* built);
 
         // --- HUD group strip (group_strip.cpp) ---------------------------------
         // Read-only F1-F7 group row on the HUD. Tick: the world render tick
@@ -1650,6 +1682,8 @@ namespace BZROpenShim
         // --- Ordnance entity leak fix (ordnance_entity_leak.cpp) ----------------
         extern bool g_OrdnanceEntityLeakFixEnabled;
         void InstallOrdnanceEntityLeakFixIfPossible();
+        // Daywrecker fall-on-spawn ODF key (daywrecker_spawn_fall.cpp).
+        void InstallDayWreckerSpawnFallIfPossible();
         // SceneManager::destroyAllEntities is about to free every Entity:
         // forget the tracked ordnance Entities. Main thread only.
         void OrdnanceEntityLeakOnSceneEntitiesDestroyed() noexcept;

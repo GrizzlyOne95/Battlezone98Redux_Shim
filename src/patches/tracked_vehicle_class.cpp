@@ -2,8 +2,10 @@
 
 #include "bzr_options_ui.h"
 #include "hook_engine.h"
+#include "mru_class.h"
 #include "net_tag_dispatch.h"
 #include "pond_class_label.h"
+#include "render_profile_runtime.h"
 #include "shim_log.h"
 #include "tracked_vehicle_net.h"
 #include "tracked_vehicle_physics.h"
@@ -46,6 +48,18 @@
 // AnimationState also never touches the shared mesh or material. Slots 0, 3
 // and 4 release the loop, as the stock HoverCraft cleanup (0x004EE8F0) does
 // from slots 3 and 4.
+//
+// Tread texture scroll (Direct3D 11 + Enhanced only): with [TrackedClass]
+// treadScrollU and treadMaterialL/R set, the same step advances a U phase
+// per side from the signed tread speed and writes it to Renderable custom
+// parameter 1411 on the SubEntities whose material is the named one (or its
+// GPU skinning clone). OpenShim's Enhanced HLSL4 vertex programs add
+// osTreadUV.x to U. osTreadUV is a plain constant 0 by default; only the
+// passes of those named materials get it bound to custom 1411 here, so
+// every other material keeps instancing and reads 0. The binding is on the
+// shared material: anything else drawn with it that never writes 1411 (an
+// ODF without the scroll, a wreck, a remote entity) reads the last value
+// another unit wrote.
 //
 // Turret (phase 2b): with [TrackedClass] turretName set, the object's root
 // transform is the turret and the hull is a counter-rotated child pose
@@ -242,6 +256,25 @@ namespace BZROpenShim
         using FnSkeletonGetBlend = int (__thiscall*)(void*);
         using FnSkeletonSetBlend = void (__thiscall*)(void*, int);
 
+        // Tread scroll (Ogre 1.10 exports; SharedPtr is {rep, info}).
+        struct OgreSharedPtr
+        {
+            void* rep;
+            void* info;
+        };
+        using FnSubEntityCount = unsigned (__thiscall*)(void*);
+        using FnSubEntityAt = void* (__thiscall*)(void*, unsigned);
+        using FnSharedRef = const OgreSharedPtr* (__thiscall*)(void*);
+        using FnSharedByValue = OgreSharedPtr* (__thiscall*)(void*, OgreSharedPtr*);
+        using FnStringRef = const std::string* (__thiscall*)(void*);
+        using FnU16 = uint16_t (__thiscall*)(void*);
+        using FnPtrAt16 = void* (__thiscall*)(void*, uint16_t);
+        using FnBoolThis = bool (__thiscall*)(void*);
+        using FnFindNamedConstant = const void* (__thiscall*)(void*, const std::string&, bool);
+        // GpuProgramParameters::setNamedAutoConstant(name, AutoConstantType, size_t extraInfo)
+        using FnSetNamedAuto = void (__thiscall*)(void*, const std::string&, int, size_t);
+        using FnSetCustomParameter = void (__thiscall*)(void*, size_t, const float*);
+
         // Multiplayer. DistributedObject::IsRemote 0x004B9830 and
         // DistributedObject::GetLocalID 0x004B9A90 are __thiscall on the
         // DistributedObject subobject (GameObject + 0x18). Net::BroadcastSend
@@ -287,6 +320,34 @@ namespace BZROpenShim
         bool g_TreadsReady = false;
         volatile long g_TreadFaultLogged = 0;
 
+        // Tread scroll: all bound or none (g_TreadScrollReady); needs treads.
+        FnSubEntityCount g_SubEntityCount = nullptr;
+        FnSubEntityAt g_SubEntityAt = nullptr;
+        FnSharedRef g_SubEntityMaterial = nullptr;
+        FnStringRef g_ResourceName = nullptr;
+        FnU16 g_MaterialTechniqueCount = nullptr;
+        FnPtrAt16 g_MaterialTechnique = nullptr;
+        FnU16 g_TechniquePassCount = nullptr;
+        FnPtrAt16 g_TechniquePass = nullptr;
+        FnBoolThis g_PassHasVertexProgram = nullptr;
+        FnSharedByValue g_PassVertexParameters = nullptr;
+        FnFindNamedConstant g_FindNamedConstant = nullptr;
+        FnSetNamedAuto g_SetNamedAutoConstant = nullptr;
+        FnSetCustomParameter g_SetCustomParameter = nullptr;
+        bool g_TreadScrollReady = false;
+        volatile long g_TreadScrollFaultLogged = 0;
+        // The renderer gate is re-read this often (PostSimulate calls).
+        constexpr long kScrollGateRecheck = 64;
+        volatile long g_ScrollGateCounter = 0;
+        volatile long g_ScrollGateOpen = 0;
+        // Ogre::SharedPtrInfo::useCount in the shipped OgreMain.dll (as in
+        // gpu_skinning.cpp), not the header's +4.
+        constexpr size_t kSharedPtrUseCountOffset = 0x14;
+        const std::string g_TreadUVName("osTreadUV");
+        // Ogre::GpuProgramParameters::ACT_CUSTOM in Ogre 1.10.
+        constexpr int kActCustom = 88;
+        constexpr int kMaxBoundMaterials = 8;
+
         // Remote gate: both or none (g_RemoteGateReady); without it every
         // object runs the owner model, as before phase 3.
         FnByteThis g_IsRemote = nullptr;
@@ -323,6 +384,9 @@ namespace BZROpenShim
             TP::Footprint footprint;
             char treadSound[kSoundNameBytes] = {};
             float treadCycleLength = TT::kDefaultCycleLength;
+            float treadScrollU = 0.0f;                   // 0: no texture scroll
+            char treadMaterialL[TT::kTreadMaterialBytes] = {};
+            char treadMaterialR[TT::kTreadMaterialBytes] = {};
             char turretName[kObj76NameBytes + 1] = {};  // empty: no turret
             TU::Config turret;
         };
@@ -342,9 +406,31 @@ namespace BZROpenShim
             char soundName[kSoundNameBytes] = {};
             uint32_t soundRetry = 0;
             float soundQuiet = 0.0f;    // seconds in a row under the sound gate
+            float phaseLeft = 0.0f;     // tread texture U phase, [0, 1)
+            float phaseRight = 0.0f;
+            int scrollSeen = -1;        // logged scroll state; -1 never logged
+            int boundCount = 0;         // materials whose osTreadUV this unit bound
+            void* bound[kMaxBoundMaterials] = {};
+            uint32_t boundName[kMaxBoundMaterials] = {};  // TT::MaterialNameHash
         };
 
         SRWLOCK g_TreadLock = SRWLOCK_INIT;
+
+        // Tread materials of every ODF with a scroll (TrackedTreadMaterialRegistered).
+        SRWLOCK g_TreadMaterialLock = SRWLOCK_INIT;
+        TT::TreadMaterialSet g_TreadMaterials;
+        volatile LONG g_TreadMaterialRevision = 0;
+
+        // Both or neither (TreadMaterialSet::AddBoth).
+        bool RegisterTreadMaterials(const char* left, const char* right)
+        {
+            AcquireSRWLockExclusive(&g_TreadMaterialLock);
+            const bool added = g_TreadMaterials.AddBoth(left, right);
+            const LONG revision = static_cast<LONG>(g_TreadMaterials.Revision());
+            ReleaseSRWLockExclusive(&g_TreadMaterialLock);
+            InterlockedExchange(&g_TreadMaterialRevision, revision);
+            return added;
+        }
         std::unordered_map<uintptr_t, TreadState> g_Treads;
 
         // Turret: per object, keyed by the object pointer; reset at Build,
@@ -464,6 +550,11 @@ namespace BZROpenShim
             char maxSlope[kRawValueBytes];
             char treadSound[kRawValueBytes];
             char treadCycleLength[kRawValueBytes];
+            char treadScrollU[kRawValueBytes];
+            // Wider than the parsed name (quotes, and one character past
+            // the limit), so an over-long name is refused, not cut.
+            char treadMaterialL[TT::kTreadMaterialBytes + 8];
+            char treadMaterialR[TT::kTreadMaterialBytes + 8];
             char turretName[kRawValueBytes];
             char yawRate[kRawValueBytes];
             char omegaTurret[kRawValueBytes];
@@ -473,18 +564,19 @@ namespace BZROpenShim
             char yawMax[kRawValueBytes];
         };
 
-        void CopyRaw(const char* value, char (&out)[kRawValueBytes])
+        template<size_t N>
+        void CopyRaw(const char* value, char (&out)[N])
         {
             out[0] = 0;
             if (!value)
                 return;
-            for (size_t i = 0; i + 1 < kRawValueBytes; ++i)
+            for (size_t i = 0; i + 1 < N; ++i)
             {
                 out[i] = value[i];
                 if (!value[i])
                     return;
             }
-            out[kRawValueBytes - 1] = 0;
+            out[N - 1] = 0;
         }
 
         // Opens the ODF's ParameterDB scope (a cache hit: GameObjectClass::Find
@@ -516,6 +608,9 @@ namespace BZROpenShim
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("maxSlope")), keys.maxSlope);
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("treadSound")), keys.treadSound);
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("treadCycleLength")), keys.treadCycleLength);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("treadScrollU")), keys.treadScrollU);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("treadMaterialL")), keys.treadMaterialL);
+                CopyRaw(g_RawGet(&scope, section, TP::OdfHash("treadMaterialR")), keys.treadMaterialR);
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("turretName")), keys.turretName);
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("yawRate")), keys.yawRate);
                 CopyRaw(g_RawGet(&scope, section, TP::OdfHash("omegaTurret")), keys.omegaTurret);
@@ -661,6 +756,15 @@ namespace BZROpenShim
                 ParseFloatKey(keys.lateralFriction, data.config.lateralFriction);
                 ParseFloatKey(keys.maxSlope, data.config.maxSlopeDeg);
                 ParseFloatKey(keys.treadCycleLength, data.treadCycleLength);
+                ParseFloatKey(keys.treadScrollU, data.treadScrollU);
+                if (!ParseNameKey(keys.treadMaterialL, data.treadMaterialL) ||
+                    !ParseNameKey(keys.treadMaterialR, data.treadMaterialR))
+                {
+                    LogShimA(LogLevel::Warn, kComponent,
+                        "ODF %.8s: treadMaterialL/R longer than %u characters; no tread scroll",
+                        odfName, static_cast<unsigned>(TT::kTreadMaterialBytes - 1));
+                    data.treadScrollU = 0.0f;
+                }
                 if (!ParseNameKey(keys.treadSound, data.treadSound))
                 {
                     LogShimA(LogLevel::Warn, kComponent,
@@ -697,6 +801,23 @@ namespace BZROpenShim
             data.config = TP::Sanitize(data.config);
             data.footprint = TP::FootprintFromBox(boxMin, boxMax);
             data.treadCycleLength = TT::SanitizeCycleLength(data.treadCycleLength);
+            data.treadScrollU = TT::SanitizeScrollU(data.treadScrollU);
+            if (data.treadScrollU != 0.0f && !data.treadMaterialL[0] && !data.treadMaterialR[0])
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "ODF %.8s: treadScrollU set without treadMaterialL/R; no tread scroll", odfName);
+                data.treadScrollU = 0.0f;
+            }
+            // Before any unit of this ODF draws, so GPU skinning builds no
+            // instanced twin (osTreadUV would read 0 there). Fail closed.
+            if (data.treadScrollU != 0.0f &&
+                !RegisterTreadMaterials(data.treadMaterialL, data.treadMaterialR))
+            {
+                LogShimA(LogLevel::Warn, kComponent,
+                    "ODF %.8s: more than %u tread scroll materials; no tread scroll", odfName,
+                    static_cast<unsigned>(TT::kMaxRegisteredTreadMaterials));
+                data.treadScrollU = 0.0f;
+            }
             const bool limitKeySet = (std::isfinite(data.turret.yawMin) && data.turret.yawMin > -1.0e29f) ||
                                      (std::isfinite(data.turret.yawMax) && data.turret.yawMax < 1.0e29f);
             data.turret = TU::Sanitize(data.turret);
@@ -720,13 +841,15 @@ namespace BZROpenShim
             LogShimA(LogLevel::Info, kComponent,
                 "built ODF %.8s as tracked class=%p stiffness=%.1f damping=%.1f contactsPerSide=%d "
                 "lateralFriction=%.2f maxSlope=%.1f footprint x=%.2f+-%.2f z=%.2f..%.2f y=%.2f "
-                "treadSound=%s treadCycleLength=%.2f",
+                "treadSound=%s treadCycleLength=%.2f treadScrollU=%.2f treadMaterialL=%s treadMaterialR=%s",
                 odfName, objectClass,
                 data.config.stiffness, data.config.damping, data.config.contactsPerSide,
                 data.config.lateralFriction, data.config.maxSlopeDeg,
                 data.footprint.centerX, data.footprint.halfWidth,
                 data.footprint.backZ, data.footprint.frontZ, data.footprint.bottomY,
-                data.treadSound[0] ? data.treadSound : "-", data.treadCycleLength);
+                data.treadSound[0] ? data.treadSound : "-", data.treadCycleLength, data.treadScrollU,
+                data.treadMaterialL[0] ? data.treadMaterialL : "-",
+                data.treadMaterialR[0] ? data.treadMaterialR : "-");
             if (data.turretName[0])
             {
                 LogShimA(LogLevel::Info, kComponent,
@@ -743,10 +866,14 @@ namespace BZROpenShim
             // so nested class lookups stay ordinary.
             const bool tracked = g_TrackedBuildPending;
             g_TrackedBuildPending = false;
+            // classLabel = mru rides on the same detour (mru_class.cpp).
+            const bool mru = TakeMruBuildPending();
 
             void* objectClass = g_OriginalBuildClass(thisPtr, odfNameLo, odfNameHi);
             if (tracked && objectClass)
                 ConfigureTrackedClass(objectClass, odfNameLo, odfNameHi);
+            else if (mru && objectClass)
+                ConfigureMruClass(objectClass, odfNameLo, odfNameHi);
             return objectClass;
         }
 
@@ -802,6 +929,10 @@ namespace BZROpenShim
                     if (g_TreadsReady)
                         ResetTreadState(object);
                 }
+            }
+            else if (object)
+            {
+                OnHoverObjectBuilt(objectClass, object);
             }
             return object;
         }
@@ -1795,6 +1926,186 @@ namespace BZROpenShim
             }
         }
 
+        // ---- tread texture scroll -------------------------------------------
+
+        bool TakeTreadLogLine();
+
+        // Drops a by-value SharedPtr the caller owns. Never drops the last
+        // reference (the pass still holds one), so it cannot free.
+        void DropSharedRef(OgreSharedPtr& pointer)
+        {
+            if (pointer.rep && pointer.info)
+            {
+                auto* count = reinterpret_cast<volatile LONG*>(
+                    static_cast<uint8_t*>(pointer.info) + kSharedPtrUseCountOffset);
+                if (InterlockedCompareExchange(count, 0, 0) > 1)
+                    InterlockedDecrement(count);
+            }
+            pointer.rep = nullptr;
+            pointer.info = nullptr;
+        }
+
+        // Direct3D 11 with the Enhanced profile, the gate local_damage.cpp
+        // uses; re-read every kScrollGateRecheck calls.
+        bool ScrollGateOpen()
+        {
+            if ((InterlockedIncrement(&g_ScrollGateCounter) % kScrollGateRecheck) == 1)
+            {
+                const bool open =
+                    RenderProfiles::Exports::GetActiveBackend() ==
+                        static_cast<uint32_t>(RenderProfiles::ActiveBackend::DX11) &&
+                    RenderProfiles::Exports::GetEffectiveRenderProfile() == RenderProfiles::Abi::kProfileEnhanced &&
+                    RenderProfiles::IdentifyActiveRenderSystem() == 1;
+                InterlockedExchange(&g_ScrollGateOpen, open ? 1 : 0);
+            }
+            return g_ScrollGateOpen != 0;
+        }
+
+        // Binds osTreadUV to custom 1411 on every pass of `material` whose
+        // vertex parameters declare it (OpenShim's Enhanced HLSL4 programs).
+        // Only the named tread materials get this; other passes keep the
+        // plain constant 0 and stay instanceable. The binding stays on the
+        // shared material, so a renderable that never writes 1411 reads
+        // the last value written. GPU skinning clones made
+        // later copy the binding (material clone, then setVertexProgram's
+        // recreateParameters). Returns the passes bound, -1 on a fault.
+        int BindTreadMaterial(void* material)
+        {
+            int set = 0;
+            __try
+            {
+                const uint16_t techniques = g_MaterialTechniqueCount(material);
+                for (uint16_t t = 0; t < techniques; ++t)
+                {
+                    void* const technique = g_MaterialTechnique(material, t);
+                    if (!technique)
+                        continue;
+                    const uint16_t passes = g_TechniquePassCount(technique);
+                    for (uint16_t p = 0; p < passes; ++p)
+                    {
+                        void* const pass = g_TechniquePass(technique, p);
+                        if (!pass || !g_PassHasVertexProgram(pass))
+                            continue;
+                        OgreSharedPtr params = { nullptr, nullptr };
+                        g_PassVertexParameters(pass, &params);
+                        // Stock, sm3/GLSL and non-OpenShim programs have no such constant.
+                        if (params.rep && g_FindNamedConstant(params.rep, g_TreadUVName, false))
+                        {
+                            g_SetNamedAutoConstant(params.rep, g_TreadUVName, kActCustom,
+                                                   TT::kTreadScrollParameter);
+                            ++set;
+                        }
+                        DropSharedRef(params);
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return -1;
+            }
+            return set;
+        }
+
+        // Writes this step's phases to `entity`'s SubEntities whose current
+        // material is treadMaterialL/R (or its GPU skinning clone) and binds
+        // each such material the first time this unit sees it. Returns bit 0
+        // for an L SubEntity found, bit 1 for an R one, -1 on a fault;
+        // boundPasses counts the passes newly bound.
+        int WriteTreadScroll(void* entity, const TrackedClassData& data, TreadState& state, int& boundPasses)
+        {
+            const float left[4] = { state.phaseLeft, 0.0f, 0.0f, 0.0f };
+            const float right[4] = { state.phaseRight, 0.0f, 0.0f, 0.0f };
+            int found = 0;
+            __try
+            {
+                const unsigned count = g_SubEntityCount(entity);
+                for (unsigned i = 0; i < count && i < 256; ++i)
+                {
+                    void* const sub = g_SubEntityAt(entity, i);
+                    if (!sub)
+                        continue;
+                    const OgreSharedPtr* material = g_SubEntityMaterial(sub);
+                    if (!material || !material->rep)
+                        continue;
+                    const std::string* name = g_ResourceName(material->rep);
+                    if (!name)
+                        continue;
+                    const TT::TreadSide side =
+                        TT::ClassifyTreadMaterial(name->c_str(), data.treadMaterialL, data.treadMaterialR);
+                    if (side == TT::TreadSide::None)
+                        continue;
+                    const bool isLeft = side == TT::TreadSide::Left;
+                    found |= isLeft ? 1 : 2;
+                    // SubEntity's Renderable base sits at offset 0 (local_damage.cpp).
+                    g_SetCustomParameter(sub, TT::kTreadScrollParameter, isLeft ? left : right);
+
+                    const uint32_t nameHash = TT::MaterialNameHash(name->c_str());
+                    bool known = false;
+                    for (int k = 0; k < state.boundCount; ++k)
+                        known = known || (state.bound[k] == material->rep && state.boundName[k] == nameHash);
+                    if (!known)
+                    {
+                        const int passes = BindTreadMaterial(material->rep);
+                        if (passes < 0)
+                            return -1;
+                        boundPasses += passes;
+                        // Remembered only once bound, so a material whose
+                        // parameters were not built yet is tried again; a
+                        // full list only means it is bound again later.
+                        if (passes > 0 && state.boundCount < kMaxBoundMaterials)
+                        {
+                            state.bound[state.boundCount] = material->rep;
+                            state.boundName[state.boundCount++] = nameHash;
+                        }
+                    }
+                }
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return -1;
+            }
+            return found;
+        }
+
+        void UpdateTreadScroll(const uint8_t* self, TreadState& state, const TrackedClassData& data,
+                               const TreadContext& ctx, float dt)
+        {
+            state.phaseLeft = TT::StepScrollPhase(state.phaseLeft, state.left, dt, data.treadScrollU,
+                                                  data.treadCycleLength);
+            state.phaseRight = TT::StepScrollPhase(state.phaseRight, state.right, dt, data.treadScrollU,
+                                                   data.treadCycleLength);
+
+            const bool enabled = g_TreadScrollReady && g_TreadScrollFaultLogged == 0 && ctx.entity &&
+                                 ScrollGateOpen();
+            int found = 0;
+            int boundPasses = 0;
+            if (enabled)
+            {
+                found = WriteTreadScroll(ctx.entity, data, state, boundPasses);
+                if (found < 0)
+                {
+                    // Fail closed: one fault stops the scroll for the session.
+                    if (InterlockedExchange(&g_TreadScrollFaultLogged, 1) == 0)
+                        LogShimA(LogLevel::Warn, kComponent,
+                            "tread scroll call faulted on entity %p; tread scroll off for this session", ctx.entity);
+                    found = 0;
+                }
+            }
+
+            // Change-only decision line: did the scroll engage on this unit?
+            const int seen = (enabled ? 4 : 0) | found;
+            if (seen != state.scrollSeen || boundPasses > 0)
+            {
+                if (TakeTreadLogLine())
+                    LogShimA(LogLevel::Info, kComponent,
+                             "tread scroll obj=%p L=%s R=%s enabled=%d boundPasses=%d",
+                             self, !enabled ? "-" : (found & 1) ? data.treadMaterialL : "absent",
+                             !enabled ? "-" : (found & 2) ? data.treadMaterialR : "absent",
+                             enabled ? 1 : 0, boundPasses);
+                state.scrollSeen = seen;
+            }
+        }
+
         bool SoundAlive(const char* name, void* owner, void* sound)
         {
             __try
@@ -1968,6 +2279,9 @@ namespace BZROpenShim
                 }
             }
 
+            if (data.treadScrollU != 0.0f)
+                UpdateTreadScroll(self, state, data, ctx, dt);
+
             const float fraction = TT::SpeedFraction(state.left, state.right, ctx.velocForward);
             const TT::SoundLevel level = TT::TreadSound(fraction, ctx.user);
             UpdateTreadSound(self, state, data, ctx, level, dt);
@@ -2123,6 +2437,52 @@ namespace BZROpenShim
             g_SkeletonGetBlend = reinterpret_cast<FnSkeletonGetBlend>(ogre[9]);
             g_SkeletonSetBlend = reinterpret_cast<FnSkeletonSetBlend>(ogre[10]);
             g_OgreEntityVtable = reinterpret_cast<uintptr_t>(ogre[11]);
+            return true;
+        }
+
+        // Optional on top of the treads: without it treadScrollU is ignored.
+        bool ResolveTreadScroll(const char*& missing)
+        {
+#define OS_STR "?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@"
+            static const char* const kOgre[] = {
+                "?getNumSubEntities@Entity@Ogre@@QBEIXZ",
+                "?getSubEntity@Entity@Ogre@@QBEPAVSubEntity@2@I@Z",
+                "?getMaterial@SubEntity@Ogre@@UBEABV?$SharedPtr@VMaterial@Ogre@@@2@XZ",
+                "?getName@Resource@Ogre@@UBEABV" OS_STR "XZ",
+                "?getNumTechniques@Material@Ogre@@QBEGXZ",
+                "?getTechnique@Material@Ogre@@QAEPAVTechnique@2@G@Z",
+                "?getNumPasses@Technique@Ogre@@QBEGXZ",
+                "?getPass@Technique@Ogre@@QAEPAVPass@2@G@Z",
+                "?hasVertexProgram@Pass@Ogre@@QBE_NXZ",
+                "?getVertexProgramParameters@Pass@Ogre@@QBE?AV?$SharedPtr@VGpuProgramParameters@Ogre@@@2@XZ",
+                "?_findNamedConstantDefinition@GpuProgramParameters@Ogre@@QBEPBUGpuConstantDefinition@2@ABV" OS_STR "_N@Z",
+                "?setNamedAutoConstant@GpuProgramParameters@Ogre@@QAEXABV" OS_STR "W4AutoConstantType@12@I@Z",
+                "?setCustomParameter@Renderable@Ogre@@QAEXIABVVector4@2@@Z",
+            };
+#undef OS_STR
+            void* ogre[sizeof(kOgre) / sizeof(kOgre[0])] = {};
+            for (size_t i = 0; i < sizeof(kOgre) / sizeof(kOgre[0]); ++i)
+            {
+                ogre[i] = Hooks::ResolveOgreProcRaw(kOgre[i]);
+                if (!ogre[i])
+                {
+                    missing = kOgre[i];
+                    return false;
+                }
+            }
+            g_SubEntityCount = reinterpret_cast<FnSubEntityCount>(ogre[0]);
+            g_SubEntityAt = reinterpret_cast<FnSubEntityAt>(ogre[1]);
+            g_SubEntityMaterial = reinterpret_cast<FnSharedRef>(ogre[2]);
+            g_ResourceName = reinterpret_cast<FnStringRef>(ogre[3]);
+            g_MaterialTechniqueCount = reinterpret_cast<FnU16>(ogre[4]);
+            g_MaterialTechnique = reinterpret_cast<FnPtrAt16>(ogre[5]);
+            g_TechniquePassCount = reinterpret_cast<FnU16>(ogre[6]);
+            g_TechniquePass = reinterpret_cast<FnPtrAt16>(ogre[7]);
+            g_PassHasVertexProgram = reinterpret_cast<FnBoolThis>(ogre[8]);
+            g_PassVertexParameters = reinterpret_cast<FnSharedByValue>(ogre[9]);
+            g_FindNamedConstant = reinterpret_cast<FnFindNamedConstant>(ogre[10]);
+            g_SetNamedAutoConstant = reinterpret_cast<FnSetNamedAuto>(ogre[11]);
+            g_SetCustomParameter = reinterpret_cast<FnSetCustomParameter>(ogre[12]);
             return true;
         }
 
@@ -2341,7 +2701,16 @@ namespace BZROpenShim
             }
         }
 
+        const char* scrollMissing = nullptr;
+        const bool treadScroll = treads && ResolveTreadScroll(scrollMissing);
+        if (treads && !treadScroll)
+        {
+            LogShimA(LogLevel::Warn, kComponent,
+                "tread texture scroll off (%s did not resolve); tread clips unaffected", scrollMissing);
+        }
+
         g_TreadsReady = treads;
+        g_TreadScrollReady = treadScroll;
         g_Installed = true;
         LogShimA(LogLevel::Info, kComponent,
             "installed classLabel=tracked (HoverCraftClass alias, Simulate slot %u replaced)",
@@ -2361,5 +2730,20 @@ namespace BZROpenShim
     bool IsTrackedVehicleClassInstalled()
     {
         return g_Installed;
+    }
+
+    bool TrackedTreadMaterialRegistered(const char* sourceMaterialName)
+    {
+        if (!sourceMaterialName || !sourceMaterialName[0])
+            return false;
+        AcquireSRWLockShared(&g_TreadMaterialLock);
+        const bool found = g_TreadMaterials.Contains(sourceMaterialName);
+        ReleaseSRWLockShared(&g_TreadMaterialLock);
+        return found;
+    }
+
+    uint32_t TrackedTreadMaterialRevision()
+    {
+        return static_cast<uint32_t>(InterlockedCompareExchange(&g_TreadMaterialRevision, 0, 0));
     }
 }

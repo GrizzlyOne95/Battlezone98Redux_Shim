@@ -4874,6 +4874,16 @@ namespace BZROpenShim
                 const auto& def = RtsCommandsPolicy::GetKeyDef(id);
                 if (command != def.rowCommand)
                     continue;
+                // The game-key token for a numpad digit is the stock name; the
+                // RTS keys store it as Numpad0-9 (QuickSaveKeyPolicy parses
+                // that). This branch always returns, so editing `chord` is safe.
+                if (key >= VK_NUMPAD0 && key <= VK_NUMPAD9)
+                {
+                    const size_t tokenLength = BuildGameKeyTokenFromVk(key, keyCode).size();
+                    if (tokenLength <= chord.size())
+                        chord.replace(chord.size() - tokenLength, tokenLength,
+                                      "Numpad" + std::string(1, static_cast<char>('0' + (key - VK_NUMPAD0))));
+                }
                 const std::string previousKey = Hooks::RtsCommandKeyText(index);
                 if (const char* refusal = Hooks::SetRtsCommandKeyText(index, chord.c_str()))
                 {
