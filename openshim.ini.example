@@ -2428,6 +2428,17 @@ PreLobby = 1
 ; Accepted: integer seconds, 0 = stock. Default: 5. Read at startup.
 ReconnectDelaySeconds = 5
 
+; Resolve the matchmaking server by IPv4 only. The game looks it up with
+; AF_UNSPEC under a hard 5 s timer; with IPv6 enabled on the adapter Windows
+; also sends the AAAA (IPv6) query, and when that DNS query stalls past 5 s
+; every attempt fails and the multiplayer tab stays "Not Ready" until IPv6 is
+; unticked. The server has only an IPv4 (A) record, so asking for IPv4 loses
+; nothing. If the IPv4 lookup finds no address, the normal lookup is tried
+; once. Only the BZRNet matchmaking host is affected; an IPv6 literal redirect
+; keeps the normal lookup. Logs "[OpenShimNet] lookup ..." lines.
+; Accepted: boolean. Default: ON. Read at startup.
+ForceIPv4Matchmaking = 1
+
 ; Matchmaking server: Rebellion's official one or a community/custom one.
 ; Accepted: Rebellion, Custom, Local, LAN. LAN uses CustomServer and never
 ; falls back to the official service. Local is a dedicated server running on

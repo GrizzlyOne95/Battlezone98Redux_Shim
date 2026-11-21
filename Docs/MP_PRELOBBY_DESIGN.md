@@ -339,6 +339,52 @@ OpenShim never lets it leave for any host other than
   require a valid platform ticket. The reference `bzrnet_server/server.py`
   skips ticket validation.
 
+### IPv4-only matchmaking lookup (`[Network] ForceIPv4Matchmaking`)
+
+Symptom: some players stay "Not Ready" on the MP tab until they untick IPv6
+on their network adapter. Mechanism, CONFIRMED in the GOG 2.2.301 exe; the
+stall itself is INFERRED:
+
+- The game resolves the matchmaking host through asio's resolver:
+  `WS2_32!getaddrinfo`, import 0x86A05C, called at 0x006AFF25.
+- Hints: `ai_flags` 0x400 (`AI_ADDRCONFIG`, pushed at 0x006D03F5),
+  `ai_family` 0 (`AF_UNSPEC`, 0x006D4E17), `SOCK_STREAM`.
+- A hard 5000 ms resolve timer (0x006D057F), with unlimited retries.
+- With IPv6 enabled, Windows also sends the AAAA query. If that stalls past
+  5 s, every attempt fails. The matchmaking host has only an A record.
+
+Fix (`Hook_getaddrinfo`, `src/patches/net_optimizer.cpp`; policy in
+`include/dns_family_policy.h`, tests in `tests/dns_family_policy_tests.cpp`):
+
+- When the original name is a BZRNet name (`IsBzrNetLookupName`), the option
+  is on, the hints are null or `AF_UNSPEC`, and the resolved node is not an
+  IPv6 literal (no `:`), the lookup runs with a copy of the hints (zeroed when
+  null) whose `ai_family` is `AF_INET`. Every other field is kept.
+- If that returns `EAI_NONAME` / `WSAHOST_NOT_FOUND`, `WSANO_DATA` (a host
+  with no A record), or succeeds with no
+  results, it is retried once with the original hints. The discarded list is
+  freed.
+- `RecordLookupAddresses` and `RecordEffectiveEndpoint` see the final result.
+- Option: openshim.ini `[Network] ForceIPv4Matchmaking`, boolean, default ON,
+  read at startup. 0 = stock lookup. No Options row.
+- Log, BZRNet names only: `[OpenShimNet] lookup <node> forced_ipv4=<0|1>
+  fallback=<0|1> rc=<rc> ms=<duration> families=<v4count>/<v6count>`. The
+  first 4 lookups are logged, then only when `rc` or the families change.
+
+Test-only switch: `OPENSHIM_TEST_DNS_STALL_MS=<n>` (read once at startup,
+capped at 15000) sleeps n ms before the real `getaddrinfo`, but only for a
+BZRNet name whose effective hints family is `AF_UNSPEC`. That imitates the
+AAAA stall. With the force on, the hints are `AF_INET` and nothing sleeps.
+A warning is logged once at startup while it is set.
+
+Live A/B owed (UNVERIFIED until run):
+
+- Old build, `OPENSHIM_TEST_DNS_STALL_MS=8000`: stays Not Ready.
+- Old build, `OPENSHIM_TEST_DNS_STALL_MS=3000`: connects.
+- This build, `OPENSHIM_TEST_DNS_STALL_MS=8000`: connects (`forced_ipv4=1`).
+- Field check: `[OpenShimSocket] MatchmakingRedirectAddress=68.183.35.188`
+  still connects; the redirect is an IPv4 literal, so it is forced too.
+
 ### Why not defer auth
 
 Deferring would mean stalling `FUN_006c35c0` until the panel closes:
