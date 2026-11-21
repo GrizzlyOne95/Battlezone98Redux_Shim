@@ -159,6 +159,6 @@ Host and client each on an OpenShim build. Use a map with `<m>.des`,
    lobby opens.
 9. Kick while open: client has the panel open and the host kicks them. The
    client gets the stock kick handling and leaves the lobby; no crash.
-10. `OPENSHIM_DISABLE_LOBBY_BRIEFING=1`: no button, log says disabled.
+10. `OPENSHIM_DISABLE_LOBBY_BRIEFING=1` at launch: no button, log says disabled. `[Features] LobbyBriefing = 0`: no button, no log line.
 11. Options row off, then Reset to Stock: the feature is gone (no button in
     the next lobby; the row reads Off).

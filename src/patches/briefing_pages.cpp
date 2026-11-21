@@ -548,10 +548,12 @@ namespace BZROpenShim
             void* __fastcall CtorHook(void* self, void* /*edx*/, int manager, StdStringBytes name)
             {
                 const auto original = reinterpret_cast<FnCtor>(g_CtorOriginal);
+                // Forget the previous screen first: with the row off, a stale
+                // g_State could match a new screen built at the same address.
+                g_State = State();
                 if (!g_Active || EnvFlagEnabled("OPENSHIM_DISABLE_BRIEFING_PAGES"))
                     return original(self, manager, name);
 
-                g_State = State();
                 g_Capturing = self;
                 g_DesCalls = 0;
                 g_CapBase.clear();

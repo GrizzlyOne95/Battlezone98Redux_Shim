@@ -11,7 +11,7 @@ unlocks, a PDA, 3D previews, multiplayer, and lore text (the content format
 keeps an empty `lore` field for it).
 
 Gate: `[Features] Database = 1` (default on). Env kill switch
-`OPENSHIM_DISABLE_DATABASE=1` (alias `BZR_DISABLE_DATABASE`). Options row
+`OPENSHIM_DISABLE_DATABASE=1` (alias `BZR_DISABLE_DATABASE`), honoured only when the ini key is absent (the ini key is read first). Options row
 "Database" (System page) writes the key; read each time Single Player is
 built, so no restart. Stock value for Reset to Stock is off.
 

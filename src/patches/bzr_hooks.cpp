@@ -622,7 +622,7 @@ namespace BZROpenShim
         Log(L"[BRIEFSTRIDE] Text block scroll-stride fix: %hs hook=%hs\n",
             g_BriefingPageStrideFixEnabled ? "enabled" : "disabled",
             g_BriefingPageStrideFixInstalled ? "installed" : "pending");
-        Log(L"[BRIEFPAGES] Multi-page briefings: %hs hook=%hs\n",
+        Log(L"[BRIEFPAGES] Multi-page briefings: %hs at startup (read per briefing screen) hook=%hs\n",
             g_BriefingPagesEnabled ? "enabled" : "disabled",
             g_BriefingPagesInstalled ? "installed" : "pending");
         Log(L"[RENDERCOUNT] draw_multi renderCount clamp: %hs hook=%hs max=%d\n",
