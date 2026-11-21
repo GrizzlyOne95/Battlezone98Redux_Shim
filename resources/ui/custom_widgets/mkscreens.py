@@ -14,7 +14,8 @@ the stock background shows through.
 The box rectangles here are the layout contract with the screen code: keep
 CAREER_LAYOUT in step with the constants in src/patches/career_screen.cpp, and
 PRELOBBY_LAYOUT with src/patches/prelobby_screen.cpp, and LAN_LAYOUT with
-src/patches/lan_screen.cpp, and BANS_LAYOUT with src/patches/bans_screen.cpp.
+src/patches/lan_screen.cpp, and BANS_LAYOUT with src/patches/bans_screen.cpp, and DATABASE_LAYOUT with
+src/patches/database_screen.cpp.
 
     python mkscreens.py            # writes every osh_*_center.png and button skin
     python mkscreens.py --preview  # also writes *_preview.png over black
@@ -311,6 +312,43 @@ def bans_center():
     return img.resize((W, H), Image.LANCZOS)
 
 
+# Layout contract with src/patches/database_screen.cpp (1440x1080 design space).
+# Six tab slots, a list box of 14 row wells with a Prev / Next footer, and a
+# detail box (header band, a 260x260 picture square reserved for a later 3D
+# preview, the text block, a briefing Prev / Next footer). cap_y frees the
+# lower screen as on the category pages.
+DATABASE_LAYOUT = {
+    'title': (470, 132, 500, 56),
+    'cap_y': 828,
+    'tabs': [(228 + 160 * k, 236, 150, 40) for k in range(6)],
+    'list_box': (228, 288, 400, 630),
+    'row_wells': [(244, 300 + 40 * k, 368, 36) for k in range(14)],
+    'list_prev': (244, 872, 110, 36),
+    'list_next': (518, 872, 110, 36),
+    'detail_box': (644, 288, 568, 630),
+    'picture': (798, 346, 260, 260),
+    'text': (660, 618, 536, 240),
+    'page_prev': (660, 872, 110, 36),
+    'page_next': (1086, 872, 110, 36),
+}
+
+
+def database_center():
+    L = DATABASE_LAYOUT
+    img, d = new_panel(L['cap_y'])
+    title_plate(d, *L['title'])
+    box(d, *L['list_box'], header_h=8)
+    box(d, *L['detail_box'], header_h=44)
+    for r in L['tabs']:
+        slot(d, *r)
+    for r in L['row_wells']:
+        text_well(d, *r)
+    text_well(d, *L['picture'])
+    for key in ('list_prev', 'list_next', 'page_prev', 'page_next'):
+        slot(d, *L[key])
+    return img.resize((W, H), Image.LANCZOS)
+
+
 def text_well(d, x, y, w, h):
     """A recessed strip for a row caption."""
     d.rectangle([s(x), s(y), s(x + w), s(y + h)], fill=(0, 14, 1, 255))
@@ -473,6 +511,7 @@ def main():
         'osh_prelobby_center.png': prelobby_center(),
         'osh_lan_center.png': lan_center(),
         'osh_bans_center.png': bans_center(),
+        'osh_database_center.png': database_center(),
         'osh_options_center.png': options_center(),
         'osh_hub_center.png': hub_center(),
         'osh_category_center.png': category_center(),

@@ -494,6 +494,14 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
       "Multiplayer map-list refresh and selection-preservation fixes. Restart required." },
+    { "Briefing Pages", "Features", "BriefingPages", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::ReadOnNextUse,
+      "Extra briefing pages with arrows for missions that ship them. Applies at the next briefing screen." },
+    { "Database", "Features", "Database", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::ReadOnNextUse,
+      "DATABASE button on Single Player: unit entries and campaign briefings. Applies next time Single Player is built." },
     { "Map Filters+", "General", "MapFilterExtras", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
@@ -707,6 +715,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Each order you give draws a short ring on the ground: green where units go, red "
       "around an attack target (it follows the target), yellow for other orders. Only you "
       "see it, so it also works in multiplayer." },
+    // [Gameplay], HUD page next to Command Pings. Ships OFF: default "Off" (0).
+    { "Radar Pings", "Gameplay", "RtsRadarPings", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "The radar also shows a short fading ring at the position of each order you give, in "
+      "the same colour as the ground ring. Orders beyond radar range show on the rim. Only "
+      "you see it." },
     // [Gameplay], Controls page next to Command Pings. Ships ON: default "On" (0).
     { "Artillery Range", "Gameplay", "RtsArtilleryRange", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -714,6 +729,30 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Draws the maximum range on the ground around selected howitzers (not your own "
       "vehicle), and a ring at the aim point: green when one of them "
       "can reach it, red when none can. Only you see it, so it also works in multiplayer." },
+    // Native range rings for the selected own units (rts_markers.cpp,
+    // Docs/RTS_RANGE_RINGS.md). Local draw only. Weapon ships ON, radar and
+    // mine OFF; the label row switches the ring names for every kind.
+    { "Weapon Range", "Gameplay", "RtsWeaponRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Draws an orange ring on the ground at the direct-fire reach of each selected unit of "
+      "yours (not your own vehicle), for as long as it is selected. Only you see it, so it "
+      "also works in multiplayer." },
+    { "Radar Range", "Gameplay", "RtsRadarRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Draws a mint ring on the ground at the scan range of each selected unit of yours that "
+      "has radar (Recycler, Scavenger, turrets...). Only you see it." },
+    { "Mine Range", "Gameplay", "RtsMineRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Shows the trigger radius of your team's proximity mines that lie near a selected unit "
+      "of yours, as lime rings (the nearest 24). Only you see it." },
+    { "Range Labels", "Gameplay", "RtsRangeLabels", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Writes the name of each range ring (Weapon Range, Radar Range, Mine Trigger) along the "
+      "ring in its colour, on the side facing you. Only matters while a range ring is on." },
     // [Gameplay] RTS command extras (rts_commands.cpp), on the RTS Commands
     // subpage of Controls. All ship ON: default "On" (0) / "Key + Shift Menu".
     { "Remote Target", "Gameplay", "RtsRemoteTarget", nullptr, 0,
@@ -741,6 +780,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Z holds the selected units in place. With Shift held the Defend entry reads Hold and does "
       "the same; turn that off if Shift+number is bound elsewhere. Single player only." },
+    // Ships OFF: new key actions (Numpad 1/2/3/5).
+    { "Quick Commands", "Gameplay", "RtsQuickCommands", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Numpad 1, 2, 3 and 5 order the selected units: Follow Me, Defend Me, Attack My Target (the "
+      "target you have locked) and Stop. Rebind them under Input > RTS Actions. Needs NumLock on. "
+      "Single player only." },
     { "Build at Nav", "Gameplay", "RtsBuildAtNav", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -783,6 +829,18 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Plays a short sound when one of your units finishes its orders and goes idle, at most "
       "once every 5 seconds. J selects the next idle unit; Shift+J selects them all." },
+    // Ships OFF: an extra voice line.
+    { "Ammo Alert", "Gameplay", "RtsAmmoAlert", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Plays the out-of-ammo voice line when one of your armed units drops under 5% ammo, at most "
+      "once every 30 seconds." },
+    // Ships OFF: an extra voice line.
+    { "Scrap Full Alert", "Gameplay", "RtsScrapFullAlert", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Plays the scrap-full voice line when your scrap reaches its maximum, at most once every "
+      "60 seconds. Silent when a mission starts full." },
     // Ships OFF: a new key action (Shift+C in the satellite view).
     { "Satellite Follow", "Gameplay", "RtsFollowCamera", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
@@ -1033,6 +1091,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::ReadOnNextUse,
       "Remember muted players across sessions by stable identity, so a rename or reconnect "
       "does not undo it. Off is stock: mutes last the session; your list is kept." },
+    { "Lobby Briefing", "Features", "LobbyBriefing", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::ReadOnNextUse,
+      "Briefing button and panel in the multiplayer waiting room. Applies next time a lobby is built." },
     { "Lobby Readouts", "Network", "LobbyReadouts", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -1134,13 +1196,14 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
 
     { "FastMenuTransitions", "0" }, { "SoundChannels", "0" }, { "CustomBindsUi", "0" },
     { "RawMouseInput", "0" }, { "DisableControlSmoothing", "0" }, { "MouseEveryFrame", "0" },
+    { "BriefingPages", "0" }, { "Database", "0" }, { "LobbyBriefing", "0" },
     { "MapFilterExtras", "0" }, { "Enabled", "0" }, { "QuickSaveEnabled", "0" }, { "WeaponConvergence", "0" },
     { "MuzzleFlash", "0" }, { "MeshRecoil", "0" }, { "ShellCasings", "0" }, { "LaserSight", "0" },
     { "SkinnedGibs", "0" }, { "FractureOnePiece", "0" }, { "GpuSkinning", "0" }, { "PlayerReticleConvergence", "0" },
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
-    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsFollowCamera", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "UnitLoadouts", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsRadarPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsWeaponRange", "0" }, { "RtsRadarRange", "0" }, { "RtsMineRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsQuickCommands", "0" }, { "RtsFollowCamera", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAmmoAlert", "0" }, { "RtsScrapFullAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "UnitLoadouts", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
@@ -1170,7 +1233,7 @@ static const char* const kShimSettingsStockKeepKeys[] =
     "PreciseTimestep", "MusicSingleFill", "MusicRefillCatchUp", "ConstructorRemoteBuild", "RestoreCraftBounds",
     "NetImprovements", "ReliableRetryAdaptToPing",
     "ThreadScheduling", "DynamicGeometryPieceReuse", "DynamicGeometryFastSort",
-    "AutoStage", "StatsTracking",
+    "AutoStage", "StatsTracking", "RtsRangeLabels",
     "Renderer", "Headlights",
     "RadarHudIdleOpacity", "RadarHudFadeDelay", "RadarHudFadeDuration", "RadarCompassAlwaysVisible",
     "HullHudIdleOpacity", "HullHudFadeDelay", "HullHudFadeDuration",

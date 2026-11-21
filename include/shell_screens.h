@@ -30,6 +30,8 @@ namespace BZROpenShim::ShellScreens
     inline constexpr uint32_t kLanScreenId = kCustomScreenIdBase + 5;
     // Banned Players list with per-entry Unban (bans_screen.cpp).
     inline constexpr uint32_t kBansScreenId = kCustomScreenIdBase + 6;
+    // Single-player Database: unit entries and campaign briefings (database_screen.cpp).
+    inline constexpr uint32_t kDatabaseScreenId = kCustomScreenIdBase + 7;
     inline constexpr uint32_t kOptionsCategoryScreenIdBase = kCustomScreenIdBase + 0x10;
     // Category screens are kOptionsCategoryScreenIdBase + 0 .. + count - 1.
     inline constexpr uint32_t kOptionsCategoryScreenIdCount = 32;
@@ -64,6 +66,13 @@ namespace BZROpenShim::ShellScreens
     // False when this build cannot host OpenShim screens.
     bool RegisterScreen(const ScreenDef& def);
     bool IsAvailable();
+
+    // Runs `built` on each stock screen of id `stockId` right after the stock
+    // factory returns it, still inside the factory call (so widgets added
+    // there draw their frames). Runs under SEH; a fault is logged and the
+    // screen is returned as built. Installs the factory detour on first use.
+    using StockBuiltFn = void (*)(void* screen);
+    bool ObserveStockScreen(uint32_t stockId, StockBuiltFn built);
 
     // Navigation from a button callback. `fromScreen` is the live screen the
     // click came from (any stock or OpenShim screen); its shell manager does

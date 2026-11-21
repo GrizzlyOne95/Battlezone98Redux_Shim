@@ -38,6 +38,8 @@ HOVERCRAFT = ["Wingman", "HoverCraft", "APC", "Minelayer", "SAV", "Scavenger", "
 AI = ["Artillery", "Bomber", "Gech", "Offensive", "Person", "RocketTank", "Scout", "Soldier", "Tank", "Wingman"]
 AI_SUB = ["RocketTank", "Scout", "Person", "Soldier", "Artillery", "Gech", "Bomber", "Tank"]
 PRODUCERS = ["Producer", "Recycler", "Factory"]
+# Classes whose slot 13 is the inherited Craft::GetCommand 0x004AE110.
+CRAFT_GETCOMMAND = ["Craft", "HoverCraft", "Minelayer", "Person", "SAV", "Walker", "Wingman"]
 
 HOOKS = [
     ("EngineFlameControl", "EngineFlameControl", [P("Engine Flame Control VTable Hook")]),
@@ -58,12 +60,18 @@ HOOKS = [
     ("TurretCraftUpdateWeaponAim", "TurretCraftUpdateWeaponAim", [VT("TurretCraftVtable", 38)]),
     ("TurretTankUpdateWeaponAim", "TurretTankUpdateWeaponAim", [VT("HowitzerVtable", 38), VT("TurretTankVtable", 38)]),
     ("ShieldTowerSimulate", "ShieldTowerSimulate", [VT("ShieldTowerVtable", 15)]),
+    ("DayWreckerSimulate (DWARMORY hold, dropRate, DaywreckerDefence)", "DayWreckerSimulate", [VT("DayWreckerVtable", 15)]),
+    ("TorpedoSimulate (DaywreckerDefence)", "TorpedoSimulate", [VT("TorpedoVtable", 15)]),
     ("MagnetMineSimulate", "MagnetMineSimulate", [VT("MagnetMineVtable", 15)]),
     ("ProximityMineSimulate", "ProximityMineSimulate", [VT("ProximityMineVtable", 15)]),
     ("SprayBuildingSimulate", "SprayBuildingSimulate", [VT("SprayBuildingVtable", 15)]),
     ("TugPostLoad", "TugPostLoad", [VT("TugVtable", 22)]),
     ("FlagDisplaySubmit", "FlagDisplaySubmit", [VT("FlagDisplayVtable", 8)]),
     ("MultiCreateUpdate", ("slot", "MultiplayerCreateVtable", 13), [VT("MultiplayerCreateVtable", 13)]),
+    ("MultiCreateChar", "MultiCreateChar", [VT("MultiplayerCreateVtable", 2)]),
+    ("MultiCreateKeyPressed", "MultiCreateKeyPressed", [VT("MultiplayerCreateVtable", 4)]),
+    ("UiViewKeyReleased (lobby briefing)", "UiViewKeyReleased", [VT("MultiplayerCreateVtable", 5)],
+     "shared cUI_View KeyReleased; only the lobby screen's slot is wrapped"),
     ("OffensiveProcessDoSubTask", "OffensiveProcessDoSubTask",
      [VT(f"{c}ProcessVtable", 11) for c in AI] +
      [VT(f"{c}{s}Vtable", 11) for c in AI_SUB for s in ("Friend", "Enemy")]),
@@ -74,6 +82,7 @@ HOOKS = [
     ("TurretTankProcessDoSubTask", "TurretTankProcessDoSubTask",
      [VT(f"TurretTank{s}Vtable", 11) for s in ("Process", "Friend", "Enemy")]),
     ("TurretTankGetCommand", "TurretTankGetCommand", [VT("TurretTankVtable", 13)]),
+    ("CraftGetCommand (DaywreckerDefence)", "CraftGetCommand", [VT(f"{c}Vtable", 13) for c in CRAFT_GETCOMMAND]),
     ("TurretTankUpdateModeList", "TurretTankUpdateModeList", [VT("TurretTankVtable", 23)]),
     ("TurretTankProcessInitAttack", "TurretTankProcessInitAttack",
      [VT(f"TurretTank{s}Vtable", 24) for s in ("Process", "Friend", "Enemy")]),
@@ -84,6 +93,9 @@ HOOKS = [
      [VT(f"TurretTank{s}Vtable", 26) for s in ("Process", "Friend", "Enemy")],
      "shared AiProcess DoAttack; TurretAttackOrders manages turret deploy only"),
     ("ConstructionRigGetCommand", "ConstructionRigGetCommandPos", [VT("ConstructionRigVtable", 12)]),
+    ("WalkerSimulate", "WalkerSimulate", [VT("WalkerVtable", 15)]),
+    ("CraftPostSimulate", "CraftPostSimulate", [VT("WalkerVtable", 16)],
+     "WalkerFreeHead wraps only the Walker copy; the other Craft classes keep the stock PostSimulate"),
 ]
 
 

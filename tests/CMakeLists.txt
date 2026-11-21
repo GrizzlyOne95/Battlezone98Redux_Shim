@@ -176,6 +176,8 @@ openshim_add_test(pool_draw_distance_policy_tests STD 17 SOURCES pool_draw_dista
 openshim_add_test(ordnance_entity_leak_policy_tests STD 17 SOURCES ordnance_entity_leak_policy_tests.cpp)
 openshim_add_test(live_object_gate_tests STD 14 SOURCES live_object_gate_tests.cpp)
 openshim_add_test(briefing_pages_policy_tests STD 17 SOURCES briefing_pages_policy_tests.cpp)
+openshim_add_test(lobby_briefing_policy_tests STD 17 SOURCES lobby_briefing_policy_tests.cpp)
+openshim_add_test(database_policy_tests STD 17 SOURCES database_policy_tests.cpp)
 openshim_add_test(lan_discovery_tests STD 17 SOURCES lan_discovery_tests.cpp)
 openshim_add_test(lan_no_auth_policy_tests STD 17 SOURCES lan_no_auth_policy_tests.cpp)
 openshim_add_test(embedded_lan_model_tests STD 17 SOURCES embedded_lan_model_tests.cpp ../src/network/embedded_lan_model.cpp)
@@ -477,6 +479,8 @@ openshim_add_test(tracked_vehicle_physics_tests STD 17 SOURCES tracked_vehicle_p
 openshim_add_test(tracked_vehicle_treads_tests STD 17 SOURCES tracked_vehicle_treads_tests.cpp)
 openshim_add_test(tracked_vehicle_turret_tests STD 17 SOURCES tracked_vehicle_turret_tests.cpp)
 openshim_add_test(tracked_vehicle_net_tests STD 17 SOURCES tracked_vehicle_net_tests.cpp)
+openshim_add_test(walker_free_head_math_tests STD 17 SOURCES walker_free_head_math_tests.cpp)
+openshim_add_test(mru_class_policy_tests STD 14 SOURCES mru_class_policy_tests.cpp)
 
 openshim_add_test(headlight_falloff_tests STD 20 SOURCES
     headlight_falloff_tests.cpp
@@ -796,6 +800,14 @@ openshim_add_test(lcbench_safety_policy_tests STD 20 SOURCES
 
 openshim_add_test(autosave_gate_tests STD 20 SOURCES
     autosave_gate_tests.cpp
+)
+
+openshim_add_test(daywrecker_defence_policy_tests STD 17 SOURCES
+    daywrecker_defence_policy_tests.cpp
+)
+
+openshim_add_test(daywrecker_spawn_policy_tests STD 17 SOURCES
+    daywrecker_spawn_policy_tests.cpp
 )
 
 openshim_add_test(autosave_notice_layout_tests STD 20 SOURCES
@@ -1184,6 +1196,8 @@ openshim_add_test(rally_beacon_assets_tests STD 20 SOURCES
 )
 openshim_add_test(laser_sight_policy_tests STD 20 SOURCES laser_sight_policy_tests.cpp)
 openshim_add_test(rts_markers_policy_tests STD 20 SOURCES rts_markers_policy_tests.cpp)
+openshim_add_test(rts_range_rings_policy_tests STD 20 SOURCES rts_range_rings_policy_tests.cpp)
+openshim_add_test(rts_radar_pings_policy_tests STD 20 SOURCES rts_radar_pings_policy_tests.cpp)
 openshim_add_test(rts_placement_policy_tests STD 20 SOURCES rts_placement_policy_tests.cpp)
 openshim_add_test(rts_order_queue_policy_tests STD 20 SOURCES rts_order_queue_policy_tests.cpp)
 openshim_add_test(rts_build_queue_policy_tests STD 20 SOURCES rts_build_queue_policy_tests.cpp)

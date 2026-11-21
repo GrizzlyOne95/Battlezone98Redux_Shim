@@ -65,6 +65,8 @@
 #include "net_optimizer.h"
 #include "pond_class_label.h"
 #include "tracked_vehicle_class.h"
+#include "walker_free_head.h"
+#include "mru_class.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -623,7 +625,7 @@ namespace BZROpenShim
         Log(L"[BRIEFSTRIDE] Text block scroll-stride fix: %hs hook=%hs\n",
             g_BriefingPageStrideFixEnabled ? "enabled" : "disabled",
             g_BriefingPageStrideFixInstalled ? "installed" : "pending");
-        Log(L"[BRIEFPAGES] Multi-page briefings: %hs hook=%hs\n",
+        Log(L"[BRIEFPAGES] Multi-page briefings: %hs at startup (read per briefing screen) hook=%hs\n",
             g_BriefingPagesEnabled ? "enabled" : "disabled",
             g_BriefingPagesInstalled ? "installed" : "pending");
         Log(L"[RENDERCOUNT] draw_multi renderCount clamp: %hs hook=%hs max=%d\n",
@@ -1084,6 +1086,8 @@ namespace BZROpenShim
             {"InstallProducerScriptPredicateHooksIfPossible", &InstallProducerScriptPredicateHooksIfPossible},
             {"InstallBriefingPageStrideFixIfPossible", &InstallBriefingPageStrideFixIfPossible},
             {"InstallBriefingPagesIfPossible", &InstallBriefingPagesIfPossible},
+            {"InstallLobbyBriefingIfPossible", &InstallLobbyBriefingIfPossible},
+            {"InstallDatabaseScreenIfPossible", &InstallDatabaseScreenIfPossible},
             {"InstallMultiRenderCountClampIfPossible", &InstallMultiRenderCountClampIfPossible},
             {"InstallThumbnailBmpGuardIfPossible", &InstallThumbnailBmpGuardIfPossible},
             {"InstallSplinterUndeadFixIfPossible", &InstallSplinterUndeadFixIfPossible},
@@ -1666,6 +1670,7 @@ namespace BZROpenShim
             {"InitializeMeshAccurateImpacts", &MeshImpact::InitializeGlobal},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"InstallOrdnanceEntityLeakFixIfPossible", &InstallOrdnanceEntityLeakFixIfPossible},
+            {"InstallDayWreckerSpawnFallIfPossible", &InstallDayWreckerSpawnFallIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
             {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},
             {"InitializeUnitVoConfig", &InitializeUnitVoConfig},
@@ -1714,6 +1719,8 @@ namespace BZROpenShim
         HookEngine::CodePatchLock lock;
         InstallPondClassLabelSupportIfPossible();
         InstallTrackedVehicleClassIfPossible();
+        InstallWalkerFreeHeadIfPossible();
+        InstallMruClassIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallD3D11ConstantLookupCacheIfPossible();
         InstallD3DCompileCacheIfPossible();
@@ -1744,6 +1751,8 @@ namespace BZROpenShim
         InstallProducerScriptPredicateHooksIfPossible();
 		InstallBriefingPageStrideFixIfPossible();
 		InstallBriefingPagesIfPossible();
+		InstallLobbyBriefingIfPossible();
+		InstallDatabaseScreenIfPossible();
 		InstallThumbnailBmpGuardIfPossible();
 		InstallSplinterUndeadFixIfPossible();
 		InstallTugCargoPostLoadFixIfPossible();

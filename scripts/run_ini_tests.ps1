@@ -236,6 +236,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Client-local UI: extra briefing pages only for missions that ship
     # <mission>_2.des; every other mission keeps the stock screen.
     "Features/BriefingPages",
+    # Client-local UI: DATABASE button on Single Player and the Database screen.
+    "Features/Database",
+    # Client-local UI: Briefing button and panel in the multiplayer waiting room.
+    "Features/LobbyBriefing",
     # Local-only: rebuilds the shooter's own sniper aim for a tilted (ejected) pilot;
     # identical to stock for a level pilot, no sync field written.
     "Fixes/SniperEjectAimFix",
@@ -402,6 +406,7 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Turret tanks accept ATTACK and close in on out-of-range targets; player
     # team only, hard-disabled in network games. Default on by design.
     "SinglePlayer/TurretAttackOrders",
+    "SinglePlayer/DaywreckerDefence",
 
     # Producer rally points: V/Shift+V set and clear a Recycler/Factory rally
     # point that its new units drive to. Player team only, nothing happens until
@@ -421,6 +426,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # artillery range. Write nothing the game reads. Default on by design.
     "Gameplay/RtsCommandPings",
     "Gameplay/RtsArtilleryRange",
+    "Gameplay/RtsWeaponRange",
+    "Gameplay/RtsRangeLabels",
 
     # RTS command extras: nothing happens until the player presses one of the
     # RTS keys or picks a unit-menu entry, and then only the stock per-unit
@@ -582,6 +589,8 @@ $shippingPolicyChecks = @{
     "Fixes/MagnetZeroRangeGuard" = "1"
     "Fixes/BriefingPageStride" = "1"
     "Features/BriefingPages" = "1"
+    "Features/Database" = "1"
+    "Features/LobbyBriefing" = "1"
     "Fixes/SniperEjectAimFix" = "1"
     "Fixes/ScavengerNetProcessGuard" = "1"
     "Fixes/LuaFormationBinding" = "1"
@@ -630,6 +639,8 @@ $shippingPolicyChecks = @{
     "SinglePlayer/SatelliteVisibilityFix" = "1"
     "SinglePlayer/PilotTeamRestore" = "1"
     "SinglePlayer/TurretAttackOrders" = "1"
+    "SinglePlayer/DaywreckerDefence" = "0"
+    "SinglePlayer/MruGameplay" = "0"
     "Gameplay/ProducerRallyPoints" = "1"
     "Gameplay/AutoGroupNewUnits" = "0"
     "Gameplay/ExtendedUnitCap" = "0"
@@ -637,17 +648,25 @@ $shippingPolicyChecks = @{
     "Gameplay/GroupStrip" = "1"
     "Gameplay/RtsCommandPings" = "1"
     "Gameplay/RtsArtilleryRange" = "1"
+    "Gameplay/RtsWeaponRange" = "1"
+    "Gameplay/RtsRadarRange" = "0"
+    "Gameplay/RtsMineRange" = "0"
+    "Gameplay/RtsRangeLabels" = "1"
     "Gameplay/RtsRemoteTarget" = "1"
     "Gameplay/RtsSmartCommandMenu" = "1"
     "Gameplay/RtsSmartRepairReload" = "1"
     "Gameplay/RtsAreaSelect" = "1"
     "Gameplay/RtsHold" = "2"
+    "Gameplay/RtsQuickCommands" = "0"
+    "Gameplay/RtsAmmoAlert" = "0"
+    "Gameplay/RtsScrapFullAlert" = "0"
     "Gameplay/RtsBuildAtNav" = "1"
     "Gameplay/RtsBuildGhost" = "1"
     "Gameplay/RtsPendingBuildGhost" = "1"
     "Gameplay/RtsPowerRange" = "1"
     "Gameplay/RtsWaypointLines" = "1"
     "Gameplay/RtsAttackMarks" = "0"
+    "Gameplay/RtsRadarPings" = "0"
     "Gameplay/RtsProducerBadges" = "0"
     "Gameplay/RtsOrderQueue" = "0"
     "Gameplay/RtsBuildQueue" = "0"

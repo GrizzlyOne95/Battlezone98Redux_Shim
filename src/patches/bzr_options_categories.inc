@@ -35,7 +35,7 @@ static const char* const kShimCategoryAudio[] = {
     "Sound Channels", "Background Music", "Unit Voices", "Attack Alert", "Hop-Out Alert Fix", "Music Refill" };
 static const char* const kShimCategoryHud[] = {
     "Scrap/Pilot HUD", "Scrap Color", "Pilot Color", "Radar Size", "Target Popup",
-    "MP Vehicle Flags", "Kill Ticker", "Command Pings", "Artillery Range", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
+    "MP Vehicle Flags", "Kill Ticker", "Command Pings", "Radar Pings", "Artillery Range", kShimRowReticle, kShimRowPalette, kShimRowDamage, kShimRowFading, kShimRowMeters, kShimRowRadar };
 static const char* const kShimCategoryRadar[] = {
     "Radar Fade", "Radar Idle", "Radar Delay", "Radar Speed", "Keep Compass" };
 static const char* const kShimCategoryMeters[] = {
@@ -63,9 +63,10 @@ static const char* const kShimCategoryControls[] = {
     "Run in Background", "Rally Points", "Auto Group", "Extended Unit Cap", "Group Member Menu", "Group Strip",
     kShimRowRtsCommands };
 static const char* const kShimCategoryRtsCommands[] = {
-    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold",
+    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold", "Quick Commands",
     "Build at Nav", "Build Ghost", "Pending Build Ghost", "Power Range", "Waypoint Lines",
-    "Producer Badges", "Idle Unit Alert", "Satellite Follow", "Attack Marks", "Queue Orders", "Build Queue", "Unit Loadouts" };
+    "Producer Badges", "Idle Unit Alert", "Ammo Alert", "Scrap Full Alert", "Satellite Follow", "Attack Marks", "Weapon Range", "Radar Range", "Mine Range", "Range Labels",
+    "Queue Orders", "Build Queue", "Unit Loadouts" };
 static const char* const kShimCategoryGameplay[] = {
     "Target Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
@@ -78,11 +79,11 @@ static const char* const kShimCategoryFixes[] = {
     "Effect Sort", "Map List Fixes" };
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions",
-    "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Persistent Mutes",
+    "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Lobby Briefing", "Persistent Mutes",
     "MP Setup Screen", "Map Letter Jump", "Block Free Camera", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install", "Skip Launcher", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
-    "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching" };
+    "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching", "Briefing Pages", "Database" };
 
 struct ShimSettingsCategory
 {

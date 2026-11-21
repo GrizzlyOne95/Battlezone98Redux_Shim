@@ -60,7 +60,16 @@ namespace BZROpenShim
         constexpr size_t kFirstQueueLineSlot = kFirstAttackRingSlot + kMaxAttackRingSlots;
         constexpr size_t kMaxQueueRingSlots = 16;
         constexpr size_t kFirstQueueRingSlot = kFirstQueueLineSlot + kMaxQueueLineSlots;
-        constexpr size_t kSlotCount = kFirstQueueRingSlot + kMaxQueueRingSlots;
+        // Then the native range rings (RtsRangeRings, rts_range_rings_policy.h):
+        // direct-fire weapon reach, radar scan range and own-team mine trigger
+        // radius.
+        constexpr size_t kMaxWeaponRingSlots = 16;
+        constexpr size_t kFirstWeaponRingSlot = kFirstQueueRingSlot + kMaxQueueRingSlots;
+        constexpr size_t kMaxRadarRingSlots = 16;
+        constexpr size_t kFirstRadarRingSlot = kFirstWeaponRingSlot + kMaxWeaponRingSlots;
+        constexpr size_t kMaxMineRingSlots = 24;
+        constexpr size_t kFirstMineRingSlot = kFirstRadarRingSlot + kMaxRadarRingSlots;
+        constexpr size_t kSlotCount = kFirstMineRingSlot + kMaxMineRingSlots;
 
         // ---- Ring geometry ---------------------------------------------------
         constexpr unsigned kMinSegments = 48;
@@ -154,6 +163,14 @@ namespace BZROpenShim
         constexpr Colour kReachableColour = {0.30f, 1.00f, 0.40f, 0.85f};
         constexpr Colour kUnreachableColour = {1.00f, 0.25f, 0.20f, 0.85f};
         constexpr Colour kPowerColour = {0.95f, 0.90f, 0.35f, 0.55f};
+        // Range rings. kRangeColour (light blue) stays the artillery ring.
+        // Direct fire is orange (close in hue to the order-queue amber, but a
+        // wide translucent ring against thin lines); radar mint; a mine
+        // trigger lime-yellow, which sits clear of the power ring and the
+        // neutral ping (both gold, g >= 0.86 with b ~ 0.3).
+        constexpr Colour kDirectFireColour = {1.00f, 0.55f, 0.25f, 0.45f};
+        constexpr Colour kRadarColour = {0.35f, 1.00f, 0.65f, 0.40f};
+        constexpr Colour kMineColour = {0.78f, 1.00f, 0.20f, 0.50f};
 
         // ---- Command pings ---------------------------------------------------
         enum class PingKind : uint8_t

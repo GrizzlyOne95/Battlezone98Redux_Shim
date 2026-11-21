@@ -11,13 +11,13 @@ Live tests still owed: `Docs/LIVE_TEST_BACKLOG.md`.
 
 ## In review
 - **6. Follow camera** (`[Gameplay] RtsFollowCamera`, Shift+C in satellite). Branch `agent/follow-camera`, PR #900, built in a cloud session: Linux CTest green, both engine rows byte-checked against the GOG 2.2.301 exe, Win32 build left to CI. **Needs the live test** (`Docs/RTS_COMMANDS.md`, checklist 11b) before merge.
+- **7. Radar order pings** (`[Gameplay] RtsRadarPings`). Branch `agent/radar-order-pings`, stacked on #900. Needs the live test (`Docs/RTS_MARKERS.md`).
+8. **FPS quick-commands** (`[Gameplay] RtsQuickCommands`, Numpad 1/2/3/5). Branch `agent/fps-quick-commands`, stacked on #903. Needs the live test (`Docs/RTS_COMMANDS.md`).
 
 ## Waiting (in order)
-7. **Map pings on orders.**
-8. **FPS quick-commands:** research.
 9. **Loadout presets:** research. Handed to Copilot, see `Docs/COPILOT_BRIEF_LOADOUT_PRESETS.md`.
 10. **Tread texture scroll.**
-11. **Walker free-turning head:** research and plan first.
+11. **Walker free-turning head:** M0 done, M1 implemented (`Docs/WALKER_FREE_HEAD.md`); next the M1 live test, then M2 (leg pose, relaxation, shared helpers).
 
 ## New ideas (added 2026-11-18, not yet scoped)
 

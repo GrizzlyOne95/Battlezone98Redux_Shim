@@ -503,8 +503,8 @@ namespace BZROpenShim
             ReloadProducerBadgesConfig();
             // [Gameplay] RtsCommandPings / RtsArtilleryRange, and the placement
             // aids RtsBuildGhost / RtsPendingBuildGhost / RtsPowerRange /
-            // RtsWaypointLines, and the under-attack rings RtsAttackMarks,
-            // likewise.
+            // RtsWaypointLines, the under-attack rings RtsAttackMarks and the
+            // radar rings RtsRadarPings, likewise.
             ReloadRtsMarkersConfig();
             // [Gameplay] RtsOrderQueue (Shift-queued orders), likewise.
             ReloadRtsOrderQueueConfig();
@@ -720,6 +720,10 @@ namespace BZROpenShim
             // deploy/pack-up around it. Revert drops per-process tracks.
             { "TurretAttackOrders", FeatureTier::SinglePlayer,
               &ResetTurretAttackOrders, &RefreshTurretAttackOrdersState },
+            // [SinglePlayer] DaywreckerDefence: ATTACK on enemy Daywrecker/Comet,
+            // radius scan and evasion. Revert drops the bomb registry and cooldowns.
+            { "DaywreckerDefence", FeatureTier::SinglePlayer,
+              &ResetDaywreckerDefence, &RefreshDaywreckerDefenceState },
             // [Gameplay] ProducerRallyPoints: V/Shift+V rally points for
             // Recycler/Factory. Revert drops the rally table at mission end.
             // SinglePlayer tier, but a co-op mission can opt in (EXU

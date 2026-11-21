@@ -1,0 +1,6 @@
+#include "include/database_content_resources.h"
+#include <windows.h>
+
+// The Database screen content (database_screen.cpp) ships inside the plugin
+// DLL; a mod's oshdb.cfg, read through the game file system, merges over it.
+IDR_OPENSHIM_DATABASE_CONTENT RCDATA "resources/database/oshdb.cfg"

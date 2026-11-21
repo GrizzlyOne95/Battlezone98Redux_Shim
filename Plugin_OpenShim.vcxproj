@@ -199,6 +199,7 @@
     <ClCompile Include="src\patches\shell_casings.cpp" />
     <ClCompile Include="src\patches\laser_sight.cpp" />
     <ClCompile Include="src\patches\rts_markers.cpp" />
+    <ClCompile Include="src\patches\rts_range_labels.cpp" />
     <ClCompile Include="src\patches\rts_placement.cpp" />
     <ClCompile Include="src\patches\rts_build_queue.cpp" />
     <ClCompile Include="src\patches\unit_loadouts.cpp" />
@@ -267,6 +268,9 @@
     <ClCompile Include="src\patches\ui_camera_fixes.cpp" />
     <ClCompile Include="src\patches\planet_video.cpp" />
     <ClCompile Include="src\patches\briefing_pages.cpp" />
+    <ClCompile Include="src\patches\lobby_briefing.cpp" />
+    <ClCompile Include="src\patches\des_reader.cpp" />
+    <ClCompile Include="src\patches\database_screen.cpp" />
     <ClCompile Include="src\patches\tro_menu_movie.cpp" />
     <ClCompile Include="src\patches\never_activate.cpp" />
     <ClCompile Include="src\patches\window_unclamp.cpp" />
@@ -323,6 +327,8 @@
     <ClCompile Include="src\patches\steam_tunnel_join.cpp" />
     <ClCompile Include="src\patches\net_tag_dispatch.cpp" />
     <ClCompile Include="src\patches\mp_daywrecker_armory_collision.cpp" />
+    <ClCompile Include="src\patches\daywrecker_defence.cpp" />
+    <ClCompile Include="src\patches\daywrecker_spawn_fall.cpp" />
     <ClCompile Include="src\patches\lua_handle_sync.cpp" />
     <ClCompile Include="src\patches\mp_faction_restrict.cpp" />
     <ClCompile Include="src\patches\mp_any_nation.cpp" />
@@ -388,7 +394,9 @@
     </ClCompile>
     <ClCompile Include="src\patches\planet_environment.cpp" />
     <ClCompile Include="src\patches\pond_class_label.cpp" />
+    <ClCompile Include="src\patches\mru_class.cpp" />
     <ClCompile Include="src\patches\tracked_vehicle_class.cpp" />
+    <ClCompile Include="src\patches\walker_free_head.cpp" />
     <ClCompile Include="src\patches\redux_compatibility.cpp" />
     <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
@@ -413,6 +421,10 @@
   <ItemGroup>
     <ClInclude Include="include\ai_range_policy.h" />
     <ClInclude Include="include\briefing_pages_policy.h" />
+    <ClInclude Include="include\lobby_briefing_policy.h" />
+    <ClInclude Include="include\des_reader.h" />
+    <ClInclude Include="include\database_policy.h" />
+    <ClInclude Include="include\database_content_resources.h" />
     <ClInclude Include="include\ordnance_entity_leak_policy.h" />
     <ClInclude Include="include\live_object_gate.h" />
     <ClInclude Include="include\deferred_modable_rebuild.h" />
@@ -459,6 +471,8 @@
     <ClInclude Include="include\hud_visibility.h" />
     <ClInclude Include="include\hud_visibility_policy.h" />
     <ClInclude Include="include\hud_gauge_overlay.h" />
+    <ClInclude Include="include\rts_range_labels.h" />
+    <ClInclude Include="include\rts_range_rings_policy.h" />
     <ClInclude Include="include\career_kill_class.h" />
     <ClInclude Include="include\kill_ticker.h" />
     <ClInclude Include="include\kill_ticker_policy.h" />
@@ -473,11 +487,15 @@
     <ClInclude Include="include\weapon_presentation_native_policy.h" />
     <ClInclude Include="include\weapon_presentation_call_bridges.h" />
     <ClInclude Include="include\pond_class_label.h" />
+    <ClInclude Include="include\mru_class.h" />
+    <ClInclude Include="include\mru_class_policy.h" />
     <ClInclude Include="include\tracked_vehicle_class.h" />
     <ClInclude Include="include\tracked_vehicle_physics.h" />
     <ClInclude Include="include\tracked_vehicle_treads.h" />
     <ClInclude Include="include\tracked_vehicle_net.h" />
     <ClInclude Include="include\tracked_vehicle_turret.h" />
+    <ClInclude Include="include\walker_free_head.h" />
+    <ClInclude Include="include\walker_free_head_math.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\steam_launcher_skip.h" />
     <ClInclude Include="include\launcher_proxy_logic.h" />
@@ -598,6 +616,8 @@
     <ClInclude Include="include\steam_tunnel_join.h" />
     <ClInclude Include="include\net_tag_dispatch.h" />
     <ClInclude Include="include\mp_daywrecker_armory_collision_install.h" />
+    <ClInclude Include="include\daywrecker_defence_policy.h" />
+    <ClInclude Include="include\daywrecker_spawn_policy.h" />
     <ClInclude Include="include\lua_handle_sync.h" />
     <ClInclude Include="include\lua_handle_sync_install.h" />
     <ClInclude Include="include\lobby_team_commands.h" />
@@ -638,6 +658,7 @@
     </ResourceCompile>
     <ResourceCompile Include="dx11_enhanced_fxaa.rc" />
     <ResourceCompile Include="options_ui_l10n.rc" />
+    <ResourceCompile Include="database_content.rc" />
     <ResourceCompile Include="fracture_interior_textures.rc" />
     <ResourceCompile Include="launcher_proxy.rc">
       <AdditionalIncludeDirectories>$(SolutionDir)bin\$(Configuration);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>

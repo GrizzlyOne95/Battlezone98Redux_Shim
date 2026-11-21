@@ -7,8 +7,10 @@ For pages 2 and up, add files next to the mission's own `.des`. No Lua, no
 mission INI keys and no new asset types are involved.
 
 Setting: `[Features] BriefingPages = 1` in `openshim.ini` (on by default).
-The environment variable `OPENSHIM_DISABLE_BRIEFING_PAGES=1` turns it off.
+The environment variable `OPENSHIM_DISABLE_BRIEFING_PAGES=1` turns it off only when the ini key is absent (the ini key is read first).
 Players without OpenShim, or with the setting off, see page 1 only.
+Options row "Briefing Pages" (System page) writes the key; it is read at
+each briefing screen, so no restart. Stock value for Reset to Stock is off.
 
 ## File names
 
@@ -80,3 +82,9 @@ lower-case like the stock files.
 - `<m>: name too long ...` - shorten the mission name to 8 characters.
 - `briefing pages hooks installed` / `... detour failed ...` - whether the
   feature could attach to this game build. Unknown builds stay stock.
+
+## Live checklist
+
+1. A mission with `<m>_2.des` shows page arrows; pages turn.
+2. Options row off, then Reset to Stock: the feature is gone (next briefing
+   shows page 1 only; the row reads Off).

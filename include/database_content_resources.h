@@ -1,0 +1,3 @@
+#pragma once
+
+#define IDR_OPENSHIM_DATABASE_CONTENT 4601
