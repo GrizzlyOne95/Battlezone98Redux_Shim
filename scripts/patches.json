@@ -7385,6 +7385,72 @@
       "address": "0x0079D670",
       "expected": "55 8B EC 8B 0D 64 55 94 00 E8 E2 06 00 00 5D C3",
       "identity": "Lobby Back button callback FUN_0079d670: FUN_0079dd60 with ecx = ModeStressLobbyScreenSlot (pops the shell history; re-seeds [main, lobby] when it is the last entry). Whole body; called by the mode stress driver to return to the main menu."
+    },
+    {
+      "name": "VehiclePreviewWindowCtor",
+      "address": "0x007A9450",
+      "expected": "55 8B EC 51 89 4D FC 51 F3 0F 10 05 98 24 8A 00 F3 0F 11 04 24 8B 45 20 50 8B 4D 1C 51 51 F3 0F",
+      "identity": "cUI_VehiclePreviewWindow ctor, thiscall(name, x, y, w, h, flags, parent), size 0x144, stores vtable 0x0089F118: the stock MP vehicle picker's model square that draws the SniperTex render target. Used by the Database 3D preview."
+    },
+    {
+      "name": "UiViewSetMaterialTexture",
+      "address": "0x007D2A00",
+      "expected": "55 8B EC 6A FF 68 70 2B 86 00 64 A1 00 00 00 00 50 83 EC 60 A1 00 70 8E 00 33 C5 89 45 F0 50 8D",
+      "identity": "cUI_View bind texture to material, thiscall(material, texture); the MP picker calls it with (\"scope\", \"SniperTex\") so the preview window shows the render target."
+    },
+    {
+      "name": "VehiclePreviewBuildModel",
+      "address": "0x0067D180",
+      "expected": "55 8B EC 6A FF 68 34 F6 84 00 64 A1 00 00 00 00 50 51 81 EC 34 01 00 00 A1 00 70 8E 00 33 C5 89",
+      "identity": "FUN_0067d180, cdecl(stem): MP picker model build (the picker pushes three extra floats, ignored). Destroys the previous node (FUN_0067d090) and every scene entity and light (SceneManager vtable +0x198, +0x140), creates a directional light into 0x00920CA0 and entity \"%.*s.mesh\" into 0x00920EC0, then FUN_0067d4d3 makes node \"uinode\" (0x00920E98) and sets the camera distance 0x008ED0DC = boundingRadius*2. Called by FUN_007aa560 line 152."
+    },
+    {
+      "name": "VehiclePreviewUpdate",
+      "address": "0x007AA000",
+      "expected": "55 8B EC 6A FF 68 B0 08 86 00 64 A1 00 00 00 00 50 51 83 EC 08 53 56 57 A1 00 70 8E 00 33 C5 50",
+      "identity": "FUN_007aa000, cdecl(): MP picker per-frame preview update. Camera at (0, 1, [0x008ED0DC]) via FUN_0067ccf0 (FOV set each frame), cloak fade only when 0x00945588 is set, spin FUN_0067ce80 unless 0x0094554A."
+    },
+    {
+      "name": "VehiclePreviewNodeDestroy",
+      "address": "0x0067D090",
+      "expected": "55 8B EC 51 83 7D 08 00 74 1E 8B 45 08 89 45 FC 8B 4D FC 51 E8 F7 FE FF FF 83 C4 04 8B 55 FC 52",
+      "identity": "FUN_0067d090, cdecl(node): detaches and destroys the preview scene node and its children (FUN_0067cfa0, FUN_0067d040). Called by the MP picker dtor FUN_007aa360 line 29."
+    },
+    {
+      "name": "RenderSceneTeardown",
+      "address": "0x0067D0C0",
+      "expected": "55 8B EC A1 A0 0E 92 00 8B 48 08 8B 15 A0 0E 92 00 8B 01 8B 4A 08 8B 90 98 01 00 00 FF D2 A1 A0",
+      "identity": "FUN_0067d0c0, cdecl(): SceneManager destroyAllEntities (+0x198) and destroyAllLights (+0x140), then removes and nulls the RenderGlobals +0x20 and +0x24 viewports. Called by the MP picker dtor FUN_007aa360 line 30."
+    },
+    {
+      "name": "SniperTexRenderTarget",
+      "address": "0x00920E80",
+      "kind": "data",
+      "identity": "Ogre::RenderTarget* of the 512x512 \"SniperTex\" render texture (created at renderer init, FUN_00664110 lines 546-568); operand of FUN_0067d0c0 at 0x0067D157. The MP picker and Database preview add their viewport to it (vtable +0x2C) and remove it (+0x40)."
+    },
+    {
+      "name": "VehiclePreviewNode",
+      "address": "0x00920E98",
+      "kind": "data",
+      "identity": "Ogre::SceneNode* \"uinode\" of the vehicle preview, written by FUN_0067d4d3 line 23; operand at 0x0067D1DD."
+    },
+    {
+      "name": "VehiclePreviewEntity",
+      "address": "0x00920EC0",
+      "kind": "data",
+      "identity": "Ogre::Entity* of the vehicle preview model, written by FUN_0067d180; operand at 0x0067D23C. Not nulled by the stock dtor FUN_007aa360."
+    },
+    {
+      "name": "VehiclePreviewFade",
+      "address": "0x00945588",
+      "kind": "data",
+      "identity": "MP picker cloak fade object (deleted via vtable[0](1) by FUN_007aa360 lines 22-26); FUN_007aa000 line 19 reads it; operand at 0x007AA0E6."
+    },
+    {
+      "name": "VehiclePreviewCameraDistance",
+      "address": "0x008ED0DC",
+      "kind": "data",
+      "identity": "float preview camera z distance: FUN_0067d4d3 line 31 sets it to boundingRadius*2, FUN_0067ccf0 line 19 places the camera at (0, 1, it); operand at 0x0067D5D5."
     }
   ],
   "module_addresses": [
