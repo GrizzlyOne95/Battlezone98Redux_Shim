@@ -542,6 +542,9 @@ namespace BZROpenShim
         static std::unordered_map<const BuildItem*, uint8_t*> g_ProducerMenuNodeStubs;
         static std::unordered_map<uintptr_t, const BuildItem*> g_ProducerMenuStubNodes;
         static std::unordered_set<uintptr_t> g_ProducerMenuAllStubs;
+        // Buttons of other features (UnitLoadouts) whose "00" cost is hidden
+        // like a submenu's; they are not PRODMENU stubs.
+        static std::unordered_set<uintptr_t> g_ProducerMenuCostlessButtons;
         static std::vector<uint8_t*> g_ProducerMenuFreeStubs;
         static std::unordered_set<const BuildItem*> g_ProducerMenuOverflowLogged;
 
@@ -721,8 +724,10 @@ namespace BZROpenShim
 
         static bool __cdecl IsProducerMenuStubClass(uint32_t modeClass)
         {
-            return !g_ProducerMenuAllStubs.empty() &&
-                g_ProducerMenuAllStubs.count(static_cast<uintptr_t>(modeClass)) != 0;
+            return (!g_ProducerMenuAllStubs.empty() &&
+                       g_ProducerMenuAllStubs.count(static_cast<uintptr_t>(modeClass)) != 0) ||
+                (!g_ProducerMenuCostlessButtons.empty() &&
+                    g_ProducerMenuCostlessButtons.count(static_cast<uintptr_t>(modeClass)) != 0);
         }
 
 #if defined(_M_IX86)
@@ -1082,6 +1087,9 @@ namespace BZROpenShim
 
     void __fastcall ProducerUpdateModeListHook(void* self, void* /*edx*/)
     {
+        // A unit's loadout page (UnitLoadouts) replaces the build page.
+        if (UnitLoadoutsUpdateModeList(self))
+            return;
         RunProducerMenuUpdateModeList(self, kProducerFamilyLayout, g_BzrFn_ProducerUpdateModeList,
             reinterpret_cast<const void*>(&ProducerSetActiveModeHook));
         RtsBuildQueueAfterUpdateModeList(self);
@@ -1092,8 +1100,42 @@ namespace BZROpenShim
         return IsProducerMenuStub(static_cast<int>(mode));
     }
 
+    // UnitLoadouts: the stock Producer::UpdateModeList over an empty build
+    // page, so slots 1..9 are cleared and slot 10 keeps its stock button; the
+    // caller then lays its own buttons over 1..9. False when the class list
+    // or the stock function is missing.
+    bool Hooks::RunProducerUpdateModeListEmptyPage(void* self)
+    {
+        void** const buildList = self ? ProducerBuildList(self) : nullptr;
+        if (!buildList || !g_BzrFn_ProducerUpdateModeList)
+            return false;
+        void* const empty[kProducerClassBuildListCount] = {};
+        RunUpdateModeListWithPage(g_BzrFn_ProducerUpdateModeList, self, buildList, empty);
+        return true;
+    }
+
+    // UnitLoadouts: a button block whose cost text is hidden as a submenu's.
+    void Hooks::HideProducerMenuButtonCost(const void* button)
+    {
+        if (!button)
+            return;
+        g_ProducerMenuCostlessButtons.insert(reinterpret_cast<uintptr_t>(button));
+        InstallModeScrapCostHookIfPossible();
+    }
+
+    // UnitLoadouts: rebuild the object's mode list through its vtable (slot 23).
+    void Hooks::RefreshProducerMenuModeList(void* self)
+    {
+        if (self)
+            RefreshProducerModeList(self);
+    }
+
     bool __fastcall ProducerSetActiveModeHook(void* self, void* /*edx*/, int mode)
     {
+        // Alt+pick opens a unit's loadout pages (UnitLoadouts), whose own
+        // buttons and Back are handled there; true keeps the panel open.
+        if (UnitLoadoutsOnSetActiveMode(self, mode))
+            return false;
         if (TryHandleProducerMenuMode(self, mode))
             return false;
         // A build pick (mode is the GameObjectClass pointer) may join the
@@ -1113,6 +1155,7 @@ namespace BZROpenShim
     void __fastcall ProducerDeselectHook(void* self, void* /*edx*/)
     {
         g_ProducerMenuCursors.erase(self);
+        UnitLoadoutsForgetProducer(self);
         if (g_BzrFn_GameObjectDeselect)
             g_BzrFn_GameObjectDeselect(self);
     }

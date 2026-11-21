@@ -395,7 +395,8 @@ namespace
                   kFirstQueueRingSlot == kFirstQueueLineSlot + kMaxQueueLineSlots && kMaxQueueRingSlots == 16,
               "the queued-order lines then rings follow the attack rings");
         Check(kSlotCount == kPoolSize + kMaxPowerRings + 3 * kMaxWaypointUnits + kMaxAttackRingSlots +
-                                kMaxQueueLineSlots + kMaxQueueRingSlots,
+                                kMaxQueueLineSlots + kMaxQueueRingSlots + kMaxWeaponRingSlots + kMaxRadarRingSlots +
+                                kMaxMineRingSlots,
               "pool holds everything at once");
         Check(2u * (kMaxLineSegments + 1u) <= 2u * (kMaxSegments + 1u), "a line fits the ring strip budget");
     }
