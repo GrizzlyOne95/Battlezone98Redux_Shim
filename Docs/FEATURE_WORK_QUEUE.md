@@ -2,6 +2,8 @@
 
 Standing: merge as you go (squash + auto-merge after local CI, a live test for native/gameplay changes, and a fresh-eyes review). New options default OFF.
 
+Live tests still owed: `Docs/LIVE_TEST_BACKLOG.md`.
+
 ## Done
 - **5. Build queue** (`[Gameplay] RtsBuildQueue`). Branch `agent/rts-build-queue`, worktree `GIT\BZR-OpenShim-buildqueue`, commit 87ffa19a9 (amended), rebased on main 153c9bae6.
   - PR #898, MERGED.

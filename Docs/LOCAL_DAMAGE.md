@@ -81,8 +81,12 @@ options row changes.
 - Hit points further out than 0.6 x the Entity's bounding radius (3 m when
   unknown) are first pulled onto that sphere along the impact direction
   (splash centres in the air).
-- GPU instancing (`[Experimental] GpuInstancing`): an instanced group takes
-  the leader's parameters, so marks can show on the wrong instances.
+- GPU instancing (`[Experimental] GpuInstancing`): a pass that binds a
+  `custom` auto constant (type 88) gets no instanced twin
+  (`src/patches/gpu_skinning.cpp` `IsObjectDependentAuto`, fragment check in
+  the twin builder), so marks never show on the wrong instance. The cost:
+  craft drawn with the Enhanced HLSL4 fragment programs that bind
+  `osMark*` (the EN High, Medium and Low tiers and IBL) are never instanced.
 - GPU skinning: the fragment shader's `inverse_worldview_matrix` is bone 0's
   under hardware skinning. If bone 0 is not at the node's pose, both the mark
   positions and the key test are off, and marks on that craft do not show.
