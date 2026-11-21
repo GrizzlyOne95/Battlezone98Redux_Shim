@@ -772,6 +772,9 @@ openshim_ui:prelobby_local_tools_button~Local host tools~Outils hфte local~Lokal
 openshim_ui:prelobby_hint~Press Continue to apply a new name or server.~Appuyez sur Continuer pour appliquer un nouveau nom ou serveur.~Mit Weiter einen neuen Namen oder Server ьbernehmen.~Pulsa Continuar para aplicar un nuevo nombre o servidor.~Premi Continua per applicare un nuovo nome o server.~Нажмите «Продолжить», чтобы применить новое имя или сервер.~Pressione Continuar para aplicar novo nome ou servidor.
 openshim_ui:prelobby_continue~Continue~Continuer~Weiter~Continuar~Continua~Продолжить~Continuar
 openshim_ui:rts_build_queue_waiting~waiting for scrap~attend la ferraille~wartet auf Schrott~espera chatarra~attende rottami~ждёт металлолом~aguarda sucata
+openshim_ui:mru_drop_repair_label~Drop Repair~Larguer rйparation~Reparatur abwerfen~Soltar reparaciуn~Rilascia riparazione~Сбросить ремкомплект~Soltar reparo
+openshim_ui:mru_drop_ammo_label~Drop Ammo~Larguer munitions~Munition abwerfen~Soltar municiуn~Rilascia munizioni~Сбросить боеприпасы~Soltar muniзгo
+openshim_ui:mru_deploy_label~Deploy~Dйployer~Aufbauen~Desplegar~Schiera~Развернуть~Implantar
 openshim_ui:rts_build_at_nav_label~Build at Nav~Construire au nav~Am Nav. bauen~Edificar en punto~Costruisci a nav~Строить у маяка~Construir no nav
 openshim_ui:rts_hold_label~Hold~Tenir~Halten~Mantener~Mantieni~Стоять~Manter
 openshim_ui:rts_order_queue_prefix~Queue~File~Reihe~Cola~Coda~В очередь~Fila

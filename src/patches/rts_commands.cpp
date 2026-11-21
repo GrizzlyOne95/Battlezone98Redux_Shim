@@ -67,6 +67,8 @@
 #include "hook_engine.h"
 #include "hud_visibility.h"
 #include "iat_patch.h"
+#include "mru_class.h"
+#include "mru_class_policy.h"
 #include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "quicksave.h"
@@ -833,6 +835,20 @@ namespace BZROpenShim::Hooks
             bool haveBefore[Policy::kSelectCapacity] = {};
             for (int i = 0; i < n; ++i)
                 haveBefore[i] = ReadPendingOrder(SafeGetObj(handles[i]), before[i]);
+            // classLabel = mru menu probe (mru_class.cpp): every pick on an
+            // MRU unit is logged; an MRU entry (Drop Repair, Drop Ammo,
+            // Deploy) is consumed here, so it gives no order and the stock
+            // dispatch never sees its reused mode id. True deselects, as a
+            // stock pick does.
+            bool mruConsumed = false;
+            for (int i = 0; i < n; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                if (obj && SafeCanCommand(obj) && NoteMruMenuPick(obj, handles[i], mode))
+                    mruConsumed = true;
+            }
+            if (mruConsumed)
+                return true;
             const unsigned smart = g_SmartMask.load(std::memory_order_acquire);
             if (!Policy::IsSmartMode(mode, smart))
             {
@@ -948,6 +964,20 @@ namespace BZROpenShim::Hooks
                 void* const obj = SafeGetObj(handles[i]);
                 Policy::RigPick pick;
                 if (obj && SafeCanCommand(obj) && ReadRigPick(obj, pick) && Policy::PickedBuildClass(pick) != 0)
+                    return true;
+            }
+            return false;
+        }
+
+        // An MRU unit in the selection (mru_class.cpp); its slots 7-9 hold
+        // the reused ids ModeLabelDecide relabels.
+        bool SelectionHasMruMenu()
+        {
+            uint32_t handles[Policy::kSelectCapacity];
+            const int n = ReadSelection(handles);
+            for (int i = 0; i < n; ++i)
+            {
+                if (IsMruMenuObject(SafeGetObj(handles[i])))
                     return true;
             }
             return false;
@@ -1311,6 +1341,31 @@ namespace BZROpenShim::Hooks
         const char* __cdecl ModeLabelDecide(const char* section, const char* key, int mode)
         {
             const char* const stock = g_FnLocalize(section, key);
+            const MruClassPolicy::Action mru = MruClassPolicy::ActionForMode(mode);
+            if (mru != MruClassPolicy::Action::None && SelectionHasMruMenu())
+            {
+                try
+                {
+                    const char* text = stock;
+                    switch (mru)
+                    {
+                    case MruClassPolicy::Action::DropRepair:
+                        text = ShimText("openshim_ui:mru_drop_repair_label", "Drop Repair");
+                        break;
+                    case MruClassPolicy::Action::DropAmmo:
+                        text = ShimText("openshim_ui:mru_drop_ammo_label", "Drop Ammo");
+                        break;
+                    default:
+                        text = ShimText("openshim_ui:mru_deploy_label", "Deploy");
+                        break;
+                    }
+                    return text && text[0] ? text : stock;
+                }
+                catch (...)
+                {
+                    return stock;
+                }
+            }
             if (mode == Policy::kModeGoToNav)
             {
                 if (!Policy::ShowBuildAtNavLabel(g_BuildNavActive.load(std::memory_order_acquire), mode,

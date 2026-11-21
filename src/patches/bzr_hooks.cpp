@@ -66,6 +66,7 @@
 #include "pond_class_label.h"
 #include "tracked_vehicle_class.h"
 #include "walker_free_head.h"
+#include "mru_class.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -1717,6 +1718,7 @@ namespace BZROpenShim
         InstallPondClassLabelSupportIfPossible();
         InstallTrackedVehicleClassIfPossible();
         InstallWalkerFreeHeadIfPossible();
+        InstallMruClassIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallD3D11ConstantLookupCacheIfPossible();
         InstallD3DCompileCacheIfPossible();

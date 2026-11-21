@@ -6991,6 +6991,12 @@
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) TurretTank::UpdateModeList (TurretTankVtable 0x00889498 slot 23), thiscall no args; fills the ModeList at this+0x1A4 and calls ModeList::SetMode(3, 0, false). OpenShim wraps the slot to put Targets/Attack (0xE) in slot 3 as HoverCraft::UpdateModeList 0x004EBD60 does. See Docs/TURRET_ATTACK_ORDERS.md."
     },
     {
+      "name": "HoverCraftUpdateModeList",
+      "address": "0x004EBD60",
+      "expected": "55 8B EC 83 EC 1C 56 89 4D F4 6A 01 6A 01 6A 00",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) HoverCraft::UpdateModeList (HoverCraftVtable 0x0087ABE4 slot 23, read from the shipped image 2026-11-19), thiscall no args: ModeList::SetMode slots 0-6 (1, 2, 10, 0xE, 7, 5, 6), slot 7 via 0x004AEFA0 (Cloak 0x18 / Decloak 0x19 on a cloak-capable craft, else 0), slots 8 and 9 = 0 disabled, slot 10 = 8 (FUN_004ebd60.c). Not patched: mru_class.cpp checks the live slot 23 holds this address and calls it first from the MRU vtable copy's slot 23, which then fills slots 7-9. See Docs/MRU_CLASS.md."
+    },
+    {
       "name": "CraftGetCommand",
       "address": "0x004AE110",
       "expected": "55 8B EC 83 EC 0C 89 4D FC 83 7D 08 00 75 07 33",
