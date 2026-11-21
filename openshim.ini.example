@@ -2657,6 +2657,16 @@ GroupStrip = 1
 ; Exposed on the OpenShim Settings page as "Command Pings".
 RtsCommandPings = 1
 
+; Radar pings. Each order you give also draws a short ring on the cockpit
+; radar at the order's position, in the same colour as the ground ring (green
+; Go, red attack, yellow other). It grows and fades over 1.5 seconds. An order
+; beyond radar range shows on the radar rim, like a distant contact. Works
+; with or without Command Pings. Local visuals only.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Radar Pings".
+RtsRadarPings = 0
+
 ; Artillery range rings. Around every selected own-team howitzer (never
 ; the piloted vehicle; the laser sight arc covers that),
 ; a ring at its flat-ground maximum range from the ODF shotSpeed and
@@ -2667,6 +2677,35 @@ RtsCommandPings = 1
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Artillery Range".
 RtsArtilleryRange = 1
+
+; Range rings for selected units (rts_markers.cpp; Docs/RTS_RANGE_RINGS.md). Each ring shows
+; only for your own selected units, for as long as they are selected, and never for the
+; vehicle you pilot. Local draw only: no game object, no network traffic, so it is safe in
+; multiplayer.
+;
+; RtsWeaponRange: an orange ring at the direct-fire reach (shotSpeed x lifeSpan) of each
+; selected unit's cannon-class weapon. Homing and guided weapons are skipped. The artillery
+; ring above is separate and unchanged.
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Weapon Range".
+RtsWeaponRange = 1
+;
+; RtsRadarRange: a mint ring at [CraftClass] rangeScan for each selected unit that has one.
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Radar Range".
+RtsRadarRange = 0
+;
+; RtsMineRange: lime rings at the trigger radius of your team's proximity mines within
+; searchRadius + 20 m of a selected unit (the nearest 24).
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Mine Range".
+RtsMineRange = 0
+;
+; RtsRangeLabels: writes WEAPON RANGE / RADAR RANGE / MINE TRIGGER letter by letter along
+; each ring, in the ring's colour, on the side facing you. Needs a range ring on.
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Range Labels".
+RtsRangeLabels = 1
 ; RTS command extras (rts_commands.cpp; Docs/RTS_COMMANDS.md). All five rows
 ; are on the OpenShim Settings page under Controls > RTS Commands. Orders go
 ; through the stock per-unit calls the unit menu itself uses.
@@ -2718,6 +2757,25 @@ RtsAreaSelect = 1
 ; Accepted: 2 (key and Shift menu), 1 (key only), 0 (off). Default: 2.
 ; Exposed on the OpenShim Settings page as "Hold".
 RtsHold = 2
+
+; Quick commands. Four keys give an order to the selected units without the
+; command menu: Numpad 1 Follow Me and Numpad 2 Defend Me (both on your own
+; vehicle), Numpad 3 Attack My Target (the target you have locked) and
+; Numpad 5 Stop. Your own vehicle is never ordered, the selection is kept,
+; and an order nobody can take plays the refusal buzz. Attack My Target
+; refuses an ally or your own team (neutral targets only with
+; AllowNeutralAttackOrders). Stock binds Numpad0 (fire), Numpad4 and
+; Numpad6 (steering) and KeypadEnter, so those are refused as quick keys;
+; the other numpad digits are free. NumLock must be on (with it off the
+; keys send Home, End and so on, which never match). Rebind the keys under
+; Options > Input > RTS Actions (RtsQuickFollowKey, RtsQuickDefendKey,
+; RtsQuickAttackKey, RtsQuickStopKey; names like Numpad1). The four keys
+; stay reserved for clash checks even while this option is off. Single
+; player only.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Quick Commands".
+RtsQuickCommands = 0
 
 ; Build at Nav. With a building picked on a selected Construction Rig, the
 ; unit menu's Go To Nav entry reads "Build at Nav"; picking a nav checks the
@@ -2791,6 +2849,28 @@ RtsProducerBadges = 0
 ; Exposed on the OpenShim Settings page as "Idle Unit Alert".
 RtsIdleUnitAlert = 0
 
+; Ammo Alert. Plays the stock "out of ammo" voice line when one of your
+; armed units (combat units, turret tanks, howitzers, minelayers) drops
+; under 5% of its maximum ammo. The voice follows your nation: NSDF and
+; Black Dog abetty5.wav, CCA and CRA sbetty5.wav. At most one alert every
+; 30 seconds; none for a unit's first observed state, and a unit alerts
+; again only after it is seen at 5% or more. Your own vehicle is skipped.
+;
+; Accepted: boolean. Default: 0.
+; Exposed on the OpenShim Settings page as "Ammo Alert".
+RtsAmmoAlert = 0
+
+; Scrap Full Alert. Plays the stock "scrap full" voice line when your team's
+; scrap reaches its maximum (only when that maximum is 30 or more). NSDF and
+; Black Dog avrecyvn.wav ("Scrap tank's full."), CCA and CRA svrecyvn.wav
+; ("The scrap storage is full."). At most one alert every 60 seconds; never
+; for a mission that starts full, and again only after scrap drops below
+; the maximum.
+;
+; Accepted: boolean. Default: 0.
+; Exposed on the OpenShim Settings page as "Scrap Full Alert".
+RtsScrapFullAlert = 0
+
 ; Attack Marks. A pulsing red ring on the ground around each of your units
 ; and buildings for 2 seconds after an enemy hits it, the same window the
 ; radar blip flashes for. At most 16 rings, the most recently hit. Drawn for
@@ -2831,6 +2911,36 @@ RtsOrderQueue = 0
 ; Exposed on the OpenShim Settings page as "Build Queue".
 RtsBuildQueue = 0
 
+; Unit Loadouts. Alt+pick a unit in your Recycler or Factory build menu to open
+; its loadout pages in the same panel: its weapon slots, then for a slot
+; "Stock" and every compatible weapon your current Armory offers ("More" pages
+; on, Back steps out). A loadout belongs to the unit type (its ODF) and applies
+; wherever that unit is built. Each changed slot adds that weapon's full Armory
+; price to the unit's build cost; the menu, the charge and a cancel refund all
+; use the same price. A weapon your Armory does not offer when the build starts
+; (or with no Armory) is not charged and the unit gets its stock weapon. A
+; unit's loadout cannot be edited while that unit is building. Loadouts are
+; kept in memory for the mission only: they are not saved and are dropped on
+; mission load. Needs [ProducerBuildMenus] Enabled = 1 (in
+; openshim_producer_build_menus.ini). Single player only.
+; OPENSHIM_DISABLE_UNIT_LOADOUTS=1 forces it off. See Docs/UNIT_LOADOUTS.md.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Unit Loadouts".
+UnitLoadouts = 0
+; Satellite Follow. In the satellite view, Shift+C (RtsFollowCameraKey) keeps
+; the view centred on your first selected unit, or on your own vehicle when
+; none of your units is selected, as it moves; the stock satellite pan is
+; overridden while it follows. Shift+C with another unit selected switches to
+; it; Shift+C again stops. Leaving the satellite view, or the unit dying or
+; being removed, also stops it; the pause menu only holds it. Plain C keeps
+; its stock job (centre on your vehicle). Only your camera moves, so it works
+; in multiplayer.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Satellite Follow".
+RtsFollowCamera = 0
+
 ; The RTS action keys. One key each, no modifier; rebind them in Options >
 ; Input > RTS Actions, which writes these lines. The remote-target key is
 ; used with Shift (Shift+T). Refused, with a log line and a fall back to the
@@ -2839,12 +2949,20 @@ RtsBuildQueue = 0
 ; key that is a Shift-only QuickSave chord.
 ; The idle unit key (J) selects the next idle unit of yours, one per press,
 ; cycling through them; Shift+J selects all of them. J is unbound in stock.
-; Defaults: T, B, X, Z, J.
+; The follow key (C) is used with Shift (Shift+C) and only in the satellite
+; view while RtsFollowCamera is on; Shift+C stays stock everywhere else.
+; Defaults: T, B, X, Z, J, C; Numpad1, Numpad2, Numpad3, Numpad5 for the
+; quick commands (only used while RtsQuickCommands is on).
 RtsRemoteTargetKey = T
 RtsBuildingCycleKey = B
 RtsAreaSelectKey = X
 RtsHoldKey = Z
+RtsQuickFollowKey = Numpad1
+RtsQuickDefendKey = Numpad2
+RtsQuickAttackKey = Numpad3
+RtsQuickStopKey = Numpad5
 RtsIdleUnitKey = J
+RtsFollowCameraKey = C
 
 
 [Updater]
@@ -2936,6 +3054,15 @@ PlayerReticleConvergence = 1
 ; replaces it.
 ; Legacy INI alias: ReticleRange
 SmartReticleRange = 500
+
+; Paint your own ship in single player. OpenShim repaints the ship you pilot
+; (no mod needed) and puts its stock paint back when you leave it. Other units
+; keep stock paint, and so does every ship on render quality below en-high,
+; outside DX11 Enhanced, or in a network game. Applies live.
+; See Docs/SP_PLAYER_PAINT.md.
+; Accepted: stock, t2 (red), t3 (blue), t4 (gold).
+; Default: stock.
+PlayerPaint = stock
 
 ; Score scrap by viable path length and reconsider temporarily unreachable scrap.
 ; Also makes newly built scavengers start scavenging at once instead of idling
@@ -3334,6 +3461,26 @@ AttackRevealPerceivedTeam = 1
 ; See Docs/TURRET_ATTACK_ORDERS.md.
 ; Accepted: boolean. Default: ON.
 TurretAttackOrders = 1
+
+; AI defence against an enemy Daywrecker in flight and an enemy Comet
+; (radarmsl). Stock AI ignores both: hovering over one offers only "Go To",
+; nobody shoots at it and nobody dodges it.
+;
+; With this on:
+; - An armed unit you command gets "Attack" on an enemy bomb instead of
+;   "Go To". The bomb keeps its yellow power-up colour.
+; - Every 0.5 s each bomb in flight looks for enemy AI units within 150 m
+;   that can see it. A unit sees it the way stock AI sees a pilot on foot:
+;   within 70 m and in front of it. Up to 4 idle or defending armed units
+;   per bomb are ordered to attack it; a unit is not re-ordered for 3 s.
+; - Units that saw the bomb and are not attacking it steer away from it,
+;   using the same rules stock AI uses to dodge incoming ordnance.
+;
+; Single player only. Read once at startup; restart after changing.
+; Kill switch: set OPENSHIM_DISABLE_DAYWRECKER_DEFENCE=1.
+; See Docs/DAYWRECKER_AI_DEFENCE_RESEARCH.md.
+; Accepted: boolean. Default: OFF.
+DaywreckerDefence = 0
 
 ; Mobile repair units: gameplay for ODFs with classLabel = "mru" and an
 ; [MruClass] section. Stock units are never affected.
