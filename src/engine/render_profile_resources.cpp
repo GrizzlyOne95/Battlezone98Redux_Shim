@@ -61,6 +61,8 @@ namespace BZROpenShim::RenderProfiles
             "openshim_ibl_neutral_prefilter.dds",
             "openshim_stock_bzbase.import",
             "openshim_stock_bzterrainbase.import",
+            // Neutral teamMap the stock en-high import binds (player paint off).
+            "openshim_team_off.dds",
         };
     }
 

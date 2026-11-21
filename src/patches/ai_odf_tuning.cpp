@@ -2840,6 +2840,8 @@ namespace BZROpenShim
         {
             InstallAiNativeOrdersHooksIfPossible();
             InstallTurretAttackOrdersHooksIfPossible();
+            // After TurretAttackOrders: chains onto its TurretTank slot-13 wrapper.
+            InstallDaywreckerDefenceIfPossible();
             InstallProducerRallyPointsIfPossible();
             InstallAutoGroupNewUnitsIfPossible();
             InstallOffenseOverflowIfPossible();
@@ -3110,6 +3112,7 @@ namespace BZROpenShim
             InstallRtsCommandsIfPossible();
             InstallRtsOrderQueueIfPossible();
             InstallRtsBuildQueueIfPossible();
+            InstallUnitLoadoutsIfPossible();
             InstallRtsPlacementIfPossible();
         }
 

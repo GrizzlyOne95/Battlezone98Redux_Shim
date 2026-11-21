@@ -79,6 +79,12 @@ namespace BZROpenShim::HudFeedback
             s.before > 0.0f && s.after < s.before;
     }
 
+    // A confirmed hit that took the victim from alive to dead.
+    inline bool IsKillshot(const DamageSample& s) { return ConfirmsHit(s) && s.after <= 0.0f; }
+
+    // Killshot marker colour (ARGB, same order as hitColor).
+    inline constexpr uint32_t kKillColor = 0xFFFF3228u;
+
     // How the local player relates to the stock reticle's current object.
     // None means no classification (no contact, ambiguous or disguised).
     enum class Relation { None, Neutral, Friend, Enemy };
@@ -97,11 +103,19 @@ namespace BZROpenShim::HudFeedback
     {
         uint64_t started = 0;
         bool active = false;
+        // Kill flash window; a later non-kill hit never shortens or clears it.
+        uint64_t killStarted = 0;
+        bool killActive = false;
         // Distinct victims confirmed recently, so splash hitting several
         // objects reads larger than one. Full handles; never object pointers.
         std::array<int, 8> victims{};
         std::array<uint64_t, 8> victimTicks{};
         void Start(uint64_t now) { started = now; active = true; }
+        void Start(uint64_t now, int victim, bool kill)
+        {
+            if (kill) { killStarted = now; killActive = true; }
+            Start(now, victim);
+        }
         void Start(uint64_t now, int victim)
         {
             Start(now);
@@ -115,7 +129,16 @@ namespace BZROpenShim::HudFeedback
             victims[slot] = victim;
             victimTicks[slot] = now;
         }
-        void Reset() { active = false; victims = {}; victimTicks = {}; }
+        void Reset() { active = false; killActive = false; victims = {}; victimTicks = {}; }
+        bool KillFlash(uint64_t now, int durationMs) const
+        {
+            return killActive && durationMs > 0 && now >= killStarted &&
+                now - killStarted < static_cast<uint64_t>(durationMs);
+        }
+        uint32_t ColorFor(uint64_t now, int durationMs, uint32_t normal) const
+        {
+            return KillFlash(now, durationMs) ? kKillColor : normal;
+        }
         float Strength(uint64_t now, int durationMs) const
         {
             if (!active || now < started || durationMs <= 0) return 0;
@@ -198,7 +221,8 @@ namespace BZROpenShim::HudFeedback
 
     inline DrawPlan MakeDrawPlan(const Settings& settings, int x, int y, float scaleX, float scaleY,
                                 Rect clip, bool contact, float hitStrength,
-                                Relation relation = Relation::None, float hitKick = 0, int hitTargets = 1)
+                                Relation relation = Relation::None, float hitKick = 0, int hitTargets = 1,
+                                uint32_t hitColor = 0)
     {
         DrawPlan plan;
         // Reject corrupt/stale panes and unreasonable scales before rounding.
@@ -256,6 +280,7 @@ namespace BZROpenShim::HudFeedback
             const uint32_t hitAlpha = static_cast<uint32_t>(
                 std::clamp(settings.hitOpacity, 25, 100) * 255 / 100 * std::min(hitStrength, 1.0f));
             const float hitSize = static_cast<float>(std::clamp(settings.hitSizePercent, 50, 200)) / percent;
+            const uint32_t markerRgb = hitColor ? hitColor : settings.hitColor;
             const float kick = std::isfinite(hitKick) ? std::clamp(hitKick, 0.0f, 1.0f) : 0.0f;
             // More targets confirmed in one window (splash, sweeps) read as
             // a bigger, longer marker: up to four targets add 30 percent each.
@@ -270,7 +295,7 @@ namespace BZROpenShim::HudFeedback
                     const float px = dx * (11.0f + push + step);
                     const float py = dy * (11.0f + push + step);
                     rect((px - tick) * hitSize, (py - tick) * hitSize,
-                         (px + tick) * hitSize, (py + tick) * hitSize, settings.hitColor, hitAlpha);
+                         (px + tick) * hitSize, (py + tick) * hitSize, markerRgb, hitAlpha);
                 }
         }
         plan.replacesStock = settings.style != Style::Stock && plan.count != 0;
