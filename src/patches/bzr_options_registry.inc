@@ -70,6 +70,11 @@ static const char* const kShimSettingsHeadlightBrightnessValues[] =
     { "0.50", "0.75", "1.00", "1.25", "1.50" };
 static const char* const kShimSettingsHeadlightBrightnessLabels[] =
     { "50%", "75%", "100%", "125%", "150%" };
+// Values are SpPlayerPaint::kVariants keys (include/sp_player_paint_policy.h),
+// the co-op tints of Campaign Reimagined: t2 red, t3 blue, t4 gold.
+static const char* const kShimSettingsPlayerPaintValues[] = { "stock", "t2", "t3", "t4" };
+static const char* const kShimSettingsPlayerPaintLabels[] =
+    { "Stock", "Red", "Blue", "Gold" };
 static const char* const kShimSettingsNetRouteValues[] = { "Stock", "Direct", "Relay" };
 static const char* const kShimSettingsGovernorTuningValues[] = { "OpenShim", "Stock" };
 static const char* const kShimSettingsUdpPortValues[] = { "0", "17770", "17771", "17772", "17773" };
@@ -589,6 +594,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Smart-reticle targeting distance; Stock is Redux's 200. This value is single player "
       "only; a mission calling EXU SetReticleRange (BZP, Reloaded) also sets it online." },
+    // Absent or unknown key = "stock", so defaultIndex 0 selects Stock.
+    { "Paint", "SinglePlayer", "PlayerPaint", nullptr, 0,
+      kShimSettingsPlayerPaintValues, kShimSettingsPlayerPaintLabels, 4, 0,
+      ShimSettingApplyGroup::LiveEngineToggle,
+      "Paints your own ship in single player at the high Enhanced render quality (DX11); "
+      "other units and network games keep stock paint." },
     // Absent key = off, so defaultIndex 1 selects "0" (Off).
     { "Smart Scavengers", "SinglePlayer", "SmartScavengerPathing",
       kShimSettingsScavengerAltKeys, 1,
@@ -1107,7 +1118,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "ShadowFarDistance", "stock" }, { "EnhancedLightSelectionV2", "0" },
     { "TerrainHdEnabled", "0" }, { "TerrainMicroRelief", "0" }, { "HullScorch", "0" },
     // Stock draws the sun flash, so this one is On.
-    { "SunFlashbang", "1" }, { "ExplosionFlash", "Stock" }, { "DamageFlash", "Stock" },
+    { "SunFlashbang", "1" }, { "PlayerPaint", "stock" }, { "ExplosionFlash", "Stock" }, { "DamageFlash", "Stock" },
     { "UnderAttackAlert", "Normal" }, { "SuppressHopOutAttackAlert", "0" },
     { "TargetPolicy", "Default" }, { "ScrapPilotHud", "Stock" }, { "RadarSizeScale", "1.0" },
     { "SatelliteZoomOut", "1.0" }, { "SatellitePanSpeed", "1.0" }, { "JetFlames", "0" },

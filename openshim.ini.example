@@ -2955,6 +2955,15 @@ PlayerReticleConvergence = 1
 ; Legacy INI alias: ReticleRange
 SmartReticleRange = 500
 
+; Paint your own ship in single player. OpenShim repaints the ship you pilot
+; (no mod needed) and puts its stock paint back when you leave it. Other units
+; keep stock paint, and so does every ship on render quality below en-high,
+; outside DX11 Enhanced, or in a network game. Applies live.
+; See Docs/SP_PLAYER_PAINT.md.
+; Accepted: stock, t2 (red), t3 (blue), t4 (gold).
+; Default: stock.
+PlayerPaint = stock
+
 ; Score scrap by viable path length and reconsider temporarily unreachable scrap.
 ; Also makes newly built scavengers start scavenging at once instead of idling
 ; for about 5 seconds first (stock already does this for units placed at

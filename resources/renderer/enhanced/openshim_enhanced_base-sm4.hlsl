@@ -470,10 +470,13 @@ static const float OSE_IBL_MAX_SPECULAR_MIP = 7.0;
 // ACT_MAP_ENABLED (set by a mod's own program wrapper, e.g. Campaign
 // Reimagined) binds one more texture after brdfLut: baked AO/curvature/
 // thickness. 1 = full baked AO on indirect light, 0 = ignore it.
-// TEAM_PAINT_ENABLED (mod wrapper, needs ACT_MAP_ENABLED) binds one more
-// texture right after actMap: RGB = camo pattern (sRGB), A = paint weight.
-// teamPaint is a plain float4 uniform the mod wrapper declares (default 0) and
-// sets per material clone. It is off unless a > 1.5:
+// TEAM_PAINT_ENABLED binds one more texture: right after actMap when
+// ACT_MAP_ENABLED is also set (mod wrappers), else right after brdfLut
+// (OpenShim's own en-high programs). RGB = camo pattern (sRGB), A = paint
+// weight. OSE_TEAM_MASK_R reads the weight from .r instead (OpenShim's
+// single-channel BC4 masks); that mode has no camo pattern.
+// teamPaint is a plain float4 uniform the program declares (default 0) and
+// is set per material clone. It is off unless a > 1.5:
 //   rgb > 0 : solid paint in that colour, shaded by the albedo luminance
 //   rgb = 0 : camo from teamMap.rgb, brightness (a - 2)
 #if defined(TEAM_PAINT_ENABLED)
@@ -507,7 +510,11 @@ float3 ose_team_paint(float3 albedo, float4 mask, float4 tint)
 #endif
         paint = saturate(teamTint * lum / max(dot(teamTint, lumW), 1e-4));
     }
+#if defined(OSE_TEAM_MASK_R)
+    return lerp(albedo, paint, saturate(mask.r));
+#else
     return lerp(albedo, paint, saturate(mask.a));
+#endif
 }
 #endif
 
@@ -1106,6 +1113,10 @@ void base_fragment(
     uniform Texture2D teamMap : register(t11),
     uniform SamplerState teamSam : register(s11),
 #endif
+#elif defined(TEAM_PAINT_ENABLED)
+    // No actMap: teamMap takes the unit right after brdfLut.
+    uniform Texture2D teamMap : register(t10),
+    uniform SamplerState teamSam : register(s10),
 #endif
 #elif defined(SHADOWRECEIVER)
     uniform TextureCube irradianceMap : register(t5),
@@ -1121,6 +1132,10 @@ void base_fragment(
     uniform Texture2D teamMap : register(t9),
     uniform SamplerState teamSam : register(s9),
 #endif
+#elif defined(TEAM_PAINT_ENABLED)
+    // No actMap: teamMap takes the unit right after brdfLut.
+    uniform Texture2D teamMap : register(t8),
+    uniform SamplerState teamSam : register(s8),
 #endif
 #else
     uniform TextureCube irradianceMap : register(t4),
@@ -1136,6 +1151,10 @@ void base_fragment(
     uniform Texture2D teamMap : register(t8),
     uniform SamplerState teamSam : register(s8),
 #endif
+#elif defined(TEAM_PAINT_ENABLED)
+    // No actMap: teamMap takes the unit right after brdfLut.
+    uniform Texture2D teamMap : register(t7),
+    uniform SamplerState teamSam : register(s7),
 #endif
 #endif
     uniform float4x4 inverseViewMatrix,
@@ -1658,7 +1677,8 @@ void base_fragment(
     diffuseTex.rgb = srgb_to_linear(diffuseTex.rgb);
 #endif
 #if defined(TEAM_PAINT_ENABLED)
-    diffuseTex.rgb = ose_team_paint(diffuseTex.rgb, teamMap.Sample(teamSam, vTexCoord), teamPaint);
+    if (teamPaint.a > 1.5)
+        diffuseTex.rgb = ose_team_paint(diffuseTex.rgb, teamMap.Sample(teamSam, vTexCoord), teamPaint);
 #endif
 #if defined(ENHANCED_MODE)
     float3 snowAlbedo = ose_snow_albedo(surfaceSnow);

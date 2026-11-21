@@ -307,6 +307,7 @@
     <ClCompile Include="src\patches\gpu_instancing.cpp" />
     <ClCompile Include="src\patches\gpu_skinning.cpp" />
     <ClCompile Include="src\patches\local_damage.cpp" />
+    <ClCompile Include="src\patches\sp_player_paint.cpp" />
     <ClCompile Include="src\patches\ogre_entity_liveness.cpp" />
     <ClCompile Include="src\patches\game_state.cpp" />
     <ClCompile Include="src\patches\campaign_manifest_id.cpp" />
@@ -435,6 +436,8 @@
     <ClInclude Include="include\gpu_skinning_hlsl.h" />
     <ClInclude Include="include\local_damage.h" />
     <ClInclude Include="include\local_damage_policy.h" />
+    <ClInclude Include="include\sp_player_paint.h" />
+    <ClInclude Include="include\sp_player_paint_policy.h" />
     <ClInclude Include="include\ogre_entity_liveness.h" />
     <ClInclude Include="include\mp_vehicle_preview_fix.h" />
     <ClInclude Include="include\bzn_save_path.h" />
