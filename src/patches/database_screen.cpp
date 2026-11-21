@@ -110,7 +110,7 @@ namespace BZROpenShim
             // Selected tab / row highlight: a tinted quad behind the buttons
             // (SLOT_PRESS and SLOT_HOVER of mkscreens.py).
             constexpr const char* kHighlightTexture = "osh_preview_white.png";
-            constexpr uint32_t kTabHighlightColour = 0xFF007F00;
+            constexpr uint32_t kTabHighlightColour = 0xFF005400; // as the row: brighter greens hide the caption
             constexpr uint32_t kRowHighlightColour = 0xFF005400;
             // Fallback skins when the painted art is not deployed.
             const Shell::ButtonSkin kStockTabSkin{ "MultiplayerModeButton_off.png", "MultiplayerModeButton_over.png",
