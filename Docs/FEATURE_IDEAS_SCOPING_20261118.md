@@ -11,7 +11,7 @@ functions. Claims not read from code are marked UNVERIFIED.
 | # | Idea | Size | Cloud-buildable | Next step |
 | --- | --- | --- | --- | --- |
 | 14b | Daywrecker: spawn without exploding (Lua/map) | S | **Yes**, one call redirect + one flag bit, static-verified | **Built:** `Docs/DAYWRECKER_FALL_ON_SPAWN.md` |
-| 14c | Daywrecker: drop speed (ODF) | S–M | Partly: an ODF override of the lobber's launch-speed cap | Research the 0x00581F80 arc solve (high/low arc) |
+| 14c | Daywrecker: drop speed (ODF) | S | **Yes**, a vtable-slot time scale, static-verified | **Built:** `Docs/DAYWRECKER_DROP_RATE.md` |
 | 18 | Loadout presets: native UI | M | Partly: the UI shell; the data path is Lua-owned | Wait for item 9's Copilot research to land |
 | 15 | Co-op briefing before sim start | M–L | No: MP timing needs live peers | Research the MP pre-sim hold |
 | 14a | Daywrecker: AI defence and reaction | L | No: AI targeting needs live tuning | Research target filters for PowerUp class |
@@ -60,14 +60,10 @@ functions. Claims not read from code are marked UNVERIFIED.
 **Built**: see `Docs/DAYWRECKER_FALL_ON_SPAWN.md`.
 
 ### 14c. Drop speed from an ODF key
-- **Known.** The Armory does not "drop" a DW: ObjectLobber lobs it on a
-  ballistic arc. Launch speed is `sqrt(distance * 9.8) + 20`, capped by the
-  weapon class's speed field (+0x84, an existing ODF value), aimed by
-  0x00581F80. Gravity is the airborne step's 9.8 (FUN_005A7D70).
-- **Shape.** An ODF override for that cap or the `+20` margin gives a
-  flatter, faster shot. A literal faster fall needs a per-class gravity
-  scale inside the airborne step, which is a bigger hook.
-- **Next.** Read 0x00581F80 to see which arc it picks, then decide.
+**Built**: see `Docs/DAYWRECKER_DROP_RATE.md`. The aim solve (0x00581F80)
+takes the high, lofted arc, so a faster launch would fly higher and arrive
+later. The key fast-forwards the airborne bomb instead (`dt * dropRate` into
+`DayWrecker::Simulate`): same arc and landing point, shorter flight.
 
 ## 15. Co-op briefing after the map loads
 - **Idea.** Let players bring the briefing back up once the co-op map has
