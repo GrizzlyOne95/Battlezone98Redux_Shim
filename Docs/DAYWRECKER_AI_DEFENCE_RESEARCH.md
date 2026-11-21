@@ -17,6 +17,13 @@ Single player only for any v1 (balance-changing AI behaviour).
    targeting.
 7. A unit that cannot attack it (no suitable weapon, or not ordered to) and has it in vision should
    dodge it with the stock incoming-ordnance avoidance checks.
+8. (Supersedes the colour half of 5 and 6, user 2026-11-19.) Keep the yellow PowerUp colour: dropping
+   a DW as a distraction is a valid tactic. No AssignColor hook. The player must still be able to order
+   Attack on it.
+9. AI detection: AI does not get the bomb instantly on radar contact. Detect it like a Person: in the
+   unit's view cone (peripheral vision) and within proximity range, using the stock Person detection
+   rule (locate it in the decompile and cite it). The radius scan, targeting and evasion only consider
+   bombs a unit has detected this way.
 
 Citations: `1.5/<name>.c` is `Battlezone_Source/BZ1/1.5/functions/<dir>/<addr>_<name>.c` (the
 PDB-named BZ 1.5 decompile). `GOG FUN_xxxxxxxx-xxxxxxxx.c` is
@@ -32,7 +39,7 @@ Unchecked claims are marked UNVERIFIED.
 | 2b. Pitch / lead | Linear-intercept lead with no gravity term, so a free-falling bomb is mis-led. Pitch limit is a weak point for hover craft; effect on AI aim UNVERIFIED. |
 | 2c. Can it be destroyed in flight? | Yes (user observation, plus the code path): generic damage path reaches `PowerUp::DamageAlloc`, health < 0 flags it dead, `DayWrecker::Explode` makes a small building explosion. Collision confirmed by the user. |
 | 3. Reaction hook | `GetClosestEnemyPersonWithin` is the in-engine "threat in radius" pattern. Best hook: the existing DayWrecker Simulate wrapper (vtable slot 15). |
-| 4. Yellow colour | `AssignColor` paints a class-POWERUP object with `teamSlot < 0` yellow; DW and Comet qualify. One AssignColor wrapper fixes HUD, reticle box and radars (3b). Proven in 1.5; GOG unverified. |
+| 4. Yellow colour | `AssignColor` paints a class-POWERUP object with `teamSlot < 0` yellow; DW and Comet qualify (3b). Proven in 1.5; GOG unverified. **Kept yellow by decision 8: no AssignColor hook.** |
 | 5. Comet | Comet = `radarmsl`, classLabel "torpedo", a PowerUp subclass: same GO, yellow and target-filter problems (3b). Proven in 1.5; GOG unverified. |
 | 6. Avoidance | `EvadeOrdnanceForce` only walks `Ordnance::ordnanceList` (200 m, forward cone), so bombs are never dodged; detour it to add them (3b). Proven in 1.5 (GOG `FUN_005fd5f0` read for the list walk); GOG unverified for the rest. |
 
@@ -214,110 +221,114 @@ hidden vec3 return, args: unit, current threat, out threat):
 - A Comet homes (TorpedoProcess), so a sideways dodge may not shake it; a DW drifts toward its target
   (PowerUpProcess), so dodge away from the landing point. Both UNVERIFIED.
 
-## 4. v1 build plan (single player only, `[SinglePlayer] DaywreckerDefence`, default 0)
+## 4. v1 build (single player only, `[SinglePlayer] DaywreckerDefence`, default 0)
 
-"Bomb" means an enemy DayWrecker (airborne: flags bit 0x4 at `[obj+0x228]+0x114`) or an enemy Comet
-(Torpedo, sig 'PROT', obj flag 0x200 clear). Stock ODFs work: detection is RTTI or class signature, no ODF
-key. Gate every hook on the option, `IsSinglePlayerSession()` and a kill switch
-`OPENSHIM_DISABLE_DAYWRECKER_DEFENCE=1`. `IsSinglePlayerSession()` is `ReadLocalPlayerNetIdValue() == 0`
-(`src/patches/game_object_helpers.cpp:168-171`, declared `bzr_hooks_internal.h:464`) and is the named
-predicate for SinglePlayer-tier gates. Its comment says the net id is non-zero in a network game and "the
-host has an id too", and an unreadable id returns 0xFFFF (fails closed) (`game_object_helpers.cpp:145-149`).
-So an MP host is not single player by the source comments. Not confirmed live: see checklist row 10.
+Built on branch `agent/daywrecker-ai-defence-v1`. The addresses below were located in the GOG corpus and
+checked against the shipping exe bytes. "Bomb" means a DayWrecker with the airborne bit (flags 0x4 at
+`[obj+0x228]+0x114`) or a live Comet (Torpedo, obj76 flag 0x200 clear), identified by primary vtable. The
+enemy test is `GameObject::EnemyP` (`GameObjectEnemyP` 0x004DB5B0). Stock ODFs work. Every hook is gated on
+the option, `IsSinglePlayerSession()` and the kill switch `OPENSHIM_DISABLE_DAYWRECKER_DEFENCE=1`.
+`IsSinglePlayerSession()` is `ReadLocalPlayerNetIdValue() == 0` (`src/patches/game_object_helpers.cpp:168-171`);
+its comment says a host has a non-zero id too (`:145-149`). Not confirmed live: checklist row 9. With the
+option off or the kill switch set, nothing is installed. Decision 8: no AssignColor hook; the bomb stays
+yellow.
 
-**New files**
-- `include/daywrecker_defence_policy.h` (pure logic) and `tests/daywrecker_defence_policy_tests.cpp`
-  (pattern: `tests/daywrecker_spawn_policy_tests.cpp`).
-- `src/patches/daywrecker_defence.cpp`, added to `Plugin_OpenShim.vcxproj`, the feature table
-  (`global_feature_config.cpp:679-719` pattern), `Docs/ACTIVE_PATCHES.md`, and `scripts/patches.json`
-  rows for each new address (reuse `GameObjectSetCommandWhere` 0x004DBE70).
+**Files**: `include/daywrecker_defence_policy.h` (pure rules), `tests/daywrecker_defence_policy_tests.cpp`,
+`src/patches/daywrecker_defence.cpp` (installed from `InstallAiTuningCoreHooksIfPossible`, after
+TurretAttackOrders), feature-table row `DaywreckerDefence`, `scripts/patches.json` rows, the vtable audit,
+`Docs/ACTIVE_PATCHES.md` and both ini files.
 
-**Policy header (unit-tested)**
-- `ShouldOfferAttack(isBomb, enemy, hasWeapon, optionOn, singlePlayer)`: stock GO becomes ATTACK.
-- `ColourAsTeam(isBomb, optionOn, singlePlayer)`: whether the AssignColor wrapper forces the team branch.
-- `ShouldTargetBomb(...)`: unit armed (start: weapon pointer non-zero, as `Craft::GetCommand` uses
-  `[this+0x1A0]`), enemy of the bomb, not cargo, idle/WAIT/DEFEND, never overriding a player order or an
-  active attack, not already on it.
-- `InRadius(dx, dz, R)` on XZ distance squared (R starts at 150 m); `ScanDue(now, last, 0.5 s)`; per-bomb
-  cap (4 units); per-unit cooldown (3 s).
-- `EvadeForce(selfPos, selfVel, selfRadius, bombPos, bombVel, bombRadius, weight)` mirroring stock: 200 m
-  range, forward cone (`z >= |x|` and `z >= 1.5|y|`), closest-approach time, threat if `t > 0` and miss
-  `< (r1 + r2) * 2.5`, weight `/(t + 1)` times the stock factor `Min(2.5 - miss/r1, 1)`
-  (`0046dd9d_EvadeOrdnanceForce.c:181,193`); and `Combine(stockForce, bombForce)` with the stock
-  normalise-to-20 rule, which runs only when a threat is recorded (`:209`).
-- `ShouldEvade(isBomb, enemy, unitIsPlayer, targetsThisBomb, optionOn, singlePlayer)`: an AI unit, armed or
-  not (stock evade has no weapon test), that is not currently attacking or targeting that bomb. That is, evade
-  when `ShouldTargetBomb` is false for the unit, or the unit's current target is not that bomb. The player
-  craft is never touched. This also removes the dodge-versus-aim conflict (a shooter does not dodge its own
-  target); the dodge-versus-goto-force conflict stays (see risks).
+**Detection like a Person (decision 9).** Stock AI picks a non-craft target (a pilot) in
+`GetClosestEnemyWithin` (GOG `FUN_00463240`, row `AiFireBlockHelperGetEnemyWithin`; 1.5
+`00406302_GetClosestEnemyWithin.c`). The rule has two parts:
+- XZ distance squared `<= 4900` (70 m). GOG line 196; 1.5 line 72.
+- The target is in the front half-space: `front . (target - self) >= 0`, where `front` is the obj76 matrix
+  front row at obj76+0x38. GOG lines 200-201, via `FUN_00462490`; 1.5 lines 95-99.
 
-**Hooks**
-1. GetCommand overrides, vtable slot 13, RTTI-checked, all-or-nothing install, same shape as
-   `turret_attack_orders.cpp:28-35,200-210`: `Craft::GetCommand` 0x004AE110 (HoverCraft vtable 0x0087ABE4)
-   and `TurretTank::GetCommand` 0x005F5D10 (vtable 0x00889498). Call stock; if it returns GO and
-   `ShouldOfferAttack`, return 4. `ActionMode::GetCommand` (1.5 0x004BE002): GOG address UNVERIFIED
-   (`FUN_004d9da0` is not it); it forwards to the selected unit's slot 13
-   (`1.5/004be002_ActionMode_GetCommand.c:22-26`), so the two hooks cover selected units.
-2. Colour: wrapper on `GameObject::AssignColor` (GOG address UNVERIFIED, locate first): for a bomb set
-   `teamSlot = 0` around the stock call, restore after. Covers HUD, target box, reticle and both radars.
-3. Radius scan from the DayWrecker Simulate wrapper (slot 15, `daywrecker_spawn_fall.cpp:264-271`) and a
-   new Torpedo Simulate wrapper (Torpedo vtable and slot UNVERIFIED). Both refresh a small bomb registry
-   (handle, pos, vel, team, time) and run the throttled scan: iterate `GameObject::objectList`
-   (`1.5/004096bf_GetClosestEnemyPersonWithin.c:38-60`; GOG `FUN_00463d90-00463d90.c`) for AI-team enemy
-   craft passing `ShouldTargetBomb`.
-4. Attack order: the bound SetCommand (`producer_rally_points.cpp:74,123,364-370`) is the (what, where,
-   param) form used for GO. ATTACK needs the target form: script `Attack()` builds
-   `AiCmdInfo{what=CMD_ATTACK, who}` and calls the object overload (`1.5/0045fc85_Attack.c`). Locate and bind
-   that overload in the GOG corpus first (address UNVERIFIED).
-5. Avoidance: detour `EvadeOrdnanceForce` GOG 0x005FD5F0. Call stock, then add `EvadeForce` for each
-   registry bomb that passes `ShouldEvade`. A unit evades only when it is not currently attacking or
-   targeting that bomb (`ShouldTargetBomb` false, or its current target is not that bomb). Registry: store
-   handles, not pointers, and re-resolve them on each use (skip if it no longer resolves). Remove an entry on
-   explode or death as well as on a 0.25 s refresh timeout. Death point: the grounded tick in
-   `DayWrecker::Simulate` detonates when flag 0x4 is clear (`1.5/0052d029_DayWrecker_Simulate.c:21-37`), which
-   the existing Simulate wrapper already sees; `DayWrecker::Explode` is 1.5 0x0052D234 and `Torpedo::Explode`
-   1.5 0x0053D56E (GOG addresses UNVERIFIED). Whether a shot-down bomb reaches Explode is UNVERIFIED (section
-   2c), so the timeout stays as the fallback.
+Persons are not radar-detected: `Scanner::SweepVisibility` skips category 4. The check is stateless.
+`Detects()` runs it on every scan and every evade call, so a unit only reacts to a bomb it currently sees.
 
-**Shoot first, dodge second.** Units that `ShouldTargetBomb` rejects (no weapon, player order, cap reached)
-rely on the evade wrapper (decisions 3 and 7). Units that do target the bomb do not dodge it.
+**Hooks and addresses**
+1. **GetCommand**, vtable slot 13, RTTI-checked, all or nothing.
+   - `Craft::GetCommand` 0x004AE110 (row `CraftGetCommand`) sits in slot 13 of 7 vtables, not only
+     HoverCraft: Craft 0x008781EC, HoverCraft 0x0087ABE4, Minelayer 0x0087D790, Person 0x0088562C, SAV
+     0x00886BFC, Walker 0x0088A0BC and Wingman 0x0088A464. Found by an .rdata scan;
+     `scripts/audit_vtable_hooks.py` finds no other copy. All 7 are hooked.
+   - Stock answers GO for the PowerUp category (`*(class+0x1C)==3`) before its enemy test. The hook turns
+     GO into ATTACK when the bomb is an enemy and the unit is armed (`[this+0x1A0] != 0`).
+   - TurretTank slot 13 (vtable 0x00889498, `TurretTank::GetCommand` 0x005F5D10) is already wrapped by
+     TurretAttackOrders. This hook installs after it and chains to it.
+   - `ActionMode::GetCommand` forwards to the selected unit's slot 13
+     (`1.5/004be002_ActionMode_GetCommand.c:22-26`), so it needs no hook.
+2. **Registry and scan**: two Simulate wrappers, both on slot 15.
+   - DayWrecker: vtable 0x00878508, `DayWrecker::Simulate` 0x004B0460. Chains with the spawn-fall and MP
+     Armory wrappers.
+   - Torpedo: RTTI `.?AVTorpedo@@` vtable 0x00888778, `Torpedo::Simulate` 0x005E2D90, found in no other
+     vtable. New rows `TorpedoVtable` and `TorpedoSimulate`.
+   - Before stock runs, each bomb refreshes its handle entry (32 slots). An entry is dropped after 0.25 s
+     unseen, when the bomb lands or dies, or when its handle no longer resolves.
+   - Every 0.5 s the bomb walks `GameObject::objectList` for craft that pass all of these:
+     - obj76+0x84 is 1 or 6 (`FUN_00417e20`), and alive (obj76 flag 0x200 clear);
+     - within 150 m XZ, and detecting the bomb;
+     - AI, an enemy of the bomb, armed, and not cargo (`[obj+0x9C]`);
+     - idle or defending: `curCmd.what` at +0xAC is NONE or DEFEND, and `nextCmd.what` at +0xCC is NONE;
+     - not already on the bomb: no current or pending ATTACK on it (who at +0xB0/+0xD0) and target handle
+       +0x21C not the bomb.
+   - Those units get `SetCommand(ATTACK, bomb)` through `GameObjectSetCommandObj` 0x004DBD60. At most 4
+     per bomb, with a 3 s per-unit cooldown.
+   - The command offsets come from the Lua `GetCurrentCommand`/`GetCurrentWho` bindings (`FUN_005cb5c0`,
+     `FUN_005cb5f0`).
+3. **Evasion**: inline detour on `EvadeOrdnanceForce` 0x005FD5F0.
+   - cdecl `(ret, unit, currentThreat, outThreat)`; 6 callers, each followed by `add esp,0x10`. New row
+     `EvadeOrdnanceForce`; 9-byte patch `55 8B EC 81 EC 98 01 00 00`.
+   - Stock runs first. Then, for each registry bomb the AI unit detects, is an enemy of, and is not
+     attacking or aiming at, the hook adds the stock force (`0046dd9d_EvadeOrdnanceForce.c:113-197`; GOG
+     `FUN_005fd5f0` lines 149-255) with weight 1000.
+   - It then applies the stock normalise-to-20 rule when any threat was recorded (`:209-224`).
+   - Explode hooks were not needed: the grounded tick, the handle re-resolve and the timeout remove entries.
 
-**Does the lead solve need gravity?** Probably yes for a DW, but ship without it. `GOG
-FUN_0048f5e0-0048f5e0.c` assumes constant target velocity, so a bomb under 9.8 m/s^2 is missed by about
-0.5*9.8*t^2 (about 36 m at t = 2.7 s; the t is an estimate). It would go in the existing
-`CannonLeadVelocitySite` detour (0x0048F658, `ordnance_velocity.cpp:50-80,506`), which already rewrites the
-target velocity before the solve: for a DayWrecker target subtract `9.8 * t_est / 2` from `v.y` with
-`t_est = dist / muzzleSpeed`. That needs ordnance velocity inheritance and the 0.1 m/s tolerance NOP forced
-on. A Comet is powered flight, so no gravity term. UNVERIFIED; add it only if the live hit rate is poor.
+No gravity lead, as planned. The cannon lead solve (`GOG FUN_0048f5e0`) assumes constant target velocity,
+so it misses a falling DW by about 0.5*9.8*t^2. Add it in `CannonLeadVelocitySite` only if the live kill
+rate is poor (checklist row 8).
 
-**Tests (host, no engine)**: each policy function above. Boundaries: cone edge, range 40000, `t <= 0`, miss at
-exactly 2.5 radii, the `Min(2.5 - miss/r1, 1)` factor (0 at 2.5 radii, 1 at or below 1.5), normalise only when
-a threat is recorded and `|F|^2 > 400` (no threat with a large force: no normalise); a unit targeting the bomb
-does not evade it; option off or multiplayer returns stock; cap and
-cooldown; a player order is never overridden; stale registry entries dropped.
+**Decision log lines** (change-only, budget 400 per mission):
+- `[DWDEF] Baseline`, `Active` / `Stood down`, and the install results.
+- `offer <kind>: enemy armed -> cmd`.
+- `bomb tracked` / `bomb left`.
+- `scan bomb= inRadius detected ordered busy unarmed capOrCooldown`.
+- `target unit= bomb=`.
+- `evade on/off unit= bomb= force=`.
 
-Risks: balance (option off by default); AIP reissuing orders and cancelling the attack; pitch limits on a
-steep dive (2b); the whole army turning at once (cap); AssignColor and Torpedo addresses unlocated; the added
-force fighting the unit's goto force (the dodge-versus-aim conflict is removed by not evading a bomb the unit
-targets); a Comet's homing defeating a dodge; a 600 HP Comet being hard to shoot
-down.
+Risks:
+- Balance (off by default).
+- AIP reissuing orders.
+- Pitch limits on a steep dive (2b).
+- The added force fighting the unit's goto force.
+- A Comet's homing defeating a dodge.
+- A 600 HP Comet being hard to shoot down.
 
 **Live checklist (shared harness, lock first, 2 retries)**
-1. Option off: stock behaviour, no `[DWDEF]` log lines (check the old build behaves the same).
-2. Confirmation only: shells kill a falling bomb (user reports yes).
-3. Colour: enemy DW and enemy Comet red in the target box, reticle, cockpit radar and map radar; own-team
-   bomb green; option off yellow. Record which team owns the DW and the Comet: a team-0 bomb shows white.
-4. Player order: select a tank, reticle the enemy bomb: Attack (not Go To), the order sticks, the unit fires.
-5. AI shoot: enemy Armory drops on player-side units; units in radius log `[DWDEF] target` and fire. Count kills
-   over 5 drops at default and at `dropRate = 2`.
-6. Avoidance: an unarmed unit (scavenger or tug), and an armed unit with the shoot path disabled, with the bomb
-   in front within 200 m: log `[DWDEF] evade` and the unit leaves the landing point; a unit behind or outside
-   the cone does not react.
-7. Comet: an enemy radarmsl at the player's units shows red, Attack is offered, an unarmed unit avoids it.
-8. Cap and cooldown logs show no order spam; AIP does not cancel within 3 s; multiplayer passes through.
-10. Host in MP: host a match (alone, then with a client): the option does nothing, no `[DWDEF]` lines, bombs
-    stay yellow, no order or evade changes. Confirms `IsSinglePlayerSession()` is false for a host.
-9. Kill rate under 30%: add the gravity phase and re-run step 5.
+1. Option off: stock behaviour. The log shows `[DWDEF] Disabled` and no other `[DWDEF]` lines.
+2. Option on, kill switch set: the log shows `Disabled by OPENSHIM_DISABLE_DAYWRECKER_DEFENCE` and behaviour
+   is stock.
+3. Install: the log shows GetCommand installed (7 slots + TurretTank), both Simulate wrappers, the evade
+   detour, then `Active (SP-only)`. DW drop rate and spawn-fall still work, since they share slot 15.
+4. Player order: select a tank, then a turret, and put the reticle on an enemy falling DW.
+   - Attack is offered (not Go To), the order sticks and the unit fires.
+   - The bomb stays yellow.
+   - An unarmed unit (a tug) still gets Go To.
+5. AI shoot: the player's Armory drops a DW on AI units.
+   - AI units within 150 m that face the bomb log `[DWDEF] target` and fire.
+   - Units facing away count in `inRadius` but not in `detected`.
+   - At most 4 units per bomb, no re-order within 3 s, and a unit on a GO order is left alone.
+   - Units on the player's team are never ordered, so their Defend or Follow orders survive. They still dodge.
+   - Limit: the Howitzer has its own GetCommand (0x004F0DD0), so the player gets no Attack on a bomb for it, but the scan can still order an AI Howitzer to attack.
+6. Avoidance: an AI scavenger or tug facing the falling bomb within 70 m logs `[DWDEF] evade on` and moves
+   off the landing line. One facing away does not react.
+7. Comet: fire an enemy radarmsl at the player's units; Attack is offered. AI units target and dodge a
+   player-fired Comet the same way as a DW.
+8. Kill rate over 5 drops, at default and at `dropRate = 2`. Under 30% means add the gravity phase.
+9. Host in MP, alone and then with a client: the log shows `Stood down`, with no order or evade changes.
 
 ## Open questions for the user
 
