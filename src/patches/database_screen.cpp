@@ -541,7 +541,7 @@ namespace BZROpenShim
                             {
                                 // ctor stores vtable 0x89F118 (c7 00 18 f1 89 00); model build prologue.
                                 const uint8_t* c = reinterpret_cast<const uint8_t*>(kPreviewCtor);
-                                for (int i = 0; i < 0x30 && !bytesOk; ++i)
+                                for (int i = 0; i < 0x80 && !bytesOk; ++i)
                                     bytesOk = c[i] == 0xC7 && c[i + 1] == 0x00 && c[i + 2] == 0x18 && c[i + 3] == 0xF1 &&
                                               c[i + 4] == 0x89 && c[i + 5] == 0x00;
                                 const uint8_t* m = reinterpret_cast<const uint8_t*>(kModelBuild);
