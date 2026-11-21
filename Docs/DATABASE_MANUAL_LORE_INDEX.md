@@ -4,7 +4,7 @@ Sources and citation keys
 - **M pN** = BZ98 Redux manual PDF, PDF page index N (printed page numbers in brackets). Text extracted with pdftotext to `lore_manual_paged.txt` (same folder).
 - **G Lnnnn** = 1998 Brady guide OCR text file, line number nnnn (`2913c44b-manual-text.txt`). OCR is noisy.
 - ODF mappings are all UNVERIFIED (neither source states ODF names).
-- Faction note: Manual calls the American side "NSDF / Stars and Stripes" and the Soviet side "CCA / Red Brigade". "Black Dogs" are an American sub-force in the Soviet campaign. No "Chinese" or "Red Odyssey" content in either source (grep 0 hits).
+- Faction note: Manual calls the American side "NSDF / Stars and Stripes" and the Soviet side "CCA / Red Brigade". "Black Dogs" are an American sub-force in the Soviet campaign. No "Chinese" or "Red Odyssey" content in either source (grep 0 hits). The Database screen's CRA tab therefore draws on the Red Odyssey game files instead (ODF stats, loading-screen pictures, chmisn01-08 briefings); see `Docs/DATABASE_SCREEN.md`.
 
 ## 1. Key finding: Badger designation
 | Source | Designation | Cite |
