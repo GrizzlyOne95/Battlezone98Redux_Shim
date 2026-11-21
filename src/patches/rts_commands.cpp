@@ -42,6 +42,12 @@
 //     * One short stock sound when an own unit goes from busy to idle, at
 //       most once per 5 s, never for a unit's first observed state.
 //     * Idle = current and pending command `what` both 0 or 2 (CMD_STOP).
+//   [Gameplay] RtsAmmoAlert (default OFF)
+//     * The stock "out of ammo" voice line (abetty5/sbetty5 by nation) when
+//       an own armed unit drops under 5% ammo, at most once per 30 s.
+//   [Gameplay] RtsScrapFullAlert (default OFF)
+//     * The stock "scrap full" voice line (avrecyvn/svrecyvn by nation) when
+//       the team's scrap reaches its maximum (30+), at most once per 60 s.
 //   [Gameplay] RtsFollowCamera (default OFF)
 //     * In the satellite view, Shift+C (RtsFollowCameraKey) keeps the view
 //       centred on the first selected own unit (else the player's vehicle);
@@ -100,6 +106,10 @@ namespace BZROpenShim::Hooks
         using FnSetTarget = void(__thiscall*)(void* obj, void* target);
         using FnSelectAdd = void(__thiscall*)(void* panel, void* obj);
         using FnSelectNone = void(__thiscall*)(void* panel);
+        // The HUD getters contextual_hud.cpp binds: HudFadeGetTeam (cdecl, the
+        // local Team*), and the thiscall GameObject / Team value getters.
+        using FnGetLocalTeam = void*(__cdecl*)();
+        using FnGetValue = uint32_t(__thiscall*)(void* self);
         using FnLocalize = const char*(__cdecl*)(const char* section, const char* key);
         using FnPlaySound = int(__cdecl*)(const char* filename, uint32_t, uint32_t, uint32_t);
         using FnGetPosition = const float*(__thiscall*)(void* entity);
@@ -201,6 +211,13 @@ namespace BZROpenShim::Hooks
         // Idle units (its own copies of the select/sound rows).
         uint32_t g_IdleSelectAddAddr = 0;
         uint32_t g_IdleSelectNoneAddr = 0;
+        // Ammo-out and scrap-full alerts (its own copies of the HUD getter rows
+        // contextual_hud.cpp binds).
+        uint32_t g_AlertGetAmmoAddr = 0;
+        uint32_t g_AlertMaxAmmoAddr = 0;
+        uint32_t g_AlertGetTeamAddr = 0;
+        uint32_t g_AlertGetScrapAddr = 0;
+        uint32_t g_AlertGetMaxScrapAddr = 0;
         // Follow camera.
         uint32_t g_OverViewSetObjectRowAddr = 0; // OverView_SetObject(handle) wrapper
         uint32_t g_OverViewSetObjectAddr = 0;
@@ -224,6 +241,11 @@ namespace BZROpenShim::Hooks
         FnSelectNone g_FnNavSelectNone = nullptr;
         FnRigGetCommand g_FnRigGetCommand = nullptr;
         FnOverViewSetObject g_FnOverViewSetObject = nullptr;
+        FnGetValue g_FnGetAmmo = nullptr;
+        FnGetValue g_FnMaxAmmo = nullptr;
+        FnGetLocalTeam g_FnGetTeam = nullptr;
+        FnGetValue g_FnGetScrap = nullptr;
+        FnGetValue g_FnGetMaxScrap = nullptr;
 
         // Config ([Gameplay]); main thread.
         bool g_ConfigRead = false;
@@ -234,6 +256,8 @@ namespace BZROpenShim::Hooks
         int g_HoldMode = Policy::kHoldKeyAndShiftMenu;
         bool g_BuildNavEnabled = true;
         bool g_IdleAlertEnabled = false;
+        bool g_AmmoAlertEnabled = false;
+        bool g_ScrapAlertEnabled = false;
         bool g_FollowEnabled = false;
         bool g_QuickEnabled = false;
 
@@ -250,6 +274,7 @@ namespace BZROpenShim::Hooks
         bool g_NavSelectNoneReady = false;
         bool g_NavPickReady = false;
         bool g_IdleReady = false;
+        bool g_AlertsReady = false; // the ammo-out and scrap-full getters
         bool g_FollowReady = false;
 
         // Live state.
@@ -262,8 +287,12 @@ namespace BZROpenShim::Hooks
         std::atomic<bool> g_BuildNavActive{ false };
         std::atomic<bool> g_IdleKeyActive{ false };
         std::atomic<bool> g_IdleAlertActive{ false };
+        std::atomic<bool> g_AmmoAlertActive{ false };
+        std::atomic<bool> g_ScrapAlertActive{ false };
         std::atomic<bool> g_FollowActive{ false };
         std::atomic<bool> g_IdleResetPending{ false };
+        std::atomic<bool> g_AmmoResetPending{ false };
+        std::atomic<bool> g_ScrapResetPending{ false };
         std::atomic<bool> g_IdlePickResetPending{ false };
         // Set by the nav-pick hook for the SelectNone call that follows it
         // (same Render frame, game thread).
@@ -286,6 +315,10 @@ namespace BZROpenShim::Hooks
         uint32_t g_LastIdlePick = 0;
         ULONGLONG g_IdleLastScanMs = 0;
         Policy::IdleTracker g_IdleTracker;
+        // Ammo-out and scrap-full alerts: drain thread only (the same scan).
+        volatile long g_AlertLogBudget = 300;
+        Policy::AmmoTracker g_AmmoTracker;
+        Policy::ScrapFullDetector g_ScrapDetector;
 
         // Keys (main thread: both filters and the key-binding editor).
         Policy::Key g_Keys[Policy::kKeyCount] = {};
@@ -539,6 +572,42 @@ namespace BZROpenShim::Hooks
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
+            }
+        }
+
+        // A thiscall value getter (ammo, max ammo, scrap, max scrap) under SEH.
+        // False when unavailable, faulted, or out of the sane range
+        // contextual_hud.cpp also rejects (over 100000000).
+        bool SafeGetValue(FnGetValue fn, void* self, int& out)
+        {
+            if (!fn || !self)
+                return false;
+            uint32_t value = 0;
+            __try
+            {
+                value = fn(self);
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+            if (value > 100000000u)
+                return false;
+            out = static_cast<int>(value);
+            return true;
+        }
+
+        void* SafeGetLocalTeam()
+        {
+            if (!g_FnGetTeam)
+                return nullptr;
+            __try
+            {
+                return g_FnGetTeam();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
             }
         }
 
@@ -1611,12 +1680,11 @@ namespace BZROpenShim::Hooks
             return Policy::ScavengerGathering(processState, recycleTask, recycleState);
         }
 
-        // Reads one object for the idle features. False unless it is an alive
-        // (in the object list snapshot), own, commandable unit of a tracked
-        // family (so never a building), and not the player's own piloted
-        // object (as DoAreaSelect skips it).
-        bool EvaluateIdleUnit(void* obj, void* user, uint32_t& handle, bool& idle, int& current, int& pending,
-                              Policy::Family& family)
+        // The eligibility the idle features and the ammo alert share.
+        // False unless it is an alive (in the object list snapshot), own,
+        // commandable unit of a known family (so never a building), and not
+        // the player's own piloted object (as DoAreaSelect skips it).
+        bool EvaluateOwnUnit(void* obj, void* user, uint32_t& handle, Policy::Family& family)
         {
             if (!obj || obj == user || !IsPlayerTeam(obj))
                 return false;
@@ -1625,15 +1693,38 @@ namespace BZROpenShim::Hooks
             if (!Policy::IdleTracksFamily(family) || !SafeCanCommand(obj))
                 return false;
             handle = SafeGetHandle(obj);
+            return handle != 0;
+        }
+
+        // The idle state of an EvaluateOwnUnit unit.
+        bool ReadIdleState(void* obj, uint32_t handle, Policy::Family family, bool& idle, int& current, int& pending)
+        {
             const uintptr_t base = reinterpret_cast<uintptr_t>(obj);
-            if (handle == 0 ||
-                !ReadInt(base + RtsPlacement::kCurrentRecordOffset + RtsPlacement::kRecordWhatOffset, current) ||
+            if (!ReadInt(base + RtsPlacement::kCurrentRecordOffset + RtsPlacement::kRecordWhatOffset, current) ||
                 !ReadInt(base + RtsPlacement::kPendingRecordOffset + RtsPlacement::kRecordWhatOffset, pending))
                 return false;
             idle = Policy::IsIdle(current, pending);
             if (idle && family == Policy::Family::Scavenger && ScavengerBusy(obj, handle))
                 idle = false;
             return true;
+        }
+
+        // Reads one object for the idle features (EvaluateOwnUnit, then its
+        // idle state).
+        bool EvaluateIdleUnit(void* obj, void* user, uint32_t& handle, bool& idle, int& current, int& pending,
+                              Policy::Family& family)
+        {
+            return EvaluateOwnUnit(obj, user, handle, family) &&
+                   ReadIdleState(obj, handle, family, idle, current, pending);
+        }
+
+        // The first letter of the player's current object's ODF name (BZP
+        // GetNation), through engine_flames.cpp's TryGetCraftOdfName; '\0'
+        // when unreadable (the policy then picks the American clip).
+        char PlayerNation(void* user)
+        {
+            char odf[16] = {};
+            return user && TryGetCraftOdfName(user, odf, sizeof(odf)) ? odf[0] : '\0';
         }
 
         void DoIdleSelect(bool all)
@@ -1684,12 +1775,33 @@ namespace BZROpenShim::Hooks
             }
         }
 
-        // Every kIdleScanIntervalMs, while the alert is on: tracks each own
-        // unit's idle state and plays kIdleAlertSound on an allowed busy->idle
-        // flip (Policy::IdleTracker).
+        // The scrap-full alert: the local team's scrap against its maximum
+        // (Policy::ScrapFullDetector).
+        void ScanScrapAlert(void* user, ULONGLONG now)
+        {
+            void* const team = SafeGetLocalTeam();
+            int scrap = 0;
+            int maxScrap = 0;
+            if (!team || !SafeGetValue(g_FnGetScrap, team, scrap) || !SafeGetValue(g_FnGetMaxScrap, team, maxScrap))
+                return;
+            if (!g_ScrapDetector.Observe(scrap, maxScrap, now))
+                return;
+            SafePlaySound(Policy::ScrapFullAlertSound(PlayerNation(user)));
+            if (InterlockedDecrement(&g_AlertLogBudget) >= 0)
+                Log(L"[RTS] scrap full alert scrap=%d/%d\n", scrap, maxScrap);
+        }
+
+        // Every kIdleScanIntervalMs, while any of the idle, ammo-out or
+        // scrap-full alerts is on: one object snapshot per pass tracks each
+        // own unit's idle state (Policy::IdleTracker, kIdleAlertSound on an
+        // allowed busy->idle flip) and armed units' ammo (Policy::AmmoTracker,
+        // the nation's ammo clip on an allowed not-low->low flip).
         void ScanIdleAlerts()
         {
-            if (!g_IdleAlertActive.load(std::memory_order_acquire))
+            const bool idleOn = g_IdleAlertActive.load(std::memory_order_acquire);
+            const bool ammoOn = g_AmmoAlertActive.load(std::memory_order_acquire);
+            const bool scrapOn = g_ScrapAlertActive.load(std::memory_order_acquire);
+            if (!idleOn && !ammoOn && !scrapOn)
                 return;
             const ULONGLONG now = GetTickCount64();
             if (now - g_IdleLastScanMs < kIdleScanIntervalMs)
@@ -1697,31 +1809,58 @@ namespace BZROpenShim::Hooks
             g_IdleLastScanMs = now;
             if (!WorldInteractive() || EditorActive())
                 return;
+            void* const user = UserObject();
+            if (scrapOn)
+                ScanScrapAlert(user, now);
+            if (!idleOn && !ammoOn)
+                return;
             const size_t n = SnapshotObjects(g_ObjectScratch, kMaxObjects);
             if (n == 0)
                 return;
-            void* const user = UserObject();
-            g_IdleTracker.BeginPass();
+            if (idleOn)
+                g_IdleTracker.BeginPass();
+            if (ammoOn)
+                g_AmmoTracker.BeginPass();
             for (size_t i = 0; i < n; ++i)
             {
+                void* const obj = g_ObjectScratch[i];
                 uint32_t handle = 0;
+                Policy::Family family = Policy::Family::None;
+                if (!EvaluateOwnUnit(obj, user, handle, family))
+                    continue;
                 bool idle = false;
                 int current = 0;
                 int pending = 0;
-                Policy::Family family = Policy::Family::None;
-                if (!EvaluateIdleUnit(g_ObjectScratch[i], user, handle, idle, current, pending, family))
-                    continue;
-                const Policy::IdleObservation o = g_IdleTracker.Observe(handle, idle, now);
-                if ((o.first || o.changed) && InterlockedDecrement(&g_IdleStateLogBudget) >= 0)
-                    Log(L"[RTS] idle state handle=0x%08X idle=%d what=%d/%d family=%hs\n", handle,
-                        idle ? 1 : 0, current, pending, Policy::FamilyName(family));
-                if (o.alert)
+                if (idleOn && ReadIdleState(obj, handle, family, idle, current, pending))
                 {
-                    SafePlaySound(kIdleAlertSound);
-                    Log(L"[RTS] idle alert handle=0x%08X what=%d/%d\n", handle, current, pending);
+                    const Policy::IdleObservation o = g_IdleTracker.Observe(handle, idle, now);
+                    if ((o.first || o.changed) && InterlockedDecrement(&g_IdleStateLogBudget) >= 0)
+                        Log(L"[RTS] idle state handle=0x%08X idle=%d what=%d/%d family=%hs\n", handle,
+                            idle ? 1 : 0, current, pending, Policy::FamilyName(family));
+                    if (o.alert)
+                    {
+                        SafePlaySound(kIdleAlertSound);
+                        Log(L"[RTS] idle alert handle=0x%08X what=%d/%d\n", handle, current, pending);
+                    }
+                }
+                int ammo = 0;
+                int maxAmmo = 0;
+                if (ammoOn && Policy::AmmoTracksFamily(family) && SafeGetValue(g_FnGetAmmo, obj, ammo) &&
+                    SafeGetValue(g_FnMaxAmmo, obj, maxAmmo))
+                {
+                    const Policy::AmmoObservation o = g_AmmoTracker.Observe(handle, ammo, maxAmmo, now);
+                    if (o.alert)
+                    {
+                        SafePlaySound(Policy::AmmoAlertSound(PlayerNation(user)));
+                        if (InterlockedDecrement(&g_AlertLogBudget) >= 0)
+                            Log(L"[RTS] ammo alert handle=0x%08X ammo=%d/%d\n", handle, ammo, maxAmmo);
+                    }
                 }
             }
-            g_IdleTracker.EndPass();
+            if (idleOn)
+                g_IdleTracker.EndPass();
+            if (ammoOn)
+                g_AmmoTracker.EndPass();
         }
 
         void DoHoldKey()
@@ -2290,6 +2429,41 @@ namespace BZROpenShim::Hooks
                     g_IdleReady = g_ObjectListGlobal != 0;
                 }
             }
+            // One bind attempt once the sound row and object list are known:
+            // a getter row that fails its guard bytes fails every retry, and
+            // each retry would cost the resolver's wait and an [ADDR] log line.
+            static bool s_alertsFailLogged = false;
+            if (!g_AlertsReady && !s_alertsFailLogged &&
+                HookEngine::ResolveNamedAddress("PlayGlobalSound") != 0 && g_ObjectListGlobal != 0)
+            {
+                // Signatures as contextual_hud.cpp calls them: HudFadeGetTeam
+                // cdecl, the rest thiscall with no stack arguments.
+                const HookEngine::EngineRow rows[] = {
+                    { "HudFadeGetAmmo", &g_AlertGetAmmoAddr },
+                    { "HudFadeMaxAmmo", &g_AlertMaxAmmoAddr },
+                    { "HudFadeGetTeam", &g_AlertGetTeamAddr },
+                    { "HudFadeGetScrap", &g_AlertGetScrapAddr },
+                    { "HudFadeGetMaxScrap", &g_AlertGetMaxScrapAddr },
+                };
+                const uint32_t sound = HookEngine::ResolveNamedAddress("PlayGlobalSound");
+                if (sound != 0 && g_ObjectListGlobal != 0 &&
+                    HookEngine::BindEngineRows("RTS ammo/scrap alerts", rows))
+                {
+                    g_FnGetAmmo = reinterpret_cast<FnGetValue>(g_AlertGetAmmoAddr);
+                    g_FnMaxAmmo = reinterpret_cast<FnGetValue>(g_AlertMaxAmmoAddr);
+                    g_FnGetTeam = reinterpret_cast<FnGetLocalTeam>(g_AlertGetTeamAddr);
+                    g_FnGetScrap = reinterpret_cast<FnGetValue>(g_AlertGetScrapAddr);
+                    g_FnGetMaxScrap = reinterpret_cast<FnGetValue>(g_AlertGetMaxScrapAddr);
+                    g_FnPlaySound = reinterpret_cast<FnPlaySound>(sound); // the same function idle binds
+                    g_AlertsReady = true;
+                }
+                else if (!s_alertsFailLogged)
+                {
+                    s_alertsFailLogged = true;
+                    Log(L"[RTS] ammo/scrap alerts: getter rows did not bind; RtsAmmoAlert and RtsScrapFullAlert "
+                        L"disabled\n");
+                }
+            }
 #endif
         }
 
@@ -2326,6 +2500,10 @@ namespace BZROpenShim::Hooks
                   "Unavailable: Build at Nav did not hook on this game build (see openshim.log)." },
                 { "RtsIdleUnitAlert", g_SharedReady && g_IdleReady,
                   "Unavailable: the idle unit alert did not hook on this game build (see openshim.log)." },
+                { "RtsAmmoAlert", g_SharedReady && g_AlertsReady,
+                  "Unavailable: the ammo alert did not hook on this game build (see openshim.log)." },
+                { "RtsScrapFullAlert", g_SharedReady && g_AlertsReady,
+                  "Unavailable: the scrap full alert did not hook on this game build (see openshim.log)." },
                 { "RtsFollowCamera", g_SharedReady && g_FollowReady,
                   "Unavailable: Satellite Follow did not hook on this game build (see openshim.log)." },
                 { "RtsQuickCommands", QuickHooksReady(),
@@ -2355,6 +2533,8 @@ namespace BZROpenShim::Hooks
         g_AreaEnabled = ReadBoolOption("RtsAreaSelect", true);
         g_BuildNavEnabled = ReadBoolOption("RtsBuildAtNav", true);
         g_IdleAlertEnabled = ReadBoolOption("RtsIdleUnitAlert", false);
+        g_AmmoAlertEnabled = ReadBoolOption("RtsAmmoAlert", false);
+        g_ScrapAlertEnabled = ReadBoolOption("RtsScrapFullAlert", false);
         g_FollowEnabled = ReadBoolOption("RtsFollowCamera", false);
         g_QuickEnabled = ReadBoolOption("RtsQuickCommands", false);
         std::string hold;
@@ -2364,10 +2544,12 @@ namespace BZROpenShim::Hooks
         ResolveKeysFromConfig();
         if (!g_ConfigRead)
             Log(L"[RTS] Baseline RtsRemoteTarget=%hs RtsSmartCommandMenu=%hs RtsSmartRepairReload=%hs "
-                L"RtsAreaSelect=%hs RtsHold=%d RtsBuildAtNav=%hs RtsIdleUnitAlert=%hs RtsFollowCamera=%hs\n",
+                L"RtsAreaSelect=%hs RtsHold=%d RtsBuildAtNav=%hs RtsIdleUnitAlert=%hs RtsAmmoAlert=%hs "
+                L"RtsScrapFullAlert=%hs RtsFollowCamera=%hs\n",
                 g_TargetEnabled ? "yes" : "no", g_SmartMenuEnabled ? "yes" : "no", g_SmartRepairEnabled ? "yes" : "no",
                 g_AreaEnabled ? "yes" : "no", g_HoldMode, g_BuildNavEnabled ? "yes" : "no",
-                g_IdleAlertEnabled ? "yes" : "no", g_FollowEnabled ? "yes" : "no");
+                g_IdleAlertEnabled ? "yes" : "no", g_AmmoAlertEnabled ? "yes" : "no",
+                g_ScrapAlertEnabled ? "yes" : "no", g_FollowEnabled ? "yes" : "no");
         g_ConfigRead = true;
         RefreshRtsCommandsState();
     }
@@ -2387,16 +2569,19 @@ namespace BZROpenShim::Hooks
             InstallParts();
         MarkParts();
         const bool all = SmartMenuPartsReady() && g_TargetReady && g_AreaReady && HoldHooksReady() &&
-                         g_HoldClickReady && g_LabelReady && BuildNavPartsReady() && g_IdleReady && g_FollowReady;
+                         g_HoldClickReady && g_LabelReady && BuildNavPartsReady() && g_IdleReady && g_AlertsReady &&
+                         g_FollowReady;
         if (all || s_attempts >= kMaxInstallAttempts)
         {
             s_done = true;
             Log(L"[RTS] install %hs after %d attempt(s): merge %hs, dispatch %hs, Defend target %hs, target %hs, "
-                L"area %hs, hold %hs, Shift+Defend click %hs, label %hs, Build at Nav %hs, idle %hs, follow %hs\n",
+                L"area %hs, hold %hs, Shift+Defend click %hs, label %hs, Build at Nav %hs, idle %hs, ammo/scrap alerts %hs, "
+                L"follow %hs\n",
                 all ? "complete" : "gave up", s_attempts, g_MergeReady ? "yes" : "no", g_DispatchReady ? "yes" : "no",
                 g_BroadcastReady ? "yes" : "no", g_TargetReady ? "yes" : "no", g_AreaReady ? "yes" : "no",
                 HoldHooksReady() ? "yes" : "no", g_HoldClickReady ? "yes" : "no", g_LabelReady ? "yes" : "no",
-                BuildNavPartsReady() ? "yes" : "no", g_IdleReady ? "yes" : "no", g_FollowReady ? "yes" : "no");
+                BuildNavPartsReady() ? "yes" : "no", g_IdleReady ? "yes" : "no", g_AlertsReady ? "yes" : "no",
+                g_FollowReady ? "yes" : "no");
         }
         RefreshRtsCommandsState();
     }
@@ -2425,6 +2610,12 @@ namespace BZROpenShim::Hooks
         // when the alert turns off, so an old table cannot alert later.
         if (g_IdleAlertActive.exchange(idleAlert, std::memory_order_acq_rel) && !idleAlert)
             g_IdleResetPending.store(true, std::memory_order_release);
+        const bool ammoAlert = g_AmmoAlertEnabled && g_SharedReady && g_AlertsReady;
+        if (g_AmmoAlertActive.exchange(ammoAlert, std::memory_order_acq_rel) && !ammoAlert)
+            g_AmmoResetPending.store(true, std::memory_order_release);
+        const bool scrapAlert = g_ScrapAlertEnabled && g_SharedReady && g_AlertsReady;
+        if (g_ScrapAlertActive.exchange(scrapAlert, std::memory_order_acq_rel) && !scrapAlert)
+            g_ScrapResetPending.store(true, std::memory_order_release);
         const bool sp = IsSinglePlayerSession();
         const bool holdKey = Policy::HoldAvailable(g_HoldMode != Policy::kHoldOff, HoldHooksReady(), sp);
         g_HoldKeyActive.store(holdKey, std::memory_order_release);
@@ -2455,6 +2646,8 @@ namespace BZROpenShim::Hooks
                             g_QuickKeyActive.load(std::memory_order_acquire) ||
                             g_IdleKeyActive.load(std::memory_order_acquire) ||
                             g_IdleAlertActive.load(std::memory_order_acquire) ||
+                            g_AmmoAlertActive.load(std::memory_order_acquire) ||
+                            g_ScrapAlertActive.load(std::memory_order_acquire) ||
                             g_FollowActive.load(std::memory_order_acquire);
         if (!anyKey)
             return;
@@ -2495,6 +2688,10 @@ namespace BZROpenShim::Hooks
             }
             if (g_IdlePickResetPending.exchange(false))
                 g_LastIdlePick = 0;
+            if (g_AmmoResetPending.exchange(false))
+                g_AmmoTracker.Clear();
+            if (g_ScrapResetPending.exchange(false))
+                g_ScrapDetector.Clear();
             if (g_FollowResetPending.exchange(false))
                 g_FollowHandle = 0;
             if (g_PendingFollow.exchange(false))
@@ -2521,7 +2718,10 @@ namespace BZROpenShim::Hooks
         g_FollowResetPending.store(true); // the drain thread drops the follow
         g_IdleResetPending.store(true); // the drain thread clears the table
         g_IdlePickResetPending.store(true);
+        g_AmmoResetPending.store(true); // a new mission's first observation is silent
+        g_ScrapResetPending.store(true);
         g_IdleStateLogBudget = 300;
+        g_AlertLogBudget = 300;
         g_ScavStateLogBudget = 300;
         g_LogBudget = 48;
         RefreshRtsCommandsState();
