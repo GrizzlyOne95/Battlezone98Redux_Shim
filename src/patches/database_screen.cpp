@@ -24,8 +24,10 @@
 #include "database_policy.h"
 #include "database_content_resources.h"
 #include "des_reader.h"
+#include "engine_globals.h"
 #include "hook_engine.h"
 #include "lobby_briefing_policy.h"
+#include "ogre_runtime.h"
 #include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "shell_screens.h"
@@ -429,6 +431,336 @@ namespace BZROpenShim
                     reinterpret_cast<FnScroll>(static_cast<uintptr_t>(g_ScrollDownAddr))(block);
             }
 
+            // ---- SPIKE (OPENSHIM_DB_PREVIEW_SPIKE=1): 3D unit preview ----
+            // Throwaway live spike: reuses the MP vehicle picker's preview
+            // (cUI_VehiclePreviewWindow on the SniperTex render target). GOG
+            // 2.2.301 addresses only; see shell_model_preview.md. Any fault turns
+            // it off for the session.
+            namespace Spike
+            {
+                constexpr uintptr_t kPreviewCtor = 0x007A9450;
+                constexpr uintptr_t kSetViewType = 0x007D3F20;
+                constexpr uintptr_t kBindMaterialTexture = 0x007D2A00;
+                constexpr uintptr_t kModelBuild = 0x0067D180;
+                constexpr uintptr_t kPreviewUpdate = 0x007AA000;
+                constexpr uintptr_t kNodeDestroy = 0x0067D090;
+                constexpr uintptr_t kPreviewCleanup = 0x0067D0C0;
+                constexpr uintptr_t kRenderGlobalsSlot = 0x00920EA0;
+                constexpr uintptr_t kSniperTexTarget = 0x00920E80;
+                constexpr uintptr_t kNode = 0x00920E98;
+                constexpr uintptr_t kEntity = 0x00920EC0;
+                constexpr uintptr_t kLight = 0x00920CA0;
+                constexpr uintptr_t kFade = 0x00945588;
+                constexpr uintptr_t kSpinGate = 0x0094554A;
+                constexpr uintptr_t kCloak = 0x0094554B;
+                constexpr size_t kSceneManagerOff = 0x08, kCameraOff = 0x18, kScopeViewportOff = 0x20,
+                                 kPreviewViewportOff = 0x24;
+                constexpr size_t kPreviewSize = 0x144;
+                const Shell::Rect kRect{ 815.0f, 224.0f, 400.0f, 400.0f };  // square, centred in kImageRect
+
+                using FnCtor = void*(__thiscall*)(void*, const char*, float, float, float, float, uint32_t, void*);
+                using FnSetViewType = void(__thiscall*)(void*, uint32_t);
+                using FnBind = void(__thiscall*)(void*, const char*, const char*);
+                using FnAddViewport = void*(__thiscall*)(void*, void*, int, float, float, float, float);
+                using FnRemoveViewport = void(__thiscall*)(void*, int);
+                using FnModelBuild = void(__cdecl*)(const char*, float, float, float);
+                using FnVoid = void(__cdecl*)();
+                using FnNodeDestroy = void(__cdecl*)(void*);
+                using FnFadeDtor = void*(__thiscall*)(void*, int);
+                using FnGetZ = int(__thiscall*)(const void*);
+                using FnSetClear = void(__thiscall*)(void*, bool, unsigned);
+                using FnSetColour = void(__thiscall*)(void*, const float*);
+                using FnSetBool = void(__thiscall*)(void*, bool);
+                using FnSetMask = void(__thiscall*)(void*, unsigned);
+
+                int g_Mode = -1;  // -1 unchecked, 0 off, 1 on
+                bool g_Faulted = false;
+                void* g_View = nullptr;
+                bool g_Ours = false;  // we created the +0x24 viewport and may own a node
+                unsigned g_Ticks = 0;
+                FnGetZ g_GetZ = nullptr;
+                FnSetClear g_SetClear = nullptr;
+                FnSetColour g_SetColour = nullptr;
+                FnSetBool g_SetOverlays = nullptr, g_SetShadows = nullptr;
+                FnSetMask g_SetMask = nullptr;
+
+                template <typename T>
+                T At(uintptr_t a)
+                {
+                    return *reinterpret_cast<T*>(a);
+                }
+
+                uintptr_t Globals()
+                {
+                    return At<uintptr_t>(kRenderGlobalsSlot);
+                }
+
+                void RttiName(const void* object, char* buf, size_t size)
+                {
+                    __try
+                    {
+                        const uintptr_t vt = *reinterpret_cast<const uintptr_t*>(object);
+                        const uintptr_t col = *reinterpret_cast<const uintptr_t*>(vt - 4);
+                        const uintptr_t td = *reinterpret_cast<const uintptr_t*>(col + 0x0C);
+                        _snprintf_s(buf, size, _TRUNCATE, "%s", reinterpret_cast<const char*>(td + 8));
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        _snprintf_s(buf, size, _TRUNCATE, "?");
+                    }
+                }
+
+                void Fault(const wchar_t* step, DWORD code)
+                {
+                    g_Faulted = true;
+                    Log(L"[DBPREVIEW] FAULT in %ls (0x%08X); spike off for this session\n", step, code);
+                }
+
+                bool Enabled()
+                {
+                    if (g_Mode < 0)
+                    {
+                        g_Mode = EnvFlagEnabled("OPENSHIM_DB_PREVIEW_SPIKE") ? 1 : 0;
+                        if (g_Mode)
+                        {
+                            g_GetZ = reinterpret_cast<FnGetZ>(OgreRuntime::ResolveExport("?getZOrder@Viewport@Ogre@@QBEHXZ"));
+                            g_SetClear = reinterpret_cast<FnSetClear>(
+                                OgreRuntime::ResolveExport("?setClearEveryFrame@Viewport@Ogre@@QAEX_NI@Z"));
+                            g_SetColour = reinterpret_cast<FnSetColour>(
+                                OgreRuntime::ResolveExport("?setBackgroundColour@Viewport@Ogre@@QAEXABVColourValue@2@@Z"));
+                            g_SetOverlays = reinterpret_cast<FnSetBool>(
+                                OgreRuntime::ResolveExport("?setOverlaysEnabled@Viewport@Ogre@@QAEX_N@Z"));
+                            g_SetShadows = reinterpret_cast<FnSetBool>(
+                                OgreRuntime::ResolveExport("?setShadowsEnabled@Viewport@Ogre@@QAEX_N@Z"));
+                            g_SetMask = reinterpret_cast<FnSetMask>(
+                                OgreRuntime::ResolveExport("?setVisibilityMask@Viewport@Ogre@@QAEXI@Z"));
+                            const bool apiOk = g_GetZ && g_SetClear && g_SetColour && g_SetOverlays && g_SetShadows && g_SetMask;
+                            const uintptr_t named = EngineGlobals::RenderGlobals();
+                            bool bytesOk = false;
+                            __try
+                            {
+                                // ctor stores vtable 0x89F118 (c7 00 18 f1 89 00); model build prologue.
+                                const uint8_t* c = reinterpret_cast<const uint8_t*>(kPreviewCtor);
+                                for (int i = 0; i < 0x30 && !bytesOk; ++i)
+                                    bytesOk = c[i] == 0xC7 && c[i + 1] == 0x00 && c[i + 2] == 0x18 && c[i + 3] == 0xF1 &&
+                                              c[i + 4] == 0x89 && c[i + 5] == 0x00;
+                                const uint8_t* m = reinterpret_cast<const uint8_t*>(kModelBuild);
+                                bytesOk = bytesOk && m[0] == 0x55 && m[1] == 0x8B && m[2] == 0xEC && m[3] == 0x6A && m[4] == 0xFF;
+                            }
+                            __except (EXCEPTION_EXECUTE_HANDLER)
+                            {
+                                bytesOk = false;
+                            }
+                            Log(L"[DBPREVIEW] env on: ogreApi=%d exeBytes=%d RenderGlobals named=0x%08X expected=0x%08X\n",
+                                apiOk ? 1 : 0, bytesOk ? 1 : 0, static_cast<unsigned>(named),
+                                static_cast<unsigned>(kRenderGlobalsSlot));
+                            if (!apiOk || !bytesOk || named != kRenderGlobalsSlot)
+                            {
+                                Log(L"[DBPREVIEW] preconditions failed; spike off\n");
+                                g_Mode = 0;
+                            }
+                        }
+                    }
+                    return g_Mode == 1 && !g_Faulted;
+                }
+
+                void LogGlobals(const wchar_t* when)
+                {
+                    __try
+                    {
+                        const uintptr_t g = Globals();
+                        Log(L"[DBPREVIEW] %ls: g=0x%08X sm=0x%08X cam=0x%08X vp20=0x%08X vp24=0x%08X rt=0x%08X "
+                            L"node=0x%08X ent=0x%08X light=0x%08X fade=0x%08X spinGate=%u cloak=%u\n",
+                            when, static_cast<unsigned>(g), g ? At<unsigned>(g + kSceneManagerOff) : 0u,
+                            g ? At<unsigned>(g + kCameraOff) : 0u, g ? At<unsigned>(g + kScopeViewportOff) : 0u,
+                            g ? At<unsigned>(g + kPreviewViewportOff) : 0u, At<unsigned>(kSniperTexTarget),
+                            At<unsigned>(kNode), At<unsigned>(kEntity), At<unsigned>(kLight), At<unsigned>(kFade),
+                            At<uint8_t>(kSpinGate), At<uint8_t>(kCloak));
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        Log(L"[DBPREVIEW] %ls: globals unreadable\n", when);
+                    }
+                }
+
+                DWORD OpenSeh(void* panel)
+                {
+                    __try
+                    {
+                        const uintptr_t g = Globals();
+                        void* rt = At<void*>(kSniperTexTarget);
+                        void* cam = g ? At<void*>(g + kCameraOff) : nullptr;
+                        if (!g || !rt || !cam || At<void*>(g + kPreviewViewportOff))
+                        {
+                            Log(L"[DBPREVIEW] open skipped: g=0x%08X rt=0x%08X cam=0x%08X vp24 busy=%d\n",
+                                static_cast<unsigned>(g), static_cast<unsigned>(reinterpret_cast<uintptr_t>(rt)),
+                                static_cast<unsigned>(reinterpret_cast<uintptr_t>(cam)),
+                                g && At<void*>(g + kPreviewViewportOff) ? 1 : 0);
+                            return 0;
+                        }
+                        void* memory = g_GameNew(kPreviewSize);
+                        if (!memory)
+                            return 0;
+                        std::memset(memory, 0, kPreviewSize);
+                        g_View = reinterpret_cast<FnCtor>(kPreviewCtor)(memory, "OpenShimDatabase_Preview", kRect.x, kRect.y,
+                                                                         kRect.w, kRect.h, Shell::kControlFlags, panel);
+                        Log(L"[DBPREVIEW] ctor 0x%08X -> view=0x%08X\n", static_cast<unsigned>(kPreviewCtor),
+                            static_cast<unsigned>(reinterpret_cast<uintptr_t>(g_View)));
+                        if (!g_View)
+                            return 0;
+                        reinterpret_cast<FnSetViewType>(kSetViewType)(g_View, 4);
+                        reinterpret_cast<FnBind>(kBindMaterialTexture)(g_View, "scope", "SniperTex");
+                        void** vtable = *reinterpret_cast<void***>(rt);
+                        void* vp = reinterpret_cast<FnAddViewport>(vtable[0x2C / 4])(rt, cam, 0, 0.0f, 0.0f, 1.0f, 1.0f);
+                        *reinterpret_cast<void**>(g + kPreviewViewportOff) = vp;
+                        g_Ours = vp != nullptr;
+                        char rtName[96] = {};
+                        RttiName(rt, rtName, sizeof(rtName));
+                        Log(L"[DBPREVIEW] addViewport rt=0x%08X (%hs) cam=0x%08X -> vp=0x%08X\n",
+                            static_cast<unsigned>(reinterpret_cast<uintptr_t>(rt)), rtName,
+                            static_cast<unsigned>(reinterpret_cast<uintptr_t>(cam)),
+                            static_cast<unsigned>(reinterpret_cast<uintptr_t>(vp)));
+                        if (vp)
+                        {
+                            const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+                            g_SetClear(vp, true, 3);
+                            g_SetColour(vp, black);
+                            g_SetOverlays(vp, false);
+                            g_SetShadows(vp, false);
+                            g_SetMask(vp, 8);
+                        }
+                        g_BzrFn_AddChild(panel, g_View, 0);
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                void Open(void* panel)
+                {
+                    g_View = nullptr;
+                    g_Ours = false;
+                    g_Ticks = 0;
+                    if (!Enabled())
+                        return;
+                    LogGlobals(L"before open");
+                    if (const DWORD code = OpenSeh(panel))
+                        Fault(L"open", code);
+                    LogGlobals(L"after open");
+                }
+
+                DWORD ShowSeh(const char* stem)
+                {
+                    __try
+                    {
+                        reinterpret_cast<FnModelBuild>(kModelBuild)(stem, 10.0f, 10.0f, 10.0f);
+                        // No cloak fade object: the stock update then only spins.
+                        *reinterpret_cast<uint8_t*>(kCloak) = 0;
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                // Mesh stem as the stock picker builds it: the ODF stem, cut to 8.
+                void ShowUnit(const std::string& odf)
+                {
+                    if (!g_View || !g_Ours || !Enabled())
+                        return;
+                    const std::string stem = odf.substr(0, 8);
+                    const bool exists = DesReader::ResourceExists(stem + ".mesh");
+                    Log(L"[DBPREVIEW] select odf=%hs stem=%hs mesh exists=%d; FUN_0067D180(0x%08X)\n", odf.c_str(),
+                        stem.c_str(), exists ? 1 : 0, static_cast<unsigned>(kModelBuild));
+                    if (!exists)
+                        return;
+                    if (const DWORD code = ShowSeh(stem.c_str()))
+                        Fault(L"model build", code);
+                    LogGlobals(L"after model build");
+                }
+
+                DWORD TickSeh()
+                {
+                    __try
+                    {
+                        reinterpret_cast<FnVoid>(kPreviewUpdate)();
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                void Tick()
+                {
+                    if (!g_Ours || !Enabled())
+                        return;
+                    if (const DWORD code = TickSeh())
+                    {
+                        Fault(L"per-frame update", code);
+                        return;
+                    }
+                    if (++g_Ticks == 1 || g_Ticks == 120)
+                        Log(L"[DBPREVIEW] per-frame update 0x%08X tick %u ok\n", static_cast<unsigned>(kPreviewUpdate),
+                            g_Ticks);
+                }
+
+                // Replicates the stock screen dtor FUN_007AA360 (never called with a fake this).
+                DWORD TeardownSeh()
+                {
+                    __try
+                    {
+                        const uintptr_t g = Globals();
+                        if (g && At<void*>(g + kPreviewViewportOff))
+                        {
+                            void* vp = At<void*>(g + kPreviewViewportOff);
+                            void* rt = At<void*>(kSniperTexTarget);
+                            const int z = g_GetZ(vp);
+                            void** vtable = *reinterpret_cast<void***>(rt);
+                            reinterpret_cast<FnRemoveViewport>(vtable[0x40 / 4])(rt, z);
+                            *reinterpret_cast<void**>(g + kPreviewViewportOff) = nullptr;
+                            Log(L"[DBPREVIEW] teardown: removed vp z=%d\n", z);
+                        }
+                        void* fade = At<void*>(kFade);
+                        if (fade)
+                        {
+                            reinterpret_cast<FnFadeDtor>((*reinterpret_cast<void***>(fade))[0])(fade, 1);
+                            *reinterpret_cast<void**>(kFade) = nullptr;
+                        }
+                        void* node = At<void*>(kNode);
+                        if (node)
+                        {
+                            reinterpret_cast<FnNodeDestroy>(kNodeDestroy)(node);
+                            reinterpret_cast<FnVoid>(kPreviewCleanup)();
+                            *reinterpret_cast<void**>(kNode) = nullptr;
+                            Log(L"[DBPREVIEW] teardown: FUN_0067D090(node 0x%08X) + FUN_0067D0C0\n",
+                                static_cast<unsigned>(reinterpret_cast<uintptr_t>(node)));
+                        }
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                void Teardown(const wchar_t* why)
+                {
+                    if (!g_Ours)
+                        return;
+                    g_Ours = false;
+                    g_View = nullptr;  // a child of the panel: the shell destroys it
+                    Log(L"[DBPREVIEW] teardown (%ls) after %u ticks\n", why, g_Ticks);
+                    if (const DWORD code = TeardownSeh())
+                        Fault(L"teardown", code);
+                    LogGlobals(L"after teardown");
+                }
+            }
+
             // ---- detail pane ----
 
             void ShowBriefingPage(int requested)
@@ -496,6 +828,11 @@ namespace BZROpenShim
                 SetLabel(g_State.ui.detailTitle, entry.caption);
                 SetDetailText(Db::FormatUnitDetail(detail, LocalizedLabels()));
                 ShowImage(unit.Get("icon"));
+                if (Spike::g_Ours)
+                {
+                    SetShown(g_State.ui.image, false);
+                    Spike::ShowUnit(odfName);
+                }
             }
 
             void ShowMission(const Entry& entry)
@@ -805,6 +1142,7 @@ namespace BZROpenShim
                 s.ui.detailTitle = Shell::AddLabel(panel, panel, "OpenShimDatabase_DetailTitle", kDetailTitleRect, "");
                 s.ui.image = Shell::AddPanel(panel, panel, "OpenShimDatabase_Image", kImageRect, nullptr,
                                              Shell::kControlFlags);
+                Spike::Open(panel);
                 s.ui.text = MakeTextBlock(panel);
                 s.ui.pageLabel = Shell::AddLabel(panel, panel, "OpenShimDatabase_PageLabel", kPageLabelRect, "");
                 s.ui.pagePrev = Shell::AddButton(panel, panel, "OpenShimDatabase_PagePrev", kPagePrevRect,
@@ -832,6 +1170,7 @@ namespace BZROpenShim
             // The widgets die with the screen; drop every pointer to them.
             void OnDatabaseClosed(void*)
             {
+                Spike::Teardown(L"screen closed");
                 g_State = State();
             }
 
@@ -880,6 +1219,11 @@ namespace BZROpenShim
                 Log(L"[DATABASE] DATABASE button added to Single Player\n");
             }
 
+            void OnDatabaseTick(void*)
+            {
+                Spike::Tick();
+            }
+
             bool ShouldEnable()
             {
                 return !EnvFlagEnabled("OPENSHIM_DISABLE_DATABASE");
@@ -922,7 +1266,7 @@ namespace BZROpenShim
                 return;
             }
             if (!Shell::RegisterScreen({ Shell::kDatabaseScreenId, "Database", &BuildDatabaseScreen,
-                                         &OnDatabaseClosed }))
+                                         &OnDatabaseClosed, &OnDatabaseTick }))
             {
                 Log(L"[DATABASE] shell screens unavailable; Database off\n");
                 return;
