@@ -2677,6 +2677,35 @@ RtsRadarPings = 0
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Artillery Range".
 RtsArtilleryRange = 1
+
+; Range rings for selected units (rts_markers.cpp; Docs/RTS_RANGE_RINGS.md). Each ring shows
+; only for your own selected units, for as long as they are selected, and never for the
+; vehicle you pilot. Local draw only: no game object, no network traffic, so it is safe in
+; multiplayer.
+;
+; RtsWeaponRange: an orange ring at the direct-fire reach (shotSpeed x lifeSpan) of each
+; selected unit's cannon-class weapon. Homing and guided weapons are skipped. The artillery
+; ring above is separate and unchanged.
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Weapon Range".
+RtsWeaponRange = 1
+;
+; RtsRadarRange: a mint ring at [CraftClass] rangeScan for each selected unit that has one.
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Radar Range".
+RtsRadarRange = 0
+;
+; RtsMineRange: lime rings at the trigger radius of your team's proximity mines within
+; searchRadius + 20 m of a selected unit (the nearest 24).
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Mine Range".
+RtsMineRange = 0
+;
+; RtsRangeLabels: writes WEAPON RANGE / RADAR RANGE / MINE TRIGGER letter by letter along
+; each ring, in the ring's colour, on the side facing you. Needs a range ring on.
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Range Labels".
+RtsRangeLabels = 1
 ; RTS command extras (rts_commands.cpp; Docs/RTS_COMMANDS.md). All five rows
 ; are on the OpenShim Settings page under Controls > RTS Commands. Orders go
 ; through the stock per-unit calls the unit menu itself uses.

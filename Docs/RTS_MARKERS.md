@@ -10,7 +10,9 @@ Ground rings that show RTS-style feedback for the local player. There are two fe
   - a blue max-range ring around every selected own-team howitzer (Howitzer vtables) that carries a gravity-ordnance cannon slot (at most 16 units); never around the piloted vehicle, whose mortar arc the laser sight already draws;
   - a 3 m ring at the aim point, green when at least one of those units can reach it and red when none can.
 
-Both features are local visuals only:
+The native range rings for selected units (direct-fire weapon, radar, own-team mine trigger, and the labels on them) are documented in `Docs/RTS_RANGE_RINGS.md`: `[Gameplay] RtsWeaponRange` (default on), `RtsRadarRange` and `RtsMineRange` (off), `RtsRangeLabels` (on). They use slots 167-222 of this pool.
+
+Both features above are local visuals only:
 
 - Nothing is sent, saved or written to the engine.
 - They have no network gate; the rings are shim-owned Ogre ManualObjects.
@@ -184,7 +186,7 @@ Where the code lives:
 
 ### Pool slots
 
-The pool grows to `RtsMarkers::kSlotCount` = 103; slots 0-22 keep the layout above.
+The pool grows to 103 slots with the placement aids and attack marks, 167 with the queued-order chain and 223 (`RtsMarkers::kSlotCount`) with the range rings; slots 0-22 keep the layout above.
 
 | Slots | Use |
 |---|---|
@@ -193,6 +195,12 @@ The pool grows to `RtsMarkers::kSlotCount` = 103; slots 0-22 keep the layout abo
 | 55-70 | waypoint lines (pending order) |
 | 71-86 | target rings (current order's object) |
 | 87-102 | attack marks (under-attack rings) |
+| 103-150 | queued-order lines (48), then queued-order target rings (16): `Docs/RTS_ORDER_QUEUE.md` |
+| 167-182 | direct-fire weapon rings (`RtsWeaponRange`) |
+| 183-198 | radar rings (`RtsRadarRange`) |
+| 199-222 | mine trigger rings (`RtsMineRange`) |
+
+`kSlotCount` is 223 with the range rings. See `Docs/RTS_RANGE_RINGS.md`.
 
 A line is the ring strip's other shape: a triangle strip sampled every 4 m (`LineSegmentsFor`, at most 96 segments, the ring vertex budget), each pair lifted `kLift` above `Terrain::HeightAt`. It uses the ring material, `g_PoolFailed` and the rebuild key (now 10 floats: centre, radius or -1 for a line, colour, end x/z).
 

@@ -418,6 +418,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # artillery range. Write nothing the game reads. Default on by design.
     "Gameplay/RtsCommandPings",
     "Gameplay/RtsArtilleryRange",
+    "Gameplay/RtsWeaponRange",
+    "Gameplay/RtsRangeLabels",
 
     # RTS command extras: nothing happens until the player presses one of the
     # RTS keys or picks a unit-menu entry, and then only the stock per-unit
@@ -632,6 +634,10 @@ $shippingPolicyChecks = @{
     "Gameplay/GroupStrip" = "1"
     "Gameplay/RtsCommandPings" = "1"
     "Gameplay/RtsArtilleryRange" = "1"
+    "Gameplay/RtsWeaponRange" = "1"
+    "Gameplay/RtsRadarRange" = "0"
+    "Gameplay/RtsMineRange" = "0"
+    "Gameplay/RtsRangeLabels" = "1"
     "Gameplay/RtsRemoteTarget" = "1"
     "Gameplay/RtsSmartCommandMenu" = "1"
     "Gameplay/RtsSmartRepairReload" = "1"
