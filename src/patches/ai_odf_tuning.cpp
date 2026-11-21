@@ -3112,6 +3112,7 @@ namespace BZROpenShim
             InstallRtsCommandsIfPossible();
             InstallRtsOrderQueueIfPossible();
             InstallRtsBuildQueueIfPossible();
+            InstallUnitLoadoutsIfPossible();
             InstallRtsPlacementIfPossible();
         }
 

@@ -2115,6 +2115,9 @@ namespace BZROpenShim::Hooks
             // Shared with AutoGroupNewUnits (auto_group_new_units.cpp), which
             // checks its own setting.
             AutoGroupOnUnitBuilt(producer, built);
+            // UnitLoadouts fits the weapons charged at StartBuild; it checks
+            // its own state.
+            UnitLoadoutsOnUnitBuilt(producer, built);
             return built;
         }
 

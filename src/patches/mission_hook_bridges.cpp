@@ -275,6 +275,7 @@ namespace BZROpenShim
         ResetTurretAttackOrders();
         ResetDaywreckerDefence();
         ResetProducerRallyPoints();
+        ResetUnitLoadouts();
         ResetAutoGroupNewUnits();
         ResetOffenseOverflow();
         ResetGroupStrip();
