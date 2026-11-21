@@ -136,7 +136,7 @@ return {
     {
         const std::string sections = R"LUA(    assetSets = {
         renderer = { source = "openshim\\renderer\\enhanced", destination = "openshim\\renderer\\enhanced", sha256 = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", files = 1 },
-        customWidgets = { source = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", destination = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", files = 1 },
+        customWidgets = { source = "BZ_ASSETS_CORE\\common\\ui\\CustomWidgets", destination = "openshim\\ui", sha256 = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", files = 1 },
     },
     assetFiles = {
         { set = "renderer", path = "resources.version", sha256 = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", size = 2 },

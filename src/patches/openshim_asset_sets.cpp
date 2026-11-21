@@ -423,6 +423,21 @@ namespace BZROpenShim
                 return Outcome(OpenShimAssetSyncResult::Deferred, "could not write marker", installed);
             return Outcome(OpenShimAssetSyncResult::Installed, "", installed);
         }
+
+        // The widgets used to live in kOpenShimLegacyWidgetsDir. Once the set
+        // is current somewhere else, OpenShim's copies there are stale
+        // duplicates of the same bare names, so they go. A manifest that still
+        // names the legacy folder as its destination is left alone.
+        uint32_t MigrateLegacyWidgets(const fs::path& gameDir, const OpenShimAssetSet& set)
+        {
+            if (Lower(set.destination) == Lower(kOpenShimLegacyWidgetsDir))
+                return 0;
+            std::vector<std::string> owned;
+            owned.reserve(set.entries.size());
+            for (const auto& entry : set.entries)
+                owned.push_back(entry.path);
+            return RemoveOpenShimLegacyWidgetFiles(gameDir / ToPath(kOpenShimLegacyWidgetsDir), owned);
+        }
     }
 
     bool ParseOpenShimAssetSets(const std::string& text,
@@ -516,7 +531,13 @@ namespace BZROpenShim
         const fs::path destination = gameDir / ToPath(set.destination);
 
         if (ReadMarker(destination / markerName) == set.sha256)
-            return Outcome(OpenShimAssetSyncResult::Current, "");
+        {
+            OpenShimAssetSyncOutcome current = Outcome(OpenShimAssetSyncResult::Current, "");
+            // A file locked during an earlier migration is retried here.
+            if (set.name == kWidgetsSet)
+                current.legacyFilesRemoved = MigrateLegacyWidgets(gameDir, set);
+            return current;
+        }
 
         if (ComputeOpenShimAssetSetHash(set.entries) != set.sha256)
             return Outcome(OpenShimAssetSyncResult::Refused, "declared set hash does not match its file list");
@@ -531,6 +552,39 @@ namespace BZROpenShim
         // its installed name; a payload-named source cannot be validated as is.
         if (set.name == kRendererSet)
             return SyncRenderer(source, destination, set, validator);
-        return SyncWidgets(source, destination, set);
+        OpenShimAssetSyncOutcome outcome = SyncWidgets(source, destination, set);
+        if (outcome.result == OpenShimAssetSyncResult::Installed)
+            outcome.legacyFilesRemoved = MigrateLegacyWidgets(gameDir, set);
+        return outcome;
+    }
+
+    uint32_t RemoveOpenShimLegacyWidgetFiles(const std::filesystem::path& legacyDir,
+                                             const std::vector<std::string>& ownedNames)
+    {
+        std::error_code ec;
+        if (!fs::is_directory(legacyDir, ec))
+            return 0;
+
+        uint32_t removed = 0;
+        auto removeOne = [&](const fs::path& file)
+        {
+            std::error_code fileEc;
+            if (fs::is_regular_file(file, fileEc) && fs::remove(file, fileEc) && !fileEc)
+                ++removed;
+        };
+        for (const std::string& name : ownedNames)
+        {
+            // Names come from a validated manifest or a fixed list; anything
+            // that is not a plain relative path is ignored rather than trusted.
+            if (!IsSafeRelativePath(name))
+                continue;
+            removeOne(legacyDir / ToPath(name));
+        }
+        removeOne(legacyDir / OpenShimAssetSetMarkerName(kWidgetsSet));
+
+        ec.clear();
+        if (fs::is_empty(legacyDir, ec) && !ec)
+            fs::remove(legacyDir, ec);
+        return removed;
     }
 }

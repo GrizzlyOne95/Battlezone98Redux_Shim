@@ -82,7 +82,7 @@ try {
         Save-AuditFile (Join-Path $GameRoot $relative)
     }
     if($ShimRepo){
-        foreach($pair in @(@('resources\renderer\enhanced','openshim\renderer\enhanced'),@('resources\ui\custom_widgets','BZ_ASSETS_CORE\common\ui\CustomWidgets'))){
+        foreach($pair in @(@('resources\renderer\enhanced','openshim\renderer\enhanced'),@('resources\ui\custom_widgets','openshim\ui'),@('resources\ui\custom_widgets','BZ_ASSETS_CORE\common\ui\CustomWidgets'))){
             foreach($file in Get-ChildItem -LiteralPath (Join-Path $ShimRepo $pair[0]) -File){Save-AuditFile (Join-Path (Join-Path $GameRoot $pair[1]) $file.Name)}
         }
     }

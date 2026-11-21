@@ -67,11 +67,14 @@ function New-GameFixture {
     Write-Fixture $Root "openshim\renderer\enhanced\openshim_enhanced_base.program" "program"
     Write-Fixture $Root "openshim\OpenShimAssets.ini" "[Assets]"
 
-    # Widget tiles beside a file that is not the installer's.
-    foreach ($tile in @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png")) {
-        Write-Fixture $Root "BZ_ASSETS_CORE\common\ui\CustomWidgets\$tile" "png"
+    # Widget tiles beside a file that is not the installer's, in the current
+    # folder and in the legacy one older releases used.
+    foreach ($uiDir in @("openshim\ui", "BZ_ASSETS_CORE\common\ui\CustomWidgets")) {
+        foreach ($tile in @("uiline.png", "uiplate.png", "uibtn.png", "uibtnhv.png", "odyssey.ogv", "openshim_widgets.sha256")) {
+            Write-Fixture $Root "$uiDir\$tile" "png"
+        }
+        Write-Fixture $Root "$uiDir\player_widget.png" "png"
     }
-    Write-Fixture $Root "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png" "png"
 
     # Player configuration, its backups, the installer's canonical copy, the
     # network config family, logs, and the updater status file.
@@ -156,9 +159,12 @@ try {
         "Launcher\d3d9.dll",
         "scripts\patches.json", "scripts\patches.json.previous", "scripts\patches.json.bak-20260101-000000",
         "openshim\renderer\enhanced\resources.version", "openshim\renderer\enhanced", "openshim\renderer",
-        "openshim\OpenShimAssets.ini", "openshim",
+        "openshim\OpenShimAssets.ini",
+        "openshim\ui\uiline.png", "openshim\ui\uiplate.png", "openshim\ui\uibtn.png", "openshim\ui\uibtnhv.png",
+        "openshim\ui\odyssey.ogv", "openshim\ui\openshim_widgets.sha256",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\uiline.png", "BZ_ASSETS_CORE\common\ui\CustomWidgets\uiplate.png",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\uibtn.png", "BZ_ASSETS_CORE\common\ui\CustomWidgets\uibtnhv.png",
+        "BZ_ASSETS_CORE\common\ui\CustomWidgets\odyssey.ogv", "BZ_ASSETS_CORE\common\ui\CustomWidgets\openshim_widgets.sha256",
         "openshim.ini.canonical", "openshim_update.status"
     )
     foreach ($relative in $gone) {
@@ -170,6 +176,7 @@ try {
         "Launcher\BZLauncher.exe",
         "scripts\stock_mission.lua", "scripts",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png", "BZ_ASSETS_CORE\common\ui\CustomWidgets",
+        "openshim\ui\player_widget.png", "openshim\ui", "openshim",
         "openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
         "net.ini", "net.ini.bak-20260101-000000", "net.ini.previous",
         "logs\openshim.log", "logs\openshim_crash.log", "logs\openshim_crash_20261015_150000.dmp",
@@ -181,6 +188,17 @@ try {
     }
     Check ($result.Output -match "KEEPING .*winmm\.dll\.bak-20260102-000000") "the foreign backup is reported as kept"
     Check ($result.Output -match "left in place") "the closing note says what was left"
+
+    # --- UI folders holding only OpenShim's files are removed, openshim\ too ------
+    New-GameFixture $game
+    Remove-Item -LiteralPath (Join-Path $game "openshim\ui\player_widget.png") -Force
+    Remove-Item -LiteralPath (Join-Path $game "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png") -Force
+    $result = Invoke-Uninstaller -GameDir $game
+    Check $result.Ok "owned-only UI run exits cleanly: $($result.Output)"
+    foreach ($relative in @("openshim\ui", "openshim", "BZ_ASSETS_CORE\common\ui\CustomWidgets")) {
+        Check (-not (Test-Path -LiteralPath (Join-Path $game $relative))) "owned-only UI run removed: $relative"
+    }
+    Check (Test-Path -LiteralPath (Join-Path $game "BZ_ASSETS_CORE\common\ui")) "owned-only UI run keeps the game's ui folder"
 
     # --- purge run also removes the player ini and its backups -------------------
     New-GameFixture $game
@@ -222,7 +240,7 @@ try {
     foreach ($relative in @(
         "net.ini", "net.ini.previous", "net.ini.bak-20260101-000000",
         "logs\BZLogger.txt", "logs\other_mod.log", "logs\openshim_custom.mod",
-        "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png"
+        "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png", "openshim\ui\player_widget.png"
     )) {
         Check (Test-Path -LiteralPath (Join-Path $game $relative)) "full-clean preserved: $relative"
     }

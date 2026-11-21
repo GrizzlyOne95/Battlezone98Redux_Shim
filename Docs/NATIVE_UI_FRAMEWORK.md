@@ -198,7 +198,7 @@ Rules learned building Career:
 
 ### Panel art
 
-The engine stretches a texture to its widget, so each screen gets its own centre panel painted at 1440x1080 by `resources/ui/custom_widgets/mkscreens.py`. The panels are drawn from geometry in the stock palette, with no stock pixels copied, and are transparent outside the frame like the stock ones. The boxes in the script are the layout contract with the screen's constants. Panels ship with the other UI files (`Deploy-OpenShim.ps1`, installer, uninstaller) into `BZ_ASSETS_CORE/common/ui/CustomWidgets/`. A screen whose panel is missing falls back to the bare stock background rather than showing a missing texture.
+The engine stretches a texture to its widget, so each screen gets its own centre panel painted at 1440x1080 by `resources/ui/custom_widgets/mkscreens.py`. The panels are drawn from geometry in the stock palette, with no stock pixels copied, and are transparent outside the frame like the stock ones. The boxes in the script are the layout contract with the screen's constants. Panels ship with the other UI files (`Deploy-OpenShim.ps1`, installer, uninstaller) into `openshim/ui/`, which `ShellScreens::EnsureOpenShimUiResourceLocation` registers with Ogre (group `General`) from the screen factory detour, so the bare texture names resolve there. Older releases used `BZ_ASSETS_CORE/common/ui/CustomWidgets/`; `IsTextureDeployed` still accepts that folder for one release, and the installers and asset sync remove OpenShim's own files from it (see `Docs/UPDATE_ASSET_SETS.md`). A screen whose panel is missing falls back to the bare stock background rather than showing a missing texture.
 
 ### Career
 

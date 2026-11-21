@@ -52,7 +52,9 @@ $pairs = @(
 $renderSourceDir = Join-Path $repoRoot 'resources\renderer\enhanced'
 $renderTargetDir = Join-Path $GameDir 'openshim\renderer\enhanced'
 $uiSourceDir = Join-Path $repoRoot 'resources\ui\custom_widgets'
-$uiTargetDir = Join-Path $GameDir 'BZ_ASSETS_CORE\common\ui\CustomWidgets'
+$uiTargetDir = Join-Path $GameDir 'openshim\ui'
+# Where the UI images lived before openshim\ui; OpenShim's copies there are removed.
+$uiLegacyDir = Join-Path $GameDir 'BZ_ASSETS_CORE\common\ui\CustomWidgets'
 
 foreach ($pair in $pairs) {
     if (-not (Test-Path -LiteralPath $pair.Source)) {
@@ -215,6 +217,16 @@ foreach ($name in $uiFiles) {
     }
 }
 Write-Host ("UI resources deployed: {0} files" -f $uiFiles.Count)
+# Stale copies under the old bare names would shadow or confuse the new ones.
+# Only OpenShim's own files go; the folder goes only if that empties it.
+if (Test-Path -LiteralPath $uiLegacyDir -PathType Container) {
+    foreach ($name in @($uiFiles) + 'openshim_widgets.sha256') {
+        Remove-Item -LiteralPath (Join-Path $uiLegacyDir $name) -Force -ErrorAction SilentlyContinue
+    }
+    if (-not (Get-ChildItem -LiteralPath $uiLegacyDir -Force | Select-Object -First 1)) {
+        Remove-Item -LiteralPath $uiLegacyDir -Force
+    }
+}
 
 Write-Host ""
 Write-Host "patches.json verified: all $(@($repoJson.patches).Count + @($repoJson.globals).Count + @($repoJson.static_pointers).Count) declared names present."

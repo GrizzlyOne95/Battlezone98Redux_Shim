@@ -139,8 +139,10 @@ try {
     $targets = @('winmm.dll', 'bzloader.dll', 'plugins/openshim.dll', 'scripts/patches.json', 'openshim/OpenShimAssets.ini')
     $targets += Get-ChildItem -LiteralPath (Join-Path $repoRoot 'resources/renderer/enhanced') -File |
         ForEach-Object { 'openshim/renderer/enhanced/' + $_.Name }
+    # Deploy writes openshim/ui and removes OpenShim's copies from the legacy
+    # CustomWidgets folder, so both are snapshotted for the restore.
     $targets += Get-ChildItem -LiteralPath (Join-Path $repoRoot 'resources/ui/custom_widgets') -File |
-        ForEach-Object { 'BZ_ASSETS_CORE/common/ui/CustomWidgets/' + $_.Name }
+        ForEach-Object { 'openshim/ui/' + $_.Name; 'BZ_ASSETS_CORE/common/ui/CustomWidgets/' + $_.Name }
     $targets += Get-ChildItem -LiteralPath $GameRoot -File |
         Where-Object { $_.Extension -in @('.cfg', '.ini') } | ForEach-Object { $_.Name }
     if ($TerrainSurfaceManifest) {
