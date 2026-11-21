@@ -29,7 +29,6 @@
 #include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "shell_screens.h"
-#include "ui_decor.h"
 
 #include <array>
 #include <cstdio>
@@ -78,30 +77,46 @@ namespace BZROpenShim
             const Shell::Rect kDatabaseButtonRect{ 535.5f, 4.0f, 369.0f, 68.0f };
 
             // ---- Database screen layout (1440x1080 design space) ----
-            const Shell::Rect kTitleRect{ 470.0f, 88.0f, 500.0f, 56.0f };
-            const Shell::Rect kLeftFrame{ 50.0f, 160.0f, 570.0f, 830.0f };
-            const Shell::Rect kRightFrame{ 640.0f, 160.0f, 750.0f, 830.0f };
+            // These rects mirror DATABASE_LAYOUT in
+            // resources/ui/custom_widgets/mkscreens.py, which paints the
+            // boxes, tab slots, row wells and footer slots into
+            // osh_database_center.png. Change both together.
+            constexpr const char* kPanelTexture = "osh_database_center.png";
+            const Shell::Rect kTitleRect{ 470.0f, 132.0f, 500.0f, 56.0f };
             constexpr size_t kMaxTabs = 6;
-            constexpr float kTabX = 66.0f, kTabY = 178.0f, kTabW = 210.0f, kTabH = 56.0f, kTabPitch = 66.0f;
-            constexpr size_t kRowsPerPage = 16;
-            constexpr float kRowX = 290.0f, kRowY = 178.0f, kRowW = 316.0f, kRowH = 40.0f, kRowPitch = 44.0f;
-            constexpr size_t kMaxRowChars = 26;
-            constexpr size_t kMaxTabChars = 17;  // kMaxRowChars scaled by kTabW / kRowW
-            const Shell::Rect kListPrevRect{ 290.0f, 918.0f, 150.0f, 50.0f };
-            const Shell::Rect kListNextRect{ 456.0f, 918.0f, 150.0f, 50.0f };
-            const Shell::Rect kListPageRect{ 66.0f, 926.0f, 210.0f, 36.0f };
-            const Shell::Rect kDetailTitleRect{ 660.0f, 172.0f, 710.0f, 44.0f };
-            const Shell::Rect kImageRect{ 660.0f, 224.0f, 710.0f, 400.0f };
-            const Shell::Rect kTextRect{ 660.0f, 636.0f, 710.0f, 270.0f };
-            const Shell::Rect kPagePrevRect{ 660.0f, 918.0f, 150.0f, 50.0f };
-            const Shell::Rect kPageNextRect{ 1220.0f, 918.0f, 150.0f, 50.0f };
-            const Shell::Rect kPageLabelRect{ 830.0f, 926.0f, 370.0f, 36.0f };
+            constexpr float kTabX = 228.0f, kTabY = 236.0f, kTabW = 150.0f, kTabH = 40.0f, kTabPitch = 160.0f;
+            constexpr size_t kRowsPerPage = 14;
+            constexpr float kRowX = 244.0f, kRowY = 300.0f, kRowW = 368.0f, kRowH = 36.0f, kRowPitch = 40.0f;
+            constexpr size_t kMaxRowChars = 30;  // fits the 368 px well
+            constexpr size_t kMaxTabChars = 12;  // fits the 150 px slot
+            const Shell::Rect kListPrevRect{ 244.0f, 872.0f, 110.0f, 36.0f };
+            const Shell::Rect kListNextRect{ 518.0f, 872.0f, 110.0f, 36.0f };
+            const Shell::Rect kListPageRect{ 358.0f, 872.0f, 156.0f, 36.0f };
+            const Shell::Rect kDetailTitleRect{ 660.0f, 292.0f, 536.0f, 36.0f };
+            // 260x260 square, reserved for a later 3D preview. Pictures are
+            // letterboxed inside it (see ShowImage).
+            const Shell::Rect kImageRect{ 798.0f, 346.0f, 260.0f, 260.0f };
+            // Loading-screen pictures are wide. UNVERIFIED aspect (no size
+            // query exists); 16:9 is assumed, so a 4:3 picture is slightly
+            // squeezed until the real size is read.
+            constexpr float kPictureAspect = 16.0f / 9.0f;
+            const Shell::Rect kTextRect{ 660.0f, 618.0f, 536.0f, 240.0f };
+            const Shell::Rect kPagePrevRect{ 660.0f, 872.0f, 110.0f, 36.0f };
+            const Shell::Rect kPageNextRect{ 1086.0f, 872.0f, 110.0f, 36.0f };
+            const Shell::Rect kPageLabelRect{ 774.0f, 872.0f, 308.0f, 36.0f };
             const Shell::Rect kBackRect{ 0.0f, 0.0f, 342.0f, 77.0f };
             constexpr float kBackTextOffset = 28.0f;
-            const Shell::ButtonSkin kTabSkin{ "MultiplayerModeButton_off.png", "MultiplayerModeButton_over.png",
-                                              "MultiplayerModeButton_on.png" };
-            // List rows show nothing at rest, a highlight on hover (stock option slots).
-            const Shell::ButtonSkin kRowSkin{ nullptr, "optionhv.png", "optionck.png" };
+            // Selected tab / row highlight: a tinted quad behind the buttons
+            // (SLOT_PRESS and SLOT_HOVER of mkscreens.py).
+            constexpr const char* kHighlightTexture = "osh_preview_white.png";
+            constexpr uint32_t kTabHighlightColour = 0xFF007F00;
+            constexpr uint32_t kRowHighlightColour = 0xFF005400;
+            // Fallback skins when the painted art is not deployed.
+            const Shell::ButtonSkin kStockTabSkin{ "MultiplayerModeButton_off.png", "MultiplayerModeButton_over.png",
+                                                   "MultiplayerModeButton_on.png" };
+            const Shell::ButtonSkin kStockRowSkin{ nullptr, "optionhv.png", "optionck.png" };
+            // Flat hover / click skins over slots and wells painted in the panel.
+            const Shell::ButtonSkin kToolSkin{ nullptr, "osh_tool_hv.png", "osh_tool_ck.png" };
 
             // cUI_ScrollingTextBlock (ctor 0x007CD8D0), as lobby_briefing.cpp.
             constexpr size_t kScrollingTextBlockSize = 0x295C;
@@ -154,6 +169,8 @@ namespace BZROpenShim
                 void* listPrev = nullptr;
                 void* listNext = nullptr;
                 void* listPage = nullptr;
+                void* tabQuad = nullptr;
+                void* rowQuad = nullptr;
                 void* detailTitle = nullptr;
                 void* image = nullptr;
                 void* text = nullptr;
@@ -366,6 +383,10 @@ namespace BZROpenShim
                 {
                     g_BzrFn_SetTextureOff(s.ui.image, image.c_str());
                     s.loadedImage = image;
+                    // Letterbox inside the square so the picture is never stretched.
+                    const float h = kImageRect.w / kPictureAspect;
+                    Shell::SetPanelRectColor(s.ui.image,
+                        { kImageRect.x, kImageRect.y + (kImageRect.h - h) * 0.5f, kImageRect.w, h }, 0xFFFFFFFF);
                 }
                 SetShown(s.ui.image, true);
             }
@@ -562,18 +583,46 @@ namespace BZROpenShim
 
             // ---- list ----
 
+            // Moves a highlight quad onto `rect`, or hides it. The quad is
+            // decoration: it never takes input.
+            // True when the quad is shown; false (no quad, nothing selected, or
+            // a renderer SetPanelRectColor does not support) lets the caller
+            // mark the selection with a "> " prefix instead.
+            bool PlaceHighlight(void* quad, const Shell::Rect* rect, uint32_t colour)
+            {
+                if (!quad)
+                    return false;
+                if (!rect || !Shell::SetPanelRectColor(quad, *rect, colour))
+                {
+                    SetShown(quad, false);
+                    return false;
+                }
+                SetShown(quad, true);
+                *reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(quad) + kUiViewInputActiveOffset) = 0;
+                return true;
+            }
+
             void RefreshList()
             {
                 State& s = g_State;
                 const size_t pages = Db::PageCount(s.entries.size(), kRowsPerPage);
                 if (s.listPage >= pages)
                     s.listPage = pages - 1;
+                const Shell::Rect tabRect{ kTabX + kTabPitch * static_cast<float>(s.tab), kTabY, kTabW, kTabH };
+                const bool tabQuadShown =
+                    PlaceHighlight(s.ui.tabQuad, s.tab < s.tabs.size() ? &tabRect : nullptr, kTabHighlightColour);
+                const int selectedRow = s.selected - static_cast<int>(s.listPage * kRowsPerPage);
+                const Shell::Rect rowRect{ kRowX, kRowY + kRowPitch * static_cast<float>(selectedRow), kRowW, kRowH };
+                const bool rowQuadShown = PlaceHighlight(s.ui.rowQuad,
+                               s.selected >= 0 && selectedRow >= 0 && selectedRow < static_cast<int>(kRowsPerPage)
+                                   ? &rowRect : nullptr,
+                               kRowHighlightColour);
                 for (size_t row = 0; row < kRowsPerPage; ++row)
                 {
                     const size_t index = s.listPage * kRowsPerPage + row;
                     std::string caption;
                     if (index < s.entries.size())
-                        caption = (static_cast<int>(index) == s.selected ? "> " : "") +
+                        caption = (!rowQuadShown && static_cast<int>(index) == s.selected ? "> " : "") +
                                   CutText(s.entries[index].caption, kMaxRowChars);
                     SetCaption(s.ui.rows[row], caption);
                 }
@@ -588,12 +637,8 @@ namespace BZROpenShim
                 {
                     std::string caption;
                     if (t < s.tabs.size())
-                    {
-                        caption = s.tabs[t]->Get("label", s.tabs[t]->id);
-                        if (t == s.tab)
-                            caption = "> " + caption;
-                        caption = CutText(caption, kMaxTabChars);
-                    }
+                        caption = (!tabQuadShown && t == s.tab ? "> " : "") +
+                                  CutText(s.tabs[t]->Get("label", s.tabs[t]->id), kMaxTabChars);
                     SetCaption(s.ui.tabs[t], caption);
                 }
             }
@@ -710,7 +755,7 @@ namespace BZROpenShim
             // ---- build ----
 
             template <size_t... I>
-            void BuildTabs(void* panel, std::index_sequence<I...>)
+            void BuildTabs(void* panel, const Shell::ButtonSkin& skin, std::index_sequence<I...>)
             {
                 constexpr void(__cdecl* callbacks[])() = { &OnTabClicked<I>... };
                 char name[48] = {};
@@ -718,13 +763,13 @@ namespace BZROpenShim
                 {
                     _snprintf_s(name, _TRUNCATE, "OpenShimDatabase_Tab%zu", t);
                     g_State.ui.tabs[t] = Shell::AddButton(panel, panel, name,
-                        { kTabX, kTabY + kTabPitch * static_cast<float>(t), kTabW, kTabH }, "", kTabSkin, 1.0f, 0.0f,
+                        { kTabX, kTabY + kTabPitch * static_cast<float>(t), kTabW, kTabH }, "", skin, 1.0f, 0.0f,
                         callbacks[t]);
                 }
             }
 
             template <size_t... I>
-            void BuildRows(void* panel, std::index_sequence<I...>)
+            void BuildRows(void* panel, const Shell::ButtonSkin& skin, std::index_sequence<I...>)
             {
                 constexpr void(__cdecl* callbacks[])() = { &OnRowClicked<I>... };
                 char name[48] = {};
@@ -732,30 +777,8 @@ namespace BZROpenShim
                 {
                     _snprintf_s(name, _TRUNCATE, "OpenShimDatabase_Row%zu", r);
                     g_State.ui.rows[r] = Shell::AddButton(panel, panel, name,
-                        { kRowX, kRowY + kRowPitch * static_cast<float>(r), kRowW, kRowH }, "", kRowSkin, 1.0f, 0.0f,
+                        { kRowX, kRowY + kRowPitch * static_cast<float>(r), kRowW, kRowH }, "", skin, 1.0f, 0.0f,
                         callbacks[r]);
-                }
-            }
-
-            void BuildFrame(void* panel, const Shell::Rect& frame, const char* tag)
-            {
-                if (!Shell::IsTextureDeployed("uiplate.png"))
-                    return;
-                char name[64] = {};
-                _snprintf_s(name, _TRUNCATE, "OpenShimDatabase_%sPlate", tag);
-                Shell::AddPanel(panel, panel, name, frame, "uiplate.png", Shell::kControlFlags);
-                if (!Shell::IsTextureDeployed("uiline.png"))
-                    return;
-                UiDecorPanelDesc desc;
-                desc.rect = { frame.x, frame.y, frame.w, frame.h };
-                UiDecorPiece pieces[kUiDecorMaxPanelPieces] = {};
-                const size_t count = BuildUiDecorPanel(desc, pieces, kUiDecorMaxPanelPieces);
-                for (size_t i = 0; i < count; ++i)
-                {
-                    _snprintf_s(name, _TRUNCATE, "OpenShimDatabase_%sBorder%zu", tag, i);
-                    Shell::AddPanel(panel, panel, name, { pieces[i].rect.x, pieces[i].rect.y, pieces[i].rect.width,
-                                                          pieces[i].rect.height }, pieces[i].texture,
-                                    Shell::kControlFlags);
                 }
             }
 
@@ -785,22 +808,39 @@ namespace BZROpenShim
                     s.tabs.resize(kMaxTabs);
                 }
 
+                const bool hasArt = Shell::IsTextureDeployed(kPanelTexture);
+                if (!hasArt)
+                    Log(L"[DATABASE] %hs is not deployed; the Database screen shows the bare stock background\n",
+                        kPanelTexture);
                 void* panel = Shell::AddPanel(screen, nullptr, "OpenShimDatabase_Overlay",
-                                              { 0.0f, 0.0f, 1440.0f, 1080.0f }, nullptr);
+                                              { 0.0f, 0.0f, 1440.0f, 1080.0f }, hasArt ? kPanelTexture : nullptr);
                 if (!panel)
                     return false;
-                BuildFrame(panel, kLeftFrame, "Left");
-                BuildFrame(panel, kRightFrame, "Right");
                 Shell::AddLabel(panel, panel, "OpenShimDatabase_Title", kTitleRect,
                                 ShimText("openshim_ui:database_title", "DATABASE"), Shell::kTitleLabelFlags);
 
-                BuildTabs(panel, std::make_index_sequence<kMaxTabs>{});
-                BuildRows(panel, std::make_index_sequence<kRowsPerPage>{});
+                const bool flat = hasArt && Shell::IsTextureDeployed("osh_tool_hv.png") &&
+                                  Shell::IsTextureDeployed("osh_tool_ck.png");
+                const Shell::ButtonSkin& tabSkin = flat ? kToolSkin : kStockTabSkin;
+                const Shell::ButtonSkin& rowSkin = flat ? kToolSkin : kStockRowSkin;
+                // Highlight quads first, so they sit behind every button.
+                if (Shell::IsTextureDeployed(kHighlightTexture))
+                {
+                    s.ui.tabQuad = Shell::AddPanel(panel, panel, "OpenShimDatabase_TabQuad", { 0.0f, 0.0f, 1.0f, 1.0f },
+                                                   kHighlightTexture, Shell::kControlFlags);
+                    s.ui.rowQuad = Shell::AddPanel(panel, panel, "OpenShimDatabase_RowQuad", { 0.0f, 0.0f, 1.0f, 1.0f },
+                                                   kHighlightTexture, Shell::kControlFlags);
+                    SetShown(s.ui.tabQuad, false);
+                    SetShown(s.ui.rowQuad, false);
+                }
+
+                BuildTabs(panel, tabSkin, std::make_index_sequence<kMaxTabs>{});
+                BuildRows(panel, rowSkin, std::make_index_sequence<kRowsPerPage>{});
                 s.ui.listPage = Shell::AddLabel(panel, panel, "OpenShimDatabase_ListPage", kListPageRect, "");
                 s.ui.listPrev = Shell::AddButton(panel, panel, "OpenShimDatabase_ListPrev", kListPrevRect,
-                    ShimText("openshim_ui:database_prev", "Prev"), kTabSkin, 1.0f, 0.0f, &OnListPrev);
+                    ShimText("openshim_ui:database_prev", "Prev"), tabSkin, 1.0f, 0.0f, &OnListPrev);
                 s.ui.listNext = Shell::AddButton(panel, panel, "OpenShimDatabase_ListNext", kListNextRect,
-                    ShimText("openshim_ui:database_next", "Next"), kTabSkin, 1.0f, 0.0f, &OnListNext);
+                    ShimText("openshim_ui:database_next", "Next"), tabSkin, 1.0f, 0.0f, &OnListNext);
 
                 s.ui.detailTitle = Shell::AddLabel(panel, panel, "OpenShimDatabase_DetailTitle", kDetailTitleRect, "");
                 s.ui.image = Shell::AddPanel(panel, panel, "OpenShimDatabase_Image", kImageRect, nullptr,
@@ -808,9 +848,9 @@ namespace BZROpenShim
                 s.ui.text = MakeTextBlock(panel);
                 s.ui.pageLabel = Shell::AddLabel(panel, panel, "OpenShimDatabase_PageLabel", kPageLabelRect, "");
                 s.ui.pagePrev = Shell::AddButton(panel, panel, "OpenShimDatabase_PagePrev", kPagePrevRect,
-                    ShimText("openshim_ui:database_prev", "Prev"), kTabSkin, 1.0f, 0.0f, &OnPagePrev);
+                    ShimText("openshim_ui:database_prev", "Prev"), tabSkin, 1.0f, 0.0f, &OnPagePrev);
                 s.ui.pageNext = Shell::AddButton(panel, panel, "OpenShimDatabase_PageNext", kPageNextRect,
-                    ShimText("openshim_ui:database_next", "Next"), kTabSkin, 1.0f, 0.0f, &OnPageNext);
+                    ShimText("openshim_ui:database_next", "Next"), tabSkin, 1.0f, 0.0f, &OnPageNext);
 
                 const bool back = Shell::AddButton(panel, nullptr, "OpenShimDatabase_Back", kBackRect,
                                                    ShimText("openshim_ui:back", "Back"), Shell::kSkinTopCorner, 1.0f,

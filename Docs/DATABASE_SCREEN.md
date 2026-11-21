@@ -33,6 +33,33 @@ with the lobby overlay, `src/patches/des_reader.cpp`; content
 - No button when Single Player shows the training prompt (the screen then
   builds none of its normal widgets).
 
+## Layout and theme
+
+The screen uses a painted 1440x1080 panel, `osh_database_center.png`
+(`resources/ui/custom_widgets/mkscreens.py`, `DATABASE_LAYOUT` and
+`database_center()`), like Career, Bans and LAN. The rects in
+`database_screen.cpp` mirror `DATABASE_LAYOUT`; change both together.
+
+- Frame with the brackets capped at y 828, title plate (470,132,500,56)
+  with the title label on it.
+- Tab strip: six 150x40 slots at y 236, pitch 160, from x 228.
+- List box (228,288,400,630): **14 rows** a page (wells 368x36, pitch 40
+  from y 300), then a Prev / "Page n/m" / Next footer at y 872.
+- Detail box (644,288,568,630): 44 px header band holding the entry title,
+  a 260x260 picture square at (798,346) (reserved for a later 3D preview),
+  the text block (660,618,536,240) and a briefing Prev / Next footer.
+- Tabs, rows and footer buttons use the flat `osh_tool_hv/ck` skins (stock
+  skins when the art is not deployed). Back stays the top-corner button.
+- The selected tab and row are shown by tinted quads (`osh_preview_white.png`,
+  moved with `Shell::SetPanelRectColor`), created before the buttons so they
+  sit behind them. The old `> ` caption prefixes are gone.
+- Pictures are letterboxed inside the square, never stretched. Loading-screen
+  pictures are wide; 16:9 is assumed (`kPictureAspect`) because no image size
+  query exists.
+- The panel is listed in `include/menu_theme_policy.h`, so the Blue, Red and
+  Amber presets recolour it with the other `osh_*_center.png` panels. The
+  panel is also in the deploy and install lists.
+
 ## Content file (`oshdb.cfg`)
 
 INI-like text, `;` or `#` comments, one `[kind id]` header per section.
@@ -148,10 +175,10 @@ mod that ships an `oshdb.cfg`.
 2. The training-prompt variant of Single Player (fresh profile) shows no
    DATABASE button and works as stock.
 3. Click DATABASE: the screen opens on the NSDF tab with the first unit
-   selected. Tabs read NSDF, CCA, Black Dogs, Fury, Briefings, with `> ` on
-   the selected one.
-4. NSDF list: captions are `MODEL - ROLE`; 16 rows a page, with Prev/Next
-   and "Page 1/2" when there are more.
+   selected. Tabs read NSDF, CCA, Black Dogs, Fury, Briefings; the selected
+   tab and row show the tinted highlight quad.
+4. NSDF list: captions are `MODEL - ROLE`; 14 rows a page, with Prev/Next
+   and "Page 1/n" when there are more. Captions fit the wells.
 5. Select avturr: role, model, the six cited Badger model numbers with
    citations; scrap cost, armor, ammo, speed and weapons match
    `avturr.odf`. Select avfigh: the loading-screen picture shows.
@@ -178,14 +205,34 @@ mod that ships an `oshdb.cfg`.
     next time Single Player opens.
 13. Options row off, then Reset to Stock: the feature is gone (and the row
     shows Off after Reset to Stock).
+14. Theme: for each Menu Colors preset (Stock, Blue, Red, Amber) at
+    16:9 and at 4:3, open the screen. The painted panel recolours with the
+    other screens; the frame, boxes, slots and wells line up with the tab,
+    row, picture, text and footer widgets; nothing is clipped at 4:3.
+15. Highlight quads: the selected tab and row show behind their captions in
+    every preset, hover and click still work on tabs and rows, and clicking
+    on a highlighted row selects it (the quad takes no click).
+16. Loading-screen picture (select avfigh): it sits letterboxed inside the
+    260x260 square with no stretch; note the real aspect if 16:9 is wrong.
 
 ## Known limits
 
 - Layout, the text block's arrows and the picture box are UNVERIFIED live.
+- UNVERIFIED: the highlight quads draw behind the transparent buttons (z
+  order) and take no input; and how the Menu Colors shader treats the white
+  `osh_preview_white.png` quad (it is not in the theme list, so only its
+  argb tint applies). If a preset shows the wrong highlight colour, tint it
+  per preset or drop the quad.
+- `SetPanelRectColor` only works on DX11 (src/engine/shell_screens.cpp).
+  On DX9, or with `osh_preview_white.png` missing,
+  the quads stay hidden: the selected tab and row then fall back to a `> `
+  caption prefix, and pictures fill the whole square (no letterbox).
+- UNVERIFIED: the letterbox aspect (16:9 assumed) and that
+  `SetPanelRectColor` on the picture panel keeps its texture.
 - Briefings have no stock pictures, so the picture area stays empty for them.
 - Rows past the end of the list are blanked by caption; their hover
-  highlight may still show.
-- Up to 6 tabs, 26 characters per list caption and 17 per tab caption; cuts
+  highlight may still show (they sit over painted empty wells).
+- Up to 6 tabs, 30 characters per list caption and 12 per tab caption; cuts
   never split a UTF-8 character.
 - File reads (ODF, weapon ODFs, `.inf`) run on the UI thread when the screen
   opens and on each selection; they are small and cached per open.

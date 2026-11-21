@@ -193,7 +193,7 @@ namespace
         Check(UnitCaption("", "RECYCLER", "Recycler", "avrecy") == "RECYCLER", "role next");
         Check(UnitCaption("", "", "Tank", "avtank") == "Tank", "unitName next");
         Check(UnitCaption("", "", "", "avtank") == "avtank", "ODF last");
-        Check(PageCount(0, 16) == 1 && PageCount(16, 16) == 1 && PageCount(17, 16) == 2, "page count");
+        Check(PageCount(0, 14) == 1 && PageCount(14, 14) == 1 && PageCount(15, 14) == 2, "page count");
         Check(PageCount(5, 0) == 1, "zero rows per page is one page");
     }
 
