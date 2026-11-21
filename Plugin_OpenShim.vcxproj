@@ -199,6 +199,7 @@
     <ClCompile Include="src\patches\shell_casings.cpp" />
     <ClCompile Include="src\patches\laser_sight.cpp" />
     <ClCompile Include="src\patches\rts_markers.cpp" />
+    <ClCompile Include="src\patches\rts_range_labels.cpp" />
     <ClCompile Include="src\patches\rts_placement.cpp" />
     <ClCompile Include="src\patches\rts_build_queue.cpp" />
     <ClCompile Include="src\patches\unit_loadouts.cpp" />
@@ -459,6 +460,8 @@
     <ClInclude Include="include\hud_visibility.h" />
     <ClInclude Include="include\hud_visibility_policy.h" />
     <ClInclude Include="include\hud_gauge_overlay.h" />
+    <ClInclude Include="include\rts_range_labels.h" />
+    <ClInclude Include="include\rts_range_rings_policy.h" />
     <ClInclude Include="include\career_kill_class.h" />
     <ClInclude Include="include\kill_ticker.h" />
     <ClInclude Include="include\kill_ticker_policy.h" />

@@ -66,6 +66,8 @@
 #include "rts_markers_policy.h"
 #include "rts_placement.h"
 #include "rts_placement_policy.h"
+#include "rts_range_labels.h"
+#include "rts_range_rings_policy.h"
 #include "rts_radar_pings_policy.h"
 #include "scene_mutation_drain.h"
 #include "shell_casing_physics.h"
@@ -81,6 +83,7 @@
 #include <iterator>
 #include <string>
 #include <system_error>
+#include <unordered_map>
 #include <vector>
 
 #if !defined(_MSC_VER) || !defined(_M_IX86)
@@ -96,6 +99,7 @@ namespace BZROpenShim
             namespace RM = RtsMarkers;
             namespace SC = ShellCasings;
             namespace RRP = RtsRadarPings;
+            namespace RR = RtsRangeRings;
             using Vec3 = SC::Vec3;
 
             constexpr const char* kComponent = "rtsmarkers";
@@ -143,6 +147,11 @@ namespace BZROpenShim
             bool g_PingsOn = true;
             bool g_RangeOn = true;
             bool g_AttackOn = false;
+            bool g_WeaponOn = true;       // [Gameplay] RtsWeaponRange
+            bool g_RadarRangeOn = false;  // [Gameplay] RtsRadarRange
+            bool g_MineRangeOn = false;   // [Gameplay] RtsMineRange
+            bool g_RangeLabelsOn = true;  // [Gameplay] RtsRangeLabels
+            int g_RangeLoggedState = -1;  // change-only "range rings" line
             int g_AttackLoggedState = -1; // change-only "enabled" line
             bool g_RadarPingsOn = false;
             bool g_RadarPostDrawRegistered = false; // the registration succeeded
@@ -175,6 +184,25 @@ namespace BZROpenShim
                         g_RadarLoggedState = state;
                         LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] radar pings enabled=%d installed=%d",
                                  g_RadarPingsOn ? 1 : 0, g_RadarPostDrawRegistered ? 1 : 0);
+                    }
+                }
+                value = true;
+                g_WeaponOn = TryGetUserConfigBool("Gameplay", "RtsWeaponRange", value) ? value : true;
+                value = false;
+                g_RadarRangeOn = TryGetUserConfigBool("Gameplay", "RtsRadarRange", value) ? value : false;
+                value = false;
+                g_MineRangeOn = TryGetUserConfigBool("Gameplay", "RtsMineRange", value) ? value : false;
+                value = true;
+                g_RangeLabelsOn = TryGetUserConfigBool("Gameplay", "RtsRangeLabels", value) ? value : true;
+                {
+                    const int state = (g_WeaponOn ? 1 : 0) | (g_RadarRangeOn ? 2 : 0) | (g_MineRangeOn ? 4 : 0) |
+                                      (g_RangeLabelsOn ? 8 : 0);
+                    if (g_RangeLoggedState != state)
+                    {
+                        g_RangeLoggedState = state;
+                        LogShimA(LogLevel::Info, kComponent,
+                                 "[RTSRANGE] config weapon=%d radar=%d mine=%d labels=%d", g_WeaponOn ? 1 : 0,
+                                 g_RadarRangeOn ? 1 : 0, g_MineRangeOn ? 1 : 0, g_RangeLabelsOn ? 1 : 0);
                     }
                 }
                 g_ConfigLoaded = true;
@@ -469,6 +497,142 @@ namespace BZROpenShim
                     return false;
                 }
                 return out.range > 0.0f;
+            }
+
+            // Longest straight-flying reach over the unit's Cannon-class
+            // weapons whose ordnance is not a gravity shell (those are the
+            // artillery ring's): shotSpeed * lifeSpan - 1, as ai_odf_tuning.cpp.
+            // Only the Cannon class (signature 'CANN', LaserSight) qualifies in
+            // v1: homing and guided weapons are other classes and are skipped.
+            bool ReadDirectFireSeh(void* obj, float& range)
+            {
+                range = 0.0f;
+                __try
+                {
+                    void* carrier = g_Api.getCarrier(obj);
+                    if (!carrier)
+                        return false;
+                    for (int slot = 0; slot < kWeaponSlots; ++slot)
+                    {
+                        const uint8_t* weapon = static_cast<const uint8_t*>(g_Api.getWeapon(carrier, slot));
+                        if (!weapon)
+                            continue;
+                        const uint8_t* weaponClass = *reinterpret_cast<const uint8_t* const*>(weapon + kWeaponClassOffset);
+                        const uint8_t* ordnance =
+                            *reinterpret_cast<const uint8_t* const*>(weapon + kWeaponOrdnanceClassOffset);
+                        if (!weaponClass || !ordnance)
+                            continue;
+                        const uint32_t weaponSig = *reinterpret_cast<const uint32_t*>(weaponClass + kClassSigOffset);
+                        const uint32_t ordnanceSig = *reinterpret_cast<const uint32_t*>(ordnance + kClassSigOffset);
+                        if (weaponSig != LaserSight::kWeaponSigCannon || ordnanceSig == 0 ||
+                            LaserSight::IsBallisticOrdnance(ordnanceSig))
+                            continue;
+                        const float reach = RR::DirectFireRange(
+                            *reinterpret_cast<const float*>(ordnance + kOrdnanceShotSpeedOffset),
+                            *reinterpret_cast<const float*>(ordnance + kOrdnanceLifeSpanOffset));
+                        if (reach > range)
+                            range = reach;
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    range = 0.0f;
+                    return false;
+                }
+                return range > 0.0f;
+            }
+
+            // ---- Radar range ---------------------------------------------------
+            // [CraftClass] rangeScan, read from the unit's ODF through the shared
+            // ODF path (TryGetObjectOdfToken + TryResolveOdfFilePath), cached per
+            // ODF. When the file cannot be resolved, CraftClass +0x150 (rangeScan
+            // in reverse_engineering/bsim/out/object_model/core_object_model.md)
+            // is read behind a sanity check. UNVERIFIED on GOG 2.2.301.
+            constexpr size_t kCraftClassRangeScanOffset = 0x150;
+            std::unordered_map<std::string, float> g_RadarByOdf; // <= 0: no radar
+            volatile long g_RangeLogBudget = 64;
+
+            bool ReadRadarRangeFromOdf(const char* token, float& out)
+            {
+                out = 0.0f;
+                std::filesystem::path path;
+                if (!TryResolveOdfFilePath(token, path))
+                    return false;
+                FILE* file = nullptr;
+                if (fopen_s(&file, path.string().c_str(), "r") != 0 || !file)
+                    return false;
+                char line[256] = {};
+                while (std::fgets(line, static_cast<int>(sizeof(line)), file))
+                {
+                    char* trimmed = TrimAsciiInPlace(line);
+                    if (*trimmed == '\0' || *trimmed == ';' || *trimmed == '#' || *trimmed == '[')
+                        continue;
+                    char* equals = std::strchr(trimmed, '=');
+                    if (!equals)
+                        continue;
+                    *equals = '\0';
+                    char* key = TrimAsciiInPlace(trimmed);
+                    if (_stricmp(key, "rangeScan") != 0)
+                        continue;
+                    char* value = TrimAsciiInPlace(equals + 1);
+                    float parsed = 0.0f;
+                    if (TryParseFloatValue(value, parsed) && std::isfinite(parsed))
+                        out = parsed;
+                    break; // a key without a usable value counts as no radar
+                }
+                std::fclose(file);
+                return true; // the file was read; out is 0 when it has no rangeScan
+            }
+
+            bool ReadRuntimeRadarRangeSeh(void* obj, float& out)
+            {
+                out = 0.0f;
+                __try
+                {
+                    const uint8_t* cls = *reinterpret_cast<const uint8_t* const*>(static_cast<const uint8_t*>(obj) +
+                                                                                    kGameObjectClassOffset);
+                    if (!cls)
+                        return false;
+                    out = *reinterpret_cast<const float*>(cls + kCraftClassRangeScanOffset);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    out = 0.0f;
+                    return false;
+                }
+                return RR::SaneRadarRange(out);
+            }
+
+            // The scan range of one unit, 0 when it has no radar.
+            float ReadRadarRange(void* obj)
+            {
+                char token[kProducerBuildMenuTokenLen + 1] = {};
+                const bool haveToken = TryGetObjectOdfToken(obj, token) && token[0];
+                if (haveToken)
+                {
+                    const auto cached = g_RadarByOdf.find(token);
+                    if (cached != g_RadarByOdf.end())
+                        return cached->second;
+                }
+                float range = 0.0f;
+                const char* source = "odf";
+                if (!haveToken || !ReadRadarRangeFromOdf(token, range))
+                {
+                    source = "runtime(+0x150, UNVERIFIED)";
+                    if (!ReadRuntimeRadarRangeSeh(obj, range))
+                    {
+                        range = 0.0f;
+                        source = "none";
+                    }
+                }
+                if (haveToken)
+                {
+                    g_RadarByOdf[token] = range;
+                    if (InterlockedDecrement(&g_RangeLogBudget) >= 0)
+                        LogShimA(LogLevel::Info, kComponent, "[RTSRANGE] radar odf=%s range=%.1f source=%s", token, range,
+                                 source);
+                }
+                return range;
             }
 
             // Bounding radius of the object's Ogre entity, or NaN.
@@ -1623,6 +1787,11 @@ namespace BZROpenShim
             constexpr size_t kMaxObjects = 4096;       // as rts_commands.cpp
             constexpr ULONGLONG kAttackScanMs = 100;
 
+            // One object-vector buffer for the attack-mark and mine-ring scans.
+            // Each scan takes a fresh snapshot and uses it at once: a snapshot
+            // kept across frames would hold pointers to destroyed objects.
+            void* g_SharedObjects[kMaxObjects];
+
             uint32_t g_AttackMarks[RM::kMaxAttackRingSlots] = {};
             size_t g_AttackMarkCount = 0;
             ULONGLONG g_AttackLastScan = 0;
@@ -1698,13 +1867,18 @@ namespace BZROpenShim
                     LogShimA(LogLevel::Info, kComponent, "[RTSMARKERS] attack mark handle=0x%08X off", handle);
             }
 
+            size_t SharedSnapshot()
+            {
+                return SnapshotObjects(g_SharedObjects, kMaxObjects);
+            }
+
             // Walks every object: own team, not the piloted one, hit by an
             // enemy inside the window. Keeps the 16 most recently hit.
             void ScanAttackMarks(float now, void* player)
             {
-                static void* objects[kMaxObjects];
                 static RM::AttackMarkCandidate hits[kMaxObjects];
-                const size_t total = SnapshotObjects(objects, kMaxObjects);
+                void** const objects = g_SharedObjects;
+                const size_t total = SharedSnapshot();
                 size_t hitCount = 0;
                 for (size_t i = 0; i < total; ++i)
                 {
@@ -1788,6 +1962,262 @@ namespace BZROpenShim
                 g_AttackMarkCount = kept;
             }
 
+            // ---- Range rings (RtsRangeRings, Docs/RTS_RANGE_RINGS.md) -----------
+            // Direct-fire weapon, radar and own-team mine-trigger rings for the
+            // selected own units (never the piloted vehicle), plus the labels
+            // for them and for the artillery rings. Local draw only.
+            constexpr size_t kProximityMineClassRangeOffset = 0x168;  // team_filter_mines.cpp:177
+            constexpr size_t kProximityMinePositionOffset = 0x108;    // team_filter_mines.cpp:183
+
+            struct MineRing
+            {
+                float pos[3] = {};
+                float radius = 0.0f;
+            };
+            MineRing g_MineRings[RM::kMaxMineRingSlots];
+            size_t g_MineRingCount = 0;
+            ULONGLONG g_MineLastScan = 0;
+            int g_MineLoggedCount = -1; // change-only "mines shown" line
+
+            // A live ProximityMine of this vtable: its position (obj +0x108)
+            // and trigger radius (class +0x168). False for anything else.
+            bool ReadMineSeh(void* obj, uint32_t vtable, float pos[3], float& radius)
+            {
+                __try
+                {
+                    const uint8_t* const o = static_cast<const uint8_t*>(obj);
+                    if (*reinterpret_cast<const uint32_t*>(o) != vtable)
+                        return false;
+                    const uint8_t* const obj76 = *reinterpret_cast<const uint8_t* const*>(o + kGameObjectObjOffset);
+                    if (!obj76 || (*reinterpret_cast<const uint32_t*>(obj76 + kObj76FlagsOffset) & kObj76DeadFlag))
+                        return false;
+                    const uint8_t* const cls = *reinterpret_cast<const uint8_t* const*>(o + kGameObjectClassOffset);
+                    if (!cls)
+                        return false;
+                    radius = *reinterpret_cast<const float*>(cls + kProximityMineClassRangeOffset);
+                    const float* const p = reinterpret_cast<const float*>(o + kProximityMinePositionOffset);
+                    pos[0] = p[0];
+                    pos[1] = p[1];
+                    pos[2] = p[2];
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return false;
+                }
+                return RR::SaneMineRadius(radius) && std::isfinite(pos[0]) && std::isfinite(pos[1]) &&
+                       std::isfinite(pos[2]);
+            }
+
+            // Own-team proximity mines within searchRadius + 20 m of a selected
+            // unit, nearest 24, from the shared 100 ms object snapshot.
+            void ScanMineRings(void* player)
+            {
+                g_MineRingCount = 0;
+                void* units[RM::kMaxWaypointLineSlots] = {};
+                float unitPos[RM::kMaxWaypointLineSlots][3] = {};
+                const size_t selected = GatherSelectedOwnUnits(units);
+                size_t unitCount = 0;
+                for (size_t i = 0; i < selected; ++i)
+                    if (TryGetGameObjectWorldPosition(units[i], unitPos[unitCount]))
+                        ++unitCount;
+                static const uint32_t vtable = HookEngine::EngineAddress("ProximityMineVtable");
+                if (unitCount && vtable)
+                {
+                    static MineRing candidates[kMaxObjects];
+                    static RR::NearItem nearest[kMaxObjects];
+                    size_t found = 0;
+                    const size_t total = SharedSnapshot();
+                    for (size_t i = 0; i < total; ++i)
+                    {
+                        MineRing mine;
+                        if (!ReadMineSeh(g_SharedObjects[i], vtable, mine.pos, mine.radius) ||
+                            !SameTeam(g_SharedObjects[i], player))
+                            continue;
+                        float best = -1.0f;
+                        for (size_t u = 0; u < unitCount; ++u)
+                        {
+                            const float dx = mine.pos[0] - unitPos[u][0];
+                            const float dz = mine.pos[2] - unitPos[u][2];
+                            if (!RR::MineNearUnit(dx, dz, mine.radius))
+                                continue;
+                            const float d = std::sqrt(dx * dx + dz * dz);
+                            if (best < 0.0f || d < best)
+                                best = d;
+                        }
+                        if (best < 0.0f)
+                            continue;
+                        candidates[found] = mine;
+                        nearest[found].distance = best;
+                        nearest[found].id = found;
+                        ++found;
+                    }
+                    const size_t kept = RR::KeepNearest(nearest, found, RM::kMaxMineRingSlots);
+                    for (size_t i = 0; i < kept; ++i)
+                        g_MineRings[g_MineRingCount++] = candidates[nearest[i].id];
+                }
+                if (g_MineLoggedCount != static_cast<int>(g_MineRingCount))
+                {
+                    g_MineLoggedCount = static_cast<int>(g_MineRingCount);
+                    if (InterlockedDecrement(&g_RangeLogBudget) >= 0)
+                        LogShimA(LogLevel::Info, kComponent, "[RTSRANGE] mine rings shown=%d (selected units=%d)",
+                                 g_MineLoggedCount, static_cast<int>(unitCount));
+                }
+            }
+
+            void SetRangeRing(RingRequest& ring, const float pos[3], float radius, const RM::Colour& colour)
+            {
+                ring.wanted = true;
+                std::memcpy(ring.centre, pos, sizeof(ring.centre));
+                ring.radius = radius;
+                ring.colour = colour;
+            }
+
+            void BuildRangeRequests(RingRequest (&requests)[RM::kSlotCount])
+            {
+                if (!g_MineRangeOn)
+                {
+                    g_MineRingCount = 0;
+                    g_MineLoggedCount = -1;
+                }
+                if (!g_WeaponOn && !g_RadarRangeOn && !g_MineRangeOn)
+                    return;
+                void* const player = SafeGetPlayer();
+                if (!player)
+                    return;
+                if (g_WeaponOn || g_RadarRangeOn)
+                {
+                    void* units[RM::kMaxWaypointLineSlots] = {};
+                    const size_t count = GatherSelectedOwnUnits(units);
+                    size_t weapons = 0, radars = 0;
+                    for (size_t i = 0; i < count; ++i)
+                    {
+                        float pos[3] = {};
+                        if (!TryGetGameObjectWorldPosition(units[i], pos))
+                            continue;
+                        float range = 0.0f;
+                        if (g_WeaponOn && g_Api.artillery && weapons < RM::kMaxWeaponRingSlots &&
+                            ReadDirectFireSeh(units[i], range) && RR::ValidRadius(range))
+                            SetRangeRing(requests[RM::kFirstWeaponRingSlot + weapons++], pos, range, RM::kDirectFireColour);
+                        if (g_RadarRangeOn && radars < RM::kMaxRadarRingSlots)
+                        {
+                            range = ReadRadarRange(units[i]);
+                            if (RR::ValidRadius(range))
+                                SetRangeRing(requests[RM::kFirstRadarRingSlot + radars++], pos, range, RM::kRadarColour);
+                        }
+                    }
+                }
+                if (g_MineRangeOn)
+                {
+                    const ULONGLONG tick = GetTickCount64();
+                    if (tick - g_MineLastScan >= kAttackScanMs)
+                    {
+                        g_MineLastScan = tick;
+                        ScanMineRings(player);
+                    }
+                    for (size_t i = 0; i < g_MineRingCount; ++i)
+                        SetRangeRing(requests[RM::kFirstMineRingSlot + i], g_MineRings[i].pos, g_MineRings[i].radius,
+                                     RM::kMineColour);
+                }
+            }
+
+            // ---- Range ring labels -------------------------------------------
+            struct ArcCache
+            {
+                bool valid = false;
+                float centre[3] = {};
+                float radius = 0.0f;
+                float arc[RR::kLabelArcPoints][3] = {};
+            };
+            ArcCache g_ArcCache[RR::kMaxLabelRings];
+
+            void FillArc(ArcCache& cache, const float centre[3], float radius)
+            {
+                std::memcpy(cache.centre, centre, sizeof(cache.centre));
+                cache.radius = radius;
+                double last = centre[1];
+                for (size_t i = 0; i < RR::kLabelArcPoints; ++i)
+                {
+                    float dx = 0.0f, dz = 0.0f;
+                    RM::RingDirection(static_cast<unsigned>(i), static_cast<unsigned>(RR::kLabelArcPoints), dx, dz);
+                    const double x = static_cast<double>(centre[0]) + dx * radius;
+                    const double z = static_cast<double>(centre[2]) + dz * radius;
+                    double h = last;
+                    if (!TerrainHeightSeh(x, z, h))
+                        h = last; // off the map: keep the neighbour's height
+                    last = h;
+                    cache.arc[i][0] = static_cast<float>(x);
+                    cache.arc[i][1] = static_cast<float>(h) + RM::kLift;
+                    cache.arc[i][2] = static_cast<float>(z);
+                }
+                cache.valid = true;
+            }
+
+            uint32_t LabelArgb(const RM::Colour& c)
+            {
+                const auto byte = [](float v) { return static_cast<uint32_t>(std::min(255.0f, std::max(0.0f, v * 255.0f))); };
+                return (0xF0u << 24) | (byte(c.r) << 16) | (byte(c.g) << 8) | byte(c.b);
+            }
+
+            void ClearRangeLabels()
+            {
+                PublishRangeLabels(nullptr, 0);
+            }
+
+            // Publishes a label for every wanted artillery, weapon, radar and
+            // mine ring (the painter keeps the 24 nearest on screen).
+            void PublishRangeRingLabels(const RingRequest (&requests)[RM::kSlotCount])
+            {
+                if (!g_RangeLabelsOn)
+                {
+                    ClearRangeLabels();
+                    return;
+                }
+                struct Group
+                {
+                    size_t first;
+                    size_t count;
+                    RR::Kind kind;
+                    bool optionOn;
+                    size_t cacheBase;
+                };
+                const Group groups[] = {
+                    {0, RM::kMaxArtilleryRings, RR::Kind::Artillery, g_RangeOn, 0},
+                    {RM::kFirstWeaponRingSlot, RM::kMaxWeaponRingSlots, RR::Kind::Weapon, g_WeaponOn, 16},
+                    {RM::kFirstRadarRingSlot, RM::kMaxRadarRingSlots, RR::Kind::Radar, g_RadarRangeOn, 32},
+                    {RM::kFirstMineRingSlot, RM::kMaxMineRingSlots, RR::Kind::Mine, g_MineRangeOn, 48},
+                };
+                static RangeLabelRing out[RR::kMaxLabelRings];
+                size_t published = 0;
+                for (const Group& group : groups)
+                {
+                    if (!RR::LabelsShown(group.optionOn, g_RangeLabelsOn, false))
+                        continue;
+                    for (size_t i = 0; i < group.count; ++i)
+                    {
+                        const RingRequest& request = requests[group.first + i];
+                        ArcCache& cache = g_ArcCache[group.cacheBase + i];
+                        if (!request.wanted || !RR::ValidRadius(request.radius))
+                        {
+                            cache.valid = false;
+                            continue;
+                        }
+                        // Re-sample the terrain only when the ring changes size or
+                        // its unit has moved over half a metre: hovering units
+                        // drift every frame, and each refill is 64 height reads.
+                        const float mdx = cache.centre[0] - request.centre[0];
+                        const float mdz = cache.centre[2] - request.centre[2];
+                        if (!cache.valid || cache.radius != request.radius || mdx * mdx + mdz * mdz > 0.25f)
+                            FillArc(cache, request.centre, request.radius);
+                        RangeLabelRing& label = out[published++];
+                        label.kind = group.kind;
+                        label.argb = LabelArgb(request.colour);
+                        std::memcpy(label.centre, request.centre, sizeof(label.centre));
+                        std::memcpy(label.arc, cache.arc, sizeof(label.arc));
+                    }
+                }
+                PublishRangeLabels(out, published);
+            }
+
             void BuildRequests(RingRequest (&requests)[RM::kSlotCount])
             {
                 BuildPlacementRequests(requests);
@@ -1861,6 +2291,7 @@ namespace BZROpenShim
                     if (g_AnyVisible)
                         HideAll();
                     HideRtsPlacement();
+                    ClearRangeLabels();
                     return;
                 }
                 // Never mutate the scene inside render-queue traversal.
@@ -1874,6 +2305,7 @@ namespace BZROpenShim
                     if (g_AnyVisible)
                         HideAll();
                     HideRtsPlacement();
+                    ClearRangeLabels();
                     return;
                 }
                 if (g_PoolSceneManager != sceneManager)
@@ -1889,6 +2321,8 @@ namespace BZROpenShim
 
                 RingRequest requests[RM::kSlotCount];
                 BuildRequests(requests);
+                BuildRangeRequests(requests);
+                PublishRangeRingLabels(requests);
                 bool anyVisible = false;
                 for (size_t i = 0; i < RM::kSlotCount; ++i)
                 {
@@ -1990,11 +2424,13 @@ namespace BZROpenShim
                 LoadConfig();
             if (!g_AttackOn)
                 ClearAttackMarks();
-            if (!g_PingsOn && !g_RangeOn && !g_AttackOn && !RtsPlacementAnyEnabled() && !RtsOrderQueueDrawActive())
+            if (!g_PingsOn && !g_RangeOn && !g_AttackOn && !g_WeaponOn && !g_RadarRangeOn && !g_MineRangeOn &&
+                !RtsPlacementAnyEnabled() && !RtsOrderQueueDrawActive())
             {
                 if (g_AnyVisible)
                     HideAll();
                 HideRtsPlacement();
+                ClearRangeLabels();
                 g_Pings.Clear();
                 return;
             }
@@ -2023,6 +2459,11 @@ namespace BZROpenShim
                 HideAll();
                 LogShimW(LogLevel::Info, kComponent, L"[RTSMARKERS] hid rings (%ls)", reason ? reason : L"unspecified");
             }
+            ClearRangeLabels();
+            g_MineRingCount = 0;
+            g_MineLoggedCount = -1;
+            g_RadarByOdf.clear();
+            g_RangeLogBudget = 64;
             g_Pings.Clear();
             g_RadarPings.Clear();
             g_RadarPingLogBudget = 8;

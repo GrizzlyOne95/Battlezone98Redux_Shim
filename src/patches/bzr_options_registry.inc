@@ -721,6 +721,30 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Draws the maximum range on the ground around selected howitzers (not your own "
       "vehicle), and a ring at the aim point: green when one of them "
       "can reach it, red when none can. Only you see it, so it also works in multiplayer." },
+    // Native range rings for the selected own units (rts_markers.cpp,
+    // Docs/RTS_RANGE_RINGS.md). Local draw only. Weapon ships ON, radar and
+    // mine OFF; the label row switches the ring names for every kind.
+    { "Weapon Range", "Gameplay", "RtsWeaponRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Draws an orange ring on the ground at the direct-fire reach of each selected unit of "
+      "yours (not your own vehicle), for as long as it is selected. Only you see it, so it "
+      "also works in multiplayer." },
+    { "Radar Range", "Gameplay", "RtsRadarRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Draws a mint ring on the ground at the scan range of each selected unit of yours that "
+      "has radar (Recycler, Scavenger, turrets...). Only you see it." },
+    { "Mine Range", "Gameplay", "RtsMineRange", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Shows the trigger radius of your team's proximity mines that lie near a selected unit "
+      "of yours, as lime rings (the nearest 24). Only you see it." },
+    { "Range Labels", "Gameplay", "RtsRangeLabels", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "Writes the name of each range ring (Weapon Range, Radar Range, Mine Trigger) along the "
+      "ring in its colour, on the side facing you. Only matters while a range ring is on." },
     // [Gameplay] RTS command extras (rts_commands.cpp), on the RTS Commands
     // subpage of Controls. All ship ON: default "On" (0) / "Key + Shift Menu".
     { "Remote Target", "Gameplay", "RtsRemoteTarget", nullptr, 0,
@@ -1154,7 +1178,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
-    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsRadarPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsQuickCommands", "0" }, { "RtsFollowCamera", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "UnitLoadouts", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsRadarPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsWeaponRange", "0" }, { "RtsRadarRange", "0" }, { "RtsMineRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsQuickCommands", "0" }, { "RtsFollowCamera", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "UnitLoadouts", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },
@@ -1184,7 +1208,7 @@ static const char* const kShimSettingsStockKeepKeys[] =
     "PreciseTimestep", "MusicSingleFill", "MusicRefillCatchUp", "ConstructorRemoteBuild", "RestoreCraftBounds",
     "NetImprovements", "ReliableRetryAdaptToPing",
     "ThreadScheduling", "DynamicGeometryPieceReuse", "DynamicGeometryFastSort",
-    "AutoStage", "StatsTracking",
+    "AutoStage", "StatsTracking", "RtsRangeLabels",
     "Renderer", "Headlights",
     "RadarHudIdleOpacity", "RadarHudFadeDelay", "RadarHudFadeDuration", "RadarCompassAlwaysVisible",
     "HullHudIdleOpacity", "HullHudFadeDelay", "HullHudFadeDuration",
