@@ -392,6 +392,7 @@
     <ClCompile Include="src\patches\planet_environment.cpp" />
     <ClCompile Include="src\patches\pond_class_label.cpp" />
     <ClCompile Include="src\patches\tracked_vehicle_class.cpp" />
+    <ClCompile Include="src\patches\walker_free_head.cpp" />
     <ClCompile Include="src\patches\redux_compatibility.cpp" />
     <ClCompile Include="src\patches\render_effect_intent_exports.cpp" />
     <ClCompile Include="src\patches\sun_flash.cpp" />
@@ -483,6 +484,8 @@
     <ClInclude Include="include\tracked_vehicle_treads.h" />
     <ClInclude Include="include\tracked_vehicle_net.h" />
     <ClInclude Include="include\tracked_vehicle_turret.h" />
+    <ClInclude Include="include\walker_free_head.h" />
+    <ClInclude Include="include\walker_free_head_math.h" />
     <ClInclude Include="include\bzr_options_ui.h" />
     <ClInclude Include="include\steam_launcher_skip.h" />
     <ClInclude Include="include\launcher_proxy_logic.h" />

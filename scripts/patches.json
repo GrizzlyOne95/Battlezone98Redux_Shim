@@ -2361,6 +2361,36 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "ParameterDB scope open on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), reached from GameObjectClass::Find at 0x004E107F: lea eax,[ebp-0x20] (the %.8s.odf name sprintf'd at 0x004E1047); lea ecx,[ebp-0x3C]; call 0x00589430, followed by the classLabel read (section 0xD3DD9CEC, key 0x92D04727). The target is __thiscall(scope holder, const char* file), ret 4: it FNV-hashes the name, takes a cached database with refcount + 1 or loads and caches a new one, and stores it in the 4-byte holder. Pair with WeaponPresentation::PopScope. tracked_vehicle_class.cpp opens a second scope on the ODF Find already holds, to read [TrackedClass]. Unique by whole-image scan 2026-11-16."
+    },
+    {
+      "name": "UserInput::SteerRight",
+      "pattern": "0F BE 0D ?? ?? ?? ?? 85 C9 75 0B 0F BE 15 ?? ?? ?? ?? 85 D2 74 1E 0F BE 05 ?? ?? ?? ?? 0F BE 0D ?? ?? ?? ?? 2B C1 F3 0F 2A C0 F3 0F 11 85 B8 FE FF FF EB 18 F3 0F 2A 05 ?? ?? ?? ?? F3 0F 5E 05",
+      "offset": 3,
+      "mode": "abs32_operand",
+      "fallback": "0x009198B4",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "UserProcess::Execute 0x0060A480 on exact GOG Redux 2.2.301 (SHA-256 8d71f56c...3377413), steer-assist branch at 0x0060AC43 (GD FUN_0060a480:272-279): movsx ecx,[steer_right]; test ecx,ecx; jnz; movsx edx,[steer_left]; test edx,edx; jz; movsx eax,[steer_left]; movsx ecx,[steer_right]; sub eax,ecx; cvtsi2ss; movss [ebp-0x148]; jmp; cvtsi2ss xmm0,[steer axis]; divss [65536.0]. Same blend by name in BZ 1.5 UserProcess::Execute (steer_left/steer_right). The m8 operand at +3: the steer_right action byte 0x009198B4 (input.map RightArrow). walker_free_head.cpp reads it for the legs turn. Unique by whole-image scan 2026-11-19 (the non-assist copy at 0x0060AF1E uses other registers)."
+    },
+    {
+      "name": "UserInput::SteerLeft",
+      "pattern": "0F BE 0D ?? ?? ?? ?? 85 C9 75 0B 0F BE 15 ?? ?? ?? ?? 85 D2 74 1E 0F BE 05 ?? ?? ?? ?? 0F BE 0D ?? ?? ?? ?? 2B C1 F3 0F 2A C0 F3 0F 11 85 B8 FE FF FF EB 18 F3 0F 2A 05 ?? ?? ?? ?? F3 0F 5E 05",
+      "offset": 14,
+      "mode": "abs32_operand",
+      "fallback": "0x009198B5",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Same UserProcess::Execute site as UserInput::SteerRight (0x0060AC43). The m8 operand at +14 (movsx edx,[m8] at 0x0060AC4E): the steer_left action byte 0x009198B5 (input.map LeftArrow). walker_free_head.cpp reads it for the legs turn."
+    },
+    {
+      "name": "UserInput::SteerAxis",
+      "pattern": "0F BE 0D ?? ?? ?? ?? 85 C9 75 0B 0F BE 15 ?? ?? ?? ?? 85 D2 74 1E 0F BE 05 ?? ?? ?? ?? 0F BE 0D ?? ?? ?? ?? 2B C1 F3 0F 2A C0 F3 0F 11 85 B8 FE FF FF EB 18 F3 0F 2A 05 ?? ?? ?? ?? F3 0F 5E 05",
+      "offset": 56,
+      "mode": "abs32_operand",
+      "fallback": "0x009198B0",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Same UserProcess::Execute site as UserInput::SteerRight (0x0060AC43). The m32 operand of cvtsi2ss xmm0,[m32] at 0x0060AC77: the analog steer axis 0x009198B0 (int, 16.16; input.map steer = mouse HorizVel), which UserProcess divides by 65536 and low-passes into ctrl.steer when neither arrow byte is set (GD FUN_0060a480:253-260). walker_free_head.cpp reads it as the head command (mouse only)."
     }
   ],
   "engine_addresses": [
@@ -5960,6 +5990,18 @@
       "identity": "ShieldTower::Simulate (vtable slot 15); the team filter wraps it"
     },
     {
+      "name": "WalkerSimulate",
+      "address": "0x0060BD60",
+      "expected": "55 8B EC 81 EC E4 04 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 57 89 8D C0 FD FF FF",
+      "identity": "Walker::Simulate (WalkerVtable slot 15, entry 0x0088A0F8, the only data reference to the address): __thiscall(this, float dt), ret 4; ends with the Craft::Simulate tail 0x004AB380 (call at 0x0060E0EB), which calls slot 38 UpdateWeaponAim when this+0x1A0 is set. Structure match with BZ 1.5 Walker::Simulate. The walker free head wraps it (Docs/WALKER_FREE_HEAD_RESEARCH.md section 5a)."
+    },
+    {
+      "name": "CraftPostSimulate",
+      "address": "0x004ACBC0",
+      "expected": "55 8B EC 81 EC 64 01 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 57 89 8D 18 FF FF FF",
+      "identity": "Inherited PostSimulate in WalkerVtable slot 16 (entry 0x0088A0FC), __thiscall(this, float dt), ret 4; two other vtables hold it too. Called once per frame through GameObject 0x004DF370 after AnimObj_Update (Docs/WALKER_FREE_HEAD_RESEARCH.md section 5a Q3). The walker free head wraps the Walker copy only."
+    },
+    {
       "name": "MagnetMineSimulate",
       "address": "0x0050C650",
       "expected": "55 8B EC 81 EC 00 01 00 00 A1 00 70 8E 00",
@@ -6072,6 +6114,12 @@
       "address": "0x008876E8",
       "kind": "data",
       "identity": "RTTI .?AVShieldTower@@ vtable; slot 15 is Simulate"
+    },
+    {
+      "name": "WalkerVtable",
+      "address": "0x0088A0BC",
+      "kind": "data",
+      "identity": "RTTI .?AVWalker@@ primary vtable (the Walker ctor stores it at this+0 at 0x0060BC80; 0x0088A064 is the secondary at this+0x18); 42 slots, slot 15 Simulate 0x0060BD60, 16 PostSimulate 0x004ACBC0, 38 UpdateWeaponAim 0x0060F320"
     },
     {
       "name": "MagnetMineVtable",

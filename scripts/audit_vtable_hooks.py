@@ -89,6 +89,9 @@ HOOKS = [
      [VT(f"TurretTank{s}Vtable", 26) for s in ("Process", "Friend", "Enemy")],
      "shared AiProcess DoAttack; TurretAttackOrders manages turret deploy only"),
     ("ConstructionRigGetCommand", "ConstructionRigGetCommandPos", [VT("ConstructionRigVtable", 12)]),
+    ("WalkerSimulate", "WalkerSimulate", [VT("WalkerVtable", 15)]),
+    ("CraftPostSimulate", "CraftPostSimulate", [VT("WalkerVtable", 16)],
+     "WalkerFreeHead wraps only the Walker copy; the other Craft classes keep the stock PostSimulate"),
 ]
 
 
