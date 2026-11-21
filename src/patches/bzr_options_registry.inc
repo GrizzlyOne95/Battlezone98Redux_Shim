@@ -783,6 +783,13 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Plays a short sound when one of your units finishes its orders and goes idle, at most "
       "once every 5 seconds. J selects the next idle unit; Shift+J selects them all." },
+    // Ships OFF: a new key action (Shift+C in the satellite view).
+    { "Satellite Follow", "Gameplay", "RtsFollowCamera", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::GlobalImprovement,
+      "In the satellite view, Shift+C keeps the view centred on your first selected unit (or "
+      "your own vehicle when none is selected) as it moves. Shift+C again, or leaving the "
+      "satellite view, stops it. Only your camera moves." },
     { "Attack Marks", "Gameplay", "RtsAttackMarks", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -1133,7 +1140,11 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
     { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
+<<<<<<< ours
     { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "UnitLoadouts", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+=======
+    { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsFollowCamera", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
+>>>>>>> theirs
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
     { "PilotFlashlight", "0" }, { "RunInBackground", "0" }, { "VehicleGeometryContact", "0" },

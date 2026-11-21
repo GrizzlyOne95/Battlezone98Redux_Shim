@@ -4790,6 +4790,18 @@
       "identity": "movss xmm0,[pan speed] in the satellite pan step; operand at +4 is the .data pan speed"
     },
     {
+      "name": "OverViewSetObjectByHandle",
+      "address": "0x00588BA0",
+      "expected": "55 8B EC 8B 45 08 50 E8 84 13 EF FF 83 C4 04 50 B9 70 91 9C 00 E8 B6 FD FF FF",
+      "identity": "OverView_SetObject(handle), cdecl: GetObj(handle) (0x00479F30), then mov ecx,0x009C9170 (the global OverView, constructed at 0x00409C90 by 0x00587520) and call OverView::SetObject; called once by the satellite view setter 0x0061BD20 at 0x0061BDB6. RtsFollowCamera reads the OverView from the imm32 at +0x11 and checks the E8 at +0x15 reaches OverViewSetObject"
+    },
+    {
+      "name": "OverViewSetObject",
+      "address": "0x00588970",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 42 2C FF D0",
+      "identity": "OverView::SetObject(GameObject* complete), thiscall (bsim 0.9976 against BZ 1.5 OverView::SetObject 0x004D3167): stores [obj+0x18]->slot 0x2C at +0x38, obj at +0x3C, and [obj+0x18]->GetPosition (slot 0xC) at +0x44..+0x4C, the view centre the satellite camera matrix 0x00588A40 reads. No null check. RtsFollowCamera calls it each frame while following"
+    },
+    {
       "name": "OrdnanceSpawnVelocitySite",
       "address": "0x004803D4",
       "expected": "8B 4D F0 89 08 8B 55 F4 89 50 04 8B 4D F8 89 48 08 8B 55 E0 8B 42 0C 8B 4D E0",
