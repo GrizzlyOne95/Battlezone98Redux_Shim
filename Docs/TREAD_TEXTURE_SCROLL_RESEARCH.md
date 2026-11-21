@@ -144,11 +144,10 @@ along the belt), set the ODF keys.
 
 1. **Decided 2026-11-18:** DX11 Enhanced only for v1; stock and DX9 stay
    clips-only.
-2. Marker: explicit `treadMaterialL/R` keys (recommended) or a `*tread*`
-   sub-mesh name convention?
-3. Is there a tracked test model with split tread sub-meshes? None found in this
+2. **Decided:** explicit `treadMaterialL/R` ODF keys, no naming convention.
+3. **Deferred:** no test model yet; the live test waits for one. None found in this
    repo; no tread material in `GAME\BZ_ASSETS_CORE\common` (grep returned
    nothing). A fixture is needed for live verification.
-4. Is U-only enough, or do your models run the belt along V?
+4. **Decided:** one axis (U), signed by tread speed, so reverse and pivots scroll backwards per side.
 5. If Risk 1 fails, accept excluding tread materials from skinning/instancing
    (tracked units draw unbatched), or defer the feature?
