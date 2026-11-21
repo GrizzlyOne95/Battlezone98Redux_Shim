@@ -811,9 +811,9 @@ openshim_ui:mru_deploy_label~Deploy~Dйployer~Aufbauen~Desplegar~Schiera~Разверну
 openshim_ui:rts_build_at_nav_label~Build at Nav~Construire au nav~Am Nav. bauen~Edificar en punto~Costruisci a nav~Строить у маяка~Construir no nav
 openshim_ui:rts_hold_label~Hold~Tenir~Halten~Mantener~Mantieni~Стоять~Manter
 openshim_ui:rts_order_queue_prefix~Queue~File~Reihe~Cola~Coda~В очередь~Fila
-openshim_ui:unit_loadouts_stock~Stock~~~~~~
-openshim_ui:unit_loadouts_more~More~~~~~~
 openshim_ui:rts_range_label_artillery~ARTILLERY RANGE~~~~~~
 openshim_ui:rts_range_label_weapon~WEAPON RANGE~~~~~~
 openshim_ui:rts_range_label_radar~RADAR RANGE~~~~~~
 openshim_ui:rts_range_label_mine~MINE TRIGGER~~~~~~
+openshim_ui:unit_loadouts_stock~Stock~~~~~~
+openshim_ui:unit_loadouts_more~More~~~~~~

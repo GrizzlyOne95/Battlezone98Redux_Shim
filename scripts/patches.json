@@ -5507,7 +5507,7 @@
       "name": "WalkerVtable",
       "address": "0x0088A0BC",
       "kind": "data",
-      "identity": "RTTI .?AVWalker@@ primary vtable; slot 13 = Craft::GetCommand 0x004AE110 (DaywreckerDefence)"
+      "identity": "RTTI .?AVWalker@@ primary vtable (the Walker ctor stores it at this+0 at 0x0060BC80; 0x0088A064 is the secondary at this+0x18); 42 slots: 13 Craft::GetCommand 0x004AE110 (DaywreckerDefence), 15 Simulate 0x0060BD60, 16 PostSimulate 0x004ACBC0, 38 UpdateWeaponAim 0x0060F320 (WalkerFreeHead)"
     },
     {
       "name": "TorpedoVtable",
@@ -6168,12 +6168,6 @@
       "address": "0x008876E8",
       "kind": "data",
       "identity": "RTTI .?AVShieldTower@@ vtable; slot 15 is Simulate"
-    },
-    {
-      "name": "WalkerVtable",
-      "address": "0x0088A0BC",
-      "kind": "data",
-      "identity": "RTTI .?AVWalker@@ primary vtable (the Walker ctor stores it at this+0 at 0x0060BC80; 0x0088A064 is the secondary at this+0x18); 42 slots, slot 15 Simulate 0x0060BD60, 16 PostSimulate 0x004ACBC0, 38 UpdateWeaponAim 0x0060F320"
     },
     {
       "name": "MagnetMineVtable",
