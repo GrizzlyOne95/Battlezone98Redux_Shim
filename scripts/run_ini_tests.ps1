@@ -534,6 +534,7 @@ $stockValueChecks = @{
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightReach" = "0"
     "SinglePlayer/HeadlightBrightness" = "1.00"
+    "SinglePlayer/PlayerPaint" = "stock"
 }
 foreach ($entry in $stockValueChecks.GetEnumerator()) {
     if (-not $playerValues.ContainsKey($entry.Key) -or
@@ -646,7 +647,11 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsProducerBadges" = "0"
     "Gameplay/RtsOrderQueue" = "0"
     "Gameplay/RtsBuildQueue" = "0"
+<<<<<<< ours
+    "Gameplay/UnitLoadouts" = "0"
+=======
     "Gameplay/RtsFollowCamera" = "0"
+>>>>>>> theirs
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }

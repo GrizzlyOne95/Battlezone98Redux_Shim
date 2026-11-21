@@ -28,6 +28,7 @@
 #include "gpu_instancing.h"
 #include "gpu_skinning.h"
 #include "local_damage.h"
+#include "sp_player_paint.h"
 #include "mp_vehicle_preview_fix.h"
 #include "shim_log.h"
 #include "x86_length.h"
@@ -229,6 +230,7 @@ namespace BZROpenShim
             {
                 GpuSkinningNotifySceneEntitiesDestroyed();
                 LocalDamageNotifySceneEntitiesDestroyed();
+                SpPlayerPaintNotifySceneEntitiesDestroyed();
             }
         }
 
@@ -292,6 +294,7 @@ namespace BZROpenShim
             // The trampoline was published before the jump went live.
             GpuSkinningSetSceneTeardownSeam(true);
             LocalDamageSetSceneTeardownSeam(true);
+            SpPlayerPaintSetSceneTeardownSeam(true);
             Log(L"[SCENE] Installed destroyAllEntities hook body=0x%08X skyDomeFlag=+0x%X skyPlaneFlag=+0x%X\n",
                 static_cast<uint32_t>(reinterpret_cast<uintptr_t>(body)),
                 g_SkyDomeEnabledOffset,
@@ -627,6 +630,7 @@ namespace BZROpenShim
                 GpuInstancingNotifyMissionRunStateChanged(false);
                 GpuSkinningNotifyMissionRunStateChanged(false);
                 LocalDamageNotifyMissionRunStateChanged(false);
+                SpPlayerPaintNotifyMissionRunStateChanged(false);
                 NotifyExuMissionSimulationState(false);
                 NativeHud::Runtime::ResetMission();
                 HudFeedback::ResetMission();
@@ -636,6 +640,9 @@ namespace BZROpenShim
                 // Rallies belong to the world being left; without this a load
                 // that restores the same producer handle would inherit them.
                 ResetProducerRallyPoints();
+                // Loadouts and frozen quotes are in-memory for one mission (no
+                // save sidecar in M1); a load must not inherit them.
+                ResetUnitLoadouts();
                 // Stock scavenger bytes go back before the next mission's
                 // single-player gate has run (it may be a network game).
                 RevertScavengerInstantStartToBaseline();
