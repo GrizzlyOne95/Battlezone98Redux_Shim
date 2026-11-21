@@ -4784,6 +4784,18 @@
       "identity": "GetPlayerHandle(): handle of the local player object"
     },
     {
+      "name": "DayWreckerBuildCtorCall",
+      "address": "0x004B0D85",
+      "expected": "8B 45 E8 50 8B 4D 08 51 8B 4D F0 E8 8B F6 FF FF",
+      "identity": "DayWreckerClass object factory 0x004B0D40 (after operator new 0x238): mov eax,[ebp-0x18] (the class); push eax; mov ecx,[ebp+8]; push ecx; mov ecx,[ebp-0x10] (new object); call DayWrecker::DayWrecker at +0x0B, the only call to 0x004B0420 in .text. Every Daywrecker creation (Armory ObjectLobber via FUN_004E1190, Lua BuildObject, map load, network create) passes here. Redirected by the fallOnSpawn ODF key (daywrecker_spawn_fall.cpp)"
+    },
+    {
+      "name": "DayWreckerCtor",
+      "address": "0x004B0420",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 0C 50 8B 4D 08 51 8B 4D FC E8 B9 75 0F 00",
+      "identity": "DayWrecker::DayWrecker(this, a, b), thiscall, RET 8, returns this: calls PowerUp::PowerUp 0x005A79F0 (which stores the PowerUp state block at +0x228), installs the DayWrecker vtables at +0 and +0x18, clears the consumed byte +0x230"
+    },
+    {
       "name": "SatelliteMaxZoomCompare",
       "address": "0x00587E68",
       "expected": "0F 2F 05 F4 23 87 00 76 10 8B 4D EC",
