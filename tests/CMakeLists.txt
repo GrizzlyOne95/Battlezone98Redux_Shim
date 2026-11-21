@@ -605,6 +605,12 @@ openshim_add_test(objective_cap_guard_tests STD 14 SOURCES
     objective_cap_guard_tests.cpp
 )
 
+openshim_add_test(handle_sequence_check_tests STD 14 SOURCES
+    handle_sequence_check_tests.cpp
+)
+target_compile_definitions(handle_sequence_check_tests PRIVATE
+    BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+
 openshim_add_test(anchor_drag_guard_tests STD 14 SOURCES
     anchor_drag_guard_tests.cpp
 )
