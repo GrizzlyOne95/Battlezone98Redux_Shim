@@ -39,6 +39,7 @@
 #include "sun_flash.h"
 #include "screen_flash.h"
 #include "local_damage.h"
+#include "sp_player_paint.h"
 #include "chunk_batch_invalidation.h"
 #include "ai_range_policy.h"
 #include "lcbench_safety_policy.h"
@@ -502,13 +503,15 @@ namespace BZROpenShim
             ReloadProducerBadgesConfig();
             // [Gameplay] RtsCommandPings / RtsArtilleryRange, and the placement
             // aids RtsBuildGhost / RtsPendingBuildGhost / RtsPowerRange /
-            // RtsWaypointLines, and the under-attack rings RtsAttackMarks,
-            // likewise.
+            // RtsWaypointLines, the under-attack rings RtsAttackMarks and the
+            // radar rings RtsRadarPings, likewise.
             ReloadRtsMarkersConfig();
             // [Gameplay] RtsOrderQueue (Shift-queued orders), likewise.
             ReloadRtsOrderQueueConfig();
             // [Gameplay] RtsBuildQueue (Recycler/Factory build queue), likewise.
             ReloadRtsBuildQueueConfig();
+            // [Gameplay] UnitLoadouts (per-unit weapon loadouts), likewise.
+            ReloadUnitLoadoutsConfig();
 
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;
             if (TryGetUserConfigBool(
@@ -748,6 +751,11 @@ namespace BZROpenShim
             // it at mission end.
             { "RtsBuildQueue", FeatureTier::SinglePlayer,
               &ResetRtsBuildQueue, &RefreshRtsBuildQueueState },
+            // [Gameplay] UnitLoadouts: per-unit weapon loadouts with a build
+            // surcharge; single player only (the refresh stands it down
+            // online). Revert drops loadouts, menus and quotes at mission end.
+            { "UnitLoadouts", FeatureTier::SinglePlayer,
+              &ResetUnitLoadouts, &RefreshUnitLoadoutsState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config
@@ -948,6 +956,7 @@ namespace BZROpenShim
             ScreenFlash::ReloadConfig();
             ReloadLaserSightConfig();
             LocalDamage::RequestReload();
+            SpPlayerPaint::RequestReload();
             break;
         case ShimSettingApplyGroup::SteamLauncher:
             SyncSteamLauncherProxy();

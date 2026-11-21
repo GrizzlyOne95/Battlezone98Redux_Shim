@@ -2,13 +2,15 @@
 // rts_commands_policy.h
 // Pure rules for the RTS command extras ([Gameplay] RtsRemoteTarget,
 // RtsSmartCommandMenu, RtsSmartRepairReload, RtsAreaSelect, RtsHold,
-// RtsIdleUnitAlert): the mixed-selection command-menu merge, which selected
+// RtsIdleUnitAlert, RtsAmmoAlert, RtsScrapFullAlert, RtsFollowCamera, RtsQuickCommands): the mixed-selection command-menu merge, which selected
 // units an order is sent to, unit families, target cycles, the area-select
-// radius filter, idle units (definition, cycling, alert policy) and the
+// radius filter, idle units (definition, cycling, alert policy), the
+// ammo-out and scrap-full alert policies and the
 // rebindable keys. No Windows or engine calls, so
 // tests/rts_commands_policy_tests.cpp runs them directly. The engine side is
 // src/patches/rts_commands.cpp; behaviour and evidence: Docs/RTS_COMMANDS.md.
 
+#include "lcbench_safety_policy.h"
 #include "quicksave_key_policy.h"
 #include "rts_placement_policy.h"
 
@@ -303,6 +305,62 @@ namespace BZROpenShim
             return list[0];
         }
 
+        // ---- Follow camera (satellite view) ---------------------------------
+
+        // [Gameplay] RtsFollowCamera (default OFF): Shift+C (RtsFollowCameraKey)
+        // in the satellite view keeps the view centred on one of the player's
+        // units. What a press does, by handle (0 = none):
+        //   * a first own selected unit other than the one followed: follow it;
+        //   * else, while following: stop (a second press on the same unit);
+        //   * else: follow the player's own vehicle (`user`, may be 0).
+        inline uint32_t FollowKeyTarget(uint32_t firstOwnSelected, uint32_t user, uint32_t following)
+        {
+            if (firstOwnSelected != 0 && firstOwnSelected != following)
+                return firstOwnSelected;
+            if (following != 0)
+                return 0;
+            return user;
+        }
+
+        // Per tick while a unit is followed. Stop ends the follow for good (the
+        // option went off, the player left the satellite view, or the unit is
+        // gone); Hold keeps it but moves nothing this tick (pause menu, a
+        // shell screen, the editor); Recenter puts the view on the unit.
+        enum class FollowTick
+        {
+            Recenter,
+            Hold,
+            StopDisabled,
+            StopLeftSatellite,
+            StopTargetGone,
+        };
+
+        inline FollowTick ClassifyFollowTick(bool active, bool satelliteView, bool worldInteractive, bool targetLive)
+        {
+            if (!active)
+                return FollowTick::StopDisabled;
+            if (!satelliteView)
+                return FollowTick::StopLeftSatellite;
+            if (!targetLive)
+                return FollowTick::StopTargetGone;
+            if (!worldInteractive)
+                return FollowTick::Hold;
+            return FollowTick::Recenter;
+        }
+
+        inline const char* FollowTickName(FollowTick tick)
+        {
+            switch (tick)
+            {
+            case FollowTick::Recenter: return "recenter";
+            case FollowTick::Hold: return "hold";
+            case FollowTick::StopDisabled: return "option off";
+            case FollowTick::StopLeftSatellite: return "left satellite";
+            case FollowTick::StopTargetGone: return "unit gone";
+            default: return "?";
+            }
+        }
+
         // ---- area select ------------------------------------------------------
 
         constexpr float kAreaRadius = 100.0f;
@@ -572,6 +630,198 @@ namespace BZROpenShim
             unsigned long long lastAlertMs_ = 0;
         };
 
+        // ---- ammo-out and scrap-full alerts ----------------------------------
+
+        // [Gameplay] RtsAmmoAlert: one stock voice line when an own armed unit
+        // runs out of ammo. Low = current ammo under 5% of its maximum; units
+        // with no ammo maximum are skipped. Alerts only on an observed
+        // not-low->low flip, never a unit's first observed state; a unit
+        // re-arms once it is seen at or above 5% again. A flip that the 30 s
+        // global limit suppresses stays low (no late alert), like the idle
+        // alert.
+        constexpr int kAmmoTrackCapacity = 512;
+        constexpr unsigned long long kAmmoAlertIntervalMs = 30000;
+        constexpr int kAmmoLowPercent = 5;
+
+        // The families with weapons.
+        inline bool AmmoTracksFamily(Family family)
+        {
+            return family == Family::Combat || family == Family::TurretTank || family == Family::Howitzer ||
+                   family == Family::Minelayer;
+        }
+
+        inline bool AmmoLow(int ammo, int maxAmmo)
+        {
+            return maxAmmo > 0 &&
+                   static_cast<long long>(ammo) * 100 < static_cast<long long>(maxAmmo) * kAmmoLowPercent;
+        }
+
+        struct AmmoObservation
+        {
+            bool skipped = false; // no ammo maximum: not tracked
+            bool first = false;   // the unit was seen for the first time
+            bool changed = false; // an existing unit's low state flipped
+            bool low = false;     // the state now
+            bool alert = false;   // a not-low->low flip that is not rate-limited
+        };
+
+        class AmmoTracker
+        {
+        public:
+            void Clear()
+            {
+                count_ = 0;
+                alerted_ = false;
+                lastAlertMs_ = 0;
+            }
+
+            // Each scan: BeginPass, Observe every eligible unit, EndPass.
+            // EndPass drops the units that were not observed (gone, dead,
+            // no longer eligible, or skipped).
+            void BeginPass()
+            {
+                for (int i = 0; i < count_; ++i)
+                    entries_[i].seen = false;
+            }
+
+            AmmoObservation Observe(uint32_t handle, int ammo, int maxAmmo, unsigned long long nowMs)
+            {
+                AmmoObservation result;
+                if (maxAmmo <= 0)
+                {
+                    result.skipped = true;
+                    return result;
+                }
+                const bool low = AmmoLow(ammo, maxAmmo);
+                result.low = low;
+                for (int i = 0; i < count_; ++i)
+                {
+                    Entry& e = entries_[i];
+                    if (e.handle != handle)
+                        continue;
+                    e.seen = true;
+                    if (e.low != low)
+                    {
+                        result.changed = true;
+                        if (low && (!alerted_ || nowMs - lastAlertMs_ >= kAmmoAlertIntervalMs))
+                        {
+                            result.alert = true;
+                            alerted_ = true;
+                            lastAlertMs_ = nowMs;
+                        }
+                        e.low = low;
+                    }
+                    return result;
+                }
+                if (count_ < kAmmoTrackCapacity)
+                {
+                    entries_[count_].handle = handle;
+                    entries_[count_].low = low;
+                    entries_[count_].seen = true;
+                    ++count_;
+                    result.first = true;
+                }
+                return result;
+            }
+
+            void EndPass()
+            {
+                int kept = 0;
+                for (int i = 0; i < count_; ++i)
+                {
+                    if (entries_[i].seen)
+                        entries_[kept++] = entries_[i];
+                }
+                count_ = kept;
+            }
+
+            int Count() const { return count_; }
+
+        private:
+            struct Entry
+            {
+                uint32_t handle = 0;
+                bool low = false;
+                bool seen = false;
+            };
+            Entry entries_[kAmmoTrackCapacity];
+            int count_ = 0;
+            bool alerted_ = false;
+            unsigned long long lastAlertMs_ = 0;
+        };
+
+        // [Gameplay] RtsScrapFullAlert: one stock voice line when the local
+        // team's scrap reaches its maximum. Full = maximum at least 30 and
+        // scrap at or above it. Alerts on a not-full->full flip, never on the
+        // first observation (cleared per mission, so a mission that starts
+        // full is silent); re-arms once scrap is seen below the maximum. At
+        // most one alert per 60 s; a suppressed flip stays full.
+        constexpr int kScrapFullMinimumMax = 30;
+        constexpr unsigned long long kScrapAlertIntervalMs = 60000;
+
+        inline bool ScrapFull(int scrap, int maxScrap)
+        {
+            return maxScrap >= kScrapFullMinimumMax && scrap >= maxScrap;
+        }
+
+        class ScrapFullDetector
+        {
+        public:
+            void Clear()
+            {
+                observed_ = false;
+                full_ = false;
+                alerted_ = false;
+                lastAlertMs_ = 0;
+            }
+
+            // True when this observation is an allowed not-full->full flip.
+            bool Observe(int scrap, int maxScrap, unsigned long long nowMs)
+            {
+                const bool full = ScrapFull(scrap, maxScrap);
+                if (!observed_)
+                {
+                    observed_ = true;
+                    full_ = full;
+                    return false;
+                }
+                const bool flip = full && !full_;
+                full_ = full;
+                if (!flip || (alerted_ && nowMs - lastAlertMs_ < kScrapAlertIntervalMs))
+                    return false;
+                alerted_ = true;
+                lastAlertMs_ = nowMs;
+                return true;
+            }
+
+            bool Full() const { return full_; }
+
+        private:
+            bool observed_ = false;
+            bool full_ = false;
+            bool alerted_ = false;
+            unsigned long long lastAlertMs_ = 0;
+        };
+
+        // The voice line by the player's nation: the first letter of the
+        // player's current object's ODF name (BZP GetNation). 'a' (NSDF) and
+        // 'b' (Black Dog) take the American clip, 's' (CCA) and 'c' (CRA) the
+        // Soviet one (there is no CRA clip); anything else the American one.
+        inline bool SovietVoice(char nation)
+        {
+            return nation == 's' || nation == 'S' || nation == 'c' || nation == 'C';
+        }
+
+        inline const char* AmmoAlertSound(char nation)
+        {
+            return SovietVoice(nation) ? "sbetty5.wav" : "abetty5.wav";
+        }
+
+        inline const char* ScrapFullAlertSound(char nation)
+        {
+            return SovietVoice(nation) ? "svrecyvn.wav" : "avrecyvn.wav";
+        }
+
         // ---- the Shift alternate on the Defend entry --------------------------
 
         // While Shift is held the Defend entry reads "Hold" and choosing it
@@ -589,7 +839,12 @@ namespace BZROpenShim
             BuildingCycle,    // key: cycle the target through own buildings
             AreaSelect,       // key: 100 m, Shift+key: 200 m
             Hold,             // key: Hold the selection
+            QuickFollowMe,    // key: Follow the player's vehicle
+            QuickDefendMe,    // key: Defend the player's vehicle
+            QuickAttackTarget, // key: Attack the player's current target
+            QuickStop,        // key: Stop
             IdleUnit,         // key: select the next idle unit, Shift+key: all of them
+            FollowCamera,     // Shift+key in the satellite view: follow a unit
             Count,
         };
         constexpr int kKeyCount = static_cast<int>(KeyId::Count);
@@ -610,6 +865,10 @@ namespace BZROpenShim
         // N, P-T, V-W and gamekey.map M, O, R, U, Y (J appears in neither;
         // checked against the GOG 2.2.301 install files, read-only), and X
         // and Z are the area-select and hold keys.
+        // Follow camera: Shift+C only. Plain C is center_player in the
+        // satellite view (input.map `+ program ControlMode`) and pitch_up
+        // elsewhere, with no Shift exclusion; the gate (satellite view and
+        // RtsFollowCamera on) leaves Shift+C stock everywhere else.
         inline const KeyDef& GetKeyDef(KeyId id)
         {
             static const KeyDef kDefs[kKeyCount] = {
@@ -617,7 +876,12 @@ namespace BZROpenShim
                 { "RtsBuildingCycleKey", "OpenShim:RtsBuildingCycleKey", "Target Next Building", "B", false, false },
                 { "RtsAreaSelectKey", "OpenShim:RtsAreaSelectKey", "Select Same Type Nearby", "X", false, true },
                 { "RtsHoldKey", "OpenShim:RtsHoldKey", "Hold Position", "Z", false, false },
+                { "RtsQuickFollowKey", "OpenShim:RtsQuickFollowKey", "Quick: Follow Me", "Numpad1", false, false },
+                { "RtsQuickDefendKey", "OpenShim:RtsQuickDefendKey", "Quick: Defend Me", "Numpad2", false, false },
+                { "RtsQuickAttackKey", "OpenShim:RtsQuickAttackKey", "Quick: Attack My Target", "Numpad3", false, false },
+                { "RtsQuickStopKey", "OpenShim:RtsQuickStopKey", "Quick: Stop", "Numpad5", false, false },
                 { "RtsIdleUnitKey", "OpenShim:RtsIdleUnitKey", "Select Next Idle Unit", "J", false, true },
+                { "RtsFollowCameraKey", "OpenShim:RtsFollowCameraKey", "Satellite Follow Unit", "C", true, false },
             };
             const int index = static_cast<int>(id);
             return kDefs[index >= 0 && index < kKeyCount ? index : 0];
@@ -647,6 +911,13 @@ namespace BZROpenShim
             case 0x12: return "Alt is a modifier";
             case 0x0D: return "Enter is a game key";
             case 0x1B: return "Esc is a game key";
+            // Stock input.map binds Numpad0 (weapon_fire: plain Insert),
+            // Numpad4 and Numpad6 (LeftArrow/RightArrow steering), and
+            // KeypadEnter (Enter, above). DirectInput fires them whatever
+            // the window filter swallows.
+            case 0x60: return "Numpad0 is the game's fire key";
+            case 0x64: return "Numpad4 is the game's steering key";
+            case 0x66: return "Numpad6 is the game's steering key";
             default: return nullptr;
             }
         }
@@ -789,6 +1060,61 @@ namespace BZROpenShim
             decision.act = true;
             decision.shift = key.shift;
             return decision;
+        }
+
+        // ---- Quick commands ----------------------------------------------------
+
+        // [Gameplay] RtsQuickCommands: four plain numpad keys that order the
+        // selection against the player. The game reads input.map through
+        // DirectInput, which swallowing window messages cannot block, so a
+        // key with a stock bind would fire both. The GOG input.map binds
+        // Numpad0 (weapon_fire, plain Insert), Numpad4 and Numpad6 (steering,
+        // LeftArrow/RightArrow) and KeypadEnter; the other numpad digits are
+        // free, so the defaults are Numpad1, 2, 3 and 5, and ReservedKeyReason
+        // refuses the bound ones. The quick keys stay reserved for the clash
+        // checks even with the option off. Single player only, like Hold.
+        constexpr int kCmdAttack = 4;
+        constexpr int kCmdFollow = 5;
+
+        inline bool QuickCommandsAvailable(bool enabled, bool hooksInstalled, bool singlePlayer)
+        {
+            return enabled && hooksInstalled && singlePlayer;
+        }
+
+        // Attack My Target: the player's target must not be on the player's
+        // team and must pass the same explicit-attack rule as the stock
+        // ControlPanel attack list (Team::EnemyP, plus team 0 only under
+        // [Gameplay] AllowNeutralAttackOrders): an ally is refused.
+        inline bool QuickAttackTargetAllowed(bool sameTeamAsPlayer, bool stockEnemy, int targetTeam,
+                                             bool allowNeutralAttackOrders)
+        {
+            return !sameTeamAsPlayer &&
+                   LcbenchSafetyPolicy::AllowExplicitAttackTarget(stockEnemy, targetTeam, allowNeutralAttackOrders);
+        }
+
+        struct QuickOrder
+        {
+            int what = 0;           // command id; 0 = not a quick key
+            int mode = kModeNone;   // ModeList entry a unit must hold; kModeNone = no filter
+            bool needsTarget = false; // an object order (the player or the player's target)
+            bool onPlayer = false;  // the target is the player's own vehicle
+        };
+
+        // Follow Me: CMD_FOLLOW (5) on the player, ModeList kModeFollowMe (2).
+        // Defend Me: CMD_DEFEND (15) on the player, kModeDefend (17).
+        // Attack My Target: CMD_ATTACK (4) on the player's target, kModeAttack
+        // (14). Stop: CMD_STOP (2), no target and no mode filter (Stop has no
+        // mode constant here; every commandable unit takes it).
+        inline QuickOrder QuickOrderFor(KeyId id)
+        {
+            switch (id)
+            {
+            case KeyId::QuickFollowMe: return { kCmdFollow, kModeFollowMe, true, true };
+            case KeyId::QuickDefendMe: return { kCmdDefend, kModeDefend, true, true };
+            case KeyId::QuickAttackTarget: return { kCmdAttack, kModeAttack, true, false };
+            case KeyId::QuickStop: return { RtsPlacement::kCmdStop, kModeNone, false, false };
+            default: return {};
+            }
         }
 
         // ---- Hold -------------------------------------------------------------

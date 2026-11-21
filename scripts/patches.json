@@ -3663,6 +3663,30 @@
       "identity": "FUN_004E1C10(teamNumber, GameObjectClass*), cdecl: the pilot cost of a class that Producer::StartBuild 0x005AECB0 compares with the team's pilots (Team +0x174); the build starts only if scrap cost <= scrap and pilot cost <= pilots. RtsBuildQueue calls it to decide when a queued item can start. Exact GOG Redux 2.2.301, bytes read 2026-11-17."
     },
     {
+      "name": "UnitLoadoutStartBuildCostCall",
+      "address": "0x005AECB6",
+      "expected": "89 4D FC 8B 45 FC 83 B8 00 03 00 00 00 74 07 32 C0 E9 A7 00 00 00 8B 4D 08 51 8B 55 FC 8B 82 74 01 00 00 50 E8 B1 2E F3 FF",
+      "identity": "Producer::StartBuild 0x005AECB0 from +6 (its first six bytes are left out because TraceAIBuildLedger relocates them) to the end of its scrap-cost call: mov [ebp-4],ecx stores this, then BuildScrapCost(this+0x174, class) is called at 0x005AECDA (E8 rel32 resolves to 0x004E1B90), so row + 0x29 = 0x005AECDF is the return address the cost function sees for the charge (FUN_005aecb0.c lines 11-16: the cost is compared with the team's scrap and subtracted). UnitLoadouts reads the producer from the caller's [ebp-4] when it sees that return address. Exact GOG Redux 2.2.301, bytes read 2026-11-19."
+    },
+    {
+      "name": "UnitLoadoutRefundCostCall",
+      "address": "0x005AED86",
+      "expected": "89 4D FC 8B 45 FC 83 B8 00 03 00 00 00 75 07 32 C0 E9 81 00 00 00 6A FF 8B 4D FC 81 C1 A4 01 00 00 E8 04 36 EC FF 8B 4D FC 8B 91 00 03 00 00 52 8B 45 FC 8B 88 74 01 00 00 51 E8 CB 2D F3 FF",
+      "identity": "The producer cancel FUN_005AED80 from +6 to the end of its scrap-cost call: mov [ebp-4],ecx stores this, then BuildScrapCost(this+0x174, this+0x300) is called at 0x005AEDC0 (E8 rel32 resolves to 0x004E1B90), so row + 0x3F = 0x005AEDC5 is the return address the cost function sees for the refund; the result is added back to the team's scrap and +0x300 is cleared only afterwards (FUN_005aed80.c lines 9-16). UnitLoadouts reads the producer from the caller's [ebp-4] when it sees that return address. Exact GOG Redux 2.2.301, bytes read 2026-11-19."
+    },
+    {
+      "name": "UnitLoadoutGiveWeapon",
+      "address": "0x00612F10",
+      "expected": "55 8B EC 83 EC 18 83 7D 08 00 75 07 32 C0 E9 6F",
+      "identity": "FUN_00612F10(GameObject*, WeaponClass*, slot), cdecl, returns al: removes the weapon in carrier slot `slot` and builds the given WeaponClass on that slot's hardpoint, then sets the slot's mask bits (FUN_00612f10.c lines 19-50). Its range test (slot < 0 && 4 < slot, line 15) never rejects, so callers must pass 0..4. The weapon powerup's give path FUN_005CB0D0 calls it as push slot; push weaponClass; push obj; call; add esp,0Ch. Used by UnitLoadouts at FinishBuild. Exact GOG Redux 2.2.301, bytes read 2026-11-19."
+    },
+    {
+      "name": "UnitLoadoutTeamAddScrap",
+      "address": "0x005E1010",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 8B 4D FC E8 8F 00 00",
+      "identity": "Team::AddScrap FUN_005E1010(Team* this, int amount), __thiscall, ret 4: adds amount to the team's scrap and clamps to the cap at this+0x170 (FUN_005e1010.c lines 8-14). The producer charge and refund call it with ecx = [producer+0x17C] (mov ecx,[ecx+0x17C] at 0x005AED01 before the scrap read and at 0x005AEDF1 before call 0x005E1010; FUN_005aecb0.c line 16, FUN_005aed80.c line 14). Used by UnitLoadouts at FinishBuild to give back the surcharge of weapons that were not fitted. Exact GOG Redux 2.2.301, bytes read 2026-11-19."
+    },
+    {
       "name": "InputHeldModifierKeys",
       "address": "0x0260C250",
       "kind": "data",
@@ -3847,6 +3871,12 @@
       "address": "0x0068AED0",
       "expected": "55 8B EC 83 EC 24 A1 00 70 8E 00 33 C5 89 45 FC 8B 45 0C 03 45 14",
       "identity": "Native diamond marker, viewport/x/y/radius/color plus caller mode slot; radar caller cleanup 0x18. Helper submits direct raw-color vertices through 0x00687550 and bypasses mode-to-color helpers. Released GOG 2.2.301 SHA256 8D71F56C...3377413, Ghidra/xrefs/Capstone semantics and native ReadProcessMemory PID 5780 on 2026-10-19 matched the complete expected window."
+    },
+    {
+      "name": "HudLine",
+      "address": "0x0068AF40",
+      "expected": "55 8B EC 8B 45 20 50 8B 4D 1C 51 E8 00 FD FF FF 83 C4 08 50 8B 55 18 52",
+      "identity": "Native 2D HUD line: viewport (unused)/x1/y1/x2/y2/ARGB/mode, cdecl; mode via 0x0068AC50 (0 = passthrough). Native cockpit radar grid caller FUN_00493ec0. Released GOG 2.2.301 SHA256 8D71F56C...3377413; bytes read from the shipping exe file on 2026-11-18."
     },
     {
       "name": "HudFadeRadarDiamondCall0",
@@ -4776,6 +4806,18 @@
       "address": "0x00587BE6",
       "expected": "F3 0F 10 05 D0 91 9C 00 F3 0F 59 45 D8",
       "identity": "movss xmm0,[pan speed] in the satellite pan step; operand at +4 is the .data pan speed"
+    },
+    {
+      "name": "OverViewSetObjectByHandle",
+      "address": "0x00588BA0",
+      "expected": "55 8B EC 8B 45 08 50 E8 84 13 EF FF 83 C4 04 50 B9 70 91 9C 00 E8 B6 FD FF FF",
+      "identity": "OverView_SetObject(handle), cdecl: GetObj(handle) (0x00479F30), then mov ecx,0x009C9170 (the global OverView, constructed at 0x00409C90 by 0x00587520) and call OverView::SetObject; called once by the satellite view setter 0x0061BD20 at 0x0061BDB6. RtsFollowCamera reads the OverView from the imm32 at +0x11 and checks the E8 at +0x15 reaches OverViewSetObject"
+    },
+    {
+      "name": "OverViewSetObject",
+      "address": "0x00588970",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D 08 83 C1 18 8B 45 08 8B 50 18 8B 42 2C FF D0",
+      "identity": "OverView::SetObject(GameObject* complete), thiscall (bsim 0.9976 against BZ 1.5 OverView::SetObject 0x004D3167): stores [obj+0x18]->slot 0x2C at +0x38, obj at +0x3C, and [obj+0x18]->GetPosition (slot 0xC) at +0x44..+0x4C, the view centre the satellite camera matrix 0x00588A40 reads. No null check. RtsFollowCamera calls it each frame while following"
     },
     {
       "name": "OrdnanceSpawnVelocitySite",

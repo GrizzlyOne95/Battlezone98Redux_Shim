@@ -43,6 +43,19 @@ namespace BZROpenShim::ContextualHud
     using CommandPanelAfterRender = void (*)(void* controlPanel);
     bool RegisterCommandPanelRenderScope(CommandPanelBeforeRender before, CommandPanelAfterRender after);
 
+    // Post-draw seam on the stock cockpit radar, same shape as the command
+    // one. This file owns the radar render slot (HudFadeRadarRenderSlot) for
+    // every feature: the wrapper goes in when the radar fade or a registered
+    // callback needs it, and only while the slot holds the stock renderer. The
+    // callback runs on the frame thread right after the stock render (inside
+    // the fade scope when the fade is on; `opacity` is then the fade opacity,
+    // else 1) and inside SEH. It is skipped while the radar is hidden, in the
+    // alternate layout, or while EXU owns the radar presentation. `radar` is
+    // the CockpitRadar. One consumer; same return rules as
+    // RegisterCommandPanelPostDraw.
+    using RadarPostDraw = void (*)(void* radar, float opacity);
+    bool RegisterRadarPostDraw(RadarPostDraw callback);
+
     // Passive observer on the stock weapon-list backdrop submit
     // (HudFadeWeaponPlate). It shares the WeaponPlate adapter the fade uses,
     // so installing it here and from Install() is idempotent, and with fading
