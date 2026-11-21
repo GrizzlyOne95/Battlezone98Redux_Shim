@@ -154,6 +154,21 @@ namespace BZROpenShim
                     extended = false;
                     return true;
                 }
+                // Numpad0-9 (also Num0-9, Keypad0-9): VK_NUMPAD0..9, never
+                // extended. With NumLock off the keys send Home/End/... instead.
+                static const char* const kNumpadPrefixes[] = { "numpad", "keypad", "num" };
+                for (const char* prefix : kNumpadPrefixes)
+                {
+                    unsigned plen = 0;
+                    while (prefix[plen] != '\0')
+                        ++plen;
+                    if (len == plen + 1 && EqualsNoCase(t, plen, prefix) && t[plen] >= '0' && t[plen] <= '9')
+                    {
+                        vk = 0x60 + static_cast<unsigned>(t[plen] - '0');
+                        extended = false;
+                        return true;
+                    }
+                }
                 for (const NamedKey& k : kNamedKeys)
                 {
                     if (EqualsNoCase(t, len, k.name))

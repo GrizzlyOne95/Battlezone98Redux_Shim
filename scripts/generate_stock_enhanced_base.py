@@ -22,6 +22,13 @@ units, so stock objects get the static and per-planet IBL without CR. Terrain
 ones (CR_TerrainIBL*) become the plain OSE_TerrainEN* fragment of the same
 tier and their IBL texture units are dropped. Non-`en-*` techniques stay stock, so Classic,
 Redux, Retro and glow rendering are unchanged.
+The OSE_BaseIBLHigh* passes also get a `teamMap` texture unit right after
+brdfLut, bound to the neutral openshim_team_off.dds; single-player player paint
+(src/patches/sp_player_paint.cpp) swaps it on the player ship's clone only.
+
+The checked-in imports are generated from Campaign Reimagined commit bc1487ac
+(Materials/CR_BZBase.material and CR_BZTerrainBase.material); later CR
+materials use CR_ShimOrStock_* programs this script does not map yet.
 
 The outputs use a `.import` extension so no resource group parses them as
 scripts: they are only ever read through the redirected import, which keeps the
@@ -67,6 +74,15 @@ IBL_FRAGMENTS = [
     (re.compile(r"\bCR_TerrainIBLHigh(PSSM|Shadow|NoShadow)_fragment\b"), r"OSE_TerrainENHigh\1_fragment"),
 ]
 IBL_UNITS = ("irradianceMap", "prefilteredEnvMap", "brdfLut")
+
+# Neutral team-paint unit for the en-high IBL programs (TEAM_PAINT_ENABLED).
+TEAM_UNIT = (
+    "\n\n\t\t\ttexture_unit teamMap\n"
+    "\t\t\t{\n"
+    "\t\t\t\ttexture_alias OpenShimTeamMask\n"
+    "\t\t\t\ttexture openshim_team_off.dds 2d\n"
+    "\t\t\t}"
+)
 
 
 def load(path):
@@ -139,6 +155,26 @@ def drop_ibl_units(technique):
     return re.sub(r"\n[ \t]*\n([ \t]*\})", r"\n\1", technique)
 
 
+def add_team_unit(technique):
+    """Append the teamMap unit after brdfLut in an OSE_BaseIBLHigh* pass."""
+    if not re.search(r"\bOSE_BaseIBLHigh\w*_fragment\b", technique):
+        return technique
+    m = re.search(r"\n[ \t]*texture_unit\s+brdfLut\s*\{", technique)
+    if not m:
+        raise ValueError("OSE_BaseIBLHigh technique has no brdfLut unit to anchor teamMap on")
+    depth = 0
+    pos = technique.index("{", m.start())
+    while True:
+        if technique[pos] == "{":
+            depth += 1
+        elif technique[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+        pos += 1
+    return technique[:pos + 1] + TEAM_UNIT + technique[pos + 1:]
+
+
 def default_emissive(block):
     """Declare `emissive 1 1 1` on an Enhanced abstract pass.
 
@@ -196,6 +232,8 @@ def generate(target, stock_dir, cr_dir, programs):
                 technique = pattern.sub(replacement, technique)
             if not target.get("keep_ibl"):
                 technique = drop_ibl_units(technique)
+            else:
+                technique = add_team_unit(technique)
             used_passes.update(m.group(0) for m in pass_re.finditer(technique))
             technique = pass_re.sub(target["pass_to"] + r"\1", technique)
             techniques.append(technique)
