@@ -1,5 +1,6 @@
 #include "database_policy.h"
 #include "test_check.h"
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -257,8 +258,50 @@ namespace
     }
 }
 
+namespace
+{
+    void TestPreview()
+    {
+        Check(PreviewMeshStem(ParseOdf("[GameObjectClass]\nbaseName = \"avwalk\"\n"), "avwalkfh") == "avwalk",
+              "baseName wins over the ODF stem");
+        Check(PreviewMeshStem(ParseOdf("[GameObjectClass]\nunitName = x\n"), "avrecy") == "avrecy",
+              "no baseName: the ODF stem");
+        Check(PreviewMeshStem(ParseOdf("[GameObjectClass]\nbaseName = avlongname9.xsi\n"), "x") == "avlongna",
+              "cut to 8 like the stock picker");
+        Check(PreviewMeshStem(ParseOdf("[GameObjectClass]\nbaseName = abc.xsi\n"), "x") == "abc",
+              "extension cut at the first dot");
+
+        const float pi = 3.14159265f;
+        const float mn[3] = { -2.0f, 0.0f, -3.0f };
+        const float mx[3] = { 2.0f, 4.0f, 4.0f };
+        const PreviewFit fit = FitPreview(mn, mx, pi / 3.0f);
+        // radius sqrt(4 + 16) = 4.47 > half height 2; node lifts to 1 - 2 = -1.
+        Check(fit.ok && std::fabs(fit.nodeY + 1.0f) < 1e-4f, "box centre at camera height");
+        const float radius = std::sqrt(20.0f);
+        const float slope = 1.05f / std::tan(pi / 6.0f);
+        Check(std::fabs(fit.distance - radius * std::sqrt(1.0f + slope * slope)) < 1e-3f,
+              "wide model: the spin cylinder's tangents fit the field of view");
+        // The tangent from the camera stays inside the half FOV with the margin.
+        Check(radius / std::sqrt(fit.distance * fit.distance - radius * radius) <=
+                  std::tan(pi / 6.0f) / 1.05f + 1e-4f,
+              "wide model is not clipped across");
+        // A tall model (walker shape) is fitted by height instead.
+        const float tmn[3] = { -1.0f, 0.0f, -1.0f };
+        const float tmx[3] = { 1.0f, 20.0f, 1.0f };
+        const PreviewFit tall = FitPreview(tmn, tmx, pi / 3.0f);
+        Check(tall.ok && (tall.distance - std::sqrt(2.0f)) * std::tan(pi / 6.0f) >= 10.0f,
+              "tall model: its half height fits at the nearest depth");
+        const float bad[3] = { 1.0f, 0.0f, 0.0f };
+        Check(!FitPreview(bad, mn, pi / 3.0f).ok, "inverted box declines");
+        Check(!FitPreview(mn, mx, 0.0f).ok, "no field of view declines");
+        const float zero[3] = { 0.0f, 0.0f, 0.0f };
+        Check(!FitPreview(zero, zero, pi / 3.0f).ok, "empty box declines");
+    }
+}
+
 int main()
 {
+    TestPreview();
     TestParse();
     TestDesignation();
     TestMerge();

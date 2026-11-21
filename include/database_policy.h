@@ -32,6 +32,7 @@
 // stock section (a repeated key is replaced as a whole list), `remove = 1`
 // drops the section, and a section the stock file lacks is appended.
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -634,5 +635,68 @@ namespace BZROpenShim::DatabasePolicy
     inline size_t PageCount(size_t items, size_t perPage)
     {
         return perPage == 0 || items == 0 ? 1 : (items + perPage - 1) / perPage;
+    }
+
+    // ---- 3D preview --------------------------------------------------------
+
+    // The mesh stem the stock MP vehicle picker builds for an ODF
+    // (FUN_007AA560 lines 114-152): [GameObjectClass] baseName (the key
+    // hashes 0xD3DD9CEC / 0x794B13B are FNV-1a of "gameobjectclass" /
+    // "basename"), cut to 8 characters, then cut at the first '.'. Stock
+    // ODFs mostly have no baseName; the ODF stem, cut the same way, is the
+    // fallback. baseName is taken from any section: some mod ODFs head the
+    // class block [GameObject].
+    inline std::string PreviewMeshStem(const Odf& odf, const std::string& odfStem)
+    {
+        std::string stem = odf.Get("GameObjectClass", "baseName");
+        if (Trim(stem).empty())
+            stem = odf.Get("", "baseName");
+        if (Trim(stem).empty())
+            stem = odfStem;
+        stem = Trim(stem).substr(0, 8);
+        const size_t dot = stem.find('.');
+        if (dot != std::string::npos)
+            stem.resize(dot);
+        return stem;
+    }
+
+    // Camera fit for the spinning preview model. The stock camera sits at
+    // (0, cameraY, distance) looking down -Z with a square viewport, and the
+    // model spins about its node's Y axis. `minimum` / `maximum` are the
+    // entity's local bounding box (node scale 1). The node is lifted so the
+    // box's vertical centre is at camera height. The distance is the nearest
+    // at which the spin cylinder (radius = the box's farthest XZ corner from
+    // the axis) fits with `margin`: across, its tangent lines from the camera
+    // must stay inside the half FOV (d = r * sqrt(1 + (margin / tan)^2));
+    // up and down, the half height must fit at the cylinder's nearest depth
+    // (d = r + margin * h / tan).
+    struct PreviewFit
+    {
+        bool ok = false;
+        float distance = 0.0f;
+        float nodeY = 0.0f;
+    };
+
+    inline PreviewFit FitPreview(const float minimum[3], const float maximum[3], float fovY,
+                                 float cameraY = 1.0f, float margin = 1.05f)
+    {
+        PreviewFit fit;
+        const auto finite = [](float v) { return v == v && v > -1.0e6f && v < 1.0e6f; };
+        for (int i = 0; i < 3; ++i)
+            if (!finite(minimum[i]) || !finite(maximum[i]) || maximum[i] < minimum[i])
+                return fit;
+        if (!(fovY > 0.1f && fovY < 3.0f))
+            return fit;
+        const float x = std::fmax(std::fabs(minimum[0]), std::fabs(maximum[0]));
+        const float z = std::fmax(std::fabs(minimum[2]), std::fabs(maximum[2]));
+        const float radius = std::sqrt(x * x + z * z);
+        const float halfHeight = (maximum[1] - minimum[1]) * 0.5f;
+        if (std::fmax(radius, halfHeight) < 0.01f)
+            return fit;
+        const float slope = margin / std::tan(fovY * 0.5f);
+        fit.distance = std::fmax(radius * std::sqrt(1.0f + slope * slope), radius + halfHeight * slope);
+        fit.nodeY = cameraY - (minimum[1] + maximum[1]) * 0.5f;
+        fit.ok = true;
+        return fit;
     }
 }

@@ -19,18 +19,22 @@
 // tab buttons, list rows and page buttons are built once and re-texted.
 
 #include <Windows.h>
+#include <Psapi.h>
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "database_policy.h"
 #include "database_content_resources.h"
 #include "des_reader.h"
+#include "engine_globals.h"
 #include "hook_engine.h"
 #include "lobby_briefing_policy.h"
+#include "ogre_runtime.h"
 #include "openshim_l10n_text.h"
 #include "patcher.h"
 #include "shell_screens.h"
 
 #include <array>
+#include <cstdarg>
 #include <cstdio>
 #include <cstring>
 #include <map>
@@ -450,6 +454,557 @@ namespace BZROpenShim
                     reinterpret_cast<FnScroll>(static_cast<uintptr_t>(g_ScrollDownAddr))(block);
             }
 
+            // ---- 3D unit preview (Docs/DATABASE_SCREEN.md "3D unit preview") ----
+            // Reuses the stock MP vehicle picker's preview: a
+            // cUI_VehiclePreviewWindow showing the "SniperTex" render target,
+            // with a viewport on it in RenderGlobals +0x24 and the model built by
+            // VehiclePreviewBuildModel into the single game SceneManager. The
+            // screen is a shell screen, so no mission scene shares that manager.
+            // Any fault turns the preview off for the session; the picture
+            // square then shows the unit's picture as before.
+            namespace Preview
+            {
+                // RenderGlobals members (FUN_0067d0c0 lines 7-19; FUN_0067ccf0 line 19).
+                constexpr size_t kSceneManagerOff = 0x08, kCameraOff = 0x18, kPreviewViewportOff = 0x24;
+                // SceneManager destroyAllEntities / destroyAllLights (FUN_0067d0c0 lines 7-8).
+                constexpr size_t kSmDestroyAllEntities = 0x198, kSmDestroyAllLights = 0x140;
+                // RenderTarget addViewport (+0x2C, the MP picker setup FUN_007a9590 line 152) and
+                // removeViewport (+0x40, FUN_0067d0c0 line 17, FUN_007aa360 line 19).
+                constexpr size_t kRtAddViewport = 0x2C, kRtRemoveViewport = 0x40;
+                constexpr size_t kPreviewWindowSize = 0x144;  // operator_new size before the ctor
+                // z order, material binding, viewport settings and mask copy FUN_007a9590
+                // lines 145-161 (the picker also calls the shadow setup FUN_00680fe0; the
+                // preview viewport has shadows off, so it is skipped).
+                constexpr uint32_t kPreviewZ = 4, kVisibilityMask = 8;
+                // Operand sites inside the bound functions, cross-checked against the data rows
+                // (GOG exe: 0x0067D1DD node, 0x0067D23C entity, 0x0067D250 light, 0x0067D5D5 camera
+                // distance in the build; 0x0067D0C4 RenderGlobals, 0x0067D157 render target in
+                // RenderSceneTeardown; 0x007AA0E6 fade in the update).
+                constexpr size_t kBuildNodeOperand = 0x5D, kBuildEntityOperand = 0xBC, kBuildLightOperand = 0xD0,
+                                 kBuildDistanceOperand = 0x455, kTeardownGlobalsOperand = 0x04,
+                                 kTeardownRtOperand = 0x97, kUpdateFadeOperand = 0xE6;
+
+                using FnCtor = void*(__thiscall*)(void*, const char*, float, float, float, float, uint32_t, void*);
+                using FnSetZ = void(__thiscall*)(void*, uint32_t);
+                using FnBind = void(__thiscall*)(void*, const char*, const char*);
+                using FnAddViewport = void*(__thiscall*)(void*, void*, int, float, float, float, float);
+                using FnRemoveViewport = void(__thiscall*)(void*, int);
+                using FnBuild = void(__cdecl*)(const char*, float, float, float);
+                using FnVoid = void(__cdecl*)();
+                using FnNodeDestroy = void(__cdecl*)(void*);
+                using FnThis = void(__thiscall*)(void*);
+                using FnFadeDtor = void*(__thiscall*)(void*, int);
+                using FnGetZ = int(__thiscall*)(const void*);
+                using FnSetClear = void(__thiscall*)(void*, bool, unsigned);
+                using FnSetColour = void(__thiscall*)(void*, const float*);
+                using FnSetBool = void(__thiscall*)(void*, bool);
+                using FnSetMask = void(__thiscall*)(void*, unsigned);
+                using FnGetBox = const float*(__thiscall*)(const void*);  // AxisAlignedBox: min[3], max[3], extent
+                using FnSetPosition = void(__thiscall*)(void*, float, float, float);
+                using FnGetFov = const float*(__thiscall*)(const void*);  // Radian: one float
+
+                uint32_t g_CtorAddr = 0, g_SetZAddr = 0, g_BindAddr = 0, g_BuildAddr = 0, g_UpdateAddr = 0,
+                         g_NodeDestroyAddr = 0, g_TeardownAddr = 0;
+                uint32_t g_RtSlot = 0, g_NodeSlot = 0, g_EntitySlot = 0, g_LightSlot = 0, g_FadeSlot = 0,
+                         g_DistanceSlot = 0;
+                uintptr_t g_GlobalsSlot = 0;
+                FnGetZ g_GetZ = nullptr;
+                FnSetClear g_SetClear = nullptr;
+                FnSetColour g_SetColour = nullptr;
+                FnSetBool g_SetOverlays = nullptr, g_SetShadows = nullptr;
+                FnSetMask g_SetMask = nullptr;
+                FnGetBox g_GetBox = nullptr;
+                FnSetPosition g_SetPosition = nullptr;
+                FnGetFov g_GetFov = nullptr;
+
+                bool g_Bound = false;
+                bool g_Faulted = false;
+                void* g_View = nullptr;   // child of the screen panel: the shell destroys it
+                bool g_Ours = false;      // we added the +0x24 viewport
+                bool g_HasModel = false;  // the node / entity / light slots hold our model
+                bool g_Fitted = false;
+                std::string g_Stem;
+                unsigned g_Builds = 0;
+                std::wstring g_LastDecision;
+
+                template <typename T>
+                T& At(uintptr_t address)
+                {
+                    return *reinterpret_cast<T*>(address);
+                }
+
+                // Change-only decision log: a line is written only when it differs from the last.
+                void Decide(const wchar_t* fmt, ...)
+                {
+                    wchar_t line[512] = {};
+                    va_list args;
+                    va_start(args, fmt);
+                    _vsnwprintf_s(line, _countof(line), _TRUNCATE, fmt, args);
+                    va_end(args);
+                    if (g_LastDecision == line)
+                        return;
+                    g_LastDecision = line;
+                    Log(L"[DATABASE] preview %ls\n", line);
+                }
+
+                size_t PrivateKb()
+                {
+                    using FnInfo = BOOL(WINAPI*)(HANDLE, PROCESS_MEMORY_COUNTERS_EX*, DWORD);
+                    static const FnInfo info = reinterpret_cast<FnInfo>(
+                        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "K32GetProcessMemoryInfo"));
+                    PROCESS_MEMORY_COUNTERS_EX counters{};
+                    counters.cb = sizeof(counters);
+                    if (!info || !info(GetCurrentProcess(), &counters, sizeof(counters)))
+                        return 0;
+                    return counters.PrivateUsage / 1024;
+                }
+
+                void RttiName(const void* object, char* buffer, size_t size)
+                {
+                    __try
+                    {
+                        const uintptr_t vtable = *reinterpret_cast<const uintptr_t*>(object);
+                        const uintptr_t locator = *reinterpret_cast<const uintptr_t*>(vtable - 4);
+                        const uintptr_t type = *reinterpret_cast<const uintptr_t*>(locator + 0x0C);
+                        _snprintf_s(buffer, size, _TRUNCATE, "%s", reinterpret_cast<const char*>(type + 8));
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        _snprintf_s(buffer, size, _TRUNCATE, "?");
+                    }
+                }
+
+                bool OperandsMatchSeh()
+                {
+                    __try
+                    {
+                        return At<uint32_t>(g_BuildAddr + kBuildNodeOperand) == g_NodeSlot &&
+                               At<uint32_t>(g_BuildAddr + kBuildEntityOperand) == g_EntitySlot &&
+                               At<uint32_t>(g_BuildAddr + kBuildLightOperand) == g_LightSlot &&
+                               At<uint32_t>(g_BuildAddr + kBuildDistanceOperand) == g_DistanceSlot &&
+                               At<uint32_t>(g_TeardownAddr + kTeardownGlobalsOperand) == g_GlobalsSlot &&
+                               At<uint32_t>(g_TeardownAddr + kTeardownRtOperand) == g_RtSlot &&
+                               At<uint32_t>(g_UpdateAddr + kUpdateFadeOperand) == g_FadeSlot;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return false;
+                    }
+                }
+
+                // Called once from InstallDatabaseScreenIfPossible. A failure leaves the
+                // screen working with pictures only.
+                void Bind()
+                {
+                    const HookEngine::EngineRow rows[] = {
+                        { "VehiclePreviewWindowCtor", &g_CtorAddr },
+                        { "UiViewSetZOrder", &g_SetZAddr },
+                        { "UiViewSetMaterialTexture", &g_BindAddr },
+                        { "VehiclePreviewBuildModel", &g_BuildAddr },
+                        { "VehiclePreviewUpdate", &g_UpdateAddr },
+                        { "VehiclePreviewNodeDestroy", &g_NodeDestroyAddr },
+                        { "RenderSceneTeardown", &g_TeardownAddr },
+                        { "SniperTexRenderTarget", &g_RtSlot },
+                        { "VehiclePreviewNode", &g_NodeSlot },
+                        { "VehiclePreviewEntity", &g_EntitySlot },
+                        { "TerrainMasterLight", &g_LightSlot },
+                        { "VehiclePreviewFade", &g_FadeSlot },
+                        { "VehiclePreviewCameraDistance", &g_DistanceSlot },
+                    };
+                    if (!HookEngine::BindEngineRows("Database 3D preview", rows))
+                    {
+                        Decide(L"off: engine rows unbound; pictures only");
+                        return;
+                    }
+                    g_GlobalsSlot = EngineGlobals::RenderGlobals();
+                    g_GetZ = reinterpret_cast<FnGetZ>(OgreRuntime::ResolveExport("?getZOrder@Viewport@Ogre@@QBEHXZ"));
+                    g_SetClear = reinterpret_cast<FnSetClear>(
+                        OgreRuntime::ResolveExport("?setClearEveryFrame@Viewport@Ogre@@QAEX_NI@Z"));
+                    g_SetColour = reinterpret_cast<FnSetColour>(
+                        OgreRuntime::ResolveExport("?setBackgroundColour@Viewport@Ogre@@QAEXABVColourValue@2@@Z"));
+                    g_SetOverlays = reinterpret_cast<FnSetBool>(
+                        OgreRuntime::ResolveExport("?setOverlaysEnabled@Viewport@Ogre@@QAEX_N@Z"));
+                    g_SetShadows = reinterpret_cast<FnSetBool>(
+                        OgreRuntime::ResolveExport("?setShadowsEnabled@Viewport@Ogre@@QAEX_N@Z"));
+                    g_SetMask = reinterpret_cast<FnSetMask>(
+                        OgreRuntime::ResolveExport("?setVisibilityMask@Viewport@Ogre@@QAEXI@Z"));
+                    g_GetBox = reinterpret_cast<FnGetBox>(
+                        OgreRuntime::ResolveExport("?getBoundingBox@Entity@Ogre@@UBEABVAxisAlignedBox@2@XZ"));
+                    g_SetPosition = reinterpret_cast<FnSetPosition>(
+                        OgreRuntime::ResolveExport("?setPosition@Node@Ogre@@UAEXMMM@Z"));
+                    g_GetFov = reinterpret_cast<FnGetFov>(
+                        OgreRuntime::ResolveExport("?getFOVy@Frustum@Ogre@@UBEABVRadian@2@XZ"));
+                    if (!g_GetZ || !g_SetClear || !g_SetColour || !g_SetOverlays || !g_SetShadows || !g_SetMask ||
+                        !g_GetBox || !g_SetPosition || !g_GetFov)
+                    {
+                        Decide(L"off: Ogre exports unresolved; pictures only");
+                        return;
+                    }
+                    if (!g_GlobalsSlot || !OperandsMatchSeh())
+                    {
+                        Decide(L"off: data rows do not match the code operands; pictures only");
+                        return;
+                    }
+                    g_Bound = true;
+                }
+
+                void Fault(const wchar_t* step, DWORD code)
+                {
+                    g_Faulted = true;
+                    if (g_View)
+                        SetShown(g_View, false);
+                    Decide(L"off: fault 0x%08X in %ls; pictures only for this session", code, step);
+                }
+
+                uintptr_t Globals()
+                {
+                    return At<uintptr_t>(g_GlobalsSlot);
+                }
+
+                // The window is decoration: it must never take clicks (as PlaceHighlight).
+                void ZeroInputActive(void* view)
+                {
+                    if (view)
+                        *reinterpret_cast<uint8_t*>(static_cast<uint8_t*>(view) + kUiViewInputActiveOffset) = 0;
+                }
+
+                DWORD OpenSeh(void* panel, const wchar_t*& declined)
+                {
+                    __try
+                    {
+                        const uintptr_t g = Globals();
+                        void* rt = At<void*>(g_RtSlot);
+                        void* camera = g ? At<void*>(g + kCameraOff) : nullptr;
+                        if (!g || !rt || !camera)
+                        {
+                            declined = L"render target or camera missing";
+                            return 0;
+                        }
+                        // Someone else (the MP picker) still owns the preview slots.
+                        if (At<void*>(g + kPreviewViewportOff) || At<void*>(g_NodeSlot) || At<void*>(g_FadeSlot))
+                        {
+                            declined = L"preview slots busy";
+                            return 0;
+                        }
+                        void* memory = g_GameNew(kPreviewWindowSize);
+                        if (!memory)
+                        {
+                            declined = L"allocation failed";
+                            return 0;
+                        }
+                        std::memset(memory, 0, kPreviewWindowSize);
+                        void* view = reinterpret_cast<FnCtor>(static_cast<uintptr_t>(g_CtorAddr))(
+                            memory, "OpenShimDatabase_Preview", kImageRect.x, kImageRect.y, kImageRect.w,
+                            kImageRect.h, Shell::kControlFlags, panel);
+                        if (!view)
+                        {
+                            declined = L"window ctor failed";
+                            return 0;
+                        }
+                        reinterpret_cast<FnSetZ>(static_cast<uintptr_t>(g_SetZAddr))(view, kPreviewZ);
+                        reinterpret_cast<FnBind>(static_cast<uintptr_t>(g_BindAddr))(view, "scope", "SniperTex");
+                        g_BzrFn_AddChild(panel, view, 0);
+                        g_View = view;
+                        SetShown(view, false);
+                        ZeroInputActive(view);
+                        void** vtable = *reinterpret_cast<void***>(rt);
+                        void* viewport = reinterpret_cast<FnAddViewport>(vtable[kRtAddViewport / 4])(
+                            rt, camera, 0, 0.0f, 0.0f, 1.0f, 1.0f);
+                        if (!viewport)
+                        {
+                            declined = L"addViewport failed";
+                            return 0;
+                        }
+                        At<void*>(g + kPreviewViewportOff) = viewport;
+                        g_Ours = true;
+                        const float black[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+                        g_SetClear(viewport, true, 3);  // FBT_COLOUR | FBT_DEPTH
+                        g_SetColour(viewport, black);
+                        g_SetOverlays(viewport, false);
+                        g_SetShadows(viewport, false);
+                        g_SetMask(viewport, kVisibilityMask);
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                void Close();
+
+                void Open(void* panel)
+                {
+                    // A new screen built before the old one was destroyed: give back
+                    // the old viewport and model first, or the slots stay busy and a
+                    // second z-0 viewport on SniperTex makes Ogre throw.
+                    if (g_Ours)
+                        Close();
+                    g_View = nullptr;
+                    g_Ours = false;
+                    g_HasModel = false;
+                    g_Fitted = false;
+                    g_Stem.clear();
+                    g_Builds = 0;
+                    if (!g_Bound || g_Faulted)
+                        return;
+                    const wchar_t* declined = nullptr;
+                    if (const DWORD code = OpenSeh(panel, declined))
+                    {
+                        Fault(L"open", code);
+                        return;
+                    }
+                    if (declined)
+                    {
+                        if (g_View)
+                            SetShown(g_View, false);
+                        Decide(L"declined: %ls; pictures only", declined);
+                        return;
+                    }
+                    char rtName[96] = {};
+                    RttiName(At<void*>(g_RtSlot), rtName, sizeof(rtName));
+                    Decide(L"ready on %hs (private %u KB)", rtName, static_cast<unsigned>(PrivateKb()));
+                }
+
+                // Same order as the model build's own reset (FUN_0067d180): node, then every
+                // entity and light. The slots are nulled so no stale pointer is left for the
+                // frame render's lazy sun rebuild (0x00682540 rebuilds only a null light).
+                DWORD DestroyModelSeh()
+                {
+                    __try
+                    {
+                        // The build makes the light before the entity and node, so a
+                        // half-made build can leave a light with no node: clear it too.
+                        void* node = At<void*>(g_NodeSlot);
+                        if (node)
+                            reinterpret_cast<FnNodeDestroy>(static_cast<uintptr_t>(g_NodeDestroyAddr))(node);
+                        if (node || At<void*>(g_EntitySlot) || At<void*>(g_LightSlot))
+                        {
+                            void* sm = At<void*>(Globals() + kSceneManagerOff);
+                            void** vtable = *reinterpret_cast<void***>(sm);
+                            reinterpret_cast<FnThis>(vtable[kSmDestroyAllEntities / 4])(sm);
+                            reinterpret_cast<FnThis>(vtable[kSmDestroyAllLights / 4])(sm);
+                        }
+                        At<void*>(g_NodeSlot) = nullptr;
+                        At<void*>(g_EntitySlot) = nullptr;
+                        At<void*>(g_LightSlot) = nullptr;
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                // Non-unit entries, units without a mesh, empty selection.
+                void Hide()
+                {
+                    if (!g_Ours)
+                        return;
+                    SetShown(g_View, false);
+                    if (!g_HasModel || g_Faulted)
+                        return;
+                    g_HasModel = false;
+                    g_Stem.clear();
+                    if (const DWORD code = DestroyModelSeh())
+                        Fault(L"model destroy", code);
+                }
+
+                DWORD BuildSeh(const char* stem, bool& built)
+                {
+                    built = false;
+                    __try
+                    {
+                        // The three floats the MP picker passes (FUN_007aa560 line 152).
+                        reinterpret_cast<FnBuild>(static_cast<uintptr_t>(g_BuildAddr))(stem, 10.0f, 10.0f, 10.0f);
+                        built = At<void*>(g_EntitySlot) != nullptr && At<void*>(g_NodeSlot) != nullptr;
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                // True when the model of `stem` is up; false leaves the picture to the caller.
+                bool Show(const std::string& stem)
+                {
+                    if (!g_Ours || g_Faulted)
+                        return false;
+                    if (g_HasModel && stem == g_Stem)
+                    {
+                        SetShown(g_View, true);
+                        ZeroInputActive(g_View);
+                        return true;
+                    }
+                    if (stem.empty() || !DesReader::ImageExists(stem + ".mesh"))
+                    {
+                        Hide();
+                        Decide(L"declined: no %hs.mesh; picture shown", stem.c_str());
+                        return false;
+                    }
+                    LARGE_INTEGER frequency, start, end;
+                    QueryPerformanceFrequency(&frequency);
+                    QueryPerformanceCounter(&start);
+                    bool built = false;
+                    const DWORD code = BuildSeh(stem.c_str(), built);
+                    QueryPerformanceCounter(&end);
+                    if (code)
+                    {
+                        Fault(L"model build", code);
+                        return false;
+                    }
+                    g_HasModel = true;  // the slots hold whatever the build made; Hide clears them
+                    g_Stem = stem;
+                    if (!built)
+                    {
+                        Hide();
+                        Decide(L"declined: %hs.mesh built no entity; picture shown", stem.c_str());
+                        return false;
+                    }
+                    ++g_Builds;
+                    g_Fitted = false;
+                    SetShown(g_View, true);
+                    ZeroInputActive(g_View);
+                    Decide(L"shows %hs (build %.2f ms)", stem.c_str(),
+                           1000.0 * static_cast<double>(end.QuadPart - start.QuadPart) /
+                               static_cast<double>(frequency.QuadPart));
+                    return true;
+                }
+
+                // Camera fit, once per model, after the update has set the camera FOV.
+                DWORD FitSeh(Db::PreviewFit& fit, float& stockDistance)
+                {
+                    __try
+                    {
+                        void* camera = At<void*>(Globals() + kCameraOff);
+                        const float fovY = *g_GetFov(camera);
+                        const float* box = g_GetBox(At<void*>(g_EntitySlot));
+                        const int extent = *reinterpret_cast<const int*>(box + 6);  // 1 = EXTENT_FINITE
+                        stockDistance = At<float>(g_DistanceSlot);
+                        if (extent == 1)
+                            fit = Db::FitPreview(box, box + 3, fovY);
+                        if (fit.ok)
+                        {
+                            At<float>(g_DistanceSlot) = fit.distance;
+                            g_SetPosition(At<void*>(g_NodeSlot), 0.0f, fit.nodeY, 0.0f);
+                        }
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                DWORD UpdateSeh()
+                {
+                    __try
+                    {
+                        reinterpret_cast<FnVoid>(static_cast<uintptr_t>(g_UpdateAddr))();
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                void Tick()
+                {
+                    if (!g_Ours || !g_HasModel || g_Faulted)
+                        return;
+                    if (const DWORD code = UpdateSeh())
+                    {
+                        Fault(L"per-frame update", code);
+                        return;
+                    }
+                    if (g_Fitted)
+                        return;
+                    g_Fitted = true;
+                    Db::PreviewFit fit;
+                    float stockDistance = 0.0f;
+                    if (const DWORD code = FitSeh(fit, stockDistance))
+                    {
+                        Fault(L"camera fit", code);
+                        return;
+                    }
+                    // Re-place the camera at the fitted distance now, not next frame.
+                    if (fit.ok)
+                        if (const DWORD code = UpdateSeh())
+                        {
+                            Fault(L"per-frame update", code);
+                            return;
+                        }
+                    if (fit.ok)
+                        Decide(L"fit %hs: distance %.1f (stock %.1f), node y %.2f", g_Stem.c_str(), fit.distance,
+                               stockDistance, fit.nodeY);
+                    else
+                        Decide(L"fit %hs: bounds unusable; stock camera kept", g_Stem.c_str());
+                }
+
+                // As the MP picker dtor FUN_007aa360 lines 17-32, plus nulling the entity
+                // and light slots it leaves behind.
+                DWORD CloseSeh(int& z)
+                {
+                    z = -1;
+                    __try
+                    {
+                        const uintptr_t g = Globals();
+                        void* viewport = g ? At<void*>(g + kPreviewViewportOff) : nullptr;
+                        if (viewport)
+                        {
+                            void* rt = At<void*>(g_RtSlot);
+                            z = g_GetZ(viewport);
+                            reinterpret_cast<FnRemoveViewport>((*reinterpret_cast<void***>(rt))[kRtRemoveViewport / 4])(
+                                rt, z);
+                            At<void*>(g + kPreviewViewportOff) = nullptr;
+                        }
+                        void* fade = At<void*>(g_FadeSlot);
+                        if (fade)
+                        {
+                            reinterpret_cast<FnFadeDtor>((*reinterpret_cast<void***>(fade))[0])(fade, 1);
+                            At<void*>(g_FadeSlot) = nullptr;
+                        }
+                        void* node = At<void*>(g_NodeSlot);
+                        if (node)
+                            reinterpret_cast<FnNodeDestroy>(static_cast<uintptr_t>(g_NodeDestroyAddr))(node);
+                        if (node || At<void*>(g_EntitySlot) || At<void*>(g_LightSlot))
+                            reinterpret_cast<FnVoid>(static_cast<uintptr_t>(g_TeardownAddr))();
+                        At<void*>(g_NodeSlot) = nullptr;
+                        At<void*>(g_EntitySlot) = nullptr;
+                        At<void*>(g_LightSlot) = nullptr;
+                        return 0;
+                    }
+                    __except (EXCEPTION_EXECUTE_HANDLER)
+                    {
+                        return GetExceptionCode() ? GetExceptionCode() : 1;
+                    }
+                }
+
+                void Close()
+                {
+                    if (!g_Ours)
+                        return;
+                    g_Ours = false;
+                    g_View = nullptr;
+                    const bool hadModel = g_HasModel;
+                    g_HasModel = false;
+                    int z = -1;
+                    if (const DWORD code = CloseSeh(z))
+                    {
+                        Fault(L"teardown", code);
+                        return;
+                    }
+                    // One line per screen close (not change-only), for the leak check.
+                    Log(L"[DATABASE] preview closed: builds=%u model=%d viewport z=%d node=0x%08X entity=0x%08X "
+                        L"light=0x%08X private %u KB\n",
+                        g_Builds, hadModel ? 1 : 0, z, At<unsigned>(g_NodeSlot), At<unsigned>(g_EntitySlot),
+                        At<unsigned>(g_LightSlot), static_cast<unsigned>(PrivateKb()));
+                    g_LastDecision.clear();
+                }
+            }
+
             // ---- detail pane ----
 
             void ShowBriefingPage(int requested)
@@ -512,16 +1067,22 @@ namespace BZROpenShim
                 detail.lore = unit.Get("lore");
                 std::string odfText;
                 detail.odfFound = ReadGameText(odfName + ".odf", odfText);
+                const Db::Odf odf = detail.odfFound ? Db::ParseOdf(odfText) : Db::Odf();
                 if (detail.odfFound)
-                    detail.stats = Db::ReadStats(Db::ParseOdf(odfText), &WeaponName);
+                    detail.stats = Db::ReadStats(odf, &WeaponName);
                 SetLabel(g_State.ui.detailTitle, entry.caption);
                 SetDetailText(Db::FormatUnitDetail(detail, LocalizedLabels()));
-                ShowImage(unit.Get("icon"));
+                // The 3D model when the unit has a mesh, else its picture.
+                if (Preview::Show(Db::PreviewMeshStem(odf, odfName)))
+                    SetShown(g_State.ui.image, false);
+                else
+                    ShowImage(unit.Get("icon"));
             }
 
             void ShowMission(const Entry& entry)
             {
                 State& s = g_State;
+                Preview::Hide();
                 const std::string& stem = entry.mission;
                 const std::string label = entry.section->Get("label", entry.section->id);
                 const std::string source = entry.section->Get("source");
@@ -549,6 +1110,7 @@ namespace BZROpenShim
                     text += line + "\n";
                 SetLabel(g_State.ui.detailTitle, entry.caption);
                 SetDetailText(text);
+                Preview::Hide();
                 ShowImage(entry.section->Get("icon"));
             }
 
@@ -563,6 +1125,7 @@ namespace BZROpenShim
                 {
                     SetLabel(s.ui.detailTitle, "");
                     SetDetailText("");
+                    Preview::Hide();
                     ShowImage("");
                     return;
                 }
@@ -763,7 +1326,7 @@ namespace BZROpenShim
                 {
                     _snprintf_s(name, _TRUNCATE, "OpenShimDatabase_Tab%zu", t);
                     g_State.ui.tabs[t] = Shell::AddButton(panel, panel, name,
-                        { kTabX, kTabY + kTabPitch * static_cast<float>(t), kTabW, kTabH }, "", skin, 1.0f, 0.0f,
+                        { kTabX + kTabPitch * static_cast<float>(t), kTabY, kTabW, kTabH }, "", skin, 1.0f, 0.0f,
                         callbacks[t]);
                 }
             }
@@ -845,6 +1408,7 @@ namespace BZROpenShim
                 s.ui.detailTitle = Shell::AddLabel(panel, panel, "OpenShimDatabase_DetailTitle", kDetailTitleRect, "");
                 s.ui.image = Shell::AddPanel(panel, panel, "OpenShimDatabase_Image", kImageRect, nullptr,
                                              Shell::kControlFlags);
+                Preview::Open(panel);  // over the picture square; hidden until a unit with a mesh
                 s.ui.text = MakeTextBlock(panel);
                 s.ui.pageLabel = Shell::AddLabel(panel, panel, "OpenShimDatabase_PageLabel", kPageLabelRect, "");
                 s.ui.pagePrev = Shell::AddButton(panel, panel, "OpenShimDatabase_PagePrev", kPagePrevRect,
@@ -872,6 +1436,7 @@ namespace BZROpenShim
             // The widgets die with the screen; drop every pointer to them.
             void OnDatabaseClosed(void*)
             {
+                Preview::Close();
                 g_State = State();
             }
 
@@ -922,6 +1487,11 @@ namespace BZROpenShim
                 Log(L"[DATABASE] DATABASE button added to Single Player\n");
             }
 
+            void OnDatabaseTick(void*)
+            {
+                Preview::Tick();
+            }
+
             bool ShouldEnable()
             {
                 return !EnvFlagEnabled("OPENSHIM_DISABLE_DATABASE");
@@ -959,8 +1529,9 @@ namespace BZROpenShim
                 Log(L"[DATABASE] file read, game allocator or page reader unresolved; Database off\n");
                 return;
             }
+            Preview::Bind();
             if (!Shell::RegisterScreen({ Shell::kDatabaseScreenId, "Database", &BuildDatabaseScreen,
-                                         &OnDatabaseClosed }))
+                                         &OnDatabaseClosed, &OnDatabaseTick }))
             {
                 Log(L"[DATABASE] shell screens unavailable; Database off\n");
                 return;
