@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace BZROpenShim
 {
     // ODF-driven `classLabel = "tracked"` support (Docs/TRACKED_VEHICLES.md).
@@ -15,4 +17,11 @@ namespace BZROpenShim
     bool MatchTrackedClassLabel(const char* registeredLabel,
                                 const char* odfLabel,
                                 int (__cdecl* stricmp)(const char*, const char*));
+
+    // Tread texture scroll: true when `sourceMaterialName` (the material a
+    // GPU skinning clone is made from) is a treadMaterialL/R of a tracked
+    // ODF. Its clones get no instanced twin. Any thread.
+    bool TrackedTreadMaterialRegistered(const char* sourceMaterialName);
+    // Changes when a name is added, so existing twins can be re-checked.
+    uint32_t TrackedTreadMaterialRevision();
 }
