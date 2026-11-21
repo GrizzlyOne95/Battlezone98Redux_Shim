@@ -23,6 +23,11 @@
 //       Defend(0) plus the native hold. With Shift held the Defend entry
 //       reads "Hold" and choosing it does the same. Single player only, like
 //       the native hold it uses (ai_native_orders.cpp SetAiHold).
+//   [Gameplay] RtsQuickCommands (default OFF)
+//     * Numpad 1/2/3/5 (RtsQuickFollowKey / DefendKey / AttackKey / StopKey)
+//       order the selected own units: Follow and Defend the player's vehicle,
+//       Attack the player's current target (GameObject +0x21C), Stop. The
+//       selection is kept. Single player only, like Hold. Needs NumLock on.
 //   [Gameplay] RtsBuildAtNav (default ON)
 //     * With a building picked on a selected Construction Rig, the Go To
 //       Nav entry reads "Build at Nav"; picking a nav validates the spot
@@ -90,6 +95,8 @@ namespace BZROpenShim::Hooks
         using FnBroadcastObj = void(__thiscall*)(void* panel, int what, void* target);
         using FnSetCommandObj = void(__thiscall*)(void* obj, int what, void* target);
         using FnSetCommand = void(__thiscall*)(void* obj, int what);
+        // GameObject::EnemyP(GameObject*) (row GameObjectEnemyP).
+        using FnEnemyP = bool(__thiscall*)(void* self, void* other);
         using FnSetTarget = void(__thiscall*)(void* obj, void* target);
         using FnSelectAdd = void(__thiscall*)(void* panel, void* obj);
         using FnSelectNone = void(__thiscall*)(void* panel);
@@ -176,6 +183,7 @@ namespace BZROpenShim::Hooks
         uint32_t g_SelectNoneAddr = 0;
         uint32_t g_ReticleAddr = 0;
         uint32_t g_SetCommandAddr = 0;
+        uint32_t g_EnemyPAddr = 0;
         uint32_t g_DefendClickRowAddr = 0;
         uint32_t g_LabelRowAddr = 0;
         uint32_t g_LocalizeAddr = 0;
@@ -204,6 +212,7 @@ namespace BZROpenShim::Hooks
         FnBroadcastObj g_FnBroadcastObj = nullptr;
         FnSetCommandObj g_FnSetCommandObj = nullptr;
         FnSetCommand g_FnSetCommand = nullptr;
+        FnEnemyP g_FnEnemyP = nullptr;
         FnSetTarget g_FnSetTarget = nullptr;
         FnSelectAdd g_FnSelectAdd = nullptr;
         FnSelectNone g_FnSelectNone = nullptr;
@@ -226,6 +235,7 @@ namespace BZROpenShim::Hooks
         bool g_BuildNavEnabled = true;
         bool g_IdleAlertEnabled = false;
         bool g_FollowEnabled = false;
+        bool g_QuickEnabled = false;
 
         // Part readiness (patch thread, then read-only).
         bool g_SharedReady = false;
@@ -247,6 +257,7 @@ namespace BZROpenShim::Hooks
         std::atomic<bool> g_TargetActive{ false };
         std::atomic<bool> g_AreaActive{ false };
         std::atomic<bool> g_HoldKeyActive{ false };
+        std::atomic<bool> g_QuickKeyActive{ false };
         std::atomic<bool> g_HoldMenuActive{ false };
         std::atomic<bool> g_BuildNavActive{ false };
         std::atomic<bool> g_IdleKeyActive{ false };
@@ -263,6 +274,7 @@ namespace BZROpenShim::Hooks
         std::atomic<bool> g_PendingBuilding{ false };
         std::atomic<int> g_PendingArea{ 0 }; // 1: 100 m, 2: 200 m
         std::atomic<bool> g_PendingHold{ false };
+        std::atomic<unsigned> g_PendingQuick{ 0 }; // bit per quick KeyId
         std::atomic<int> g_PendingIdle{ 0 }; // 1: next idle unit, 2: all idle units
         std::atomic<bool> g_PendingFollow{ false };
         std::atomic<bool> g_FollowResetPending{ false };
@@ -435,6 +447,21 @@ namespace BZROpenShim::Hooks
             {
                 g_FnSetCommandObj(obj, what, target);
                 return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // EnemyP under SEH; false (not an enemy) when unavailable or faulted.
+        bool SafeEnemyP(void* self, void* other)
+        {
+            if (!g_FnEnemyP || !self || !other)
+                return false;
+            __try
+            {
+                return g_FnEnemyP(self, other);
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
@@ -1086,6 +1113,115 @@ namespace BZROpenShim::Hooks
             return held;
         }
 
+        // ---- Quick commands --------------------------------------------------
+
+        bool QuickHooksReady()
+        {
+            return g_SharedReady && g_HoldKeyReady && g_FnSetCommandObj != nullptr && g_FnEnemyP != nullptr;
+        }
+
+        bool QuickAvailableNow()
+        {
+            return IsSinglePlayerSession() && QuickHooksReady();
+        }
+
+        const char* QuickName(Policy::KeyId id)
+        {
+            switch (id)
+            {
+            case Policy::KeyId::QuickFollowMe: return "follow me";
+            case Policy::KeyId::QuickDefendMe: return "defend me";
+            case Policy::KeyId::QuickAttackTarget: return "attack target";
+            case Policy::KeyId::QuickStop: return "stop";
+            default: return "?";
+            }
+        }
+
+        // One quick order for the selected own units (Policy::QuickOrderFor):
+        // each unit that can be commanded and, when the order names a mode,
+        // holds it in its ModeList gets the stock SetCommand; the player's own
+        // vehicle never does. The selection is kept. Returns the ordered count
+        // and sets `refused` to the own units that could not take it.
+        int QuickOrderSelection(const Policy::QuickOrder& order, void* user, void* target, int& refused)
+        {
+            refused = 0;
+            uint32_t handles[Policy::kSelectCapacity];
+            const int n = ReadSelection(handles);
+            uint32_t orderedHandles[Policy::kSelectCapacity];
+            int ordered = 0;
+            for (int i = 0; i < n; ++i)
+            {
+                void* const obj = SafeGetObj(handles[i]);
+                if (!obj || obj == user || !IsPlayerTeam(obj))
+                    continue;
+                if (obj == target) // a unit cannot attack or follow itself
+                {
+                    ++refused;
+                    continue;
+                }
+                bool ok = SafeCanCommand(obj);
+                if (ok && order.mode != Policy::kModeNone)
+                {
+                    Policy::ModeList own;
+                    ok = ReadModeList(obj, own) && Policy::UnitTakesMode(own, order.mode);
+                }
+                if (ok)
+                    ok = order.needsTarget ? SafeSetCommandObj(obj, order.what, target)
+                                           : SafeSetCommand(obj, order.what);
+                if (!ok)
+                {
+                    ++refused;
+                    continue;
+                }
+                orderedHandles[ordered++] = handles[i];
+            }
+            if (ordered > 0)
+            {
+                if (order.needsTarget)
+                    NotifyRtsMarkersCommand(order.what, target); // Stop gets no ping
+                NoteRtsOrderQueuePlainOrder(orderedHandles, ordered);
+            }
+            return ordered;
+        }
+
+        void DoQuickCommand(Policy::KeyId id)
+        {
+            if (!QuickAvailableNow())
+                return;
+            const Policy::QuickOrder order = Policy::QuickOrderFor(id);
+            void* const user = UserObject();
+            if (order.what == 0 || !user)
+                return;
+            void* target = nullptr;
+            if (order.onPlayer)
+                target = user;
+            else if (order.needsTarget)
+            {
+                int handle = 0;
+                ReadInt(reinterpret_cast<uintptr_t>(user) + kGameObjectTargetHandleOffset, handle);
+                target = handle != 0 ? SafeGetObj(static_cast<uint32_t>(handle)) : nullptr;
+                // The stock attack rule (ControlPanelEnemyPAttackOrderHook): an
+                // enemy, or team 0 under AllowNeutralAttackOrders; never the
+                // player's own team, so an ally is refused.
+                int targetTeam = -1;
+                if (target && user)
+                {
+                    const bool teamRead =
+                        ReadInt(reinterpret_cast<uintptr_t>(target) + kGameObjectActualTeamOffset, targetTeam);
+                    if (!teamRead || !Policy::QuickAttackTargetAllowed(IsPlayerTeam(target), SafeEnemyP(user, target),
+                                                                       targetTeam, g_AllowNeutralAttackOrders))
+                        target = nullptr;
+                }
+            }
+            int refused = 0;
+            int ordered = 0;
+            if (!order.needsTarget || (target && target != user))
+                ordered = QuickOrderSelection(order, user, target, refused);
+            if (ordered == 0)
+                SafePlaySound(kRefuseSound);
+            LogBudgeted(L"[RTS] quick %hs: %d unit(s) ordered, %d refused\n", QuickName(id), ordered, refused);
+        }
+
         // The Defend entry was chosen (mouse or its number key). With Shift
         // held and the alternate on, Hold replaces opening the submenu.
         bool __cdecl DefendClickDecide(void* panel)
@@ -1641,6 +1777,11 @@ namespace BZROpenShim::Hooks
                 return g_AreaActive.load(std::memory_order_acquire);
             case Policy::KeyId::Hold:
                 return g_HoldKeyActive.load(std::memory_order_acquire) && HoldAvailableNow();
+            case Policy::KeyId::QuickFollowMe:
+            case Policy::KeyId::QuickDefendMe:
+            case Policy::KeyId::QuickAttackTarget:
+            case Policy::KeyId::QuickStop:
+                return g_QuickKeyActive.load(std::memory_order_acquire) && QuickAvailableNow();
             case Policy::KeyId::IdleUnit:
                 return g_IdleKeyActive.load(std::memory_order_acquire);
             case Policy::KeyId::FollowCamera:
@@ -1707,6 +1848,12 @@ namespace BZROpenShim::Hooks
                 case Policy::KeyId::BuildingCycle: g_PendingBuilding.store(true); break;
                 case Policy::KeyId::AreaSelect: g_PendingArea.store(d.shift ? 2 : 1); break;
                 case Policy::KeyId::Hold: g_PendingHold.store(true); break;
+                case Policy::KeyId::QuickFollowMe:
+                case Policy::KeyId::QuickDefendMe:
+                case Policy::KeyId::QuickAttackTarget:
+                case Policy::KeyId::QuickStop:
+                    g_PendingQuick.fetch_or(1u << i);
+                    break;
                 case Policy::KeyId::IdleUnit: g_PendingIdle.store(d.shift ? 2 : 1); break;
                 case Policy::KeyId::FollowCamera: g_PendingFollow.store(true); break;
                 default: break;
@@ -1784,9 +1931,11 @@ namespace BZROpenShim::Hooks
             }
             g_PrevWndProc = prev;
             g_Window = ctx.found;
+            auto keyText = [](Policy::KeyId id) { return g_KeyText[static_cast<int>(id)].c_str(); };
             Log(L"[RTS] key filters on (target %hs, building %hs, area %hs, hold %hs, idle %hs, follow Shift+%hs)\n",
-                g_KeyText[0].c_str(), g_KeyText[1].c_str(), g_KeyText[2].c_str(), g_KeyText[3].c_str(),
-                g_KeyText[4].c_str(), g_KeyText[5].c_str());
+                keyText(Policy::KeyId::RemoteTarget), keyText(Policy::KeyId::BuildingCycle),
+                keyText(Policy::KeyId::AreaSelect), keyText(Policy::KeyId::Hold), keyText(Policy::KeyId::IdleUnit),
+                keyText(Policy::KeyId::FollowCamera));
         }
 
         // The QuickSave chords and rally key in force, for the clash checks.
@@ -2006,6 +2155,14 @@ namespace BZROpenShim::Hooks
                     g_HoldKeyReady = true;
                 }
             }
+            if (!g_FnEnemyP)
+            {
+                const HookEngine::EngineRow rows[] = {
+                    { "GameObjectEnemyP", &g_EnemyPAddr },
+                };
+                if (HookEngine::BindEngineRows("RTS quick attack", rows))
+                    g_FnEnemyP = reinterpret_cast<FnEnemyP>(g_EnemyPAddr);
+            }
             if (g_HoldKeyReady && !s_holdMenuBound)
             {
                 const HookEngine::EngineRow rows[] = {
@@ -2171,6 +2328,8 @@ namespace BZROpenShim::Hooks
                   "Unavailable: the idle unit alert did not hook on this game build (see openshim.log)." },
                 { "RtsFollowCamera", g_SharedReady && g_FollowReady,
                   "Unavailable: Satellite Follow did not hook on this game build (see openshim.log)." },
+                { "RtsQuickCommands", QuickHooksReady(),
+                  "Unavailable: Quick Commands did not hook on this game build (see openshim.log)." },
             };
             for (const Mark& m : marks)
             {
@@ -2197,6 +2356,7 @@ namespace BZROpenShim::Hooks
         g_BuildNavEnabled = ReadBoolOption("RtsBuildAtNav", true);
         g_IdleAlertEnabled = ReadBoolOption("RtsIdleUnitAlert", false);
         g_FollowEnabled = ReadBoolOption("RtsFollowCamera", false);
+        g_QuickEnabled = ReadBoolOption("RtsQuickCommands", false);
         std::string hold;
         g_HoldMode = Policy::kHoldKeyAndShiftMenu;
         if (TryGetUserConfigString("Gameplay", "RtsHold", hold) && !hold.empty())
@@ -2268,6 +2428,13 @@ namespace BZROpenShim::Hooks
         const bool sp = IsSinglePlayerSession();
         const bool holdKey = Policy::HoldAvailable(g_HoldMode != Policy::kHoldOff, HoldHooksReady(), sp);
         g_HoldKeyActive.store(holdKey, std::memory_order_release);
+        g_QuickKeyActive.store(Policy::QuickCommandsAvailable(g_QuickEnabled, QuickHooksReady(), sp),
+                               std::memory_order_release);
+        // Change-only decision line: the option and the single-player gate.
+        static volatile long s_quickState = -1;
+        const long quickState = (g_QuickEnabled ? 1 : 0) | (sp ? 2 : 0);
+        if (InterlockedExchange(&s_quickState, quickState) != quickState)
+            Log(L"[RTS] quick commands enabled=%d sp=%d\n", g_QuickEnabled ? 1 : 0, sp ? 1 : 0);
         g_HoldMenuActive.store(holdKey && g_HoldMode == Policy::kHoldKeyAndShiftMenu && g_HoldClickReady &&
                                    g_LabelReady,
                                std::memory_order_release);
@@ -2285,6 +2452,7 @@ namespace BZROpenShim::Hooks
         const bool anyKey = g_TargetActive.load(std::memory_order_acquire) ||
                             g_AreaActive.load(std::memory_order_acquire) ||
                             g_HoldKeyActive.load(std::memory_order_acquire) ||
+                            g_QuickKeyActive.load(std::memory_order_acquire) ||
                             g_IdleKeyActive.load(std::memory_order_acquire) ||
                             g_IdleAlertActive.load(std::memory_order_acquire) ||
                             g_FollowActive.load(std::memory_order_acquire);
@@ -2310,6 +2478,14 @@ namespace BZROpenShim::Hooks
                 DoAreaSelect(area == 2);
             if (g_PendingHold.exchange(false))
                 DoHoldKey();
+            if (const unsigned quick = g_PendingQuick.exchange(0))
+            {
+                for (int i = 0; i < Policy::kKeyCount; ++i)
+                {
+                    if ((quick >> i) & 1u)
+                        DoQuickCommand(static_cast<Policy::KeyId>(i));
+                }
+            }
             if (const int idle = g_PendingIdle.exchange(0))
                 DoIdleSelect(idle == 2);
             if (g_IdleResetPending.exchange(false))
@@ -2339,6 +2515,7 @@ namespace BZROpenShim::Hooks
         g_PendingBuilding.store(false);
         g_PendingArea.store(0);
         g_PendingHold.store(false);
+        g_PendingQuick.store(0);
         g_PendingIdle.store(0);
         g_PendingFollow.store(false);
         g_FollowResetPending.store(true); // the drain thread drops the follow

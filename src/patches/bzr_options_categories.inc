@@ -63,7 +63,7 @@ static const char* const kShimCategoryControls[] = {
     "Run in Background", "Rally Points", "Auto Group", "Extended Unit Cap", "Group Member Menu", "Group Strip",
     kShimRowRtsCommands };
 static const char* const kShimCategoryRtsCommands[] = {
-    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold",
+    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold", "Quick Commands",
     "Build at Nav", "Build Ghost", "Pending Build Ghost", "Power Range", "Waypoint Lines",
     "Producer Badges", "Idle Unit Alert", "Satellite Follow", "Attack Marks", "Queue Orders", "Build Queue", "Unit Loadouts" };
 static const char* const kShimCategoryGameplay[] = {

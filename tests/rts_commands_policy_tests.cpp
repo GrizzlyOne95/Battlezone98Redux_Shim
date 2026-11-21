@@ -278,9 +278,31 @@ namespace
                   std::string("default key accepted: ") + GetKeyDef(id).iniKey);
             keys[i] = k;
         }
-        Check(keys[0].vk == 'T' && keys[1].vk == 'B' && keys[2].vk == 'X' && keys[3].vk == 'Z' && keys[4].vk == 'J' &&
-                  keys[5].vk == 'C',
+        const auto at = [&](KeyId id) { return keys[static_cast<int>(id)]; };
+        Check(at(KeyId::RemoteTarget).vk == 'T' && at(KeyId::BuildingCycle).vk == 'B' &&
+                  at(KeyId::AreaSelect).vk == 'X' && at(KeyId::Hold).vk == 'Z' && at(KeyId::IdleUnit).vk == 'J' &&
+                  at(KeyId::FollowCamera).vk == 'C',
               "defaults T B X Z J C");
+        Check(at(KeyId::QuickFollowMe).vk == 0x61 && at(KeyId::QuickDefendMe).vk == 0x62 &&
+                  at(KeyId::QuickAttackTarget).vk == 0x63 && at(KeyId::QuickStop).vk == 0x65 &&
+                  !at(KeyId::QuickFollowMe).extended,
+              "quick defaults Numpad1 Numpad2 Numpad3 Numpad5");
+        for (int i = 0; i < kKeyCount; ++i)
+        {
+            for (int j = i + 1; j < kKeyCount; ++j)
+                Check(!(keys[i] == keys[j]),
+                      std::string("default keys are distinct: ") + GetKeyDef(static_cast<KeyId>(i)).iniKey);
+        }
+        const KeyDef& quickDef = GetKeyDef(KeyId::QuickFollowMe);
+        Check(std::string(quickDef.iniKey) == "RtsQuickFollowKey" &&
+                  std::string(quickDef.rowCommand) == "OpenShim:RtsQuickFollowKey" &&
+                  std::string(quickDef.displayText) == "Quick: Follow Me" && !quickDef.needsShift &&
+                  !quickDef.shiftVariant,
+              "quick follow key row: plain key");
+        Check(std::string(GetKeyDef(KeyId::QuickDefendMe).iniKey) == "RtsQuickDefendKey" &&
+                  std::string(GetKeyDef(KeyId::QuickAttackTarget).iniKey) == "RtsQuickAttackKey" &&
+                  std::string(GetKeyDef(KeyId::QuickStop).iniKey) == "RtsQuickStopKey",
+              "quick key ini names");
         const KeyDef& followDef = GetKeyDef(KeyId::FollowCamera);
         Check(std::string(followDef.iniKey) == "RtsFollowCameraKey" &&
                   std::string(followDef.rowCommand) == "OpenShim:RtsFollowCameraKey" &&
@@ -310,13 +332,43 @@ namespace
               "idle unit (Shift variant) refuses a Shift-only QuickSave chord");
         Check(CheckKeyText(KeyId::Hold, "Q", keys, rally, shiftQ, load, k) == nullptr,
               "plain-only action ignores a Shift QuickSave chord");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad1", keys, rally, save, load, k) != nullptr,
+              "a quick key refuses another quick key");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad9", keys, rally, save, load, k) == nullptr && k.vk == 0x69,
+              "a quick key takes a free numpad key");
+        Check(CheckKeyText(KeyId::QuickStop, "Insert", keys, rally, save, load, k) == nullptr && k.extended,
+              "a quick key takes a grey-cluster key");
+        Check(CheckKeyText(KeyId::Hold, "Numpad2", keys, rally, save, load, k) != nullptr,
+              "Hold refuses a quick key");
+        const Key numpadRally{ 0x67, false };
+        Check(CheckKeyText(KeyId::QuickFollowMe, "Numpad7", keys, numpadRally, save, load, k) != nullptr,
+              "a quick key refuses the rally key");
+        // Stock-bound numpad keys: Numpad0 (fire), Numpad4 and Numpad6 (steer).
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad0", keys, rally, save, load, k) != nullptr,
+              "Numpad0 (weapon_fire) is refused");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad4", keys, rally, save, load, k) != nullptr,
+              "Numpad4 (steering) is refused");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad6", keys, rally, save, load, k) != nullptr,
+              "Numpad6 (steering) is refused");
+        Check(CheckKeyText(KeyId::Hold, "Numpad0", keys, rally, save, load, k) != nullptr,
+              "no RTS key takes Numpad0");
+        Check(CheckKeyText(KeyId::QuickStop, "Numpad7", keys, rally, save, load, k) == nullptr,
+              "Numpad7 is free");
+        Check(ReservedKeyReason(0x60) && ReservedKeyReason(0x64) && ReservedKeyReason(0x66) &&
+                  !ReservedKeyReason(0x61) && !ReservedKeyReason(0x65),
+              "reserved numpad keys: 0, 4, 6 only");
     }
 
     void TestChordClashes()
     {
         Key keys[kKeyCount] = {};
         for (int i = 0; i < kKeyCount; ++i)
-            keys[i] = Key{ static_cast<unsigned>(GetKeyDef(static_cast<KeyId>(i)).defaultText[0]), false };
+        {
+            BZROpenShim::QuickSaveKeyPolicy::Chord chord;
+            Check(BZROpenShim::QuickSaveKeyPolicy::ParseChord(GetKeyDef(static_cast<KeyId>(i)).defaultText, chord),
+                  "default key text parses");
+            keys[i] = Key{ chord.vk, chord.extended };
+        }
         // Remote target (T) takes only Shift+T: plain T stays frontal_target.
         Check(ActionTakingChord(keys, 'T', false, true, false, false) == KeyId::RemoteTarget, "Shift+T is ours");
         Check(ActionTakingChord(keys, 'T', false, false, false, false) == KeyId::Count, "plain T is stock");
@@ -336,10 +388,66 @@ namespace
         Check(ActionTakingChord(keys, 'C', false, true, false, false) == KeyId::FollowCamera, "Shift+C is ours");
         Check(ActionTakingChord(keys, 'C', false, false, false, false) == KeyId::Count, "plain C is stock");
         Check(ActionTakingChord(keys, 'C', false, true, true, false) == KeyId::Count, "Ctrl+Shift+C is stock");
+        // Quick commands take only the plain numpad key.
+        Check(ActionTakingChord(keys, 0x61, false, false, false, false) == KeyId::QuickFollowMe, "Numpad1 is ours");
+        Check(ActionTakingChord(keys, 0x62, false, false, false, false) == KeyId::QuickDefendMe, "Numpad2 is ours");
+        Check(ActionTakingChord(keys, 0x63, false, false, false, false) == KeyId::QuickAttackTarget,
+              "Numpad3 is ours");
+        Check(ActionTakingChord(keys, 0x65, false, false, false, false) == KeyId::QuickStop, "Numpad5 is ours");
+        Check(ActionTakingChord(keys, 0x60, false, false, false, false) == KeyId::Count, "Numpad0 is not a quick key");
+        Check(ActionTakingChord(keys, 0x61, false, true, false, false) == KeyId::Count, "Shift+Numpad1 is not taken");
+        Check(ActionTakingChord(keys, 0x61, false, false, true, false) == KeyId::Count, "Ctrl+Numpad1 is not taken");
+        Check(ActionTakingChord(keys, 0x61, true, false, false, false) == KeyId::Count,
+              "an extended 0x61 is not the numpad key");
+        Check(ActionUsingKey(keys, 0x61, false) == KeyId::QuickFollowMe, "the rally key may not be Numpad1");
         Check(ActionTakingChord(keys, 'Q', false, false, false, false) == KeyId::Count, "unbound key");
         Check(ActionUsingKey(keys, 'T', false) == KeyId::RemoteTarget, "the rally key may not be T");
         Check(ActionUsingKey(keys, 'V', false) == KeyId::Count, "V is free for the rally key");
         Check(ActionTakingChord(nullptr, 'X', false, false, false, false) == KeyId::Count, "no keys");
+    }
+
+    void TestQuickCommands()
+    {
+        const QuickOrder follow = QuickOrderFor(KeyId::QuickFollowMe);
+        Check(follow.what == 5 && follow.mode == kModeFollowMe && follow.needsTarget && follow.onPlayer,
+              "follow me: CMD_FOLLOW on the player, Follow Me mode");
+        const QuickOrder defend = QuickOrderFor(KeyId::QuickDefendMe);
+        Check(defend.what == kCmdDefend && defend.what == 15 && defend.mode == kModeDefend && defend.needsTarget &&
+                  defend.onPlayer,
+              "defend me: CMD_DEFEND on the player, Defend mode");
+        const QuickOrder attack = QuickOrderFor(KeyId::QuickAttackTarget);
+        Check(attack.what == 4 && attack.mode == kModeAttack && attack.needsTarget && !attack.onPlayer,
+              "attack: CMD_ATTACK on the players target, Attack mode");
+        const QuickOrder stop = QuickOrderFor(KeyId::QuickStop);
+        Check(QuickAttackTargetAllowed(false, true, 2, false), "attack: an enemy is allowed");
+        Check(!QuickAttackTargetAllowed(true, true, 1, false), "attack: the player's own team is refused");
+        Check(!QuickAttackTargetAllowed(false, false, 3, false), "attack: an ally (not enemy) is refused");
+        Check(!QuickAttackTargetAllowed(false, false, 0, false), "attack: neutral refused by default");
+        Check(QuickAttackTargetAllowed(false, false, 0, true), "attack: neutral allowed by AllowNeutralAttackOrders");
+        Check(!QuickAttackTargetAllowed(true, false, 0, true), "attack: same team stays refused");
+        Check(stop.what == 2 && stop.mode == kModeNone && !stop.needsTarget && !stop.onPlayer,
+              "stop: CMD_STOP, no target, no mode filter");
+        Check(QuickOrderFor(KeyId::Hold).what == 0 && QuickOrderFor(KeyId::Count).what == 0,
+              "other keys are not quick orders");
+
+        Check(QuickCommandsAvailable(true, true, true), "quick: on, hooked, single player");
+        Check(!QuickCommandsAvailable(false, true, true), "quick: off by option");
+        Check(!QuickCommandsAvailable(true, false, true), "quick: needs the hooks");
+        Check(!QuickCommandsAvailable(true, true, false), "quick: single player only");
+
+        // The key filter: a plain key is ours when the gate is open, Shift is not.
+        const Key key{ 0x61, false };
+        KeyLatch latch;
+        KeyEvent down;
+        down.msg = kWmKeyDown;
+        down.vk = 0x61;
+        Check(ClassifyKey(down, KeyId::QuickFollowMe, key, true, latch).act, "Numpad1 down acts");
+        KeyLatch closed;
+        Check(!ClassifyKey(down, KeyId::QuickFollowMe, key, false, closed).swallow,
+              "a closed gate (option off) leaves the key alone");
+        down.shift = true;
+        KeyLatch shifted;
+        Check(!ClassifyKey(down, KeyId::QuickFollowMe, key, true, shifted).act, "Shift+Numpad1 is not ours");
     }
 
     void TestFollowCamera()
@@ -621,6 +729,7 @@ int main()
     TestHoldLabel();
     TestKeys();
     TestChordClashes();
+    TestQuickCommands();
     TestFollowCamera();
     TestKeyMessages();
     TestIdleUnits();

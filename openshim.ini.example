@@ -2729,6 +2729,25 @@ RtsAreaSelect = 1
 ; Exposed on the OpenShim Settings page as "Hold".
 RtsHold = 2
 
+; Quick commands. Four keys give an order to the selected units without the
+; command menu: Numpad 1 Follow Me and Numpad 2 Defend Me (both on your own
+; vehicle), Numpad 3 Attack My Target (the target you have locked) and
+; Numpad 5 Stop. Your own vehicle is never ordered, the selection is kept,
+; and an order nobody can take plays the refusal buzz. Attack My Target
+; refuses an ally or your own team (neutral targets only with
+; AllowNeutralAttackOrders). Stock binds Numpad0 (fire), Numpad4 and
+; Numpad6 (steering) and KeypadEnter, so those are refused as quick keys;
+; the other numpad digits are free. NumLock must be on (with it off the
+; keys send Home, End and so on, which never match). Rebind the keys under
+; Options > Input > RTS Actions (RtsQuickFollowKey, RtsQuickDefendKey,
+; RtsQuickAttackKey, RtsQuickStopKey; names like Numpad1). The four keys
+; stay reserved for clash checks even while this option is off. Single
+; player only.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Quick Commands".
+RtsQuickCommands = 0
+
 ; Build at Nav. With a building picked on a selected Construction Rig, the
 ; unit menu's Go To Nav entry reads "Build at Nav"; picking a nav checks the
 ; spot with the rig's own placement test (slope, overlap, power for guns
@@ -2881,11 +2900,16 @@ RtsFollowCamera = 0
 ; cycling through them; Shift+J selects all of them. J is unbound in stock.
 ; The follow key (C) is used with Shift (Shift+C) and only in the satellite
 ; view while RtsFollowCamera is on; Shift+C stays stock everywhere else.
-; Defaults: T, B, X, Z, J, C.
+; Defaults: T, B, X, Z, J, C; Numpad1, Numpad2, Numpad3, Numpad5 for the
+; quick commands (only used while RtsQuickCommands is on).
 RtsRemoteTargetKey = T
 RtsBuildingCycleKey = B
 RtsAreaSelectKey = X
 RtsHoldKey = Z
+RtsQuickFollowKey = Numpad1
+RtsQuickDefendKey = Numpad2
+RtsQuickAttackKey = Numpad3
+RtsQuickStopKey = Numpad5
 RtsIdleUnitKey = J
 RtsFollowCameraKey = C
 
