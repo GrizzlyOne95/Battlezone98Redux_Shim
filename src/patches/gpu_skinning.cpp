@@ -39,6 +39,7 @@
 #include "ogre_entity_liveness.h"
 #include "render_profile_runtime.h"
 #include "shim_log.h"
+#include "tracked_vehicle_class.h"
 
 #include <Windows.h>
 
@@ -988,6 +989,8 @@ namespace BZROpenShim
         };
         // Clone pass -> twin pass, for every pass that has a usable twin.
         std::unordered_map<const void*, TwinPass> g_twinPasses;
+        // TrackedTreadMaterialRevision() the twins were last checked against.
+        uint32_t g_twinTreadRevision = 0;
         // Skinned program name -> instanced program name, or empty after a failure.
         std::unordered_map<std::string, std::string> g_instancedPrograms;
 
@@ -1292,9 +1295,24 @@ namespace BZROpenShim
             return true;
         }
 
-        void BuildInstancedTwin(const CloneRecord& record)
+        // A tracked tread material (Docs/TRACKED_VEHICLES.md) gets its
+        // per-unit U phase from a custom parameter the twin cannot carry, so
+        // its clones draw unbatched.
+        bool SkipTreadTwin(const std::string& sourceName)
+        {
+            if (!TrackedTreadMaterialRegistered(sourceName.c_str()))
+                return false;
+            if (g_loggedRejects.size() <= 256 && g_loggedRejects.insert("twin-tread:" + sourceName).second)
+                LogShimA(LogLevel::Info, kComponent, "[GPUINST] no twin for tracked tread material %s",
+                    sourceName.c_str());
+            return true;
+        }
+
+        void BuildInstancedTwin(const CloneRecord& record, const std::string& sourceName)
         {
             if (!g_buildTwins || !record.clone.rep || g_twins.count(record.cloneName) || !ResolveTwinApi())
+                return;
+            if (SkipTreadTwin(sourceName))
                 return;
             TwinRecord& twin = g_twins[record.cloneName];
             twin.name = std::string(kTwinRoot) + record.cloneName.substr(std::strlen(kCloneRoot));
@@ -1356,6 +1374,36 @@ namespace BZROpenShim
                 g_twinPasses[pair.first] = pair.second;
             ++g_twinStats.twins;
             g_twinStats.passes += static_cast<uint32_t>(pairs.size());
+        }
+
+        // A tread material registered after its clone's twin was built: stop
+        // routing the clone's passes to the twin. The twin material itself is
+        // kept until ReleaseTwins, and g_twins still names it, so it is not
+        // rebuilt. Render thread, the only reader of g_twinPasses.
+        void DropTreadTwins()
+        {
+            const uint32_t revision = TrackedTreadMaterialRevision();
+            if (revision == g_twinTreadRevision)
+                return;
+            g_twinTreadRevision = revision;
+            for (const auto& entry : g_clones)
+            {
+                const CloneRecord& record = entry.second;
+                if (!record.clone.rep || entry.first.compare(0, 7, "caster:") == 0 ||
+                    !g_twins.count(record.cloneName))
+                    continue;
+                const size_t bar = entry.first.rfind('|');
+                if (bar == std::string::npos || !SkipTreadTwin(entry.first.substr(0, bar)))
+                    continue;
+                const uint16_t techniques = g_ogre.getNumTechniques(record.clone.rep);
+                for (uint16_t t = 0; t < techniques; ++t)
+                {
+                    void* technique = g_ogre.getTechnique(record.clone.rep, t);
+                    const uint16_t passes = technique ? g_ogre.getNumPasses(technique) : 0;
+                    for (uint16_t p = 0; p < passes; ++p)
+                        g_twinPasses.erase(g_ogre.getPass(technique, p));
+                }
+            }
         }
 
         void ReleaseTwins()
@@ -1477,7 +1525,7 @@ namespace BZROpenShim
             error = {};
             // Caster clones (from #538) never had twins; keep it that way.
             if (!asCaster)
-                BuildInstancedTwin(record);
+                BuildInstancedTwin(record, sourceName);
             return &record;
         }
 
@@ -1683,6 +1731,8 @@ namespace BZROpenShim
             void* const sceneManager = Hooks::GetOgreSceneManagerRuntime();
             if (!sceneManager)
                 return;
+            if (g_buildTwins)
+                DropTreadTwins();
             g_variantThread = GetCurrentThreadId();
             std::unordered_map<void*,std::vector<SurfaceVariantChange>> variants;
             std::unordered_set<void*> variantsHandled;

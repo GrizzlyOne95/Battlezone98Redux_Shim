@@ -28,7 +28,7 @@ namespace BZROpenShim::RenderProfiles
     //    and per-planet IBL maps (openshim_env_<world>_*.dds). A v4 deployment
     //    next to a v5 DLL would silently drop stock materials back to Redux
     //    shading and every planet to the neutral environment.
-    constexpr char kEnhancedResourcesVersion[] = "5";
+    constexpr char kEnhancedResourcesVersion[] = "6";
 
     // Repository-relative name of the mandatory resource directory, as laid
     // out under the game install.

@@ -2677,6 +2677,35 @@ RtsRadarPings = 0
 ; Accepted: boolean. Default: ON.
 ; Exposed on the OpenShim Settings page as "Artillery Range".
 RtsArtilleryRange = 1
+
+; Range rings for selected units (rts_markers.cpp; Docs/RTS_RANGE_RINGS.md). Each ring shows
+; only for your own selected units, for as long as they are selected, and never for the
+; vehicle you pilot. Local draw only: no game object, no network traffic, so it is safe in
+; multiplayer.
+;
+; RtsWeaponRange: an orange ring at the direct-fire reach (shotSpeed x lifeSpan) of each
+; selected unit's cannon-class weapon. Homing and guided weapons are skipped. The artillery
+; ring above is separate and unchanged.
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Weapon Range".
+RtsWeaponRange = 1
+;
+; RtsRadarRange: a mint ring at [CraftClass] rangeScan for each selected unit that has one.
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Radar Range".
+RtsRadarRange = 0
+;
+; RtsMineRange: lime rings at the trigger radius of your team's proximity mines within
+; searchRadius + 20 m of a selected unit (the nearest 24).
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Mine Range".
+RtsMineRange = 0
+;
+; RtsRangeLabels: writes WEAPON RANGE / RADAR RANGE / MINE TRIGGER letter by letter along
+; each ring, in the ring's colour, on the side facing you. Needs a range ring on.
+; Accepted: boolean. Default: ON.
+; Exposed on the OpenShim Settings page as "Range Labels".
+RtsRangeLabels = 1
 ; RTS command extras (rts_commands.cpp; Docs/RTS_COMMANDS.md). All five rows
 ; are on the OpenShim Settings page under Controls > RTS Commands. Orders go
 ; through the stock per-unit calls the unit menu itself uses.
@@ -2882,6 +2911,23 @@ RtsOrderQueue = 0
 ; Exposed on the OpenShim Settings page as "Build Queue".
 RtsBuildQueue = 0
 
+; Unit Loadouts. Alt+pick a unit in your Recycler or Factory build menu to open
+; its loadout pages in the same panel: its weapon slots, then for a slot
+; "Stock" and every compatible weapon your current Armory offers ("More" pages
+; on, Back steps out). A loadout belongs to the unit type (its ODF) and applies
+; wherever that unit is built. Each changed slot adds that weapon's full Armory
+; price to the unit's build cost; the menu, the charge and a cancel refund all
+; use the same price. A weapon your Armory does not offer when the build starts
+; (or with no Armory) is not charged and the unit gets its stock weapon. A
+; unit's loadout cannot be edited while that unit is building. Loadouts are
+; kept in memory for the mission only: they are not saved and are dropped on
+; mission load. Needs [ProducerBuildMenus] Enabled = 1 (in
+; openshim_producer_build_menus.ini). Single player only.
+; OPENSHIM_DISABLE_UNIT_LOADOUTS=1 forces it off. See Docs/UNIT_LOADOUTS.md.
+;
+; Accepted: boolean. Default: OFF.
+; Exposed on the OpenShim Settings page as "Unit Loadouts".
+UnitLoadouts = 0
 ; Satellite Follow. In the satellite view, Shift+C (RtsFollowCameraKey) keeps
 ; the view centred on your first selected unit, or on your own vehicle when
 ; none of your units is selected, as it moves; the stock satellite pan is
@@ -3008,6 +3054,15 @@ PlayerReticleConvergence = 1
 ; replaces it.
 ; Legacy INI alias: ReticleRange
 SmartReticleRange = 500
+
+; Paint your own ship in single player. OpenShim repaints the ship you pilot
+; (no mod needed) and puts its stock paint back when you leave it. Other units
+; keep stock paint, and so does every ship on render quality below en-high,
+; outside DX11 Enhanced, or in a network game. Applies live.
+; See Docs/SP_PLAYER_PAINT.md.
+; Accepted: stock, t2 (red), t3 (blue), t4 (gold).
+; Default: stock.
+PlayerPaint = stock
 
 ; Score scrap by viable path length and reconsider temporarily unreachable scrap.
 ; Also makes newly built scavengers start scavenging at once instead of idling

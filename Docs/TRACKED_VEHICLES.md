@@ -36,12 +36,16 @@ lateralFriction = 1.0   ; sideways grip as a fraction of g (no strafe)
 maxSlope = 40.0         ; full traction up to this slope; none 10 degrees past it
 treadSound = "xvtrd0.wav" ; looping tread sound (BZCC key name); none when absent
 treadCycleLength = 1.0  ; metres of tread travel per loop of a tread clip
+treadScrollU = 0.0      ; tread texture widths (U) per treadCycleLength; 0 = no scroll
+treadMaterialL = ""     ; material on the left tread sub-mesh (scroll only)
+treadMaterialR = ""     ; material on the right tread sub-mesh (scroll only)
 ```
 
 Every `[TrackedClass]` key is optional; the values above are the defaults
-(`treadSound` has none). Out-of-range values are clamped (stiffness
-10..5000, damping 0..500, lateralFriction 0..5, maxSlope 5..85,
-treadCycleLength 0.05..100). Hover-only keys (`velocStrafe`,
+(`treadSound`, `treadMaterialL` and `treadMaterialR` have none).
+Out-of-range values are clamped (stiffness 10..5000, damping 0..500,
+lateralFriction 0..5, maxSlope 5..85, treadCycleLength 0.05..100,
+treadScrollU -64..64). Hover-only keys (`velocStrafe`,
 `setAltitude`, `accelJump`, boost) have no effect on a tracked unit.
 
 ### Tread clips and sound
@@ -76,9 +80,63 @@ are 0.
   tread clips off bones `idle` animates, or the two add up. Do not key
   bones whose 4th name character is `1` or `2`: the model loader marks
   those for LOD hiding and takes manual control of them.
-- **No UV scroll.** The stock vehicle shaders (`base.program`) bind no
-  texture matrix, so a material scroll on a "tread" sub-mesh would not
-  show, and a shared material would scroll every unit using it.
+- **Texture scroll (Direct3D 11 + Enhanced only).** With `treadScrollU`
+  non-zero, each tracked object keeps a U phase per side, advanced by
+  `speed * dt * treadScrollU / treadCycleLength` and wrapped into [0, 1),
+  so `treadScrollU` texture widths pass per `treadCycleLength` metres of
+  tread travel. The speed is signed: reversing scrolls the texture
+  backward, and in a pivot each side follows its own sign (L backward,
+  R forward). If the texture runs the wrong way on a model, negate
+  `treadScrollU`. The phase goes to the SubEntities whose current
+  material is `treadMaterialL` or `treadMaterialR` (exact name, case
+  sensitive, no spaces or quotes inside, up to 127 characters; GPU
+  skinning's `OpenShim/GpuSkin/...` clones of it are matched too) as
+  Ogre custom parameter 1411. OpenShim's Enhanced HLSL4 vertex programs
+  add `osTreadUV.x` to U. `osTreadUV` is a plain constant 0; the first
+  time a unit finds a named material (or a skinning clone of it), its
+  passes that declare `osTreadUV` are bound to custom 1411. No other
+  material is touched, so no other material moves. A material whose
+  passes do not declare it (a mod's own programs instead of OpenShim's
+  Enhanced ones) is retried each step and never scrolls. Campaign
+  Reimagined's `CR_ShimOrStock_*` vertex wrappers delegate to the
+  `OSE_*_vertexHLSL4` programs first on Direct3D 11, so CR vehicle
+  materials do declare it.
+  - Give each side its own plain `: BZBase` material (L and R must
+    differ; if they are equal both sides take the L phase).
+  - Use those materials only on tracked units with these keys. The
+    binding is made on the shared material, not per unit, so once any unit
+    has bound it, everything else drawn with that material that never
+    writes 1411 reads the last value another unit wrote: an ODF that uses
+    the material without `treadScrollU`, a wreck or other object built
+    from the same model, and a remote unit before its first tracked step. Their treads then sit at a
+    random offset (frozen, or jumping between frames). This is the same
+    stale-custom-value rule as `LOCAL_DAMAGE.md`. Other materials are
+    unaffected and read 0.
+  - Stock, Retro, Direct3D 9 and OpenGL draw the treads unscrolled; the
+    sm3 and GLSL programs have no new uniform. The gate is re-read every
+    64 steps, so a renderer or profile change is picked up.
+  - Instancing: an instanced draw cannot carry a per-unit custom value,
+    and GPU skinning builds a clone's instanced twin as soon as it makes
+    the clone, before any tracked step has bound 1411. So the ODF's
+    `treadMaterialL/R` are registered when the ODF is read (before any
+    unit of it draws), and GPU skinning builds no twin for clones of a
+    registered material, logging `[GPUINST] no twin for tracked tread
+    material <name>` once. If a twin already existed (another ODF read
+    later names a material already in use), the next skinning frame stops
+    routing that clone's passes to it. Only the tread materials draw
+    unbatched; every other pass on this model and all others keeps
+    instancing. The registration is by material name and lasts for the
+    session, also on renderers where the scroll is off; it holds up to
+    64 names, past which that ODF gets no scroll (warning logged).
+  - The DXBC seed pack predates the new uniform, so on a seed-pack
+    miss the 13 Enhanced HLSL4 base vertex programs are compiled once at
+    run time.
+  - Without `treadScrollU` and at least one material, or when a resolve misses (logged at install),
+    there is no scroll; the clips are unaffected. The first time a unit
+    finds its tread SubEntities it logs
+    `tread scroll obj=... L=<material> R=<material> enabled=1 boundPasses=N`
+    (`absent` for a side with no matching SubEntity, `-` when the
+    renderer gate is closed), and again only when that changes.
 - **Sound.** `treadSound` loops through the engine's own looping-sound
   path, the one the hover thrust loop uses: the same start block and
   priority (higher for the user's craft), pitch `11025 + 5512.5 * t` Hz
@@ -305,10 +363,12 @@ positions, volume and rate.
 - The unit is a HoverCraft underneath: AI, weapons, sounds and the HUD
   treat it as one. An ODF that used `classLabel = "wingman"` loses
   Wingman-specific behaviour when switched to `tracked`.
-- Tread visuals are skeleton clips only (see "Tread clips and sound");
-  there is no texture scroll. Clips follow the commanded tread speed, so
-  treads keep turning against an obstacle and are still while the hull is
-  pushed.
+- Tread visuals are skeleton clips plus, on Direct3D 11 + Enhanced only,
+  the optional texture scroll (see "Tread clips and sound"). Both follow
+  the commanded tread speed, so treads keep turning against an obstacle
+  and are still while the hull is pushed. The scroll phase is not saved
+  and is not sent over the network; a replica derives it from its own
+  tread speeds.
 - Pitch (+omega.x raises the nose) and roll (+omega.z lowers the right side)
   signs follow BZ 1.5's convention (+omega.y turns left). The live run
   shows both converge onto the ground (see Verification); a wrong sign
@@ -456,3 +516,12 @@ Live checklist (background, never-activate harness run):
    (trace clearance near `-g/stiffness`, about -0.025 m with defaults).
 3. AI Goto drives it forward and back; it pivots in place; it never strafes.
 4. Save and reload keep it tracked.
+5. Tread texture scroll (not yet run; needs a model with a separate
+   tread material per side): on Direct3D 11 + Enhanced, a unit with
+   `treadScrollU = 1`, `treadMaterialL` and `treadMaterialR` logs
+   `tread scroll ... enabled=1 boundPasses=N` with N > 0 and both sides
+   found; the tread textures move forward when driving, backward when
+   reversing, opposite ways in a pivot, and not at rest. A hover unit
+   and a tracked unit without the keys look unchanged. Repeat with GPU
+   skinning on (the clone names must still match) and on Direct3D 9 and
+   Stock (no scroll, no shader or parameter errors in `Ogre.log`).
