@@ -2831,7 +2831,6 @@ RtsOrderQueue = 0
 ; Exposed on the OpenShim Settings page as "Build Queue".
 RtsBuildQueue = 0
 
-<<<<<<< ours
 ; Unit Loadouts. Alt+pick a unit in your Recycler or Factory build menu to open
 ; its loadout pages in the same panel: its weapon slots, then for a slot
 ; "Stock" and every compatible weapon your current Armory offers ("More" pages
@@ -2849,7 +2848,7 @@ RtsBuildQueue = 0
 ; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Unit Loadouts".
 UnitLoadouts = 0
-=======
+
 ; Satellite Follow. In the satellite view, Shift+C (RtsFollowCameraKey) keeps
 ; the view centred on your first selected unit, or on your own vehicle when
 ; none of your units is selected, as it moves; the stock satellite pan is
@@ -2862,7 +2861,6 @@ UnitLoadouts = 0
 ; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Satellite Follow".
 RtsFollowCamera = 0
->>>>>>> theirs
 
 ; The RTS action keys. One key each, no modifier; rebind them in Options >
 ; Input > RTS Actions, which writes these lines. The remote-target key is
