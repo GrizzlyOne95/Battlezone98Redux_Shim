@@ -27,6 +27,7 @@
 #include "gpu_instancing.h"
 #include "gpu_skinning.h"
 #include "local_damage.h"
+#include "sp_player_paint.h"
 #include "soak_telemetry.h"
 #include "mode_stress_driver.h"
 #include "mp_vehicle_preview_fix.h"
@@ -64,6 +65,8 @@
 #include "net_optimizer.h"
 #include "pond_class_label.h"
 #include "tracked_vehicle_class.h"
+#include "walker_free_head.h"
+#include "mru_class.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -1667,6 +1670,7 @@ namespace BZROpenShim
             {"InitializeMeshAccurateImpacts", &MeshImpact::InitializeGlobal},
             {"InstallEmissionLightFixIfPossible", &InstallEmissionLightFixIfPossible},
             {"InstallOrdnanceEntityLeakFixIfPossible", &InstallOrdnanceEntityLeakFixIfPossible},
+            {"InstallDayWreckerSpawnFallIfPossible", &InstallDayWreckerSpawnFallIfPossible},
             {"VerifyExpectedOgreExportsIfPossible", &VerifyExpectedOgreExportsIfPossible},
             {"InitializeJetFlamesConfig", &InitializeJetFlamesConfig},
             {"InitializeUnitVoConfig", &InitializeUnitVoConfig},
@@ -1715,6 +1719,8 @@ namespace BZROpenShim
         HookEngine::CodePatchLock lock;
         InstallPondClassLabelSupportIfPossible();
         InstallTrackedVehicleClassIfPossible();
+        InstallWalkerFreeHeadIfPossible();
+        InstallMruClassIfPossible();
         InstallEnhancedLightSelectionIfPossible();
         InstallD3D11ConstantLookupCacheIfPossible();
         InstallD3DCompileCacheIfPossible();
@@ -1936,6 +1942,7 @@ namespace BZROpenShim
         FogWakeRenderFrameTick();
         GpuSkinningRenderFrameTick();
         LocalDamageRenderFrameTick();
+        SpPlayerPaintRenderFrameTick();
         GpuInstancingRenderFrameTick();
         PlanetEnvironmentRenderFrameTick();
         // Drives the pending terrain seam blend once the new world's terrain is
