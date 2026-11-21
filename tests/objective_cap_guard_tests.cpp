@@ -88,7 +88,7 @@ namespace
     {
         g = FakeList();
         for (int32_t i = 0; i < n; ++i)
-            std::snprintf(g.names[i], kNameLength, "obj%d.otf", static_cast<int>(i));
+            std::snprintf(g.names[i], kNameLength, "obj%d.otf", static_cast<int>(i % 100));
         g.count = n;
     }
 
