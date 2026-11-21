@@ -363,6 +363,31 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "LuaGetIndependenceGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_OBJECTIVE_CAP_GUARD") ||
+            Equals(name, "BZR_DISABLE_OBJECTIVE_CAP_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "ObjectiveCapGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_ANCHOR_DRAG_GUARD") ||
+            Equals(name, "BZR_DISABLE_ANCHOR_DRAG_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "AnchorDragGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_TERRAIN_ZONE_TABLE_GUARD") ||
+            Equals(name, "BZR_DISABLE_TERRAIN_ZONE_TABLE_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "TerrainZoneTableGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_TERRAIN_HEIGHT_SAMPLE_GUARD") ||
+            Equals(name, "BZR_DISABLE_TERRAIN_HEIGHT_SAMPLE_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "TerrainHeightSampleGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_NAN_TRANSFORM_GUARD") ||
+            Equals(name, "BZR_DISABLE_NAN_TRANSFORM_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "NaNTransformGuard", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX") ||
             Equals(name, "BZR_DISABLE_LUA_SEND_LENGTH_FIX"))
         {

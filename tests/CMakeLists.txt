@@ -601,6 +601,22 @@ openshim_add_test(lua_getindependence_guard_tests STD 14 SOURCES
     lua_getindependence_guard_tests.cpp
 )
 
+openshim_add_test(objective_cap_guard_tests STD 14 SOURCES
+    objective_cap_guard_tests.cpp
+)
+
+openshim_add_test(anchor_drag_guard_tests STD 14 SOURCES
+    anchor_drag_guard_tests.cpp
+)
+
+openshim_add_test(terrain_zone_guard_tests STD 14 SOURCES
+    terrain_zone_guard_tests.cpp
+)
+
+openshim_add_test(nan_transform_guard_tests STD 14 SOURCES
+    nan_transform_guard_tests.cpp
+)
+
 openshim_add_test(lua_send_length_tests STD 14 SOURCES
     lua_send_length_tests.cpp
 )
