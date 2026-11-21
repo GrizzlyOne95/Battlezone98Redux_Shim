@@ -228,8 +228,9 @@ namespace BZROpenShim::HudFeedback
             const float kick = hitsOn ? pulse.Kick(frameNow, settings.hitDurationMs) : 0.0f;
             const int targets = hitsOn ? pulse.Targets(frameNow, settings.hitDurationMs) : 1;
             const Relation relation = valid && effective.reactive && contact ? ClassifyContact(contactObject) : Relation::None;
+            const uint32_t markerColor = pulse.ColorFor(frameNow, settings.hitDurationMs, settings.hitColor);
             const DrawPlan plan = valid
-                ? MakeDrawPlan(effective, x, y, sx, sy, clip, contact, strength, relation, kick, targets) : DrawPlan{};
+                ? MakeDrawPlan(effective, x, y, sx, sy, clip, contact, strength, relation, kick, targets, markerColor) : DrawPlan{};
             if (!plan.replacesStock)
             {
                 // The ripple scales about the aim point, so it needs the
@@ -239,7 +240,8 @@ namespace BZROpenShim::HudFeedback
                 {
                     const int ghostMs = GhostDurationMs(settings.hitDurationMs);
                     ghost = MakeGhostPlan(pulse.Progress(frameNow, ghostMs), kick,
-                        pulse.Targets(frameNow, ghostMs), settings.hitColor, settings.hitOpacity);
+                        pulse.Targets(frameNow, ghostMs),
+                        pulse.ColorFor(frameNow, ghostMs, settings.hitColor), settings.hitOpacity);
                 }
                 // Team tint recolors the stock art only through the shader:
                 // the native tint would multiply already-colored art to mud.
@@ -249,7 +251,7 @@ namespace BZROpenShim::HudFeedback
                 {
                     StockReticleFx::Frame fx;
                     fx.sprite = sprite; fx.x = stockX; fx.y = stockY; fx.flags = flags; fx.scale = scale;
-                    fx.uiScaleX = sx; fx.uiScaleY = sy; fx.ghost = ghost; fx.ringRgb = settings.hitColor;
+                    fx.uiScaleX = sx; fx.uiScaleY = sy; fx.ghost = ghost; fx.ringRgb = pulse.ColorFor(frameNow, GhostDurationMs(settings.hitDurationMs), settings.hitColor);
                     fx.tintRgb = RelationColor(relation, 0xFFFFFF); fx.tintAmount = tinted ? 0.85f : 0.0f;
                     fx.flash = 0.5f * kick;
                     shaded = StockReticleFx::Draw(viewport, fx);
@@ -431,7 +433,8 @@ namespace BZROpenShim::HudFeedback
                 KillTicker::NoteDamage(kill, context.odf, context.sample.singlePlayer);
             }
             if (g_hitsEnabled.load(std::memory_order_relaxed) && ConfirmsHit(context.sample))
-                PublishSimEvent(OpenShimEventType::SimDamageApplied, context.sample.victim, context.sample.attacker, 0, 1);
+                PublishSimEvent(OpenShimEventType::SimDamageApplied, context.sample.victim, context.sample.attacker,
+                    IsKillshot(context.sample) ? 1 : 0, 1);
             if (g_incomingEnabled.load(std::memory_order_relaxed) && context.hasDirection &&
                 IsSinglePlayerSession() && ConfirmsIncoming(context.sample, context.localVictim))
             {
@@ -522,7 +525,7 @@ namespace BZROpenShim::HudFeedback
             const auto ui = ReadShellUiState();
             if (!ui.readable || ui.wrapperActive || ui.screenPresent) return;
             AcquireSRWLockExclusive(&g_stateLock);
-            g_pulse.Start(event.tickMs, SimEventArg(event, 0));
+            g_pulse.Start(event.tickMs, SimEventArg(event, 0), SimEventArg(event, 2) != 0);
             ReleaseSRWLockExclusive(&g_stateLock);
             if (InterlockedDecrement(&g_hitLogBudget) >= 0)
                 Log(L"[HUDFEEDBACK] Confirmed player hit victim=%d attacker=%d\n", SimEventArg(event, 0), SimEventArg(event, 1));

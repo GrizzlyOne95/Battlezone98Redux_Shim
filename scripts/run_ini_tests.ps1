@@ -418,6 +418,8 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # artillery range. Write nothing the game reads. Default on by design.
     "Gameplay/RtsCommandPings",
     "Gameplay/RtsArtilleryRange",
+    "Gameplay/RtsWeaponRange",
+    "Gameplay/RtsRangeLabels",
 
     # RTS command extras: nothing happens until the player presses one of the
     # RTS keys or picks a unit-menu entry, and then only the stock per-unit
@@ -534,6 +536,7 @@ $stockValueChecks = @{
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightReach" = "0"
     "SinglePlayer/HeadlightBrightness" = "1.00"
+    "SinglePlayer/PlayerPaint" = "stock"
 }
 foreach ($entry in $stockValueChecks.GetEnumerator()) {
     if (-not $playerValues.ContainsKey($entry.Key) -or
@@ -632,20 +635,30 @@ $shippingPolicyChecks = @{
     "Gameplay/GroupStrip" = "1"
     "Gameplay/RtsCommandPings" = "1"
     "Gameplay/RtsArtilleryRange" = "1"
+    "Gameplay/RtsWeaponRange" = "1"
+    "Gameplay/RtsRadarRange" = "0"
+    "Gameplay/RtsMineRange" = "0"
+    "Gameplay/RtsRangeLabels" = "1"
     "Gameplay/RtsRemoteTarget" = "1"
     "Gameplay/RtsSmartCommandMenu" = "1"
     "Gameplay/RtsSmartRepairReload" = "1"
     "Gameplay/RtsAreaSelect" = "1"
     "Gameplay/RtsHold" = "2"
+    "Gameplay/RtsQuickCommands" = "0"
+    "Gameplay/RtsAmmoAlert" = "0"
+    "Gameplay/RtsScrapFullAlert" = "0"
     "Gameplay/RtsBuildAtNav" = "1"
     "Gameplay/RtsBuildGhost" = "1"
     "Gameplay/RtsPendingBuildGhost" = "1"
     "Gameplay/RtsPowerRange" = "1"
     "Gameplay/RtsWaypointLines" = "1"
     "Gameplay/RtsAttackMarks" = "0"
+    "Gameplay/RtsRadarPings" = "0"
     "Gameplay/RtsProducerBadges" = "0"
     "Gameplay/RtsOrderQueue" = "0"
     "Gameplay/RtsBuildQueue" = "0"
+    "Gameplay/UnitLoadouts" = "0"
+    "Gameplay/RtsFollowCamera" = "0"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }
