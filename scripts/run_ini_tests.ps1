@@ -349,6 +349,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # inert unless the websocket closes mid-mission, and a real P2P loss still
     # ends the session through the stock ping check. Added 2026-10-26.
     "Network/LobbyDropKeepsMatch",
+    # Client-local DNS only: the BZRNet matchmaking lookup asks for IPv4,
+    # which the server's only record is; falls back to the stock lookup.
+    "Network/ForceIPv4Matchmaking",
     # Editor-only: routes World Builder saves to the map's source folder
     # behind an actual-destination prompt. Inert outside /edit saves.
     "General/EditorSaveToSourceFolder",
@@ -620,6 +623,7 @@ $shippingPolicyChecks = @{
     "Network/LobbyReadouts" = "1"
     "Network/LobbyBanButton" = "0"
     "Network/PreLobby" = "1"
+    "Network/ForceIPv4Matchmaking" = "1"
     "Career/StatsTracking" = "0"
     "SinglePlayer/JumpSnipeCrouch" = "1"
     "SinglePlayer/AttackRevealPerceivedTeam" = "0"

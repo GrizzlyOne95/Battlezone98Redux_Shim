@@ -10,6 +10,7 @@
 #include "bzr_options_ui.h"
 #include "matchmaking_server.h"
 #include "hook_engine.h"
+#include "dns_family_policy.h"
 
 #include <winsock2.h>
 #include <ws2tcpip.h>
@@ -298,6 +299,11 @@ namespace
         bool bufferLogPeerFilterEnabled = false;
         std::string bufferLogPeerText;
         std::string matchmakingRedirectAddress;
+        // openshim.ini [Network] ForceIPv4Matchmaking (default on).
+        bool forceIPv4Matchmaking = true;
+        // OPENSHIM_TEST_DNS_STALL_MS: test-only delay before an AF_UNSPEC
+        // BZRNet lookup, imitating a stalled AAAA query. 0 = off.
+        uint32_t testDnsStallMs = 0;
     };
 
     struct SocketState
@@ -354,6 +360,7 @@ namespace
     using WSAGetLastErrorFn = int (WSAAPI*)();
     using WSASetLastErrorFn = void (WSAAPI*)(int);
     using GetAddrInfoAFn = INT (WSAAPI*)(PCSTR, PCSTR, const ADDRINFOA*, PADDRINFOA*);
+    using FreeAddrInfoAFn = VOID (WSAAPI*)(PADDRINFOA);
     using GetQueuedCompletionStatusFn = BOOL (WINAPI*)(HANDLE, LPDWORD, PULONG_PTR, LPOVERLAPPED*, DWORD);
 
     NetConfig g_Config;
@@ -390,6 +397,7 @@ namespace
     WSAGetLastErrorFn g_RealWSAGetLastError = nullptr;
     WSASetLastErrorFn g_RealWSASetLastError = nullptr;
     GetAddrInfoAFn g_RealGetAddrInfoA = nullptr;
+    FreeAddrInfoAFn g_RealFreeAddrInfoA = nullptr;
 
     // Live matchmaking-server override (the pre-lobby's Rebellion / Custom
     // choice). A canonical "host" or "host:port"; empty means no override.
@@ -1071,6 +1079,25 @@ namespace
                 g_Config.matchmakingRedirectAddress.c_str());
         }
 
+        // openshim.ini [Network] ForceIPv4Matchmaking: resolve the BZRNet
+        // matchmaking host as AF_INET only (see Hook_getaddrinfo).
+        g_Config.forceIPv4Matchmaking = true;
+        TryGetUserConfigBool("Network", "ForceIPv4Matchmaking", g_Config.forceIPv4Matchmaking);
+        if (TryReadEnvValue("OPENSHIM_TEST_DNS_STALL_MS", envValue, static_cast<DWORD>(sizeof(envValue))))
+        {
+            const long stallValue = std::strtol(envValue, nullptr, 10);
+            g_Config.testDnsStallMs = DnsFamilyPolicy::ClampTestStallMs(
+                stallValue > 0 ? static_cast<uint32_t>(stallValue) : 0u);
+            if (g_Config.testDnsStallMs > 0)
+            {
+                LogShimA(LogLevel::Warn, "net",
+                    "[OpenShimNet] TEST ONLY: OPENSHIM_TEST_DNS_STALL_MS=%u delays AF_UNSPEC BZRNet lookups "
+                    "(ForceIPv4Matchmaking=%d)",
+                    g_Config.testDnsStallMs,
+                    g_Config.forceIPv4Matchmaking ? 1 : 0);
+            }
+        }
+
         if (TryReadEnvValue("BZ_REORDER", envValue, static_cast<DWORD>(sizeof(envValue))) ||
             TryReadEnvValue("OPENSHIM_REORDER", envValue, static_cast<DWORD>(sizeof(envValue))))
         {
@@ -1375,6 +1402,7 @@ namespace
         g_RealWSAGetLastError = reinterpret_cast<WSAGetLastErrorFn>(GetProcAddress(g_Ws2Module, "WSAGetLastError"));
         g_RealWSASetLastError = reinterpret_cast<WSASetLastErrorFn>(GetProcAddress(g_Ws2Module, "WSASetLastError"));
         g_RealGetAddrInfoA = reinterpret_cast<GetAddrInfoAFn>(GetProcAddress(g_Ws2Module, "getaddrinfo"));
+        g_RealFreeAddrInfoA = reinterpret_cast<FreeAddrInfoAFn>(GetProcAddress(g_Ws2Module, "freeaddrinfo"));
         HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
         if (kernel32)
         {
@@ -4167,6 +4195,16 @@ namespace
         ReleaseSRWLockExclusive(&g_EffectiveEndpointLock);
     }
 
+    static_assert(DnsFamilyPolicy::kAfUnspec == AF_UNSPEC, "AF_UNSPEC mirror");
+    static_assert(DnsFamilyPolicy::kAfInet == AF_INET, "AF_INET mirror");
+    static_assert(DnsFamilyPolicy::kEaiNoName == EAI_NONAME, "EAI_NONAME mirror");
+    static_assert(DnsFamilyPolicy::kEaiNoName == WSAHOST_NOT_FOUND, "WSAHOST_NOT_FOUND mirror");
+    static_assert(DnsFamilyPolicy::kEaiNoData == WSANO_DATA, "WSANO_DATA mirror");
+
+    // Change-only budget for the per-lookup [OpenShimNet] lookup line.
+    SRWLOCK g_LookupLogLock = SRWLOCK_INIT;
+    DnsFamilyPolicy::LookupLogBudget g_LookupLogBudget;
+
     INT WSAAPI Hook_getaddrinfo(
         PCSTR nodeName,
         PCSTR serviceName,
@@ -4259,7 +4297,86 @@ namespace
             g_SelectedWebSocketPort.store(static_cast<uint16_t>(lookupPort), std::memory_order_relaxed);
         }
 
-        const INT rc = g_RealGetAddrInfoA(resolvedNode, resolvedService, hints, result);
+        // [Network] ForceIPv4Matchmaking. asio asks for AF_UNSPEC with
+        // AI_ADDRCONFIG under a hard 5 s resolve timer (GOG 0x006D057F); with
+        // IPv6 on, a stalled AAAA query fails every attempt, and the host has
+        // only an A record. A BZRNet lookup that would ask for AF_UNSPEC asks
+        // for AF_INET instead, and falls back once to the caller's hints when
+        // that finds nothing.
+        const bool bzrNetLookup = IsBzrNetLookupName(nodeName);
+        // No freeaddrinfo means no safe fallback, so no force either.
+        const bool forceIPv4 = g_RealFreeAddrInfoA != nullptr && DnsFamilyPolicy::ShouldForceIPv4(
+            g_Config.forceIPv4Matchmaking,
+            bzrNetLookup,
+            !hints || hints->ai_family == AF_UNSPEC,
+            DnsFamilyPolicy::IsIPv6Literal(resolvedNode));
+        ADDRINFOA ipv4Hints = {};
+        if (hints)
+            ipv4Hints = *hints;
+        ipv4Hints.ai_family = AF_INET;
+
+        const auto callReal = [&](const ADDRINFOA* lookupHints) -> INT
+        {
+            const uint32_t stallMs = g_Config.testDnsStallMs;
+            if (DnsFamilyPolicy::TestStallApplies(stallMs, bzrNetLookup,
+                    lookupHints ? lookupHints->ai_family : AF_UNSPEC))
+                Sleep(stallMs);
+            return g_RealGetAddrInfoA(resolvedNode, resolvedService, lookupHints, result);
+        };
+
+        const ULONGLONG lookupStart = GetTickCount64();
+        INT rc = callReal(forceIPv4 ? &ipv4Hints : hints);
+        bool fallback = false;
+        if (forceIPv4 && result)
+        {
+            unsigned count = 0;
+            if (rc == 0)
+            {
+                for (const ADDRINFOA* ai = *result; ai; ai = ai->ai_next)
+                    ++count;
+            }
+            if (DnsFamilyPolicy::ShouldRetryWithOriginal(rc, count))
+            {
+                if (rc == 0 && *result)
+                    g_RealFreeAddrInfoA(*result);
+                *result = nullptr;
+                fallback = true;
+                rc = callReal(hints);
+            }
+        }
+
+        // Observation only: keep the lookup's last-error for the caller.
+        Win32LastErrorScope lookupError;
+        if (bzrNetLookup)
+        {
+            unsigned v4 = 0;
+            unsigned v6 = 0;
+            if (rc == 0 && result)
+            {
+                for (const ADDRINFOA* ai = *result; ai; ai = ai->ai_next)
+                {
+                    if (ai->ai_family == AF_INET)
+                        ++v4;
+                    else if (ai->ai_family == AF_INET6)
+                        ++v6;
+                }
+            }
+            AcquireSRWLockExclusive(&g_LookupLogLock);
+            const bool log = g_LookupLogBudget.ShouldLog(rc, v4, v6);
+            ReleaseSRWLockExclusive(&g_LookupLogLock);
+            if (log)
+            {
+                Logf("[OpenShimNet] lookup %s forced_ipv4=%d fallback=%d rc=%d ms=%llu families=%u/%u",
+                    resolvedNode ? resolvedNode : "-",
+                    forceIPv4 ? 1 : 0,
+                    fallback ? 1 : 0,
+                    rc,
+                    static_cast<unsigned long long>(GetTickCount64() - lookupStart),
+                    v4,
+                    v6);
+            }
+        }
+
         if (rc == 0 && result)
             RecordLookupAddresses(nodeName, resolvedNode, *result);
         if (IsBzrNetLookupName(nodeName))
