@@ -510,6 +510,8 @@ namespace BZROpenShim
             ReloadRtsOrderQueueConfig();
             // [Gameplay] RtsBuildQueue (Recycler/Factory build queue), likewise.
             ReloadRtsBuildQueueConfig();
+            // [Gameplay] UnitLoadouts (per-unit weapon loadouts), likewise.
+            ReloadUnitLoadoutsConfig();
 
             g_AipResolveTraceEnabled = kAipResolveTraceDefault;
             if (TryGetUserConfigBool(
@@ -749,6 +751,11 @@ namespace BZROpenShim
             // it at mission end.
             { "RtsBuildQueue", FeatureTier::SinglePlayer,
               &ResetRtsBuildQueue, &RefreshRtsBuildQueueState },
+            // [Gameplay] UnitLoadouts: per-unit weapon loadouts with a build
+            // surcharge; single player only (the refresh stands it down
+            // online). Revert drops loadouts, menus and quotes at mission end.
+            { "UnitLoadouts", FeatureTier::SinglePlayer,
+              &ResetUnitLoadouts, &RefreshUnitLoadoutsState },
             { "AttackRevealPerceivedTeam", FeatureTier::SinglePlayer,
               &RevertAttackRevealToBaseline, &RefreshAttackRevealState },
             // Display tier: purely observational, writes only its own config

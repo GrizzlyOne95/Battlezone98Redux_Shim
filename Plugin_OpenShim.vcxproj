@@ -201,6 +201,7 @@
     <ClCompile Include="src\patches\rts_markers.cpp" />
     <ClCompile Include="src\patches\rts_placement.cpp" />
     <ClCompile Include="src\patches\rts_build_queue.cpp" />
+    <ClCompile Include="src\patches\unit_loadouts.cpp" />
     <ClCompile Include="src\patches\rts_order_queue.cpp" />
     <ClCompile Include="src\patches\scene_mutation_drain.cpp" />
 
@@ -422,6 +423,7 @@
     <ClInclude Include="include\group_strip_policy.h" />
     <ClInclude Include="include\producer_badges_policy.h" />
     <ClInclude Include="include\rts_build_queue_policy.h" />
+    <ClInclude Include="include\unit_loadouts_policy.h" />
     <ClInclude Include="include\never_activate_policy.h" />
     <ClInclude Include="include\render_effect_intent.h" />
     <ClInclude Include="include\native_hud_layout.h" />

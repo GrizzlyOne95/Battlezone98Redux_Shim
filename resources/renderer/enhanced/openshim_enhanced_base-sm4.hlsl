@@ -935,6 +935,10 @@ void ComputeSpotlightTerms(
 void base_vertex(
     uniform float4x4 wvpMat,
     uniform float4x4 worldViewMat,
+    // Tread texture scroll (Docs/TRACKED_VEHICLES.md): osTreadUV.x is the
+    // U phase. A constant 0 unless OpenShim binds it, at run time and only
+    // on passes of an ODF-named tread material, to Renderable custom 1411.
+    uniform float4 osTreadUV,
 #if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
     uniform float4x4 worldMat,
     uniform float4 surfaceSnow,
@@ -1006,7 +1010,7 @@ void base_vertex(
     }
 #endif
     oPosition = mul(wvpMat, iPosition);
-    vTexCoord = iTexCoord;
+    vTexCoord = iTexCoord + float2(osTreadUV.x, 0.0);
 
 #if defined(VERTEX_LIGHTING)
     float3 vViewPosition, vViewNormal;

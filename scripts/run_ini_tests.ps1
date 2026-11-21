@@ -647,6 +647,7 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsProducerBadges" = "0"
     "Gameplay/RtsOrderQueue" = "0"
     "Gameplay/RtsBuildQueue" = "0"
+    "Gameplay/UnitLoadouts" = "0"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }
