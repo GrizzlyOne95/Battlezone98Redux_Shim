@@ -6,6 +6,8 @@ namespace BZROpenShim
     // writes a text report (registers, module+RVA, stack scan) to
     // logs\openshim_crash.log and a minidump beside it, plus an optional
     // first-chance vectored logger for fatal exception codes.
+    // An AV that executes non-code is written as a full crash with a
+    // minidump at first chance (once), since some runtimes skip the filter.
     //
     // Opt-outs:
     //   OPENSHIM_DISABLE_CRASH_LOGGER=1  - install nothing

@@ -282,11 +282,14 @@ function Test-Crashed {
 # Separate a missing clean-exit marker from actual exception evidence. The
 # crash logger creates a fresh, empty openshim_crash.log on every launch, so
 # existence and mtime alone are not evidence that an exception occurred.
+# A log of only [FIRST-CHANCE] lines records handled faults: with exit 0, no
+# [CRASH] record and no fresh dump the session is not a crash.
 function Get-TerminationKind {
     param(
         [string]$LogPath,
         [int]$ExitCode,
-        [bool]$HasExceptionEvidence
+        [bool]$HasExceptionEvidence,
+        [bool]$HasCrashRecord = $HasExceptionEvidence
     )
 
     if (-not (Test-Crashed $LogPath)) {
@@ -294,7 +297,10 @@ function Get-TerminationKind {
         return "clean"
     }
 
-    if ($HasExceptionEvidence) { return "crash-with-exception" }
+    if ($HasExceptionEvidence) {
+        if (-not $HasCrashRecord -and $ExitCode -eq 0) { return "clean-with-handled-faults" }
+        return "crash-with-exception"
+    }
     if ($ExitCode -eq 130) { return "interrupted-sigint" }
     if ($ExitCode -eq -1073741510) { return "interrupted-console-control" }
     return "abrupt-exit"
@@ -524,10 +530,13 @@ function New-BundleAndUpload {
                             $shimCrashInfo.LastWriteTimeUtc -ge $SessionStart
     }
     $hasExceptionEvidence = $hasFreshCrashLog -or $hasFreshDump
+    $hasCrashRecord = $hasFreshDump -or ($hasFreshCrashLog -and
+        [bool](Select-String -LiteralPath $shimCrashSource -SimpleMatch '[CRASH]' -Quiet -ErrorAction SilentlyContinue))
     $terminationKind = Get-TerminationKind `
         -LogPath (Join-Path $bundle "BZLogger.txt") `
         -ExitCode $ExitCode `
-        -HasExceptionEvidence $hasExceptionEvidence
+        -HasExceptionEvidence $hasExceptionEvidence `
+        -HasCrashRecord $hasCrashRecord
     @(
         "termination_kind=$terminationKind"
         "exception_evidence=$([int]$hasExceptionEvidence)"
@@ -536,6 +545,7 @@ function New-BundleAndUpload {
     $statusFlag = switch ($terminationKind) {
         "clean"                { "" }
         "clean-with-exception" { " **EXCEPTION** (handled; game logged a clean exit)" }
+        "clean-with-handled-faults" { " **HANDLED FAULTS** (first-chance only; exit 0, no crash record or dump)" }
         "crash-with-exception" { " **CRASH** (non-empty OpenShim crash evidence)" }
         "interrupted-sigint"   { " **INTERRUPTED** (SIGINT)" }
         "interrupted-console-control" { " **INTERRUPTED** (console control event)" }

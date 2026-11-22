@@ -30,7 +30,9 @@
 // newest kKeptDumps openshim_crash_*.dmp are kept. They stay on this PC.
 
 #include "crash_logger.h"
+#include "crash_av_classify.h"
 #include "crash_dump_retention.h"
+#include "memory_access.h"
 #include "shim_log.h"
 #include "shim_log_sink.h"
 
@@ -66,6 +68,11 @@ namespace BZROpenShim
         char g_DumpDirectory[MAX_PATH] = {};
         uintptr_t g_SeenFirstChanceEips[64] = {};
         volatile LONG g_SeenFirstChanceCount = 0;
+        volatile LONG g_EarlyFatalReported = 0;
+        volatile uintptr_t g_EarlyFatalEip = 0;
+        volatile DWORD g_EarlyFatalThreadId = 0;
+        HMODULE g_SelfModule = nullptr;
+        HMODULE g_ProxyModule = nullptr;
         // Read at install: the unhandled filter must not call
         // GetEnvironmentVariableA, which takes the PEB lock a faulting thread
         // may already hold.
@@ -746,13 +753,74 @@ namespace BZROpenShim
             const bool overflowReported = pointers->ExceptionRecord->ExceptionCode == EXCEPTION_STACK_OVERFLOW &&
                                           g_SoClaimed != 0 && g_SoThreadId == GetCurrentThreadId() &&
                                           g_SoRecord.ExceptionAddress == pointers->ExceptionRecord->ExceptionAddress;
+            // The first-chance path already dumped this fault; log the record
+            // again but keep one dump per crash.
+            const bool earlyDumped = g_EarlyFatalReported != 0 && g_EarlyFatalThreadId == GetCurrentThreadId() &&
+                                     g_EarlyFatalEip == reinterpret_cast<uintptr_t>(pointers->ExceptionRecord->ExceptionAddress);
             if (!overflowReported && InterlockedCompareExchange(&g_InHandler, 1, 0) == 0)
             {
-                WriteCrashReport(pointers, "unhandled", true);
+                WriteCrashReport(pointers, "unhandled", !earlyDumped);
                 InterlockedExchange(&g_InHandler, 0);
             }
             if (g_PreviousFilter) return g_PreviousFilter(pointers);
             return EXCEPTION_CONTINUE_SEARCH;
+        }
+
+        HMODULE ModuleOf(uintptr_t address)
+        {
+            HMODULE module = nullptr;
+            if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                    GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                    reinterpret_cast<LPCSTR>(address), &module))
+                return nullptr;
+            return module;
+        }
+
+        bool IsShimModule(HMODULE module)
+        {
+            return module != nullptr && (module == g_SelfModule || module == g_ProxyModule);
+        }
+
+        // True when a shim __try guard is around a shim call through a bad
+        // pointer, so the fault may recover: the dword at esp (the return
+        // address the call pushed) and the handler of the nearest SEH record
+        // are both in an OpenShim module (this plugin or the winmm.dll proxy).
+        // A shim call with no guard of its own still dumps.
+        bool ShimGuardedCall(const CONTEXT* context)
+        {
+#if defined(_M_IX86)
+            const uintptr_t* top = reinterpret_cast<const uintptr_t*>(context->Esp);
+            if (!top || !MemoryAccess::IsReadable(top, sizeof(*top)) || !IsShimModule(ModuleOf(*top)))
+                return false;
+            const NT_TIB* tib = reinterpret_cast<const NT_TIB*>(NtCurrentTeb());
+            const EXCEPTION_REGISTRATION_RECORD* frame = tib->ExceptionList;
+            const uintptr_t at = reinterpret_cast<uintptr_t>(frame);
+            if (at == 0xFFFFFFFFu || at < reinterpret_cast<uintptr_t>(tib->StackLimit) ||
+                at + sizeof(*frame) > reinterpret_cast<uintptr_t>(tib->StackBase) || (at & 3) != 0)
+                return false;
+            return IsShimModule(ModuleOf(reinterpret_cast<uintptr_t>(frame->Handler)));
+#else
+            (void)context;
+            return false;
+#endif
+        }
+
+        bool IsCertainlyFatal(const EXCEPTION_POINTERS* pointers)
+        {
+            const EXCEPTION_RECORD* record = pointers->ExceptionRecord;
+            if (record->ExceptionCode != EXCEPTION_ACCESS_VIOLATION) return false;
+            CrashAvClassify::FaultFacts facts = {};
+            facts.code = record->ExceptionCode;
+            facts.numberParameters = record->NumberParameters;
+            facts.accessKind = record->NumberParameters >= 1 ? record->ExceptionInformation[0] : 0;
+            facts.faultAddress = record->NumberParameters >= 2 ? record->ExceptionInformation[1] : 0;
+            facts.eip = reinterpret_cast<uintptr_t>(record->ExceptionAddress);
+            facts.eipExecutable = MemoryAccess::IsExecutable(record->ExceptionAddress);
+            // Cheap facts first: handled probes never reach the module
+            // lookups, which may take the loader lock.
+            if (!CrashAvClassify::IsCertainlyFatalAv(facts)) return false;
+            facts.shimGuardedCall = ShimGuardedCall(pointers->ContextRecord);
+            return CrashAvClassify::IsCertainlyFatalAv(facts);
         }
 
         LONG WINAPI FirstChanceLogger(EXCEPTION_POINTERS* pointers)
@@ -765,6 +833,21 @@ namespace BZROpenShim
             // and minidump that would otherwise follow.
             if (record->ExceptionCode == EXCEPTION_STACK_OVERFLOW)
                 return EXCEPTION_CONTINUE_SEARCH;
+            // Running code that is not there cannot be recovered. Write the
+            // full [CRASH] record and minidump now (once per process): some
+            // runtimes end the process before the unhandled filter runs.
+            if (g_EarlyFatalReported == 0 && IsCertainlyFatal(pointers) &&
+                InterlockedCompareExchange(&g_InHandler, 1, 0) == 0)
+            {
+                if (InterlockedCompareExchange(&g_EarlyFatalReported, 1, 0) == 0)
+                {
+                    g_EarlyFatalEip = reinterpret_cast<uintptr_t>(record->ExceptionAddress);
+                    g_EarlyFatalThreadId = GetCurrentThreadId();
+                    WriteCrashReport(pointers, "non-code-eip", true);
+                }
+                InterlockedExchange(&g_InHandler, 0);
+                return EXCEPTION_CONTINUE_SEARCH;
+            }
             if (g_FirstChanceBudget <= 0)
                 return EXCEPTION_CONTINUE_SEARCH;
 
@@ -883,6 +966,9 @@ namespace BZROpenShim
             overflowHandle = AddVectoredExceptionHandler(1, StackOverflowCatcher);
 
         g_PreviousFilter = SetUnhandledExceptionFilter(UnhandledFilter);
+        // Resolved here so the first-chance handler takes no loader lock.
+        g_SelfModule = ModuleOf(reinterpret_cast<uintptr_t>(&ModuleOf));
+        g_ProxyModule = GetModuleHandleA("winmm.dll");
         if (!EnvDisabled("OPENSHIM_DISABLE_CRASH_VEH"))
             g_VectoredHandle = AddVectoredExceptionHandler(0, FirstChanceLogger);
 
