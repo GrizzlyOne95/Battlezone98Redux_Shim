@@ -38,5 +38,8 @@ jobs:
       - name: Test Linux coredump bundle collection
         run: bash tests/openshim_wrap_coredump_tests.sh
 
+      - name: Test Linux session-file harvest
+        run: bash tests/openshim_wrap_harvest_tests.sh
+
       - name: Test the Linux uninstaller against a fixture install
         run: bash tests/uninstall_linux_tests.sh

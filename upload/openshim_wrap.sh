@@ -56,7 +56,7 @@ CONF_FILE="$CONF_DIR/upload.conf"
 # check.  It was previously inlined in the meta.txt heredoc only, which is why
 # a tester running V4.91-harvest against a V4.92-arms repo went unnoticed until
 # somebody read a bundle's meta.txt after the fact (2026-08-12).
-WRAPPER_VERSION="OpenShim-upload-20260920-coredump"
+WRAPPER_VERSION="OpenShim-upload-20261121-sessionlogs"
 
 # Discord's webhook attachment cap is ~10 MB for an unboosted server. Stay
 # under it with room for the multipart envelope.
@@ -236,7 +236,9 @@ EOF
     echo "everything after it is an argument handed to the game."
     echo
     echo "What gets sent: openshim.log, openshim_crash.log, the proxy log,"
-    echo "BZLogger (before and after), multi.ini, and a meta file."
+    echo "BZLogger (before and after), multi.ini, the loader and Ogre logs,"
+    echo "the game's file-check logs, any netcode traces you turned on, and a"
+    echo "meta file."
     echo "Bundles contain every peer's public IP, which is why the destination"
     echo "is a private channel."
     echo
@@ -781,6 +783,59 @@ flush_outbox() {
     done
 }
 
+# Files that persist after the session that wrote them, so with logging off a
+# bundle would ship YESTERDAY'S copy looking current (happened 2026-08-03 with
+# the capture ring). Only take them if written during this session; the
+# splitter already handles Discord's 10 MB cap.
+#
+#   * buffer-capture files (bz_buffer_log.*, capture_verify.txt)
+#   * logs/BZOgreLogfile.log: Ogre's renderer log. Render-device and resource
+#     failures land here, not in openshim.log.
+#   * logs/crc32host.log, logs/crc32mission.log: the game's file-check logs,
+#     the evidence for a "files do not match" multiplayer rejection.
+#   * the opt-in netcode traces (bzrnet_trace.jsonl, bzrnet_session.json,
+#     bz_relay_control.jsonl): present only when the tester turned them on.
+#   * bzloader.log, beside the exe: the plugin host's log. When
+#     plugins/openshim.dll fails to load, openshim.log is never written and
+#     this is the only record of why. It is append-only across runs, so only
+#     its tail rides along.
+#
+# The in-game troubleshooting bundle (src/engine/troubleshooting_bundle.cpp)
+# already collects all of these; this keeps the uploader in step with it.
+SESSION_LOG_FILES=(
+    bz_buffer_log.bin bz_buffer_log.meta.txt capture_verify.txt
+    BZOgreLogfile.log crc32host.log crc32mission.log
+    bzrnet_trace.jsonl bzrnet_session.json bz_relay_control.jsonl
+)
+BZLOADER_TAIL_LINES=2000
+
+session_fresh() {
+    local src="$1"
+    [[ -z "${start_epoch:-}" ]] && return 0
+    (( $(stat -c %Y "$src" 2>/dev/null || echo 0) >= start_epoch ))
+}
+
+harvest_session_files() {
+    local game_dir="$1" bundle="$2" f src
+    for f in "${SESSION_LOG_FILES[@]}"; do
+        src="$(harvested_path "$game_dir" "$f" || true)"
+        [[ -n "$src" ]] || continue
+        if ! session_fresh "$src"; then
+            log "skipping stale $f (predates this session)"
+            continue
+        fi
+        cp -f "$src" "$bundle/$f"
+    done
+    src="$(harvested_path "$game_dir" "bzloader.log" || true)"
+    if [[ -n "$src" ]]; then
+        if session_fresh "$src"; then
+            tail -n "$BZLOADER_TAIL_LINES" "$src" >"$bundle/bzloader.log" 2>/dev/null || true
+        else
+            log "skipping stale bzloader.log (predates this session)"
+        fi
+    fi
+}
+
 # ── Bundle ───────────────────────────────────────────────────────────────────
 
 collect_and_upload() {
@@ -840,20 +895,7 @@ collect_and_upload() {
     if [[ -f "$LOG_FILE" ]]; then
         tail -n 200 "$LOG_FILE" >"$bundle/openshim_wrap.log.tail.txt" 2>/dev/null || true
     fi
-    # Capture files persist after the capture that made them, so with logging
-    # off a bundle would ship YESTERDAY'S ring looking current (happened
-    # 2026-08-03). Only take them if written during this session. Same rule
-    # for OpenShim minidumps: the splitter already handles Discord's 10 MB cap.
-    for f in bz_buffer_log.bin bz_buffer_log.meta.txt capture_verify.txt; do
-        src="$(harvested_path "$game_dir" "$f" || true)"
-        [[ -n "$src" ]] || continue
-        if [[ -n "${start_epoch:-}" ]] && \
-           (( $(stat -c %Y "$src" 2>/dev/null || echo 0) < start_epoch )); then
-            log "skipping stale $f (predates this session)"
-            continue
-        fi
-        cp -f "$src" "$bundle/$f"
-    done
+    harvest_session_files "$game_dir" "$bundle"
     local fresh_dump_count=0
     if [[ -d "$game_dir/logs" ]]; then
         local dump
