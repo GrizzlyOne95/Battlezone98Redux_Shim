@@ -6,6 +6,8 @@
 
 #pragma once
 #include <cstdint>
+#include <filesystem>
+#include <string>
 
 namespace BZROpenShim
 {
@@ -26,4 +28,10 @@ namespace BZROpenShim
     // producer. Canonicalizes tracked files after close and leaves unsupported
     // UTF-16 untouched instead of guessing an encoding.
     void ApplyTrnSaveNormalizeHooks();
+
+    // Folder the engine opened '<base>.bzn' from (any read open, whatever
+    // the editor save setting), or empty when unseen or two folders hold that
+    // name. Lets map-folder lookups find Workshop items on another Steam
+    // library drive, which the gameDir-derived roots never search.
+    std::filesystem::path FindLoadedMapFolder(const std::string& base);
 }

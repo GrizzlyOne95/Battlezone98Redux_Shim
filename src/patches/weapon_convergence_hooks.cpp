@@ -1161,6 +1161,23 @@ namespace BZROpenShim
             return std::isfinite(outRange);
         }
 
+        // Set once this mission when something other than the OpenShim bridge
+        // writes the pooled literal (an EXU build older than the bridge, as
+        // BZP/BZP-T bundle, calls SetReticleRange by writing 0x00886B20
+        // directly). That mod owns the range until the mission ends; staying
+        // redirected would make the reticle ignore its value.
+        static bool g_SmartReticleRangeOwnedByLiteralWriter = false;
+
+        static bool PooledReticleLiteralWasRewritten()
+        {
+            if (!SmartReticleRangeAddressesBound() || g_SmartReticleRangePooledLiteralAddr == 0)
+                return false;
+            const float value =
+                *reinterpret_cast<const volatile float*>(
+                    static_cast<uintptr_t>(g_SmartReticleRangePooledLiteralAddr));
+            return value != kSmartReticleRangeStock;
+        }
+
         void RefreshSmartReticleRangeState()
         {
             const bool networkGame = ReadLocalPlayerNetIdValue() != 0;
@@ -1184,6 +1201,27 @@ namespace BZROpenShim
             {
                 RestoreSmartReticleRangeRedirect();
                 return;
+            }
+
+            // Only reached when OpenShim would redirect, so stock settings never
+            // bind or read the engine rows here. A newer EXU calling the bridge
+            // always wins. Old EXU never puts 200 back, so the flag re-latches in
+            // later missions of this process; that matches the game without
+            // OpenShim (the leftover literal governs).
+            if (!g_SmartReticleRangeOwnedByBridge)
+            {
+                if (!g_SmartReticleRangeOwnedByLiteralWriter && PooledReticleLiteralWasRewritten())
+                {
+                    g_SmartReticleRangeOwnedByLiteralWriter = true;
+                    Log(L"[RETICLE] Shared reticle literal was set to %.3f by a mod outside the OpenShim bridge; leaving the range to it while it stays set\n",
+                        static_cast<double>(*reinterpret_cast<const volatile float*>(
+                            static_cast<uintptr_t>(g_SmartReticleRangePooledLiteralAddr))));
+                }
+                if (g_SmartReticleRangeOwnedByLiteralWriter)
+                {
+                    RestoreSmartReticleRangeRedirect();
+                    return;
+                }
             }
 
             // Without the redirect the only place left to put the value is the
@@ -1214,6 +1252,7 @@ namespace BZROpenShim
         void RevertSmartReticleRangeToBaseline()
         {
             g_SmartReticleRangeOwnedByBridge = false;
+            g_SmartReticleRangeOwnedByLiteralWriter = false;
             g_SmartReticleRange = g_SmartReticleRangeBaseline;
             RefreshSmartReticleRangeState();
         }

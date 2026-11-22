@@ -56,6 +56,7 @@ namespace BZROpenShim
         static std::unordered_map<uintptr_t, TrnWriteRecord> g_TrnWriteHandles;
         static std::mutex g_BznSourceMutex;
         static BznSourceRegistry g_BznSources;
+        static BznSourceRegistry g_LoadedMapSources;
         using EditorSaveDialog = bool(__thiscall*)(void*, char*, bool);
         static EditorSaveDialog g_OriginalEditorSaveDialog = nullptr;
         static thread_local bool g_InTrnNormalization = false;
@@ -528,8 +529,7 @@ namespace BZROpenShim
         static void RememberOpenedBznSource(
             HANDLE handle, DWORD desiredAccess, DWORD creationDisposition)
         {
-            if (!BznSourceSaveEnabled() ||
-                ShouldTrackTrnWrite(desiredAccess, creationDisposition) ||
+            if (ShouldTrackTrnWrite(desiredAccess, creationDisposition) ||
                 (desiredAccess & (GENERIC_READ | GENERIC_EXECUTE | GENERIC_ALL)) == 0)
             {
                 return;
@@ -537,6 +537,15 @@ namespace BZROpenShim
 
             const std::filesystem::path openedPath = GetOpenedFilePath(handle);
             if (!IsEditorSourcePath(openedPath))
+                return;
+
+            // Map-folder lookups (a map's own .vxt) need the folder the engine
+            // really loaded the map from, whatever the editor save setting.
+            {
+                std::lock_guard<std::mutex> lock(g_BznSourceMutex);
+                g_LoadedMapSources.Remember(openedPath);
+            }
+            if (!BznSourceSaveEnabled())
                 return;
 
             const std::wstring value = openedPath.wstring();
@@ -1094,6 +1103,18 @@ namespace BZROpenShim
     bool InstallFileIoProvider()
     {
         return BootstrapFileIo::InstallProvider(&g_FileIoProvider);
+    }
+
+    std::filesystem::path FindLoadedMapFolder(const std::string& base)
+    {
+        if (base.empty())
+            return {};
+        std::filesystem::path source;
+        {
+            std::lock_guard<std::mutex> lock(g_BznSourceMutex);
+            source = g_LoadedMapSources.Lookup(std::filesystem::path(base + ".bzn"));
+        }
+        return source.empty() ? std::filesystem::path() : source.parent_path();
     }
 
     void ApplyTrnSaveNormalizeHooks()
