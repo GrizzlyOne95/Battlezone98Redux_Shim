@@ -39,6 +39,7 @@
 #include "hook_engine.h"
 #include "map_folder_items.h"
 #include "odf_item_hooks.h"
+#include "file_io_hooks.h"
 #include "ui_performance.h"
 #include "openshim_events.h"
 #include "player_kill_trace.h"
@@ -536,6 +537,15 @@ namespace BZROpenShim
             return;
         }
 
+        // The root scan is cached per map, misses included. A miss then asks
+        // which folder the engine loaded the map's .bzn from
+        // (FindLoadedMapFolder) on every call: Workshop items on another
+        // Steam library drive sit outside every gameDir-derived root, the
+        // engine may open the .bzn only after the first lobby select, and a
+        // name seen in two folders turns ambiguous (empty) later. Only the
+        // .vxt file check is cached, per (map, folder).
+        // OPENSHIM_TEST_VXT_SKIP_ROOT_SCAN=1 makes the root scan miss so a
+        // live test can exercise that fallback on a single-library install.
         static std::unordered_map<std::string, std::filesystem::path> s_folders;
         const std::string key = LowerKey(base);
         auto it = s_folders.find(key);
@@ -544,21 +554,59 @@ namespace BZROpenShim
             std::filesystem::path folder;
             try
             {
-                folder = MapFolderItems::FindMapFolder(MapFolderRoots(), base);
+                static const bool skipRootScan = EnvFlagEnabled("OPENSHIM_TEST_VXT_SKIP_ROOT_SCAN");
+                if (!skipRootScan)
+                    folder = MapFolderItems::FindMapFolder(MapFolderRoots(), base);
             }
             catch (...)
             {
                 folder.clear();
             }
             if (folder.empty())
-                Log(L"[VXT] '%hs.vxt' is not indexed and no map folder holds it with '%hs.bzn'\n",
+                Log(L"[VXT] '%hs.vxt' is not indexed and no map folder root holds it with '%hs.bzn'\n",
                     base.c_str(), base.c_str());
             else
-                Log(L"[VXT] '%hs.vxt' is not indexed; reading it from '%ls'\n",
+                Log(L"[VXT] '%hs.vxt' is not indexed; reading it from '%ls'\n",
                     base.c_str(), folder.wstring().c_str());
             it = s_folders.emplace(key, std::move(folder)).first;
         }
-        MapFolderItems::SetFolder(it->second);
+        if (!it->second.empty())
+        {
+            MapFolderItems::SetFolder(it->second);
+            return;
+        }
+
+        struct LoadedCheck
+        {
+            std::filesystem::path folder;
+            bool hasVxt = false;
+        };
+        static std::unordered_map<std::string, LoadedCheck> s_loadedChecks;
+        std::filesystem::path loaded;
+        try
+        {
+            loaded = FindLoadedMapFolder(base);
+            if (!loaded.empty())
+            {
+                LoadedCheck& check = s_loadedChecks[key];
+                if (check.folder != loaded)
+                {
+                    std::error_code ec;
+                    check.folder = loaded;
+                    check.hasVxt = std::filesystem::is_regular_file(loaded / (base + ".vxt"), ec);
+                    if (check.hasVxt)
+                        Log(L"[VXT] '%hs.vxt' is not indexed; reading it from the loaded map folder '%ls'\n",
+                            base.c_str(), loaded.wstring().c_str());
+                }
+                if (!check.hasVxt)
+                    loaded.clear();
+            }
+        }
+        catch (...)
+        {
+            loaded.clear();
+        }
+        MapFolderItems::SetFolder(loaded);
     }
 
     static uint8_t* VehicleEntryAt(void* context, uint32_t index)
