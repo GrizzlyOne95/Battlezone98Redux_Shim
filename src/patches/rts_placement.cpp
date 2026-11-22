@@ -1,21 +1,21 @@
 // rts_placement.cpp
 // BZR Open Shim - RTS placement aids, local visuals for the local player:
 //
-//  * [Gameplay] RtsBuildGhost (default on): while the stock placement quad
+//  * [Gameplay] RtsBuildGhost (default off): while the stock placement quad
 //    shows (ConstructionDisplay, the ground.G/.Y/.R sprite), a see-through
 //    copy of the picked building's own mesh at the rig's drop matrix
 //    (ConstructionRig +0x378), tinted like the quad: green valid, yellow no
 //    power, red blocked. While the Go To Nav submenu is open and Build at Nav
 //    is active with a picked rig selected, a neutral ghost at every listed
 //    nav, facing the player's heading on the terrain.
-//  * [Gameplay] RtsPendingBuildGhost (default on): a dim neutral ghost at the
+//  * [Gameplay] RtsPendingBuildGhost (default off): a dim neutral ghost at the
 //    drop matrix of each of the local player's rigs with a BUILD order whose
 //    construction has not started (its BuildGoto task, process +0x38), at
 //    most eight.
-//  * [Gameplay] RtsPowerRange (default on): while the stock preview or a nav
+//  * [Gameplay] RtsPowerRange (default off): while the stock preview or a nav
 //    ghost shows a COMM/TURR/SHLD class, a ground ring of each allied power
 //    plant's powerRadius (rings drawn by rts_markers.cpp).
-//  * [Gameplay] RtsWaypointLines (default on): the command-record reader for
+//  * [Gameplay] RtsWaypointLines (default off): the command-record reader for
 //    the waypoint lines rts_markers.cpp draws.
 //
 // The preview is read, never driven: a pass-through post-hook on
@@ -115,21 +115,21 @@ namespace BZROpenShim
 
             // ---- Config ------------------------------------------------------
             bool g_ConfigLoaded = false;
-            bool g_GhostOn = true;
-            bool g_PowerOn = true;
-            bool g_LinesOn = true;
-            bool g_PendingOn = true;
+            bool g_GhostOn = false;
+            bool g_PowerOn = false;
+            bool g_LinesOn = false;
+            bool g_PendingOn = false;
 
             void LoadConfig()
             {
-                bool value = true;
-                g_GhostOn = TryGetUserConfigBool("Gameplay", "RtsBuildGhost", value) ? value : true;
-                value = true;
-                g_PowerOn = TryGetUserConfigBool("Gameplay", "RtsPowerRange", value) ? value : true;
-                value = true;
-                g_LinesOn = TryGetUserConfigBool("Gameplay", "RtsWaypointLines", value) ? value : true;
-                value = true;
-                g_PendingOn = TryGetUserConfigBool("Gameplay", "RtsPendingBuildGhost", value) ? value : true;
+                bool value = false;
+                g_GhostOn = TryGetUserConfigBool("Gameplay", "RtsBuildGhost", value) ? value : false;
+                value = false;
+                g_PowerOn = TryGetUserConfigBool("Gameplay", "RtsPowerRange", value) ? value : false;
+                value = false;
+                g_LinesOn = TryGetUserConfigBool("Gameplay", "RtsWaypointLines", value) ? value : false;
+                value = false;
+                g_PendingOn = TryGetUserConfigBool("Gameplay", "RtsPendingBuildGhost", value) ? value : false;
                 g_ConfigLoaded = true;
                 LogShimA(LogLevel::Info, kComponent,
                          "[RTSPLACE] config buildGhost=%d powerRange=%d waypointLines=%d pendingBuildGhost=%d",

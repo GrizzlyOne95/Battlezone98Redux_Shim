@@ -8,10 +8,10 @@ Each kind has its own on/off key in `[Gameplay]` and its own row in Options > Co
 
 | Key | Options row | Default | Draws |
 |---|---|---|---|
-| `RtsWeaponRange` | Weapon Range | on | orange ring at the direct-fire reach |
+| `RtsWeaponRange` | Weapon Range | off | orange ring at the direct-fire reach |
 | `RtsRadarRange` | Radar Range | off | mint ring at `[CraftClass] rangeScan` |
 | `RtsMineRange` | Mine Range | off | lime ring per own-team proximity mine near a selected unit |
-| `RtsRangeLabels` | Range Labels | on | the ring names, for every kind (also the artillery ring) |
+| `RtsRangeLabels` | Range Labels | off | the ring names, for every kind (also the artillery ring) |
 
 `RtsArtilleryRange` (light blue) is unchanged. The label row only matters while a ring row is on: with every ring off no label is drawn, so Reset to Stock (all ring rows reset to off, `RtsRangeLabels` kept) leaves no ring and no label.
 

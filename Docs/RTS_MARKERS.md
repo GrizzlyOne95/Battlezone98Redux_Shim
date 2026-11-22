@@ -2,15 +2,15 @@
 
 Ground rings that show RTS-style feedback for the local player. There are two features, and each has its own option:
 
-- **Command pings** (`[Gameplay] RtsCommandPings`, Options > HUD > Command Pings, default on). Each order the local ControlPanel issues draws one short ring:
+- **Command pings** (`[Gameplay] RtsCommandPings`, Options > HUD > Command Pings, default off). Each order the local ControlPanel issues draws one short ring:
   - **Go to a point:** a green ring that shrinks onto the point and fades over 0.9 s.
   - **Attack on an object:** a red ring around the target that follows it and fades over 1.0 s.
   - **Any other order on a point or object:** a yellow ring that fades over 0.9 s.
-- **Artillery range** (`[Gameplay] RtsArtilleryRange`, Options > HUD > Artillery Range, default on). It draws:
+- **Artillery range** (`[Gameplay] RtsArtilleryRange`, Options > HUD > Artillery Range, default off). It draws:
   - a blue max-range ring around every selected own-team howitzer (Howitzer vtables) that carries a gravity-ordnance cannon slot (at most 16 units); never around the piloted vehicle, whose mortar arc the laser sight already draws;
   - a 3 m ring at the aim point, green when at least one of those units can reach it and red when none can.
 
-The native range rings for selected units (direct-fire weapon, radar, own-team mine trigger, and the labels on them) are documented in `Docs/RTS_RANGE_RINGS.md`: `[Gameplay] RtsWeaponRange` (default on), `RtsRadarRange` and `RtsMineRange` (off), `RtsRangeLabels` (on). They use slots 167-222 of this pool.
+The native range rings for selected units (direct-fire weapon, radar, own-team mine trigger, and the labels on them) are documented in `Docs/RTS_RANGE_RINGS.md`: `[Gameplay] RtsWeaponRange` (default on), `RtsRadarRange` and `RtsMineRange` (off), `RtsRangeLabels` (off). They use slots 167-222 of this pool.
 
 Both features above are local visuals only:
 
@@ -171,7 +171,7 @@ If any row fails to bind, the feature fails closed:
 
 ## Placement aids
 
-Four more local-only features share the tick and the ring pool. Their rows are on Options > Controls > RTS Commands; all ship on, stock value off.
+Four more local-only features share the tick and the ring pool. Their rows are on Options > Controls > RTS Commands; all ship off, stock value off.
 
 - **Build Ghost** (`[Gameplay] RtsBuildGhost`). While the stock placement square shows, a see-through copy of the picked building's own mesh stands at the rig's drop matrix, tinted like the square: green valid, yellow no power, red blocked. While the Go To Nav submenu is open and Build at Nav is active for a selected rig with a building picked, a neutral blue-white copy stands at every listed nav (at most 10), on the terrain, facing the player's heading.
 - **Pending Build Ghost** (`[Gameplay] RtsPendingBuildGhost`). For each of the local player's Construction Rigs with a BUILD order (the stock reticle order or Build at Nav), a dim pale blue copy of the ordered building stands at the rig's drop matrix, from the order until construction starts, the order is replaced or cancelled, or the rig dies. At most 8 rigs: the first 8 in the engine's object list order; with more than 4096 objects in the list none show. The rig the cursor ghost is previewing shows only the cursor ghost.

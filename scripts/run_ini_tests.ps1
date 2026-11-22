@@ -466,28 +466,15 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Gameplay/GroupMemberMenu",
     # RTS markers: local-only ground rings for the player's orders and for
     # artillery range. Write nothing the game reads. Default on by design.
-    "Gameplay/RtsCommandPings",
-    "Gameplay/RtsArtilleryRange",
-    "Gameplay/RtsWeaponRange",
-    "Gameplay/RtsRangeLabels",
 
     # RTS command extras: nothing happens until the player presses one of the
     # RTS keys or picks a unit-menu entry, and then only the stock per-unit
     # orders go out, to the units whose own menu offers them. Hold uses the
     # native hold and stands down in network games. Default on by design.
-    "Gameplay/RtsRemoteTarget",
-    "Gameplay/RtsSmartCommandMenu",
-    "Gameplay/RtsSmartRepairReload",
-    "Gameplay/RtsAreaSelect",
-    "Gameplay/RtsBuildAtNav",
 
     # RTS placement aids: local-only ghosts, rings and lines while placing a
     # building or with units selected. Write nothing the game reads. Default
     # on by design.
-    "Gameplay/RtsBuildGhost",
-    "Gameplay/RtsPendingBuildGhost",
-    "Gameplay/RtsPowerRange",
-    "Gameplay/RtsWaypointLines",
 
     # Seven verified stock-bug fixes turned on at the user's request on
     # 2026-10-21 (preset revision 5).
@@ -700,25 +687,25 @@ $shippingPolicyChecks = @{
     "Gameplay/ExtendedUnitCap" = "0"
     "Gameplay/GroupMemberMenu" = "1"
     "Gameplay/GroupStrip" = "1"
-    "Gameplay/RtsCommandPings" = "1"
-    "Gameplay/RtsArtilleryRange" = "1"
-    "Gameplay/RtsWeaponRange" = "1"
+    "Gameplay/RtsCommandPings" = "0"
+    "Gameplay/RtsArtilleryRange" = "0"
+    "Gameplay/RtsWeaponRange" = "0"
     "Gameplay/RtsRadarRange" = "0"
     "Gameplay/RtsMineRange" = "0"
-    "Gameplay/RtsRangeLabels" = "1"
-    "Gameplay/RtsRemoteTarget" = "1"
-    "Gameplay/RtsSmartCommandMenu" = "1"
-    "Gameplay/RtsSmartRepairReload" = "1"
-    "Gameplay/RtsAreaSelect" = "1"
-    "Gameplay/RtsHold" = "2"
+    "Gameplay/RtsRangeLabels" = "0"
+    "Gameplay/RtsRemoteTarget" = "0"
+    "Gameplay/RtsSmartCommandMenu" = "0"
+    "Gameplay/RtsSmartRepairReload" = "0"
+    "Gameplay/RtsAreaSelect" = "0"
+    "Gameplay/RtsHold" = "0"
     "Gameplay/RtsQuickCommands" = "0"
     "Gameplay/RtsAmmoAlert" = "0"
     "Gameplay/RtsScrapFullAlert" = "0"
-    "Gameplay/RtsBuildAtNav" = "1"
-    "Gameplay/RtsBuildGhost" = "1"
-    "Gameplay/RtsPendingBuildGhost" = "1"
-    "Gameplay/RtsPowerRange" = "1"
-    "Gameplay/RtsWaypointLines" = "1"
+    "Gameplay/RtsBuildAtNav" = "0"
+    "Gameplay/RtsBuildGhost" = "0"
+    "Gameplay/RtsPendingBuildGhost" = "0"
+    "Gameplay/RtsPowerRange" = "0"
+    "Gameplay/RtsWaypointLines" = "0"
     "Gameplay/RtsAttackMarks" = "0"
     "Gameplay/RtsRadarPings" = "0"
     "Gameplay/RtsProducerBadges" = "0"

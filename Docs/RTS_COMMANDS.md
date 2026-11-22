@@ -7,21 +7,21 @@ RTS Commands. Keys: Options > Input > RTS Actions (written to
 
 | Feature | `[Gameplay]` row | Key (default) | Multiplayer |
 | --- | --- | --- | --- |
-| Target a selected unit | `RtsRemoteTarget` (on) | Shift+`RtsRemoteTargetKey` (Shift+T) | Runs (UNVERIFIED live) |
-| Target the next own building | `RtsRemoteTarget` (on) | `RtsBuildingCycleKey` (B) | Runs (UNVERIFIED live) |
-| Mixed-selection menu | `RtsSmartCommandMenu` (on) | stock menu keys | Runs (UNVERIFIED live) |
-| Repair/Reload for the units that need it | `RtsSmartRepairReload` (on) | stock menu keys | Runs (UNVERIFIED live) |
-| Area select | `RtsAreaSelect` (on) | `RtsAreaSelectKey` (X), Shift+X wide | Runs (UNVERIFIED live) |
-| Hold | `RtsHold` (2) | `RtsHoldKey` (Z); Shift on the Defend entry | Off (single player only) |
+| Target a selected unit | `RtsRemoteTarget` (off) | Shift+`RtsRemoteTargetKey` (Shift+T) | Runs (UNVERIFIED live) |
+| Target the next own building | `RtsRemoteTarget` (off) | `RtsBuildingCycleKey` (B) | Runs (UNVERIFIED live) |
+| Mixed-selection menu | `RtsSmartCommandMenu` (off) | stock menu keys | Runs (UNVERIFIED live) |
+| Repair/Reload for the units that need it | `RtsSmartRepairReload` (off) | stock menu keys | Runs (UNVERIFIED live) |
+| Area select | `RtsAreaSelect` (off) | `RtsAreaSelectKey` (X), Shift+X wide | Runs (UNVERIFIED live) |
+| Hold | `RtsHold` (0) | `RtsHoldKey` (Z); Shift on the Defend entry | Off (single player only) |
 | Quick commands | `RtsQuickCommands` (off) | `RtsQuickFollowKey` (Numpad1), `RtsQuickDefendKey` (Numpad2), `RtsQuickAttackKey` (Numpad3), `RtsQuickStopKey` (Numpad5) | Off (single player only) |
 | Select next idle unit | none (always on) | `RtsIdleUnitKey` (J), Shift+J all | Runs (UNVERIFIED live) |
 | Idle unit alert | `RtsIdleUnitAlert` (off) | none (a sound) | Runs (live 2026-11-17: alert, 5 s limit, no start-up alerts) |
 | Ammo-out and scrap-full alerts | `RtsAmmoAlert` (off), `RtsScrapFullAlert` (off) | none (a voice line) | Runs (UNVERIFIED live) |
-| Build at Nav | `RtsBuildAtNav` (on) | stock menu keys (Go To Nav, then the nav) | Runs for local rigs (UNVERIFIED live) |
-| Build ghost | `RtsBuildGhost` (on) | none (shows while placing) | Local visual (UNVERIFIED live) |
-| Pending build ghost | `RtsPendingBuildGhost` (on) | none (shows until the rig starts building) | Local visual (UNVERIFIED live) |
-| Power range | `RtsPowerRange` (on) | none (shows while placing a powered building) | Local visual (UNVERIFIED live) |
-| Waypoint lines | `RtsWaypointLines` (on) | none (shows for the selection) | Local visual (UNVERIFIED live) |
+| Build at Nav | `RtsBuildAtNav` (off) | stock menu keys (Go To Nav, then the nav) | Runs for local rigs (UNVERIFIED live) |
+| Build ghost | `RtsBuildGhost` (off) | none (shows while placing) | Local visual (UNVERIFIED live) |
+| Pending build ghost | `RtsPendingBuildGhost` (off) | none (shows until the rig starts building) | Local visual (UNVERIFIED live) |
+| Power range | `RtsPowerRange` (off) | none (shows while placing a powered building) | Local visual (UNVERIFIED live) |
+| Waypoint lines | `RtsWaypointLines` (off) | none (shows for the selection) | Local visual (UNVERIFIED live) |
 
 The last four are the placement aids in `src/patches/rts_placement.cpp`,
 drawn with the RTS marker rings; see Docs/RTS_MARKERS.md, "Placement aids".
