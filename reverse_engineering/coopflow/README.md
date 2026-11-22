@@ -56,6 +56,17 @@ zero relay drops alone do not prove the game accepted position or ping packets.
 This diagnostic pattern is not a measurement of zero packet loss. Subtitle
 overlay failure notices also fail the verdict, even when Lua has not raised an error.
 
+Disk: each launch prunes the oldest `runs\` folders over a day old until `runs\`
+is under 40 GB (`BZRCOOP_RUNS_CAP_GB`), and refuses to launch if it is still
+over, or if the drive has under 50 GB free (`BZRCOOP_MIN_FREE_GB`). Each client
+keeps at most the two newest dumps per run. Copy anything worth keeping out of
+`runs\` first.
+
+Fresh machine: Prepare needs Goldberg's 32-bit `steam_api.dll` at
+`C:\BZRCoop\tools\NucleusCoop\utils\GoldbergEmu\steam_api.dll` (or pass
+`-GoldbergDll`), and optionally `C:\BZRCoop\tools\steam_interfaces.txt` from
+Goldberg's `generate_interfaces_file.exe` run on the stock `steam_api.dll`.
+
 Hands-on: `-Scenario play` loads the mission and leaves everything running.
 Drive it with `BZRCoopPlay.ps1` (`-Lua`, `-State`, `-Events`, `-Shot`, `-Key`,
 `-Click`, `-Stop`). `Run-BZRCoopMission.ps1 -Mission <m> -Scenario <s> -Attach`
