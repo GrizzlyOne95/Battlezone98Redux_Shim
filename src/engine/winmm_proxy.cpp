@@ -6,6 +6,7 @@
 
 #include "winmm_proxy.h"
 #include "shim_log.h"
+#include <cfgmgr32.h>
 #include <cstdio>
 
 HMODULE g_hRealWinmm = nullptr;
@@ -106,6 +107,85 @@ void FreeRealWinmm()
     if (!_fn_##name) \
         return failure; \
     return _fn_##name args
+
+// ---------------------------------------------------------------------------
+// joyGetDevCapsA cache (works around a dinput.dll heap overrun)
+// ---------------------------------------------------------------------------
+// The game calls joyGetDevCapsA for every joystick id each time it rebuilds
+// its input device list, which includes every return to the main menu. In
+// the system winmm, joyGetDevCapsW -> joyOpen -> dinput!CJoyCfg_GetConfig ->
+// JoyReg_GetConfig -> DIHid_BuildHidList rebuilds dinput's global HID device
+// list once 20 s have passed since the last rebuild. That rebuild first runs
+// dinput!DIHid_CheckHidList, which drops entries whose device no longer opens
+// for read/write and then compacts the array. The compaction loop starts at
+// index cdlMax (one past the last slot), so whenever any entry was dropped it
+// reads, copies and then zeroes 0x48 bytes past the end of the heap block,
+// destroying the next block's header. The heap reports it later as
+// 0xC0000374 (crash dump 2026-11-22: slot [cdlMax] zeroed, next header zero;
+// Windows 11 26100 dinput.dll, DIHid_CheckHidList+0xe2..+0x113).
+//
+// The first rebuild in a process is safe (the list is still empty), so
+// answering repeat calls from a cache keeps dinput from rebuilding again on
+// each menu return. The cache is dropped when a HID device interface arrives
+// or is removed, or when joyConfigChanged is called, so a joystick plugged in
+// mid-session still shows up on the next menu return, as it did before. If
+// the device-change notification cannot be registered, nothing is cached and
+// every call goes to winmm as before.
+namespace
+{
+    // GUID_DEVINTERFACE_HID {4D1E55B2-F16F-11CF-88CB-001111000030}
+    constexpr GUID kHidInterfaceGuid = { 0x4D1E55B2, 0xF16F, 0x11CF, { 0x88, 0xCB, 0x00, 0x11, 0x11, 0x00, 0x00, 0x30 } };
+    constexpr UINT kJoyCacheSlots = 16;
+
+    struct JoyCapsCacheEntry
+    {
+        bool valid;
+        LONG generation;
+        MMRESULT result;
+        JOYCAPSA caps;
+    };
+
+    SRWLOCK g_joyCacheLock = SRWLOCK_INIT;
+    JoyCapsCacheEntry g_joyCache[kJoyCacheSlots] = {};
+    volatile LONG g_joyGeneration = 0;
+    LONG g_joyLoggedGeneration = -1;
+    INIT_ONCE g_joyNotifyOnce = INIT_ONCE_STATIC_INIT;
+    bool g_joyNotifyRegistered = false;
+
+    DWORD CALLBACK JoyHidChangeCallback(HCMNOTIFICATION, PVOID, CM_NOTIFY_ACTION action, PCM_NOTIFY_EVENT_DATA, DWORD)
+    {
+        if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL || action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL)
+            InterlockedIncrement(&g_joyGeneration);
+        return ERROR_SUCCESS;
+    }
+
+    BOOL CALLBACK RegisterJoyHidNotification(PINIT_ONCE, PVOID, PVOID*)
+    {
+        // Resolved at run time so the bootstrap gains no new import; Wine
+        // builds without CM_Register_Notification fall back to no caching.
+        using RegisterFn = CONFIGRET(WINAPI*)(PCM_NOTIFY_FILTER, PVOID, PCM_NOTIFY_CALLBACK, PHCMNOTIFICATION);
+        HMODULE cfgmgr = LoadLibraryExW(L"cfgmgr32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        auto registerFn = cfgmgr ? reinterpret_cast<RegisterFn>(GetProcAddress(cfgmgr, "CM_Register_Notification")) : nullptr;
+        if (!registerFn)
+        {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "winmm", "joyGetDevCapsA cache off: CM_Register_Notification unavailable");
+            return TRUE;
+        }
+
+        CM_NOTIFY_FILTER filter = {};
+        filter.cbSize = sizeof(filter);
+        filter.FilterType = CM_NOTIFY_FILTER_TYPE_DEVICEINTERFACE;
+        filter.u.DeviceInterface.ClassGuid = kHidInterfaceGuid;
+        // Never unregistered: the proxy stays loaded until process exit, and
+        // CM_Unregister_Notification must not run under the loader lock.
+        HCMNOTIFICATION handle = nullptr;
+        const CONFIGRET cr = registerFn(&filter, nullptr, JoyHidChangeCallback, &handle);
+        g_joyNotifyRegistered = (cr == CR_SUCCESS);
+        BZROpenShim::LogShimA(g_joyNotifyRegistered ? BZROpenShim::LogLevel::Info : BZROpenShim::LogLevel::Warn, "winmm",
+            "joyGetDevCapsA cache %s (CM_Register_Notification cr=%lu)", g_joyNotifyRegistered ? "on" : "off", static_cast<unsigned long>(cr));
+        return TRUE;
+    }
+}
 
 #if defined(_M_IX86)
 #define FORWARD_NAKED(name) \
@@ -267,7 +347,37 @@ extern "C"
     WINMMAPI MMRESULT WINAPI mixerGetControlDetailsW(HMIXEROBJ a, LPMIXERCONTROLDETAILS b, DWORD c) { FORWARD(mixerGetControlDetailsW, MMSYSERR_NOTSUPPORTED, (a,b,c)); }
     WINMMAPI MMRESULT WINAPI mixerSetControlDetails(HMIXEROBJ a, LPMIXERCONTROLDETAILS b, DWORD c)  { FORWARD(mixerSetControlDetails, MMSYSERR_NOTSUPPORTED, (a,b,c)); }
 
-    WINMMAPI MMRESULT WINAPI joyGetDevCapsA(UINT_PTR a, LPJOYCAPSA b, UINT c)                       { FORWARD(joyGetDevCapsA, MMSYSERR_NOTSUPPORTED, (a,b,c)); }
+    static MMRESULT ForwardJoyGetDevCapsA(UINT_PTR a, LPJOYCAPSA b, UINT c)                         { FORWARD(joyGetDevCapsA, MMSYSERR_NOTSUPPORTED, (a,b,c)); }
+
+    WINMMAPI MMRESULT WINAPI joyGetDevCapsA(UINT_PTR a, LPJOYCAPSA b, UINT c)
+    {
+        InitOnceExecuteOnce(&g_joyNotifyOnce, RegisterJoyHidNotification, nullptr, nullptr);
+        if (!g_joyNotifyRegistered || a >= kJoyCacheSlots || !b || c != sizeof(JOYCAPSA))
+            return ForwardJoyGetDevCapsA(a, b, c);
+
+        AcquireSRWLockExclusive(&g_joyCacheLock);
+        const LONG generation = InterlockedCompareExchange(&g_joyGeneration, 0, 0);
+        JoyCapsCacheEntry& entry = g_joyCache[a];
+        const bool hit = entry.valid && entry.generation == generation;
+        if (!hit)
+        {
+            if (g_joyLoggedGeneration != generation)
+            {
+                // One line per device-change generation, not one per call.
+                BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "winmm", "joyGetDevCapsA cache refresh (HID device generation %ld)", generation);
+                g_joyLoggedGeneration = generation;
+            }
+            entry.result = ForwardJoyGetDevCapsA(a, &entry.caps, c);
+            entry.generation = generation;
+            entry.valid = true;
+        }
+        const MMRESULT result = entry.result;
+        // winmm copies the caps out only on success; do the same.
+        if (result == JOYERR_NOERROR)
+            *b = entry.caps;
+        ReleaseSRWLockExclusive(&g_joyCacheLock);
+        return result;
+    }
     WINMMAPI MMRESULT WINAPI joyGetDevCapsW(UINT_PTR a, LPJOYCAPSW b, UINT c)                       { FORWARD(joyGetDevCapsW, MMSYSERR_NOTSUPPORTED, (a,b,c)); }
     WINMMAPI UINT     WINAPI joyGetNumDevs()                                                          { FORWARD(joyGetNumDevs, 0, ()); }
     WINMMAPI MMRESULT WINAPI joyGetPos(UINT a, LPJOYINFO b)                                         { FORWARD(joyGetPos, MMSYSERR_NOTSUPPORTED, (a,b)); }
@@ -276,7 +386,11 @@ extern "C"
     WINMMAPI MMRESULT WINAPI joyReleaseCapture(UINT a)                                               { FORWARD(joyReleaseCapture, MMSYSERR_NOTSUPPORTED, (a)); }
     WINMMAPI MMRESULT WINAPI joySetCapture(HWND a, UINT b, UINT c, BOOL d)                          { FORWARD(joySetCapture, MMSYSERR_NOTSUPPORTED, (a,b,c,d)); }
     WINMMAPI MMRESULT WINAPI joySetThreshold(UINT a, UINT b)                                        { FORWARD(joySetThreshold, MMSYSERR_NOTSUPPORTED, (a,b)); }
-    WINMMAPI MMRESULT WINAPI joyConfigChanged(DWORD a)                                               { FORWARD(joyConfigChanged, MMSYSERR_NOTSUPPORTED, (a)); }
+    WINMMAPI MMRESULT WINAPI joyConfigChanged(DWORD a)
+    {
+        InterlockedIncrement(&g_joyGeneration); // drop the joyGetDevCapsA cache
+        FORWARD(joyConfigChanged, MMSYSERR_NOTSUPPORTED, (a));
+    }
 
     WINMMAPI UINT  WINAPI mmsystemGetVersion()         { FORWARD(mmsystemGetVersion, 0, ()); }
 
