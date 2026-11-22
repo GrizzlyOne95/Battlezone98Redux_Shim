@@ -368,6 +368,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "ObjectiveCapGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_HANDLE_SEQUENCE_CHECK") ||
+            Equals(name, "BZR_DISABLE_HANDLE_SEQUENCE_CHECK"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "HandleSequenceCheck", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_ANCHOR_DRAG_GUARD") ||
             Equals(name, "BZR_DISABLE_ANCHOR_DRAG_GUARD"))
         {
@@ -417,6 +422,11 @@ namespace
             Equals(name, "BZR_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION"))
         {
             return TryReadMappedBool(ini, "Fixes", "DaywreckerArmoryCollision", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_SPLINTER_PAYLOAD_LOCAL") ||
+            Equals(name, "BZR_DISABLE_SPLINTER_PAYLOAD_LOCAL"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SplinterPayloadLocal", true, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_MP_INVITE_PASSWORD") ||
             Equals(name, "BZR_DISABLE_MP_INVITE_PASSWORD"))

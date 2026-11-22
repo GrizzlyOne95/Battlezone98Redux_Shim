@@ -47,6 +47,7 @@
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
 #include "soak_telemetry.h"
+#include "fp_trap_log.h"
 #include "mode_stress_driver.h"
 #include "music_refill_catchup.h"
 #include "music_single_fill.h"
@@ -68,6 +69,7 @@
 #include "lua_formation_fix_install.h"
 #include "lua_getindependence_guard_install.h"
 #include "objective_cap_guard_install.h"
+#include "handle_sequence_check_install.h"
 #include "anchor_drag_guard_install.h"
 #include "terrain_zone_guard_install.h"
 #include "nan_transform_guard_install.h"
@@ -79,6 +81,7 @@
 #include "mp_invite_password_install.h"
 #include "steam_tunnel_join.h"
 #include "mp_daywrecker_armory_collision_install.h"
+#include "splinter_payload_local_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
 #include "mp_any_nation.h"
@@ -217,6 +220,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // [Fixes] ObjectiveCapGuard = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::ObjectiveCap::InstallObjectiveCapGuardIfPossible());
 
+    // Object handles keep 20 sequence bits; past ~1M creations new objects get
+    // handles the engine cannot resolve. Read-only: binds the byte-guarded
+    // counter so the frame callback can warn at 90% and at exhaustion.
+    // [Fixes] HandleSequenceCheck = 0 leaves it off.
+    PATCH_STAGE(BZROpenShim::HandleSequence::InstallHandleSequenceCheckIfPossible());
+
     // AnchorRocket drag on a stationary or near-stationary target with a
     // negative (custom ODF) drag divides by ~0 and writes NaN into its velocity
     // or spin; a negative drag also boosts without bound. Two byte-guarded
@@ -272,6 +281,20 @@ static unsigned __stdcall PatchThreadProc(void*)
     // [Fixes] DaywreckerArmoryCollision = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::DaywreckerArmory::InstallDaywreckerArmoryCollisionIfPossible());
 
+    // A splinter's payload is built on every peer with source = that peer and
+    // never sent, but a SprayBomb or BounceBomb payload resends itself at its
+    // first bounce and a Popper payload sends its child, from every peer, so a
+    // splinter whose payload is a splinter multiplies per peer. In a network
+    // game the payload build call in SprayBuilding::Simulate records each
+    // payload SprayBomb, BounceBomb or Popper (the mission-teardown ordnance
+    // cleanup clears the records, the SprayBomb destructor slot drops one as a
+    // backstop). The Net_GetMyPlayerID calls in SprayBomb::Hit and
+    // BounceBomb::Hit report a non-matching id for recorded payloads only, and
+    // a recorded Popper's child is built with bSend = 0; the launcher's own
+    // thrown bomb keeps its stock resync. Byte-guarded, all eight patches or
+    // none; [Fixes] SplinterPayloadLocal = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::SplinterPayloadLocal::InstallSplinterPayloadLocalIfPossible());
+
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and
     // logs which term failed, because the stock UI has no way to say. Its own
@@ -325,6 +348,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     // Opt-in soak telemetry ([Diagnostics] SoakTelemetry): GPU-stall
     // watchdog, heartbeat and lighting-change lines. Dormant unless asked.
     PATCH_STAGE(BZROpenShim::InitializeSoakTelemetry());
+    // Opt-in floating-point trap logger ([Diagnostics] FpTrapLog): records
+    // where the main thread produces NaN/inf. Installs nothing unless asked.
+    PATCH_STAGE(BZROpenShim::InitializeFpTrapLog());
     // Release-qualification mode-transition stress driver. Dormant unless
     // OPENSHIM_MODE_STRESS_PLAN names a plan file.
     PATCH_STAGE(BZROpenShim::InitializeModeStressDriver());
@@ -435,6 +461,7 @@ namespace BZROpenShim
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownPerfTelemetry();
         BZROpenShim::ShutdownSoakTelemetry();
+        BZROpenShim::ShutdownFpTrapLog("plugin shutdown");
         BZROpenShim::ShutdownModeStressDriver();
         BZROpenShim::ShutdownThreadScheduling();
         BZROpenShim::ShutdownOpenShimAssetSync();

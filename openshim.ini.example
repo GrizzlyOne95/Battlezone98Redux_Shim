@@ -493,6 +493,26 @@ SplinterUndead = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_SPLINTER_SYNC
 SplinterSync = 1
 
+; Multiplayer only: keep a splinter's own payload ordnance local to each peer.
+; Every peer builds a splinter's payload itself and never sends it, but stock
+; SprayBomb::Hit and BounceBomb::Hit resend a payload bomb from every peer at
+; its first bounce, and a payload Popper sends its child from every peer. Each
+; peer then receives the others' copies as new ordnance, and each SprayBomb
+; copy deploys another splinter, so a splinter whose payload is a splinter
+; multiplies once per player each generation. This records each SprayBomb,
+; BounceBomb and Popper payload a splinter fires, keeps those bounces local
+; and builds a payload Popper's child unsent; other payload classes
+; (SniperShell, Beam) have no such resend and stay stock. The launcher's own
+; thrown splinter keeps its stock bounce resync. Payloads already in flight
+; when the fix installs mid-mission stay stock. Nested splinters stay
+; per-peer, as stock payload ordnance is; SplinterSync still syncs only the
+; top-level one. A peer without the fix still resends its own copies.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match. No effect in single player.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_SPLINTER_PAYLOAD_LOCAL
+SplinterPayloadLocal = 1
+
 ; Multiplayer "Any Nation" lobby toggle (Battlezone 1.5 parity). The host gets an
 ; "Any Nation: On/Off" button in the lobby. ON (default) is the full vehicle
 ; pool, as before. OFF restricts the vehicle-select pool to the 1.5 netveh.odf
@@ -742,6 +762,16 @@ NaNTransformGuard = 1
 ; Accepted: boolean. Default: ON.
 ; Env alias to force it off: OPENSHIM_DISABLE_SNIPER_KILL_CREDIT
 SniperKillCredit = 1
+; Warn before object handles run out. A handle keeps 12 bits for the object
+; slot and 20 for a sequence number that grows by one per object created, so a
+; session (and any save of it) can make about 1,048,575 objects. Past that,
+; new objects still spawn but their handles resolve to nothing: scripts cannot
+; reference them and multiplayer peers reject them. This only reads the
+; counter: one warning at 90%, one error at exhaustion, nothing changed.
+; Stands down on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_HANDLE_SEQUENCE_CHECK
+HandleSequenceCheck = 1
 
 ; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
 ; stores a length above 30 in one extension byte, and the stock decoders read it
@@ -1857,6 +1887,33 @@ SoakTelemetry = 0
 ; GPU stall threshold in milliseconds (200..60000). Default: 1000.
 ; Env override: OPENSHIM_SOAK_GPU_STALL_MS
 SoakGpuStallMs = 1000
+
+; Floating-point trap log: finds the instructions that produce NaN or infinity.
+; Redux masks every floating-point exception, so a NaN appears silently and is
+; only noticed later as a broken transform. When on, the main thread unmasks
+; SSE invalid-operation and divide-by-zero and x87 divide-by-zero once per
+; frame; the first trap of a frame is recorded by address and re-run masked, so
+; it produces the same NaN/inf as stock, and the thread stays masked until the
+; next frame. A CRT math error such as log(0) raises the exception from
+; software; that is caught too, logged as "raised" by its caller's address,
+; and returns the stock result. New sites are logged as [FPTRAP] lines (first 64) and an exit
+; summary lists every site with its count and first EBP call stack. x87
+; invalid-operation stays masked: x87 reports it late, after integer code has
+; already acted on it, so trapping it would change branches.
+; Diagnostic only: it costs one exception round trip on frames that trap and
+; arms from the first mission frame on. Leave it off for normal play. A
+; start-up self-test turns it off when the OS does not hand over the FPU state
+; it needs.
+; WARNING: one rare case DOES change game state. When an x87 trap cannot be
+; re-run (an unreadable instruction or operand, or an operand on the stack
+; that has since been overwritten), its instruction is skipped: the
+; destination keeps its old value and the x87 stack can end one deeper. The
+; log then prints an "[FPTRAP] WARNING ... SKIPPED" line and the summary says
+; unrecovered=N; the logger stops for that session. Do not trust gameplay
+; after that line -- restart the game.
+; Accepted: boolean. Default: OFF.
+; Env override: OPENSHIM_FP_TRAP_LOG or BZR_FP_TRAP_LOG (wins when set)
+FpTrapLog = 0
 
 ; Explain a "Not Ready" multiplayer entry on the main menu. The stock shell has
 ; no way to say why: its readiness getter returns only ready/not-ready, so the

@@ -93,6 +93,16 @@ Opt-in overnight-run diagnostics in `src/patches/soak_telemetry.cpp`. Off instal
   - `[SOAK] main-loop stalled ms=<n> lastFrame=<f>` and `[SOAK] main-loop resumed after ms=<n>` -- the render-thread frame counter did not move for 2000 ms (mission loads also trigger this).
   - `[LIGHTING] change field=<name> old=<v> new=<v> frame=<f> mission=<name> capture=<path>` -- a step between consecutive mission frames: `ambient`, `fogColour`, `sunDiffuse` (any channel > 0.08), `sunDirection` (> 5 degrees), `fogStart`/`fogEnd` (> 10%), `fogMode`, `sun` (present/absent) and `scheme` (any change; the main viewport's material scheme). Colours and directions print as `r,g,b`. One line per field per 2 s. `capture=` is the PNG path in the game `logs` folder (`openshim_soak_lighting_<pid>_<nn>.png`, written by `RenderTarget::writeContentsToFile` at that frame's `frameRenderingQueued`), `none` when the cap (30 per process, one per 10 s) held it, `unavailable` when the Ogre exports are missing or a write failed.
 
+## FP trap log
+
+Opt-in diagnostic that names the instructions producing NaN/inf, in `src/patches/fp_trap_log.cpp` (pure logic `include/fp_trap_log_policy.h`, recovery `include/fp_trap_recovery.h`). Off installs nothing.
+
+- Toggle: `[Diagnostics] FpTrapLog = 0` in `openshim.ini`; `OPENSHIM_FP_TRAP_LOG` (or `BZR_FP_TRAP_LOG`) wins when set.
+- Once per frame (Ogre `frameStarted`, so from the first mission frame) the main thread unmasks SSE IE/ZE and x87 ZE. x87 IE stays masked: x87 reports it late, after integer code acted on the stale result. A vectored handler recovers each trap to the stock masked result (SSE re-run; x87 re-run of the faulting instruction in a stub; a CRT `RaiseException`, as from `log(0)`, masked and continued) and records the site.
+- Log lines (component `fptrap`): `[FPTRAP] on: self-test passed (...)` or `[FPTRAP] off: <reason>`; `[FPTRAP] armed on main thread <tid>`; `[FPTRAP] new site <kind> <flags> addr=... (module+offset) count= firstFrame= eip=...[ nonadjacent] stack=...` for the first 64 sites; `[FPTRAP] summary (<reason>): frames= traps= sites= dropped= inPlace= raised= unrecovered=` at exit, then every site by count. `raised` sites are keyed on the first caller outside the CRT and system DLLs.
+- `[FPTRAP] WARNING ... SKIPPED` (and `unrecovered=` above 0) means an x87 instruction could not be re-run and was skipped, so game state differs from stock; the logger stops for the session. Restart before trusting that run.
+- Known limits (comments in `include/fp_trap_recovery.h` and `fp_trap_log.cpp`): an x87 fault that first meets a non-waiting x87 instruction is lost silently; a segment-prefixed (fs:) x87 operand fails the flat-address check or faults in the stub (caught, but seen by first-chance crash loggers); a shutdown on a non-main thread can garble the summary.
+
 ## UI performance logging
 
 `[UIPERF]` shell-transition timing (`src/patches/ui_performance.cpp`) is opt-in.
