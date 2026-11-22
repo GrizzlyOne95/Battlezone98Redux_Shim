@@ -42,6 +42,9 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed the multiplayer vehicle list using stock assets instead of the selected mod's. Stock reused description files cached from other mods and ignored the selected map's own vehicle list.
 [*] Fixed the black craft in the multiplayer Create Game preview on DX11. Stock's preview viewport has shadows turned off but still uses a shadow shader setup, so the craft drew black.
 [*] Fixed the Create Game map layout preview overflowing its frame. Stock resizes the preview to the 500-pixel map texture, far larger than its frame.
+[*] Fixed splinter shells appearing twice in multiplayer, and splinter payloads that are themselves splinters multiplying. Stock builds a splinter's payload on every player's machine, and each machine then resends its own copy when it bounces.
+[*] Fixed the host's sniper kills not being scored or announced. Stock scores a snipe only when the victim belongs to another player's machine, so a snipe of a craft the sniping machine owns removes the pilot with no kill message and no score.
+[*] Fixed the Lua [code]ObjectiveObjects()[/code] iterator returning the first objective forever or freezing the game. The stock iterator never advances its position (a loop-counter bug carried over from 1.5).
 [/list]
 
 [h2]Crashes[/h2]
@@ -64,6 +67,8 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed a crash from a ChargeGun with a negative ordnanceCount or a Launcher with a negative targetCount in its ODF. Stock does not range-check these counts, and a negative value crashes the game.
 [*] Fixed a crash when a UI widget is rebuilt while Ogre still holds an old "Top Screen" object. Stock then creates a second object with the same name, and the uncaught error closes the game.
 [*] Fixed the game terminating when a map with a description of 2,400 bytes or more is selected. Stock's description loader copies up to 2,400 bytes into a 2,400-byte array, then rejects that length as an invalid index for the terminating zero.
+[*] Fixed a crash when a mission script error box opens while a unit is being removed. Stock's error box keeps the game running from inside the script callback, so a half-removed unit gets drawn and updated.
+[*] Fixed a crash drawing a unit whose 3D model had just been destroyed. OpenShim now checks the unit's model is still valid before syncing its position to the renderer.
 [/list]
 
 [h2]Rendering, audio and UI[/h2]
