@@ -403,6 +403,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "LuaSendLengthUnsigned", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_OBJECTIVE_OBJECTS_FIX") ||
+            Equals(name, "BZR_DISABLE_OBJECTIVE_OBJECTS_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "ObjectiveObjectsIterator", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_MP_MISSION_END_SYNC") ||
             Equals(name, "BZR_DISABLE_MP_MISSION_END_SYNC"))
         {

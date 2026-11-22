@@ -75,6 +75,7 @@
 #include "nan_transform_guard_install.h"
 #include "sniper_kill_credit_install.h"
 #include "lua_send_length_install.h"
+#include "objective_objects_fix_install.h"
 #include "mp_mission_end_sync_install.h"
 #include "mp_splinter_sync_install.h"
 #include "mp_host_leave_install.h"
@@ -245,6 +246,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // movzx and the encoders refuse lengths above 255. Byte-guarded and
     // fail-closed; [Fixes] LuaSendLengthUnsigned = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::LuaSendLength::InstallLuaSendLengthFixIfPossible());
+
+    // Stock Lua ObjectiveObjects() never advances its index: it returns the
+    // first objective forever (or spins on a skipped slot). The step body is
+    // rewritten in place to walk the list top down. Byte-guarded and fail-closed;
+    // [Fixes] ObjectiveObjectsIterator = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::ObjectiveObjectsFix::InstallObjectiveObjectsFixIfPossible());
 
     // Stock multiplayer carries no mission-end message: when only the host's
     // script calls SucceedMission/FailMission, guests run on forever. The host

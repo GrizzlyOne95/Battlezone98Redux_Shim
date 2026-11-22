@@ -274,6 +274,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Lua Send lengths 128..255 decode unsigned; lengths above 255 are refused
     # by the sender instead of wrapping. Unpatched receivers still crash.
     "Fixes/LuaSendLengthUnsigned",
+    # Lua ObjectiveObjects() advances its index; script-side only, one
+    # byte-guarded same-length write.
+    "Fixes/ObjectiveObjectsIterator",
     # Host mission end is broadcast as one new tag that stock peers ignore;
     # guests apply it only from the host, once, to a live mission.
     "Fixes/MissionEndSync",
@@ -626,6 +629,7 @@ $shippingPolicyChecks = @{
     "Fixes/SniperKillCredit" = "1"
     "Fixes/HandleSequenceCheck" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
+    "Fixes/ObjectiveObjectsIterator" = "1"
     "Fixes/MissionEndSync" = "1"
     "Fixes/DaywreckerArmoryCollision" = "1"
     "Fixes/InvitePassword" = "1"

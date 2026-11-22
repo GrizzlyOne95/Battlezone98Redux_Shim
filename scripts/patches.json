@@ -2103,6 +2103,16 @@
       "identity": "The `movsx edx, byte [ecx]` that reads the one-byte count extension inside Redux's Lua table unpacker FUN_00505B50 on exact GOG Redux 2.2.301 (count at [ebp-8], 31 means an extension byte follows). Same sign bug as the string unpacker. lua_send_length.cpp flips the second byte to B6 (MOVZX). Verified by whole-image scan on 2026-10-18: one match. Rewritten by lua_send_length.cpp."
     },
     {
+      "name": "Lua::ObjectiveObjectsNext",
+      "pattern": "55 8B EC 83 EC 0C 68 ED D8 FF FF 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 08 89 45 F8 8B 4D F8 3B 0D ?? ?? ?? ?? 7D 79 8B 55 F8 8B 04 95 ?? ?? ?? ?? 89",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00502760",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Entry of Redux's ObjectiveObjects iterator step FUN_00502760 (1.5 ObjectiveObjectsNext @0x0041C004) on exact GOG Redux 2.2.301; its only reference is the push in the ObjectiveObjects binding FUN_00502810 (0x00502823), which installs it as a closure with upvalue 1 = 0. The step reads the index from upvalue 1 (lua_tointeger -10003), compares it with the objective count 0x00917AF8, loads the slot from the objective array 0x00917A78 and skips a null slot or a class with flag 0x200, but never increments the index, so it returns slot 0 forever or spins. objective_objects_fix.cpp checks all 0xA4 body bytes except the call and global operands, then rewrites the body in place with a top-down walk. Verified by whole-image scan on 2026-11-21: one match for this pattern and for the masked body, no branch or pointer into +1..+0xA3. Rewritten by objective_objects_fix.cpp."
+    },
+    {
       "name": "Lua::PackString length room check",
       "pattern": "8B 55 08 8B 02 8B 4D FC 8D 54 08 01 3B 55 0C 72 04 32 C0 EB",
       "offset": 0,
