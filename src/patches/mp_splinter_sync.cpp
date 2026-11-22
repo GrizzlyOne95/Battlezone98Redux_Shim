@@ -46,11 +46,17 @@
 // destructor (vtable slot 0, 0x005DA680). Early messages wait in a small
 // pending table and expire after 60 s.
 //
+// Only deploys this peer and its peers both see are synced. A payload SprayBomb
+// that a SprayBuilding fired is built locally on every peer under that peer's
+// own key, so its deploy is skipped when SplinterPayloadLocal has recorded it
+// (splinter_payload_local.cpp). With that fix off, nothing is skipped.
+//
 // Every engine address is a named row in scripts/patches.json.
 
 #include "bzr_hooks.h"
 #include "bzr_hooks_internal.h"
 #include "mp_splinter_sync_install.h"
+#include "splinter_payload_local_install.h"
 
 #include "bzr_options_ui.h"
 #include "com_vtable_patch.h"
@@ -224,6 +230,22 @@ namespace BZROpenShim
                 __except (EXCEPTION_EXECUTE_HANDLER)
                 {
                     return false;
+                }
+            }
+
+            // The SprayBomb itself from SprayBomb::Hit's frame.
+            const void* ReadFrameBomb(void* callerFrame)
+            {
+                __try
+                {
+                    if (!callerFrame)
+                        return nullptr;
+                    return *reinterpret_cast<const void* const*>(reinterpret_cast<const uint8_t*>(callerFrame) +
+                                                                 kSprayBombFrameOffset);
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER)
+                {
+                    return nullptr;
                 }
             }
 
@@ -621,6 +643,10 @@ namespace BZROpenShim
             const uintptr_t ptr = reinterpret_cast<uintptr_t>(building);
             uint16_t source = 0, ordId = 0;
             if (!ReadBombKey(callerFrame, source, ordId))
+                return;
+            // A payload bomb's deploy is local to every peer; its key means
+            // nothing to them, so it is neither tracked nor announced.
+            if (SplinterPayloadLocal::IsLocalPayload(ReadFrameBomb(callerFrame)))
                 return;
             if (!BuildingVtableMatches(ptr))
             {
