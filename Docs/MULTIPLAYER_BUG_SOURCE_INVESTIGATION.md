@@ -534,6 +534,12 @@ Identity collapses at `NetPlayer::RecordDeath(teamId victim, teamId killer)` (`@
 
 Make sniper kills follow the same “reliable local + replicated” pattern as normal kills: either (a) have `SendSnipe` also locally call `HandleSnipe`/`RecordDeath` before `Send`, or (b) route sniper kills through the generic `DistributedObject::RecordDeath` path that already handles both local increment and `SendKill` broadcast and is not victim-owner-addressed. The minimal OpenShim patch is: hook `Net::SendSnipe`’s return to also `RecordDeath`/`KillMessage` on the sending peer when `victim` is locally owned, or replace `SendSnipe`’s victim-addressed `Send` with a broadcast `SendKill`-like path.
 
+### Redux 2.2.301 check and fix (`[Fixes] SniperKillCredit`)
+
+Checked against the shipping GOG exe. One correction to the table above: Redux `SniperShell::Hit` (0x005D6E00) does not call `SendSnipe` for a local victim. It calls it only after `IsRemote` (call at 0x005D6FA3, `SendSnipe` call at 0x005D6FE9). The `IsLocal` branch (call at 0x005D6FF7) sets shell flags 2 and 0x200 and nothing else. `Hit` only runs on the shell owner's machine in a network game (`shell+0x7C == myPlayerID`, 0x005D6E25..0x005D6E38), so for a local victim no peer ever reaches `HandleSnipe` (0x00573AE0) or `RecordDeath`.
+
+`src/patches/sniper_kill_credit.cpp` redirects the `IsLocal` call. For a local victim in a network game it does what `HandleSnipe` does (0x00573B3E..0x00573B96): test and set record flag 4, `NetPlayer::RecordDeath(victimTeam, shooterTeam)`, then `KillMessage(victimTeam, shooterTeam, 'S', victim == userObject)`. Exactly one peer credits: the victim owner, who is also the shooter here. Single player has no kill scoring path and is unchanged.
+
 ---
 
 ## Investigation 10 — Multiplayer Freecam Exploit

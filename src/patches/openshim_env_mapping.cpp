@@ -393,6 +393,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "NaNTransformGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_SNIPER_KILL_CREDIT") ||
+            Equals(name, "BZR_DISABLE_SNIPER_KILL_CREDIT"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SniperKillCredit", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX") ||
             Equals(name, "BZR_DISABLE_LUA_SEND_LENGTH_FIX"))
         {

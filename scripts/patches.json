@@ -4471,6 +4471,30 @@
       "identity": "DistributedObject::IsRemote on exact GOG Redux 2.2.301, __thiscall(DistributedObject* this): true when the byte at this+0x68 is 2. remote_object_smoothing.cpp reads that byte directly at GameObject+0x18+0x68. Bytes read from the shipped image 2026-11-07."
     },
     {
+      "name": "SniperShellHitShellLocal",
+      "address": "0x005D6FAF",
+      "expected": "8B 8D 60 FF FF FF E8 46 60 E9 FF 89 85 5C FF FF FF",
+      "identity": "SniperShell::Hit (0x005D6E00, SniperShell vtable 0x00887BB4 slot 5) on exact GOG Redux 2.2.301, remote-victim branch: mov ecx,[ebp-0xA0] / call 0x0046D000 (shell owner OBJ76, [shell+0xD8]). Pins that Hit keeps the shell `this` at [ebp-0xA0] (stored at 0x005D6E15); the sniper kill credit thunk reads it there. Guard only, never patched. Bytes read from the shipped image 2026-11-21."
+    },
+    {
+      "name": "SniperShellHitIsLocalCall",
+      "address": "0x005D6FF7",
+      "expected": "E8 64 28 EE FF 0F B6 D0 85 D2 74 6B 8B 4D 08 83 C1 18",
+      "identity": "SniperShell::Hit on exact GOG Redux 2.2.301: the E8 call to DistributedObject::IsLocal 0x004B9860 (ecx = victim+0x18) after the IsRemote/SendSnipe branch; only al is consumed (movzx edx,al; je 0x005D706E) and ecx is reloaded after it. The local branch sets shell flags only and never calls RecordDeath or KillMessage, so a snipe on a craft this machine owns is never scored. SniperKillCredit redirects this call. Bytes read from the shipped image 2026-11-21."
+    },
+    {
+      "name": "DistributedObjectIsLocal",
+      "address": "0x004B9860",
+      "expected": "55 8B EC 83 EC 08 89 4D F8 8B 45 F8 0F B6 48 68 83 F9 01 75 09",
+      "identity": "DistributedObject::IsLocal on exact GOG Redux 2.2.301, __thiscall(DistributedObject* this), plain `ret`: true when the byte at this+0x68 is 1 (IsRemote 0x004B9830 tests 2). Bytes read from the shipped image 2026-11-21."
+    },
+    {
+      "name": "KillMessage",
+      "address": "0x00626470",
+      "expected": "55 8B EC 81 EC 0C 01 00 00 A1 00 70 8E 00 33 C5 89 45 FC 8D 85 FC FE FF FF 89 85 F4 FE FF FF",
+      "identity": "KillMessage on exact GOG Redux 2.2.301, __cdecl(char victimTeam, char killerTeam, char type, char victimIsUser): shows the kill ticker locally and broadcasts the 'MK' message. The snipe receive handler 0x00573AE0 calls it with type 0x53 ('S') at 0x00573B96 (add esp,0x10). Bytes read from the shipped image 2026-11-21."
+    },
+    {
       "name": "NetPlayerDtor",
       "address": "0x00575BF0",
       "expected": "55 8B EC 6A FF 68 26 B9 84 00",
