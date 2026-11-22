@@ -1664,6 +1664,7 @@ namespace BZROpenShim
             {"InitializeSeismicWaveExtentClampConfig", &InitializeSeismicWaveExtentClampConfig},
             {"InitializeSeismicWalkerVelocityScale", &InitializeSeismicWalkerVelocityScale},
             {"InitializeDynamicAllocGuardConfig", &InitializeDynamicAllocGuardConfig},
+            {"InitializeDeferLuaCallbackAlertConfig", &InitializeDeferLuaCallbackAlertConfig},
             {"InitializeHeadlightConfig", &InitializeHeadlightConfig},
             {"InitializePilotFlashlightConfig", &InitializePilotFlashlightConfig},
             {"InitializeVehicleGeometryContact", &GeometryContactTest::InitializeGlobal},
