@@ -1,6 +1,6 @@
 [h1]Campaign Reimagined and OpenShim: Roadmap[/h1]
 
-[b]Updated 2026-11-21. Current version: Campaign Reimagined with OpenShim 1.0.0.77 and EXU 1.3.3.[/b]
+[b]Updated 2026-11-22. Current version: Campaign Reimagined with OpenShim 1.0.0.78 and EXU 1.3.3.[/b]
 
 [b]OpenShim[/b] is a community patch for Battlezone 98 Redux. It fixes engine bugs, adds the in-game OpenShim Options menu and powers the new visuals. [b]Campaign Reimagined (CR)[/b] is the remastered NSDF campaign built on top of it. [b]Extra Utilities (EXU)[/b] gives mod and mission makers the same tools.
 
@@ -20,19 +20,6 @@
 [*] [b]Multiplayer[/b] - map search and filters, persistent mutes and bans, host controls, clear messages when you can't connect, and a networking fix that reduces stutter in busy games. Also fixed: splinters sitting in a different spot on each player's machine, a phantom Daywrecker blast at the Armory, Daywrecker hits that pushed tall spikes out of the terrain (1.0.0.77), the host leaving a match, and mission wins and losses that never reached the other players. These multiplayer fixes work best when every player has OpenShim.
 [*] [b]Install and updates[/b] - one-click setup from inside the game or a standalone installer, and automatic updates from the Workshop.
 [*] [b]For modders[/b] - EXU and bzfile add Lua tools for cameras, HUD, materials, AI, production, file saving and more.
-[/list]
-
-[h2]Coming in the Next Update[/h2]
-
-Finished and merged; still being tested before release.
-
-[list]
-[*] [b]Multiplayer[/b] - splinter shells no longer appear twice (each player's game was firing its own copy of the payload), and the host's sniper kills are scored and announced again.
-[*] [b]Crash fixes[/b] - a crash when a mission script error box opened while units were being removed, a crash drawing a unit that had just been destroyed, missions that froze reading their objective list, an emptied weapon slot that stayed selected, and build menu colors for teams 3 and up. More guards against bad positions, terrain zones and objective lists.
-[*] [b]Crash dumps[/b] - when the game crashes, OpenShim now saves a small dump file next to the crash log (the newest 3 are kept). Turn it off under [b]System > Crash Dumps[/b].
-[*] [b]Commander tools[/b] - optional RTS helpers: queued orders and builds, an idle-unit key, range rings, radar pings, quick commands from the cockpit, a satellite follow camera, markers on units under attack, and build badges on factories.
-[*] [b]New screens and options[/b] - a [b]Database[/b] screen in Single Player with a live 3D unit preview, and a mission briefing panel in the multiplayer lobby. Off by default: weapon loadout choices when building, and hull scorch marks (DirectX 11). For modders: tracked vehicles.
-[*] [b]Small fixes[/b] - music no longer skips like a scratched CD, and the hit marker flashes red on a kill.
 [/list]
 
 [h2]Ways to Play Online[/h2]
@@ -56,7 +43,7 @@ These are known problems we are still tracking down. Detailed reports and log fi
 
 [list]
 [*] [b]Host leaving[/b] - when the host leaves, the host's own team's units still vanish.
-[*] [b]Scoreboard[/b] - some kills credited to the wrong player. (Sniper kills by the host are fixed for the next update.)
+[*] [b]Scoreboard[/b] - some kills credited to the wrong player. (Sniper kills by the host are fixed in 1.0.0.78.)
 [*] [b]Free camera[/b] - players in a match can sometimes use a free camera they shouldn't have.
 [*] [b]Bad connections[/b] - long stalls when packet loss is heavy.
 [*] [b]Real-world testing[/b] - co-op is tested heavily on one PC; we need more sessions between real PCs, on Steam, and on Linux/Steam Deck (Proton).
@@ -91,6 +78,7 @@ Steam hosting from your own PC is now in the release (see Ways to Play Online). 
 [h2]Recent Updates[/h2]
 
 [list]
+[*] [b]2026-11-22 (1.0.0.78)[/b] - Multiplayer: splinter shells no longer appear twice (each player's game fired its own copy of the payload), and the host's sniper kills are scored and announced again. Fixed crashes when a mission script error box opened while units were being removed and when drawing a unit that had just been destroyed, missions that froze reading their objective list, an emptied weapon slot that stayed selected, and build menu colors for teams 3 and up, with more guards against bad positions, terrain zones and objective lists. Fixed: model files were left open after each mission, slowly using up memory over a long session. After a crash, OpenShim saves a small dump file next to the crash log (newest 3 kept; off under [b]System > Crash Dumps[/b]). Optional commander tools: queued orders and builds, an idle-unit key, range rings, radar pings, cockpit quick commands, a satellite follow camera, markers on units under attack and build badges on factories. New: a [b]Database[/b] screen in Single Player with a live 3D unit preview, and a mission briefing panel in the multiplayer lobby. Off by default: weapon loadout choices when building, and hull scorch marks (DirectX 11). For modders: tracked vehicles. Music no longer skips like a scratched CD, and the hit marker flashes red on a kill.
 [*] [b]2026-11-16 (1.0.0.77)[/b] - Fixed: Daywrecker hits no longer push tall spikes out of the terrain. OpenShim's own menus and messages are now translated into French, German, Spanish, Italian, Russian and Portuguese, following the game's language setting. HUD fade is smarter: the radar stays solid while an enemy is on it, and each panel wakes when its value changes. Ctrl+= hides or shows the whole HUD. The laser sight now only appears on cannons, rockets and mortars. In single player, pressing a group's F-key again lists its members, and an optional Extended Unit Cap (off by default) lets you build more than 10 offensive units, kept in F1-F7 groups. Several Options rows were merged or renamed and have clearer descriptions; Emissive Pulse and Empty Craft Glow became one Dynamic Emissives switch, which moved to the Campaign Reimagined PDA along with Star Twinkle. Fixed: rare background errors while models were being prepared for GPU skinning, and the no-sign-in LAN host reporting the network as not ready. Campaign Reimagined: the four campaigns are now listed as "Campaign Reimagined: NSDF", "Black Dog", "Chinese (CRA)" and "Soviet (CCA)", each with its own thumbnail and description, and the first two briefings of each campaign explain the PDA (press X) and its subtitle options.
 [*] [b]2026-11-15 (1.0.0.76)[/b] - A big update, which also brings everything listed under 1.0.0.75 below. New: quick save and load (Ctrl+Home / Ctrl+End), rally points for the Recycler and Factory (V sets, Shift+V clears), turret tanks that can be ordered to attack, and an optional laser sight and unit auto-grouping. Campaign Reimagined gets a rebuilt look for explosions, weapon hits, ordnance and ground kick-up, the Fury Walker and Fury turret, dropship cutscenes, an enemies-only Shield Tower for Constructors, tougher CCA missions and a co-op team strip. Fixed: an intermittent crash at the end of the second or third mission of a session, two GPU hangs in later missions, terrain going flat after a graphics-driver reset, and several other crashes. Autosave is now off unless your openshim.ini turns it on.
 [*] [b]2026-11-10 (included in 1.0.0.76)[/b] - DirectX 11 can run fullscreen as a borderless window: [b]Options > OpenShim > DX11 Borderless Fullscreen[/b] (off by default, restart required), so Alt-Tab no longer switches display mode. Alt-Enter on DirectX 11 now fills the screen instead of leaving a small window in a corner. Fixes a DirectX 11 crash when a fading or see-through object used an old mod material, and Emissive Pulse works on Enhanced DX11 again.
