@@ -231,15 +231,44 @@ function Get-GameDirFromCommand {
 # admin) - but the 2026-08-03 map-load crash produced no dump and nobody knew
 # none could exist until the bundle was already the only evidence. Now the
 # bundle says so itself.
-function Get-CrashCaptureStatus {
+# OpenShim's own crash logger writes logs\openshim_crash_<time>.dmp for the
+# crashes it can catch (not __fastfail) unless [Diagnostics] CrashMinidumps = 0
+# or OPENSHIM_DISABLE_CRASH_DUMP / OPENSHIM_DISABLE_CRASH_LOGGER is set.
+function Get-ShimMinidumpEnabled([string]$GameDir) {
+    foreach ($name in @("OPENSHIM_DISABLE_CRASH_LOGGER", "OPENSHIM_DISABLE_CRASH_DUMP", "BZR_DISABLE_CRASH_DUMP")) {
+        $v = [Environment]::GetEnvironmentVariable($name)
+        if ($v -and $v -ne "0") { return $false }
+    }
+    if (-not $GameDir) { return $true }
+    $ini = Join-Path $GameDir "openshim.ini"
+    if (-not (Test-Path -LiteralPath $ini)) { return $true }
+    $section = ""
+    foreach ($line in (Get-Content -LiteralPath $ini -ErrorAction SilentlyContinue)) {
+        $t = $line.Trim()
+        if ($t -match '^\[(.+)\]$') { $section = $Matches[1]; continue }
+        if ($section -eq "Diagnostics" -and $t -match '^CrashMinidumps\s*=\s*([^;#\s]+)') {
+            return -not ($Matches[1] -match '^(0|false|off|no)$')
+        }
+    }
+    return $true
+}
+
+function Get-CrashCaptureStatus([string]$GameDir) {
+    $shim = if (Get-ShimMinidumpEnabled $GameDir) { "shim-minidump" } else { "" }
+    $os = ""
     $wer = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" -ErrorAction SilentlyContinue
-    if ($wer) { return "wer-localdumps" }
-    $candidates = @(
-        (Get-Command procdump.exe -ErrorAction SilentlyContinue | ForEach-Object { $_.Source }),
-        "C:\Program Files\Sysinternals\procdump.exe",
-        "C:\Sysinternals\procdump.exe"
-    ) | Where-Object { $_ -and (Test-Path $_) }
-    if ($candidates.Count -gt 0) { return "procdump-available-not-armed (run tester_diag to arm it)" }
+    if ($wer) { $os = "wer-localdumps" }
+    else {
+        $candidates = @(
+            (Get-Command procdump.exe -ErrorAction SilentlyContinue | ForEach-Object { $_.Source }),
+            "C:\Program Files\Sysinternals\procdump.exe",
+            "C:\Sysinternals\procdump.exe"
+        ) | Where-Object { $_ -and (Test-Path $_) }
+        if ($candidates.Count -gt 0) { $os = "procdump-available-not-armed (run tester_diag to arm it)" }
+    }
+    if ($shim -and $os) { return "$shim+$os" }
+    if ($shim) { return "$shim (no OS capture: __fastfail and loader crashes leave no dump; enable WER LocalDumps or procdump + tester_diag)" }
+    if ($os) { return $os }
     return "NONE (a crash leaves no dump; enable WER LocalDumps or install procdump + tester_diag)"
 }
 
@@ -255,11 +284,14 @@ function Test-Crashed {
 # Separate a missing clean-exit marker from actual exception evidence. The
 # crash logger creates a fresh, empty openshim_crash.log on every launch, so
 # existence and mtime alone are not evidence that an exception occurred.
+# A log of only [FIRST-CHANCE] lines records handled faults: with exit 0, no
+# [CRASH] record and no fresh dump the session is not a crash.
 function Get-TerminationKind {
     param(
         [string]$LogPath,
         [int]$ExitCode,
-        [bool]$HasExceptionEvidence
+        [bool]$HasExceptionEvidence,
+        [bool]$HasCrashRecord = $HasExceptionEvidence
     )
 
     if (-not (Test-Crashed $LogPath)) {
@@ -267,7 +299,10 @@ function Get-TerminationKind {
         return "clean"
     }
 
-    if ($HasExceptionEvidence) { return "crash-with-exception" }
+    if ($HasExceptionEvidence) {
+        if (-not $HasCrashRecord -and $ExitCode -eq 0) { return "clean-with-handled-faults" }
+        return "crash-with-exception"
+    }
     if ($ExitCode -eq 130) { return "interrupted-sigint" }
     if ($ExitCode -eq -1073741510) { return "interrupted-console-control" }
     return "abrupt-exit"
@@ -427,7 +462,7 @@ function New-BundleAndUpload {
         "hostname=$host_"
         "start_utc=$StartUtc"
         "overrides=$($SessionOverrides -join ' ')"
-        "crash_capture=$(Get-CrashCaptureStatus)"
+        "crash_capture=$(Get-CrashCaptureStatus $GameDir)"
         "end_utc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
         "end_local=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
         "utc_offset_seconds=$offset"
@@ -516,10 +551,13 @@ function New-BundleAndUpload {
                             $shimCrashInfo.LastWriteTimeUtc -ge $SessionStart
     }
     $hasExceptionEvidence = $hasFreshCrashLog -or $hasFreshDump
+    $hasCrashRecord = $hasFreshDump -or ($hasFreshCrashLog -and
+        [bool](Select-String -LiteralPath $shimCrashSource -SimpleMatch '[CRASH]' -Quiet -ErrorAction SilentlyContinue))
     $terminationKind = Get-TerminationKind `
         -LogPath (Join-Path $bundle "BZLogger.txt") `
         -ExitCode $ExitCode `
-        -HasExceptionEvidence $hasExceptionEvidence
+        -HasExceptionEvidence $hasExceptionEvidence `
+        -HasCrashRecord $hasCrashRecord
     @(
         "termination_kind=$terminationKind"
         "exception_evidence=$([int]$hasExceptionEvidence)"
@@ -528,6 +566,7 @@ function New-BundleAndUpload {
     $statusFlag = switch ($terminationKind) {
         "clean"                { "" }
         "clean-with-exception" { " **EXCEPTION** (handled; game logged a clean exit)" }
+        "clean-with-handled-faults" { " **HANDLED FAULTS** (first-chance only; exit 0, no crash record or dump)" }
         "crash-with-exception" { " **CRASH** (non-empty OpenShim crash evidence)" }
         "interrupted-sigint"   { " **INTERRUPTED** (SIGINT)" }
         "interrupted-console-control" { " **INTERRUPTED** (console control event)" }

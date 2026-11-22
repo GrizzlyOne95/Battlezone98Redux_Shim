@@ -221,6 +221,35 @@ check_line "$META" 'coredump_match=not-attempted-clean-termination'
 check_line "$META" 'coredump_backtrace=not-attempted'
 [[ ! -s "$FAKE_CALL_LOG" ]] || { echo 'FAIL: clean termination queried coredumpctl' >&2; failures=$((failures + 1)); }
 
+new_case handled_faults
+OPENSHIM_COREDUMPCTL_BIN="$test_root/fake-coredumpctl"     collect_systemd_coredump "$CASE_DIR" "$META" /games/BZR 1000 1100 clean-with-handled-faults
+check_line "$META" 'coredump_match=not-attempted-clean-termination'
+[[ ! -s "$FAKE_CALL_LOG" ]] || { echo 'FAIL: handled-faults session queried coredumpctl' >&2; failures=$((failures + 1)); }
+
+# Termination labels: only first-chance entries with exit 0 is not a crash.
+ABRUPT_LOG="$test_root/abrupt_BZLogger.txt"
+CLEAN_LOG="$test_root/clean_BZLogger.txt"
+printf 'Launching Network Game
+' >"$ABRUPT_LOG"
+printf 'Exiting Game With Return Code 0
+' >"$CLEAN_LOG"
+check_kind() {
+    local expected="$1" actual
+    shift
+    actual="$(classify_termination "$@")"
+    if [[ "$actual" != "$expected" ]]; then
+        echo "FAIL: classify_termination $* gave $actual, expected $expected" >&2
+        failures=$((failures + 1))
+    fi
+}
+check_kind clean-with-handled-faults 0 "$ABRUPT_LOG" 1 0
+check_kind crash-with-exception 0 "$ABRUPT_LOG" 1 1
+check_kind crash-with-exception 1 "$ABRUPT_LOG" 1 0
+check_kind crash-with-exception 0 "$ABRUPT_LOG" 1
+check_kind abrupt-exit 0 "$ABRUPT_LOG" 0 0
+check_kind clean-with-exception 0 "$CLEAN_LOG" 1 0
+check_kind clean 0 "$CLEAN_LOG" 0 0
+
 if (( failures > 0 )); then
     echo "$failures openshim coredump test(s) failed" >&2
     exit 1

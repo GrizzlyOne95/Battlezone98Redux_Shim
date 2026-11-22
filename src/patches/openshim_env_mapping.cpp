@@ -121,6 +121,13 @@ namespace
                                 const IniReader& ini,
                                 std::string& out)
     {
+        // Crash minidumps: on unless [Diagnostics] CrashMinidumps = 0.
+        if (Equals(name, "OPENSHIM_DISABLE_CRASH_DUMP") ||
+            Equals(name, "BZR_DISABLE_CRASH_DUMP"))
+        {
+            return TryReadMappedBool(ini, "Diagnostics", "CrashMinidumps", true, out);
+        }
+
         // Startup / patcher diagnostics.
         if (Equals(name, "OPENSHIM_TRACE_HITS"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceHookHits", false, out);
@@ -728,6 +735,11 @@ namespace EnvConfig
                Equals(name, "OPENSHIM_BZRNET_TRACE_QUEUE") ||
                Equals(name, "OPENSHIM_RELAY_LOG_ALL_CONTROL") ||
                Equals(name, "OPENSHIM_RELAY_LOG_DATAGRAMS") ||
+               // The crash-dump kill switch predates [Diagnostics]
+               // CrashMinidumps, which ships as 1; a set variable must still
+               // turn dumps off.
+               Equals(name, "OPENSHIM_DISABLE_CRASH_DUMP") ||
+               Equals(name, "BZR_DISABLE_CRASH_DUMP") ||
                // Keep relief harness On/Off controls independent of the saved
                // UI choice, including a flat control with a saved On value.
                Equals(name, "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST");

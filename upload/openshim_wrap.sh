@@ -438,7 +438,7 @@ collect_systemd_coredump() {
     echo "coredump_capture=$availability" >>"$meta"
 
     case "$termination" in
-        clean|clean-with-exception)
+        clean|clean-with-exception|clean-with-handled-faults)
             echo "coredump_match=not-attempted-clean-termination" >>"$meta"
             echo "coredump_metadata=not-captured" >>"$meta"
             echo "coredump_backtrace=not-attempted" >>"$meta"
@@ -630,8 +630,11 @@ detect_crash() {
 # is what a terminal Ctrl+C produced in PiercingXX's 2026-09-13 bundle while
 # the game was still writing normal lobby telemetry. A non-empty, session-fresh
 # OpenShim crash report is independent evidence and gets its own classification.
+# A crash log holding only [FIRST-CHANCE] lines records faults that were
+# handled: with exit 0, no [CRASH] record and no fresh dump the session is not
+# a crash (KingFurykiller's 2026-11 bundles ran on for 15-20 minutes).
 classify_termination() {
-    local exit_code="$1" logfile="$2" exception_evidence="$3"
+    local exit_code="$1" logfile="$2" exception_evidence="$3" crash_record="${4:-$3}"
 
     if ! detect_crash "$logfile"; then
         if [[ "$exception_evidence" == "1" ]]; then
@@ -643,7 +646,11 @@ classify_termination() {
     fi
 
     if [[ "$exception_evidence" == "1" ]]; then
-        echo "crash-with-exception"
+        if [[ "$crash_record" != "1" && "$exit_code" == "0" ]]; then
+            echo "clean-with-handled-faults"
+        else
+            echo "crash-with-exception"
+        fi
         return 0
     fi
 
@@ -921,16 +928,17 @@ collect_and_upload() {
     # Existence and a fresh mtime therefore prove only that OpenShim started;
     # require content (or a fresh dump) before calling it exception evidence.
     # Check the source because cp gives the bundled copy a current timestamp.
-    local exception_evidence=0 crash_log_source
+    local exception_evidence=0 crash_record=0 crash_log_source
     crash_log_source="$(harvested_path "$game_dir" "openshim_crash.log" || true)"
     if [[ -n "$crash_log_source" && -s "$crash_log_source" && -n "${start_epoch:-}" ]] && \
        (( $(stat -c %Y "$crash_log_source" 2>/dev/null || echo 0) >= start_epoch )); then
         exception_evidence=1
+        grep -q '\[CRASH\]' "$crash_log_source" 2>/dev/null && crash_record=1
     fi
-    (( fresh_dump_count > 0 )) && exception_evidence=1
+    (( fresh_dump_count > 0 )) && exception_evidence=1 && crash_record=1
 
     local termination_kind status_flag="" map duration
-    termination_kind="$(classify_termination "$exit_code" "$bundle/BZLogger.txt" "$exception_evidence")"
+    termination_kind="$(classify_termination "$exit_code" "$bundle/BZLogger.txt" "$exception_evidence" "$crash_record")"
     echo "termination_kind=$termination_kind" >>"$bundle/meta.txt"
     echo "exception_evidence=$exception_evidence" >>"$bundle/meta.txt"
     collect_systemd_coredump "$bundle" "$bundle/meta.txt" "$game_dir" \
@@ -940,6 +948,8 @@ collect_and_upload() {
         clean) ;;
         clean-with-exception)
             status_flag=" **EXCEPTION** (handled; game logged a clean exit)" ;;
+        clean-with-handled-faults)
+            status_flag=" **HANDLED FAULTS** (first-chance only; exit 0, no crash record or dump)" ;;
         interrupted-sigint)
             status_flag=" **INTERRUPTED** (SIGINT)" ;;
         terminated-sigterm)

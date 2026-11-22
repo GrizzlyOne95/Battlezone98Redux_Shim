@@ -1156,6 +1156,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Pack the logs, settings and newest crash dump into one zip in the game's logs folder "
       "for a bug report. Traces and the dump can hold player names, addresses and session "
       "data, so send it privately. It is built in the background and named here when ready." },
+    { "Crash Dumps", "Diagnostics", "CrashMinidumps", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "Write a small minidump to the logs folder when the game crashes, keeping the newest 3. "
+      "Dumps stay on this PC and are never uploaded; send one with a bug report only if you "
+      "choose to. Restart required." },
 };
 
 // Reset to Stock writes these values, by canonical key, and nothing else.
@@ -1246,4 +1252,5 @@ static const char* const kShimSettingsStockKeepKeys[] =
     "ReticleColor", "ReticleSize", "ReticleThickness", "ReticleOutline", "ReticleOpacity",
     "HitMarkerDuration", "HitMarkerColor", "HitMarkerSize", "HitMarkerOpacity", "StockReticleShader",
     "IntervalSeconds", "BackupExisting", "PilotFlashlightColor", "PilotFlashlightBeam",
+    "CrashMinidumps",
 };

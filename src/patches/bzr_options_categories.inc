@@ -83,7 +83,7 @@ static const char* const kShimCategoryNetwork[] = {
     "MP Setup Screen", "Map Letter Jump", "Block Free Camera", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
     kShimRowUpdateCheck, "Auto-Install", "Skip Launcher", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
-    "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching", "Briefing Pages", "Database" };
+    "Crash Dumps", "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching", "Briefing Pages", "Database" };
 
 struct ShimSettingsCategory
 {

@@ -1261,3 +1261,5 @@ openshim_add_test(rts_placement_policy_tests STD 20 SOURCES rts_placement_policy
 openshim_add_test(rts_order_queue_policy_tests STD 20 SOURCES rts_order_queue_policy_tests.cpp)
 openshim_add_test(rts_build_queue_policy_tests STD 20 SOURCES rts_build_queue_policy_tests.cpp)
 openshim_add_test(unit_loadouts_policy_tests STD 20 SOURCES unit_loadouts_policy_tests.cpp)
+openshim_add_test(crash_dump_retention_tests STD 14 SOURCES crash_dump_retention_tests.cpp)
+openshim_add_test(crash_av_classify_tests STD 14 SOURCES crash_av_classify_tests.cpp)

@@ -1884,6 +1884,14 @@ LoadKey = Ctrl+End
 
 [Diagnostics]
 
+; Crash minidumps: when the game crashes, OpenShim writes
+; logs\openshim_crash_<date>_<time>.dmp (stacks, registers and loaded modules;
+; typically well under 1 MB) beside openshim_crash.log and keeps the newest 3.
+; The dumps stay on this PC: OpenShim never uploads them. Send one only if you
+; choose to, with your bug report (the opt-in bug-report zip includes this
+; session's dump). Accepted: boolean. Default: ON. Env override: OPENSHIM_DISABLE_CRASH_DUMP=1.
+CrashMinidumps = 1
+
 ; Per-gib SkinnedGibs log lines (mesh, bone, launch position and velocity) and
 ; an unbudgeted [SKINNEDGIBS] summary for every person death.
 ; Accepted: boolean. Default: OFF.
