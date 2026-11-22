@@ -126,7 +126,9 @@ void FreeRealWinmm()
 //
 // The first rebuild in a process is safe (the list is still empty), so
 // answering repeat calls from a cache keeps dinput from rebuilding again on
-// each menu return. The cache is dropped when a HID device interface arrives
+// each menu return. This narrows the overrun to the first menu return after a
+// HID device change (the stock path); it cannot remove it, and joyGetPosEx
+// on an open joystick can still reach the same rebuild. The cache is dropped when a HID device interface arrives
 // or is removed, or when joyConfigChanged is called, so a joystick plugged in
 // mid-session still shows up on the next menu return, as it did before. If
 // the device-change notification cannot be registered, nothing is cached and
@@ -148,21 +150,51 @@ namespace
     SRWLOCK g_joyCacheLock = SRWLOCK_INIT;
     JoyCapsCacheEntry g_joyCache[kJoyCacheSlots] = {};
     volatile LONG g_joyGeneration = 0;
+    volatile LONG g_joyChangeTick = 0; // GetTickCount() of the last bump
     LONG g_joyLoggedGeneration = -1;
     INIT_ONCE g_joyNotifyOnce = INIT_ONCE_STATIC_INIT;
     bool g_joyNotifyRegistered = false;
 
+    // After a device change every call is forwarded for this long. dinput
+    // only rebuilds its HID list every 20 s, and a new device may not open
+    // straight away, so an answer cached right after an arrival could stay
+    // "unplugged" until the next change.
+    constexpr DWORD kJoyRefreshWindowMs = 30000;
+
+    void BumpJoyGeneration()
+    {
+        InterlockedExchange(&g_joyChangeTick, static_cast<LONG>(GetTickCount()));
+        InterlockedIncrement(&g_joyGeneration);
+    }
+
+    bool InJoyRefreshWindow()
+    {
+        if (InterlockedCompareExchange(&g_joyGeneration, 0, 0) == 0)
+            return false;
+        const DWORD since = GetTickCount() - static_cast<DWORD>(InterlockedCompareExchange(&g_joyChangeTick, 0, 0));
+        return since < kJoyRefreshWindowMs;
+    }
+
     DWORD CALLBACK JoyHidChangeCallback(HCMNOTIFICATION, PVOID, CM_NOTIFY_ACTION action, PCM_NOTIFY_EVENT_DATA, DWORD)
     {
         if (action == CM_NOTIFY_ACTION_DEVICEINTERFACEARRIVAL || action == CM_NOTIFY_ACTION_DEVICEINTERFACEREMOVAL)
-            InterlockedIncrement(&g_joyGeneration);
+            BumpJoyGeneration();
         return ERROR_SUCCESS;
     }
 
     BOOL CALLBACK RegisterJoyHidNotification(PINIT_ONCE, PVOID, PVOID*)
     {
-        // Resolved at run time so the bootstrap gains no new import; Wine
-        // builds without CM_Register_Notification fall back to no caching.
+        // The dinput overrun is a Windows bug, and a Wine stub that reports
+        // success but never fires would freeze the cache, so Wine forwards.
+        HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+        if (ntdll && GetProcAddress(ntdll, "wine_get_version"))
+        {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "winmm", "joyGetDevCapsA cache off: Wine");
+            return TRUE;
+        }
+
+        // Resolved at run time so the bootstrap gains no new import; systems
+        // without CM_Register_Notification fall back to no caching.
         using RegisterFn = CONFIGRET(WINAPI*)(PCM_NOTIFY_FILTER, PVOID, PCM_NOTIFY_CALLBACK, PHCMNOTIFICATION);
         HMODULE cfgmgr = LoadLibraryExW(L"cfgmgr32.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
         auto registerFn = cfgmgr ? reinterpret_cast<RegisterFn>(GetProcAddress(cfgmgr, "CM_Register_Notification")) : nullptr;
@@ -352,7 +384,7 @@ extern "C"
     WINMMAPI MMRESULT WINAPI joyGetDevCapsA(UINT_PTR a, LPJOYCAPSA b, UINT c)
     {
         InitOnceExecuteOnce(&g_joyNotifyOnce, RegisterJoyHidNotification, nullptr, nullptr);
-        if (!g_joyNotifyRegistered || a >= kJoyCacheSlots || !b || c != sizeof(JOYCAPSA))
+        if (!g_joyNotifyRegistered || a >= kJoyCacheSlots || !b || c != sizeof(JOYCAPSA) || InJoyRefreshWindow())
             return ForwardJoyGetDevCapsA(a, b, c);
 
         AcquireSRWLockExclusive(&g_joyCacheLock);
@@ -386,10 +418,16 @@ extern "C"
     WINMMAPI MMRESULT WINAPI joyReleaseCapture(UINT a)                                               { FORWARD(joyReleaseCapture, MMSYSERR_NOTSUPPORTED, (a)); }
     WINMMAPI MMRESULT WINAPI joySetCapture(HWND a, UINT b, UINT c, BOOL d)                          { FORWARD(joySetCapture, MMSYSERR_NOTSUPPORTED, (a,b,c,d)); }
     WINMMAPI MMRESULT WINAPI joySetThreshold(UINT a, UINT b)                                        { FORWARD(joySetThreshold, MMSYSERR_NOTSUPPORTED, (a,b)); }
+    static MMRESULT ForwardJoyConfigChanged(DWORD a)                                                 { FORWARD(joyConfigChanged, MMSYSERR_NOTSUPPORTED, (a)); }
+
     WINMMAPI MMRESULT WINAPI joyConfigChanged(DWORD a)
     {
-        InterlockedIncrement(&g_joyGeneration); // drop the joyGetDevCapsA cache
-        FORWARD(joyConfigChanged, MMSYSERR_NOTSUPPORTED, (a));
+        // Drop the joyGetDevCapsA cache before and after, so a call racing
+        // the forward cannot keep the old answer.
+        BumpJoyGeneration();
+        const MMRESULT result = ForwardJoyConfigChanged(a);
+        BumpJoyGeneration();
+        return result;
     }
 
     WINMMAPI UINT  WINAPI mmsystemGetVersion()         { FORWARD(mmsystemGetVersion, 0, ()); }
