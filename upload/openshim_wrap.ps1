@@ -229,15 +229,44 @@ function Get-GameDirFromCommand {
 # admin) - but the 2026-08-03 map-load crash produced no dump and nobody knew
 # none could exist until the bundle was already the only evidence. Now the
 # bundle says so itself.
-function Get-CrashCaptureStatus {
+# OpenShim's own crash logger writes logs\openshim_crash_<time>.dmp for the
+# crashes it can catch (not __fastfail) unless [Diagnostics] CrashMinidumps = 0
+# or OPENSHIM_DISABLE_CRASH_DUMP / OPENSHIM_DISABLE_CRASH_LOGGER is set.
+function Get-ShimMinidumpEnabled([string]$GameDir) {
+    foreach ($name in @("OPENSHIM_DISABLE_CRASH_LOGGER", "OPENSHIM_DISABLE_CRASH_DUMP", "BZR_DISABLE_CRASH_DUMP")) {
+        $v = [Environment]::GetEnvironmentVariable($name)
+        if ($v -and $v -ne "0") { return $false }
+    }
+    if (-not $GameDir) { return $true }
+    $ini = Join-Path $GameDir "openshim.ini"
+    if (-not (Test-Path -LiteralPath $ini)) { return $true }
+    $section = ""
+    foreach ($line in (Get-Content -LiteralPath $ini -ErrorAction SilentlyContinue)) {
+        $t = $line.Trim()
+        if ($t -match '^\[(.+)\]$') { $section = $Matches[1]; continue }
+        if ($section -eq "Diagnostics" -and $t -match '^CrashMinidumps\s*=\s*([^;#\s]+)') {
+            return -not ($Matches[1] -match '^(0|false|off|no)$')
+        }
+    }
+    return $true
+}
+
+function Get-CrashCaptureStatus([string]$GameDir) {
+    $shim = if (Get-ShimMinidumpEnabled $GameDir) { "shim-minidump" } else { "" }
+    $os = ""
     $wer = Get-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps" -ErrorAction SilentlyContinue
-    if ($wer) { return "wer-localdumps" }
-    $candidates = @(
-        (Get-Command procdump.exe -ErrorAction SilentlyContinue | ForEach-Object { $_.Source }),
-        "C:\Program Files\Sysinternals\procdump.exe",
-        "C:\Sysinternals\procdump.exe"
-    ) | Where-Object { $_ -and (Test-Path $_) }
-    if ($candidates.Count -gt 0) { return "procdump-available-not-armed (run tester_diag to arm it)" }
+    if ($wer) { $os = "wer-localdumps" }
+    else {
+        $candidates = @(
+            (Get-Command procdump.exe -ErrorAction SilentlyContinue | ForEach-Object { $_.Source }),
+            "C:\Program Files\Sysinternals\procdump.exe",
+            "C:\Sysinternals\procdump.exe"
+        ) | Where-Object { $_ -and (Test-Path $_) }
+        if ($candidates.Count -gt 0) { $os = "procdump-available-not-armed (run tester_diag to arm it)" }
+    }
+    if ($shim -and $os) { return "$shim+$os" }
+    if ($shim) { return "$shim (no OS capture: __fastfail and loader crashes leave no dump; enable WER LocalDumps or procdump + tester_diag)" }
+    if ($os) { return $os }
     return "NONE (a crash leaves no dump; enable WER LocalDumps or install procdump + tester_diag)"
 }
 
@@ -425,7 +454,7 @@ function New-BundleAndUpload {
         "hostname=$host_"
         "start_utc=$StartUtc"
         "overrides=$($SessionOverrides -join ' ')"
-        "crash_capture=$(Get-CrashCaptureStatus)"
+        "crash_capture=$(Get-CrashCaptureStatus $GameDir)"
         "end_utc=$((Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))"
         "end_local=$((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))"
         "utc_offset_seconds=$offset"

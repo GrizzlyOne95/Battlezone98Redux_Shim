@@ -10,7 +10,11 @@ namespace BZROpenShim
     // Opt-outs:
     //   OPENSHIM_DISABLE_CRASH_LOGGER=1  - install nothing
     //   OPENSHIM_DISABLE_CRASH_VEH=1     - skip the first-chance vectored logger
-    //   OPENSHIM_DISABLE_CRASH_DUMP=1    - skip minidump writing
+    //   OPENSHIM_DISABLE_CRASH_DUMP=1    - skip minidump writing ([Diagnostics]
+    //                                      CrashMinidumps = 0; default on, newest 3 kept)
+    //   OPENSHIM_DISABLE_CRASH_CRT_HANDLERS=1 - skip the purecall / invalid parameter /
+    //                                      terminate / SIGABRT handlers
+    // A stack overflow is reported from a watcher thread made here.
     void InstallCrashLogger();
 
     // For a deliberate fail-closed exit (no exception, no dump): appends

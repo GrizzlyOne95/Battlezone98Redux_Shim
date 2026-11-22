@@ -150,6 +150,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # had to enable beforehand would never be enabled in time to catch it.
     "Diagnostics/LogMultiplayerReadiness",
 
+    # Pure crash logging: a minidump is written only when the game has
+    # already crashed, stays on the player's PC, and keeps 3 files. On by
+    # default so the first crash a player hits is already captured.
+    "Diagnostics/CrashMinidumps",
+
     # Display-only, and the shell already carries the machinery: it has
     # always had a status line beside the multiplayer entry, but stock can
     # never fill it because the readiness getter returns one bit. This ships
@@ -693,6 +698,7 @@ $shippingPolicyChecks = @{
     "Gameplay/RtsFollowCamera" = "0"
     # Diagnostic: unmasks FP exceptions on the main thread; never ship on.
     "Diagnostics/FpTrapLog" = "0"
+    "Diagnostics/CrashMinidumps" = "1"
     "ODF/CrashValueGuards" = "1"
     "ODF/LegacySectionRemap" = "1"
 }

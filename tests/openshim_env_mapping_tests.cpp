@@ -398,6 +398,20 @@ namespace
         Check(Lookup("OPENSHIM_TRACE_SUN_FLASH", &ini, env) == "0", "non-capture name is INI first");
 
         Check(IsCaptureOverrideName("bz_bzrnet_trace_queue"), "capture names match without case");
+
+        // Crash dumps: the ini key ships on, the old env kill switch still wins.
+        FakeIni dumpIni;
+        FakeEnv dumpEnv;
+        dumpIni.Set("Diagnostics", "CrashMinidumps", "1");
+        Check(Lookup("OPENSHIM_DISABLE_CRASH_DUMP", &dumpIni, dumpEnv) == "0", "CrashMinidumps = 1 leaves dumps on");
+        dumpIni.Set("Diagnostics", "CrashMinidumps", "0");
+        Check(Lookup("OPENSHIM_DISABLE_CRASH_DUMP", &dumpIni, dumpEnv) == "1", "CrashMinidumps = 0 turns dumps off");
+        dumpIni.Set("Diagnostics", "CrashMinidumps", "1");
+        dumpEnv.values["OPENSHIM_DISABLE_CRASH_DUMP"] = "1";
+        Check(Lookup("OPENSHIM_DISABLE_CRASH_DUMP", &dumpIni, dumpEnv) == "1", "the env kill switch beats CrashMinidumps = 1");
+        dumpEnv.values["OPENSHIM_DISABLE_CRASH_DUMP"] = "";
+        dumpEnv.values["BZR_DISABLE_CRASH_DUMP"] = "1";
+        Check(Lookup("BZR_DISABLE_CRASH_DUMP", &dumpIni, dumpEnv) == "1", "the BZR_ alias wins too");
         Check(!IsCaptureOverrideName("OPENSHIM_TRACE_HITS"), "trace flags are not capture names");
         Check(!IsCaptureOverrideName(nullptr), "null is not a capture name");
     }
