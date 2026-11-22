@@ -96,4 +96,11 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed a short hitch at every music track change. Stock decodes the first three seconds of each track twice and throws the first away.
 [*] Fixed a crash after a mission script removed an AI craft's selected weapon with GiveWeapon(h, nil, slot). Stock clears the weapon but leaves the slot marked selected, and code that walks the selected weapons then reads the empty slot. GiveWeapon also now refuses slots outside 0..4, which stock never rejected.
 [*] Fixed modded build menu items with a team of 3 or higher (or below 0) being drawn in a random colour in the build menu and the control panel. Stock reads past its three team colours; these items now draw red, like team 2 (white below 0).
+[*] Fixed DX11 renderer writing in a low resolution placeholder for ogre.cfg (1024 x 768)
+[*] Fixed DX11 trying to render on a side monitor instead of the primary monitor
+[/list]
+
+[h2] Other/Misc [/h2]
+[list]
+[*] Added option to suppress/skip the launcher on Steam
 [/list]
