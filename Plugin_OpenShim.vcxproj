@@ -318,6 +318,7 @@
     <ClCompile Include="src\patches\lua_formation_fix.cpp" />
     <ClCompile Include="src\patches\lua_getindependence_guard.cpp" />
     <ClCompile Include="src\patches\objective_cap_guard.cpp" />
+    <ClCompile Include="src\patches\handle_sequence_check.cpp" />
     <ClCompile Include="src\patches\anchor_drag_guard.cpp" />
     <ClCompile Include="src\patches\terrain_zone_guard.cpp" />
     <ClCompile Include="src\patches\nan_transform_guard.cpp" />
@@ -343,6 +344,7 @@
     <ClCompile Include="src\patches\native_cpu_sampler.cpp" />
     <ClCompile Include="src\patches\perf_telemetry.cpp" />
     <ClCompile Include="src\patches\soak_telemetry.cpp" />
+    <ClCompile Include="src\patches\fp_trap_log.cpp" />
     <ClCompile Include="src\patches\mode_stress_driver.cpp" />
     <ClCompile Include="src\patches\music_single_fill.cpp" />
     <ClCompile Include="src\patches\music_refill_catchup.cpp" />
@@ -580,6 +582,9 @@
     <ClInclude Include="include\perf_telemetry.h" />
     <ClInclude Include="include\soak_telemetry.h" />
     <ClInclude Include="include\soak_telemetry_policy.h" />
+    <ClInclude Include="include\fp_trap_log.h" />
+    <ClInclude Include="include\fp_trap_log_policy.h" />
+    <ClInclude Include="include\fp_trap_recovery.h" />
     <ClInclude Include="include\mode_stress_driver.h" />
     <ClInclude Include="include\mode_stress_plan.h" />
     <ClInclude Include="include\music_single_fill.h" />
@@ -612,6 +617,8 @@
     <ClInclude Include="include\lua_getindependence_guard_install.h" />
     <ClInclude Include="include\objective_cap_guard.h" />
     <ClInclude Include="include\objective_cap_guard_install.h" />
+    <ClInclude Include="include\handle_sequence_check.h" />
+    <ClInclude Include="include\handle_sequence_check_install.h" />
     <ClInclude Include="include\anchor_drag_guard.h" />
     <ClInclude Include="include\anchor_drag_guard_install.h" />
     <ClInclude Include="include\terrain_zone_guard.h" />

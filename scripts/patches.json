@@ -7056,6 +7056,24 @@
       "identity": "Objective list Remove, __thiscall(this, const char* name), on GOG Redux 2.2.301: finds the first entry whose name matches with _strnicmp(.., 16), frees its text with the engine's CRT free, count--, memmoves the tail down and zeroes the vacated last slot. objective_cap_guard.cpp calls it with a local copy of entry 0's name to drop the oldest objective; it is never patched."
     },
     {
+      "name": "GameObjectCtorSequenceAssign",
+      "address": "0x004DA247",
+      "expected": "8B 85 6C FF FF FF 8B 0D 60 86 8E 00 89 88 5C 01 00 00 8B 15 60 86 8E 00 83 C2 01 89 15 60 86 8E 00",
+      "identity": "Sequence assignment inside the GameObject constructor FUN_004DA0B0 on GOG Redux 2.2.301 (SHA256 8d71f56c...): mov eax,[ebp-0x94] (the new object) / mov ecx,[0x008E8660] / mov [eax+0x15C],ecx / mov edx,[0x008E8660] / add edx,1 / mov [0x008E8660],edx. Decompile: local_98[0x57] = DAT_008e8660; DAT_008e8660 = DAT_008e8660 + 1 (0x57*4 = 0x15C). The counter is stored unmasked and never saturates. handle_sequence_check.cpp only reads this row to prove the three abs32 operands name GameObjectSequenceCounter; it is never patched."
+    },
+    {
+      "name": "GameObjectHandleLookup",
+      "address": "0x004DA060",
+      "expected": "55 8B EC 83 EC 08 83 7D 08 00 75 04 33 C0 EB 39 8B 45 08 89 45 FC 8B 4D FC C1 E9 14 81 E1 FF 0F 00 00 C1 E1 0A 81 C1 20 DB 60 02 89 4D F8 8B 55 FC 81 E2 FF FF 0F 00 8B 45 F8 39 90 5C 01 00 00",
+      "identity": "Handle-to-object lookup FUN_004DA060 on GOG Redux 2.2.301: slot = (h >> 0x14) & 0xFFF, object = 0x0260DB20 + slot * 0x400, null unless [object+0x15C] == h & 0xFFFFF (cmp [eax+0x15C],edx). A raw sequence of 0x100000 or more can never pass this compare. handle_sequence_check.cpp binds it only as proof of the 20-bit compare; it is never patched."
+    },
+    {
+      "name": "GameObjectSequenceCounter",
+      "address": "0x008E8660",
+      "kind": "data",
+      "identity": "GameObject sequence counter (.data, initial value 1) on GOG Redux 2.2.301. Read and incremented only by the constructor site GameObjectCtorSequenceAssign (0x004DA24F/0x004DA25B/0x004DA264), returned by FUN_004D9C80 (BZN save writes it as seq_count from FUN_004FD190) and set by FUN_004D9C90 (BZN load FUN_004FC490). handle_sequence_check.cpp reads it once per rendered frame; never written."
+    },
+    {
       "name": "AnchorRocketLinearDragCompare",
       "address": "0x0046D9C3",
       "expected": "F3 0F 10 85 70 FF FF FF 0F 2F 85 6C FF FF FF 76 76",

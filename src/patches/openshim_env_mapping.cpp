@@ -368,6 +368,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "ObjectiveCapGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_HANDLE_SEQUENCE_CHECK") ||
+            Equals(name, "BZR_DISABLE_HANDLE_SEQUENCE_CHECK"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "HandleSequenceCheck", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_ANCHOR_DRAG_GUARD") ||
             Equals(name, "BZR_DISABLE_ANCHOR_DRAG_GUARD"))
         {

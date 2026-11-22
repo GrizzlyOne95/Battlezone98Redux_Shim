@@ -47,6 +47,7 @@
 #include "native_cpu_sampler.h"
 #include "perf_telemetry.h"
 #include "soak_telemetry.h"
+#include "fp_trap_log.h"
 #include "mode_stress_driver.h"
 #include "music_refill_catchup.h"
 #include "music_single_fill.h"
@@ -68,6 +69,7 @@
 #include "lua_formation_fix_install.h"
 #include "lua_getindependence_guard_install.h"
 #include "objective_cap_guard_install.h"
+#include "handle_sequence_check_install.h"
 #include "anchor_drag_guard_install.h"
 #include "terrain_zone_guard_install.h"
 #include "nan_transform_guard_install.h"
@@ -217,6 +219,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // [Fixes] ObjectiveCapGuard = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::ObjectiveCap::InstallObjectiveCapGuardIfPossible());
 
+    // Object handles keep 20 sequence bits; past ~1M creations new objects get
+    // handles the engine cannot resolve. Read-only: binds the byte-guarded
+    // counter so the frame callback can warn at 90% and at exhaustion.
+    // [Fixes] HandleSequenceCheck = 0 leaves it off.
+    PATCH_STAGE(BZROpenShim::HandleSequence::InstallHandleSequenceCheckIfPossible());
+
     // AnchorRocket drag on a stationary or near-stationary target with a
     // negative (custom ODF) drag divides by ~0 and writes NaN into its velocity
     // or spin; a negative drag also boosts without bound. Two byte-guarded
@@ -339,6 +347,9 @@ static unsigned __stdcall PatchThreadProc(void*)
     // Opt-in soak telemetry ([Diagnostics] SoakTelemetry): GPU-stall
     // watchdog, heartbeat and lighting-change lines. Dormant unless asked.
     PATCH_STAGE(BZROpenShim::InitializeSoakTelemetry());
+    // Opt-in floating-point trap logger ([Diagnostics] FpTrapLog): records
+    // where the main thread produces NaN/inf. Installs nothing unless asked.
+    PATCH_STAGE(BZROpenShim::InitializeFpTrapLog());
     // Release-qualification mode-transition stress driver. Dormant unless
     // OPENSHIM_MODE_STRESS_PLAN names a plan file.
     PATCH_STAGE(BZROpenShim::InitializeModeStressDriver());
@@ -445,6 +456,7 @@ namespace BZROpenShim
         BZROpenShim::ShutdownNativeCpuSampler();
         BZROpenShim::ShutdownPerfTelemetry();
         BZROpenShim::ShutdownSoakTelemetry();
+        BZROpenShim::ShutdownFpTrapLog("plugin shutdown");
         BZROpenShim::ShutdownModeStressDriver();
         BZROpenShim::ShutdownThreadScheduling();
         BZROpenShim::ShutdownOpenShimAssetSync();
