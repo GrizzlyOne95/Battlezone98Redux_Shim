@@ -731,6 +731,18 @@ TerrainHeightSampleGuard = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_NAN_TRANSFORM_GUARD
 NaNTransformGuard = 1
 
+; Score sniper kills on craft the shooter's own machine owns. In a network
+; game a sniper shell is resolved on the shooter's machine; stock only credits
+; the kill when the victim is owned by another machine (that machine records
+; it), so a host sniping host-owned AI, or anyone sniping a craft they own,
+; got no kill, no death and no ticker line. With this on, that case records the
+; death and kill and shows the 'sniped' ticker once, the way the victim's owner
+; does for a remote victim. Single player has no kill scoring and is unchanged.
+; Stands down on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_SNIPER_KILL_CREDIT
+SniperKillCredit = 1
+
 ; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
 ; stores a length above 30 in one extension byte, and the stock decoders read it
 ; signed: a Send string of 128..255 bytes faults every receiving peer (access

@@ -71,6 +71,7 @@
 #include "anchor_drag_guard_install.h"
 #include "terrain_zone_guard_install.h"
 #include "nan_transform_guard_install.h"
+#include "sniper_kill_credit_install.h"
 #include "lua_send_length_install.h"
 #include "mp_mission_end_sync_install.h"
 #include "mp_splinter_sync_install.h"
@@ -338,6 +339,10 @@ static unsigned __stdcall PatchThreadProc(void*)
     // detour. Byte-guarded and fail-closed; [Fixes] NaNTransformGuard = 0 leaves
     // the engine untouched.
     PATCH_STAGE(BZROpenShim::NanTransform::InstallNanTransformGuardIfPossible());
+    // Scores a snipe on a craft this machine owns (SniperShell::Hit IsLocal
+    // call redirect, network games only). Byte-guarded and fail-closed;
+    // [Fixes] SniperKillCredit = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::SniperKillCredit::InstallSniperKillCreditIfPossible());
     // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
     PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
     // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf

@@ -2007,8 +2007,10 @@ namespace BZROpenShim
         //     remote senders only) calls FUN_004b9ba0 (score notify,
         //     FUN_004b9ba0.c:8), the sole caller of RecordDeath.
         // UNVERIFIED: what FUN_005e1310(killedTeam) tests (FUN_00577290.c:18-19; a
-        // non-zero result skips the kill credit), and how the host's own snipe is
-        // scored (FUN_00573bb0.c:23-29 only sends when FUN_004b9800 returns a peer).
+        // non-zero result skips the kill credit).
+        //   A snipe on a craft the shooter's machine owns never reaches the
+        //   receiver (Hit only sends after IsRemote, 0x005D6FA3); it is scored by
+        //   sniper_kill_credit.cpp through RecordDeath, so it shows in this trace.
         static uintptr_t g_SnipeNotifyAddr = 0;
         static uintptr_t g_IncrementKillsAddr = 0;
         static InlineDetour32 g_SnipeNotifyDetour = {};

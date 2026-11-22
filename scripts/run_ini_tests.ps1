@@ -266,6 +266,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/TerrainHeightSampleGuard",
     # Only already-NaN/infinite object state is repaired; finite state is untouched.
     "Fixes/NaNTransformGuard",
+    # A snipe on a craft the shooter's machine owns is scored once, as the
+    # victim owner's receive handler does for a remote victim; MP only.
+    "Fixes/SniperKillCredit",
     # Lua Send lengths 128..255 decode unsigned; lengths above 255 are refused
     # by the sender instead of wrapping. Unpatched receivers still crash.
     "Fixes/LuaSendLengthUnsigned",
@@ -614,6 +617,7 @@ $shippingPolicyChecks = @{
     "Fixes/TerrainZoneTableGuard" = "1"
     "Fixes/TerrainHeightSampleGuard" = "1"
     "Fixes/NaNTransformGuard" = "1"
+    "Fixes/SniperKillCredit" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/MissionEndSync" = "1"
     "Fixes/DaywreckerArmoryCollision" = "1"
