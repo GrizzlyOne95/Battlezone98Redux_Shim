@@ -10,7 +10,7 @@ Ground rings that show RTS-style feedback for the local player. There are two fe
   - a blue max-range ring around every selected own-team howitzer (Howitzer vtables) that carries a gravity-ordnance cannon slot (at most 16 units); never around the piloted vehicle, whose mortar arc the laser sight already draws;
   - a 3 m ring at the aim point, green when at least one of those units can reach it and red when none can.
 
-The native range rings for selected units (direct-fire weapon, radar, own-team mine trigger, and the labels on them) are documented in `Docs/RTS_RANGE_RINGS.md`: `[Gameplay] RtsWeaponRange` (default on), `RtsRadarRange` and `RtsMineRange` (off), `RtsRangeLabels` (off). They use slots 167-222 of this pool.
+The native range rings for selected units (direct-fire weapon, radar, own-team mine trigger, and the labels on them) are documented in `Docs/RTS_RANGE_RINGS.md`: `[Gameplay] RtsWeaponRange`, `RtsRadarRange`, `RtsMineRange` and `RtsRangeLabels`, all off by default. They use slots 167-222 of this pool.
 
 Both features above are local visuals only:
 

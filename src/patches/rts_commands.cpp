@@ -18,7 +18,7 @@
 //     * X (RtsAreaSelectKey) adds the player's units of the same family as
 //       the reticle object (else the first selected unit) within 100 m;
 //       Shift+X within 200 m.
-//   [Gameplay] RtsHold (default 2: key and Shift menu; 1 key only; 0 off)
+//   [Gameplay] RtsHold (default 0 off; 1 key only; 2 key and Shift menu)
 //     * Z (RtsHoldKey) gives the selected units that have a Defend entry
 //       Defend(0) plus the native hold. With Shift held the Defend entry
 //       reads "Hold" and choosing it does the same. Single player only, like
