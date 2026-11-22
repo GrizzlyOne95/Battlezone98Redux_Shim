@@ -266,6 +266,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/TerrainHeightSampleGuard",
     # Only already-NaN/infinite object state is repaired; finite state is untouched.
     "Fixes/NaNTransformGuard",
+    # GiveWeapon(nil) also clears the emptied slot's selected bit, and slots
+    # outside 0..4 are refused; valid calls keep the stock path.
+    "Fixes/GiveWeaponNilClearsSelected",
+    # Build menu team colour index stays inside its 3 colours; teams 0..2 unchanged.
+    "Fixes/BuildMenuTeamColorClamp",
     # A snipe on a craft the shooter's machine owns is scored once, as the
     # victim owner's receive handler does for a remote victim; MP only.
     "Fixes/SniperKillCredit",
@@ -626,6 +631,8 @@ $shippingPolicyChecks = @{
     "Fixes/TerrainZoneTableGuard" = "1"
     "Fixes/TerrainHeightSampleGuard" = "1"
     "Fixes/NaNTransformGuard" = "1"
+    "Fixes/GiveWeaponNilClearsSelected" = "1"
+    "Fixes/BuildMenuTeamColorClamp" = "1"
     "Fixes/SniperKillCredit" = "1"
     "Fixes/HandleSequenceCheck" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"

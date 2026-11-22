@@ -322,6 +322,8 @@
     <ClCompile Include="src\patches\anchor_drag_guard.cpp" />
     <ClCompile Include="src\patches\terrain_zone_guard.cpp" />
     <ClCompile Include="src\patches\nan_transform_guard.cpp" />
+    <ClCompile Include="src\patches\give_weapon_selected_guard.cpp" />
+    <ClCompile Include="src\patches\build_menu_team_color.cpp" />
     <ClCompile Include="src\patches\sniper_kill_credit.cpp" />
     <ClCompile Include="src\patches\lua_send_length.cpp" />
     <ClCompile Include="src\patches\objective_objects_fix.cpp" />
@@ -627,6 +629,10 @@
     <ClInclude Include="include\terrain_zone_guard_install.h" />
     <ClInclude Include="include\nan_transform_guard.h" />
     <ClInclude Include="include\nan_transform_guard_install.h" />
+    <ClInclude Include="include\give_weapon_selected_guard.h" />
+    <ClInclude Include="include\give_weapon_selected_guard_install.h" />
+    <ClInclude Include="include\build_menu_team_color.h" />
+    <ClInclude Include="include\build_menu_team_color_install.h" />
     <ClInclude Include="include\sniper_kill_credit.h" />
     <ClInclude Include="include\sniper_kill_credit_install.h" />
     <ClInclude Include="include\lua_send_length.h" />

@@ -73,6 +73,8 @@
 #include "anchor_drag_guard_install.h"
 #include "terrain_zone_guard_install.h"
 #include "nan_transform_guard_install.h"
+#include "give_weapon_selected_guard_install.h"
+#include "build_menu_team_color_install.h"
 #include "sniper_kill_credit_install.h"
 #include "lua_send_length_install.h"
 #include "objective_objects_fix_install.h"
@@ -221,6 +223,18 @@ static unsigned __stdcall PatchThreadProc(void*)
     // [Fixes] ObjectiveCapGuard = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::ObjectiveCap::InstallObjectiveCapGuardIfPossible());
 
+    // GiveWeapon(h, nil, slot) left the slot's selected bit set on every craft
+    // but the player's, and readers of the selected mask then dereference the
+    // empty slot; its slot test also never rejected 5 or more. The nil arm now
+    // clears the bit through Carrier::SetSelected and slots outside 0..4 are
+    // refused. Byte-guarded and fail-closed; [Fixes] GiveWeaponNilClearsSelected
+    // = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::GiveWeaponSelected::InstallGiveWeaponSelectedGuardIfPossible());
+
+    // The build menu indexed its 3-entry team colour array with a team clamped
+    // to 0..3, so team 3+ drew in the stack cookie's colour. Clamp max becomes 2.
+    // Byte-guarded; [Fixes] BuildMenuTeamColorClamp = 0 leaves it stock.
+    PATCH_STAGE(BZROpenShim::BuildMenuTeamColor::InstallBuildMenuTeamColorIfPossible());
     // Object handles keep 20 sequence bits; past ~1M creations new objects get
     // handles the engine cannot resolve. Read-only: binds the byte-guarded
     // counter so the frame callback can warn at 90% and at exhaustion.
