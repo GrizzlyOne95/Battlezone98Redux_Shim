@@ -563,6 +563,15 @@ SeismicWaveExtentClamp = 1
 ; skips (does not draw) any single draw that cannot fit in the buffer.
 ; Accepted: boolean. Default: ON.
 DynamicAllocGuard = 1
+; Hold a Lua mission callback's error alert until the frame ends. Stock opens
+; its modal from inside the callback, and the modal keeps the world simulating
+; and rendering while, for example, DeleteObject has half torn its object down;
+; that can crash. Start/Update/GameKey/Create/Add/DeleteObject, the Player
+; callbacks and Receive log the error at once and show the same alert after
+; the frame (repeats collapsed). Other Lua errors are stock.
+; Accepted: boolean. Default: ON. Env override to disable:
+; OPENSHIM_NO_DEFER_LUA_CALLBACK_ALERT
+DeferLuaCallbackAlert = 1
 
 ; Clear a dead constructor's remote build state from AI_UnitRemove, so the
 ; build it was told to place does not outlive it.

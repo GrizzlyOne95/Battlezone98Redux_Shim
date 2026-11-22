@@ -226,6 +226,7 @@
     <ClCompile Include="src\patches\seismic_walker_velocity_scale.cpp" />
     <ClCompile Include="src\patches\seismic_wave_extent_clamp.cpp" />
     <ClCompile Include="src\patches\dynamic_alloc_guard.cpp" />
+    <ClCompile Include="src\patches\lua_callback_alert_defer.cpp" />
     <ClCompile Include="src\patches\headlights.cpp" />
     <ClCompile Include="src\patches\hook_patch_helpers.cpp" />
     <ClCompile Include="src\patches\hud_sprite_rects.cpp" />
@@ -606,6 +607,7 @@
     <ClInclude Include="include\socket_tunnel_protocol.h" />
     <ClInclude Include="include\steam_ban_list.h" />
     <ClInclude Include="include\steam_tunnel_policy.h" />
+    <ClInclude Include="include\lua_alert_queue.h" />
     <ClInclude Include="include\steam_tunnel_transport.h" />
     <ClInclude Include="include\net_reorder_core.h" />
     <ClInclude Include="include\shim_log.h" />

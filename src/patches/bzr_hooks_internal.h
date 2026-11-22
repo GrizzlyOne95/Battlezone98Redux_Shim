@@ -2441,6 +2441,9 @@ namespace BZROpenShim
         // --- DynamicMain allocator guard (dynamic_alloc_guard.cpp) ------------
         void InitializeDynamicAllocGuardConfig();
 
+        // --- Lua callback alert deferral (lua_callback_alert_defer.cpp) ------
+        void InitializeDeferLuaCallbackAlertConfig();
+
         // --- AI construction counter repair (ai_construction_counter_repair.cpp)
         void InitializeAiConstructionCounterRepairConfig();
 

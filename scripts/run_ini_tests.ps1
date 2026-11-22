@@ -231,6 +231,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # Fixes the DynamicMain index full-check and sinks draws that cannot fit
     # (stock returns NULL and crashes); render-only, nothing extra drawn.
     "Fixes/DynamicAllocGuard",
+    # Shows a Lua sim-callback error alert after the frame instead of from
+    # inside the callback (stock re-enters sim/render and can crash); same alert.
+    "Fixes/DeferLuaCallbackAlert",
     # Skips a music decode that Play overwrites before it is heard; audio only.
     "Fixes/MusicSingleFill",
     # Refills every music chunk playback has passed; audio only.
