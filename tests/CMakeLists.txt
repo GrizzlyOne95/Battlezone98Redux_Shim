@@ -605,6 +605,12 @@ openshim_add_test(objective_cap_guard_tests STD 14 SOURCES
     objective_cap_guard_tests.cpp
 )
 
+openshim_add_test(handle_sequence_check_tests STD 14 SOURCES
+    handle_sequence_check_tests.cpp
+)
+target_compile_definitions(handle_sequence_check_tests PRIVATE
+    BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+
 openshim_add_test(anchor_drag_guard_tests STD 14 SOURCES
     anchor_drag_guard_tests.cpp
 )
@@ -617,12 +623,36 @@ openshim_add_test(nan_transform_guard_tests STD 14 SOURCES
     nan_transform_guard_tests.cpp
 )
 
+openshim_add_test(render_sync_guard_tests STD 14 SOURCES
+    render_sync_guard_tests.cpp
+)
+
+openshim_add_test(give_weapon_selected_guard_tests STD 14 SOURCES
+    give_weapon_selected_guard_tests.cpp
+)
+
+openshim_add_test(build_menu_team_color_tests STD 14 SOURCES
+    build_menu_team_color_tests.cpp
+)
+
+openshim_add_test(sniper_kill_credit_tests STD 14 SOURCES
+    sniper_kill_credit_tests.cpp
+)
+
 openshim_add_test(lua_send_length_tests STD 14 SOURCES
     lua_send_length_tests.cpp
 )
 
+openshim_add_test(objective_objects_fix_tests STD 14 SOURCES
+    objective_objects_fix_tests.cpp
+)
+
 openshim_add_test(lua_handle_sync_tests STD 14 SOURCES
     lua_handle_sync_tests.cpp
+)
+
+openshim_add_test(splinter_payload_local_tests STD 14 SOURCES
+    splinter_payload_local_tests.cpp
 )
 
 openshim_add_test(memory_access_tests STD 20 SOURCES

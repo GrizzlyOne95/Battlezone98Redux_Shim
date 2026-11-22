@@ -49,7 +49,7 @@ $Work     = Join-Path $DataDir "work"
 # predicted: on 2026-08-15 both testers uploaded bundles stamped
 # V4.91-harvest while this repo shipped V4.92-arms, and the drift was only
 # visible after reading a bundle's meta.txt.
-$WrapperVersion = "OpenShim-upload-20260914"
+$WrapperVersion = "OpenShim-upload-20261121-sessionlogs"
 
 # Discord's webhook attachment cap is ~10 MB unboosted. Leave room for the
 # multipart envelope.
@@ -151,7 +151,9 @@ function Invoke-Setup {
         Write-Host ""
     }
     Write-Host "What gets sent: openshim.log, openshim_crash.log, the proxy log,"
-    Write-Host "BZLogger (before and after), multi.ini, and a meta file."
+    Write-Host "BZLogger (before and after), multi.ini, the loader and Ogre logs,"
+    Write-Host "the game's file-check logs, any netcode traces you turned on, and a"
+    Write-Host "meta file."
     Write-Host "Bundles contain every peer's public IP, which is why the destination"
     Write-Host "is a private channel."
     Write-Host ""
@@ -484,12 +486,18 @@ function New-BundleAndUpload {
                      "multi.ini", "openshim.log", "openshim_crash.log")) {
         Copy-Harvested -GameDir $GameDir -Name $f -DestDir $bundle | Out-Null
     }
-    # Capture files persist after the capture that made them, so with logging
-    # off a bundle would ship YESTERDAY'S ring looking current (happened
-    # 2026-08-03). Only take them if written during this session. Same rule
-    # for OpenShim minidumps: the splitter already handles Discord's 10 MB cap.
+    # Files that persist after the session that wrote them, so with logging
+    # off a bundle would ship YESTERDAY'S copy looking current (happened
+    # 2026-08-03 with the capture ring). Only take them if written during this
+    # session. Same rule for OpenShim minidumps: the splitter already handles
+    # Discord's 10 MB cap. Besides the capture files: Ogre's renderer log, the
+    # game's file-check logs (crc32*), and the opt-in netcode traces. The
+    # in-game troubleshooting bundle already collects these; keep this list in
+    # step with SESSION_LOG_FILES in openshim_wrap.sh.
     $sessionFiles = @(
-        "bz_buffer_log.bin", "bz_buffer_log.meta.txt", "capture_verify.txt"
+        "bz_buffer_log.bin", "bz_buffer_log.meta.txt", "capture_verify.txt",
+        "BZOgreLogfile.log", "crc32host.log", "crc32mission.log",
+        "bzrnet_trace.jsonl", "bzrnet_session.json", "bz_relay_control.jsonl"
     )
     foreach ($f in $sessionFiles) {
         $src = Resolve-HarvestedPath -GameDir $GameDir -Name $f
@@ -499,6 +507,19 @@ function New-BundleAndUpload {
             continue
         }
         Copy-Item -Force -LiteralPath $src -Destination (Join-Path $bundle $f)
+    }
+    # bzloader.log, beside the exe, is the plugin host's log: when
+    # plugins\openshim.dll fails to load, openshim.log is never written and
+    # this is the only record of why. It is append-only across runs, so only
+    # its tail rides along, and only if this session's loader wrote to it.
+    $loaderLog = Resolve-HarvestedPath -GameDir $GameDir -Name "bzloader.log"
+    if ($loaderLog) {
+        if ((Get-Item -LiteralPath $loaderLog).LastWriteTimeUtc -lt $SessionStart) {
+            Write-WrapLog "skipping stale bzloader.log (predates this session)"
+        } else {
+            Get-Content -LiteralPath $loaderLog -Tail 2000 -ErrorAction SilentlyContinue |
+                Out-File -FilePath (Join-Path $bundle "bzloader.log") -Encoding utf8
+        }
     }
     $logDir = Join-Path $GameDir "logs"
     $hasFreshDump = $false
