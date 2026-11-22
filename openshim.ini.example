@@ -744,6 +744,20 @@ NaNTransformGuard = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX
 LuaSendLengthUnsigned = 1
 
+; Make the stock Lua ObjectiveObjects() iterator advance. Stock never increments
+; its list index, so `for h in ObjectiveObjects() do` gets the first objective
+; on every step and never ends (and hangs in native code if that first slot is
+; one the iterator skips). The iterator step is rewritten in place to walk the
+; engine's objective list from the top down, so each objective is listed once,
+; highest slot first. Turning objectives off inside the loop (including all of
+; them) is safe; turning off one not yet listed can list another one twice.
+; Covers every objective the engine tracks, including ones set by native code
+; or a save load. Lua-only: no simulation or network state changes. Checks the
+; whole stock step body first and stands down untouched if it differs.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_OBJECTIVE_OBJECTS_FIX
+ObjectiveObjectsIterator = 1
+
 ; Make a mission ending on the host end for everyone. Stock Redux has no
 ; network message for it: when only the host's script calls SucceedMission or
 ; FailMission, guests keep playing forever. The host broadcasts a 21-byte "ME"

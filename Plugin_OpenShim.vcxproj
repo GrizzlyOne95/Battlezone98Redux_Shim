@@ -322,6 +322,7 @@
     <ClCompile Include="src\patches\terrain_zone_guard.cpp" />
     <ClCompile Include="src\patches\nan_transform_guard.cpp" />
     <ClCompile Include="src\patches\lua_send_length.cpp" />
+    <ClCompile Include="src\patches\objective_objects_fix.cpp" />
     <ClCompile Include="src\patches\mp_mission_end_sync.cpp" />
     <ClCompile Include="src\patches\mp_splinter_sync.cpp" />
     <ClCompile Include="src\patches\mp_lives_infinite.cpp" />
@@ -623,6 +624,8 @@
     <ClInclude Include="include\nan_transform_guard_install.h" />
     <ClInclude Include="include\lua_send_length.h" />
     <ClInclude Include="include\lua_send_length_install.h" />
+    <ClInclude Include="include\objective_objects_fix.h" />
+    <ClInclude Include="include\objective_objects_fix_install.h" />
     <ClInclude Include="include\mp_mission_end_sync_install.h" />
     <ClInclude Include="include\mp_splinter_sync_install.h" />
     <ClInclude Include="include\mp_lives_infinite.h" />
