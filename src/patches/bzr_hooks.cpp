@@ -67,6 +67,7 @@
 #include "tracked_vehicle_class.h"
 #include "walker_free_head.h"
 #include "mru_class.h"
+#include "handle_sequence_check_install.h"
 
 #include <Windows.h>
 #include <objidl.h>
@@ -1866,6 +1867,11 @@ namespace BZROpenShim
         // gate: every SinglePlayer-tier feature is reconciled here rather than
         // waiting on the first chunk effect of the match. Internally throttled.
         TickMpGateReconcile();
+
+        // One read of the object handle sequence counter per render-queue
+        // update; logs only when it crosses 90% or exhausts the 20-bit space.
+        // No-op unless installed.
+        HandleSequence::TickHandleSequenceCheck();
 
         // The native event layer's known-safe dispatch point. Producers queue
         // from arbitrary engine hook contexts; this is the only place sinks

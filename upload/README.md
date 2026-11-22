@@ -77,6 +77,11 @@ On every wrapped exit it zips (Windows) or xz-compresses (Linux) and POSTs:
 - `winmm_proxy.log` / `dsound_proxy.log` when present
 - `multi.ini`
 - session-fresh buffer-capture files, `openshim_crash_*.dmp` minidumps and the `openshim_crash_*.log` report saved beside each
+- session-fresh `BZOgreLogfile.log` (renderer), `crc32host.log` / `crc32mission.log`
+  (the game's file-check logs), and the opt-in netcode traces `bzrnet_trace.jsonl`,
+  `bzrnet_session.json` and `bz_relay_control.jsonl` when they were turned on
+- the last 2,000 lines of `bzloader.log` (the plugin host's append-only log; the
+  only record when `plugins\openshim.dll` fails to load), when this session wrote to it
 - `openshim_wrap.log.tail.txt` (the last 200 wrapper diagnostics)
 - on abnormal Linux exits, the best matching `systemd-coredump` metadata and
   a bounded `coredumpctl` backtrace when accessible (never the raw core)
