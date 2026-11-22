@@ -121,6 +121,13 @@ namespace
                                 const IniReader& ini,
                                 std::string& out)
     {
+        // Crash minidumps: on unless [Diagnostics] CrashMinidumps = 0.
+        if (Equals(name, "OPENSHIM_DISABLE_CRASH_DUMP") ||
+            Equals(name, "BZR_DISABLE_CRASH_DUMP"))
+        {
+            return TryReadMappedBool(ini, "Diagnostics", "CrashMinidumps", true, out);
+        }
+
         // Startup / patcher diagnostics.
         if (Equals(name, "OPENSHIM_TRACE_HITS"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceHookHits", false, out);
@@ -368,6 +375,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "ObjectiveCapGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_HANDLE_SEQUENCE_CHECK") ||
+            Equals(name, "BZR_DISABLE_HANDLE_SEQUENCE_CHECK"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "HandleSequenceCheck", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_ANCHOR_DRAG_GUARD") ||
             Equals(name, "BZR_DISABLE_ANCHOR_DRAG_GUARD"))
         {
@@ -388,10 +400,35 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "NaNTransformGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_RENDER_SYNC_GUARD") ||
+            Equals(name, "BZR_DISABLE_RENDER_SYNC_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "RenderSyncVtableGuard", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED") ||
+            Equals(name, "BZR_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "GiveWeaponNilClearsSelected", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP") ||
+            Equals(name, "BZR_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "BuildMenuTeamColorClamp", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_SNIPER_KILL_CREDIT") ||
+            Equals(name, "BZR_DISABLE_SNIPER_KILL_CREDIT"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SniperKillCredit", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX") ||
             Equals(name, "BZR_DISABLE_LUA_SEND_LENGTH_FIX"))
         {
             return TryReadMappedBool(ini, "Fixes", "LuaSendLengthUnsigned", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_OBJECTIVE_OBJECTS_FIX") ||
+            Equals(name, "BZR_DISABLE_OBJECTIVE_OBJECTS_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "ObjectiveObjectsIterator", true, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_MP_MISSION_END_SYNC") ||
             Equals(name, "BZR_DISABLE_MP_MISSION_END_SYNC"))
@@ -412,6 +449,11 @@ namespace
             Equals(name, "BZR_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION"))
         {
             return TryReadMappedBool(ini, "Fixes", "DaywreckerArmoryCollision", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_SPLINTER_PAYLOAD_LOCAL") ||
+            Equals(name, "BZR_DISABLE_SPLINTER_PAYLOAD_LOCAL"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SplinterPayloadLocal", true, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_MP_INVITE_PASSWORD") ||
             Equals(name, "BZR_DISABLE_MP_INVITE_PASSWORD"))
@@ -693,6 +735,11 @@ namespace EnvConfig
                Equals(name, "OPENSHIM_BZRNET_TRACE_QUEUE") ||
                Equals(name, "OPENSHIM_RELAY_LOG_ALL_CONTROL") ||
                Equals(name, "OPENSHIM_RELAY_LOG_DATAGRAMS") ||
+               // The crash-dump kill switch predates [Diagnostics]
+               // CrashMinidumps, which ships as 1; a set variable must still
+               // turn dumps off.
+               Equals(name, "OPENSHIM_DISABLE_CRASH_DUMP") ||
+               Equals(name, "BZR_DISABLE_CRASH_DUMP") ||
                // Keep relief harness On/Off controls independent of the saved
                // UI choice, including a flat control with a saved On value.
                Equals(name, "OPENSHIM_TERRAIN_MICRO_RELIEF_TEST");

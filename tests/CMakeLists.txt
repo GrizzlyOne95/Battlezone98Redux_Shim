@@ -18,6 +18,10 @@ add_executable(campaign_manifest_id_tests campaign_manifest_id_tests.cpp)
 target_include_directories(campaign_manifest_id_tests PRIVATE ../include)
 target_compile_features(campaign_manifest_id_tests PRIVATE cxx_std_17)
 add_test(NAME campaign_manifest_id_tests COMMAND campaign_manifest_id_tests)
+add_executable(lua_alert_queue_tests lua_alert_queue_tests.cpp)
+target_include_directories(lua_alert_queue_tests PRIVATE ../include)
+target_compile_features(lua_alert_queue_tests PRIVATE cxx_std_17)
+add_test(NAME lua_alert_queue_tests COMMAND lua_alert_queue_tests)
 
 if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 4)
     add_executable(map_description_bounds_tests map_description_bounds_tests.cpp)
@@ -605,6 +609,12 @@ openshim_add_test(objective_cap_guard_tests STD 14 SOURCES
     objective_cap_guard_tests.cpp
 )
 
+openshim_add_test(handle_sequence_check_tests STD 14 SOURCES
+    handle_sequence_check_tests.cpp
+)
+target_compile_definitions(handle_sequence_check_tests PRIVATE
+    BZR_PATCHES_JSON="${CMAKE_CURRENT_SOURCE_DIR}/../scripts/patches.json")
+
 openshim_add_test(anchor_drag_guard_tests STD 14 SOURCES
     anchor_drag_guard_tests.cpp
 )
@@ -617,12 +627,36 @@ openshim_add_test(nan_transform_guard_tests STD 14 SOURCES
     nan_transform_guard_tests.cpp
 )
 
+openshim_add_test(render_sync_guard_tests STD 14 SOURCES
+    render_sync_guard_tests.cpp
+)
+
+openshim_add_test(give_weapon_selected_guard_tests STD 14 SOURCES
+    give_weapon_selected_guard_tests.cpp
+)
+
+openshim_add_test(build_menu_team_color_tests STD 14 SOURCES
+    build_menu_team_color_tests.cpp
+)
+
+openshim_add_test(sniper_kill_credit_tests STD 14 SOURCES
+    sniper_kill_credit_tests.cpp
+)
+
 openshim_add_test(lua_send_length_tests STD 14 SOURCES
     lua_send_length_tests.cpp
 )
 
+openshim_add_test(objective_objects_fix_tests STD 14 SOURCES
+    objective_objects_fix_tests.cpp
+)
+
 openshim_add_test(lua_handle_sync_tests STD 14 SOURCES
     lua_handle_sync_tests.cpp
+)
+
+openshim_add_test(splinter_payload_local_tests STD 14 SOURCES
+    splinter_payload_local_tests.cpp
 )
 
 openshim_add_test(memory_access_tests STD 20 SOURCES
@@ -1231,3 +1265,5 @@ openshim_add_test(rts_placement_policy_tests STD 20 SOURCES rts_placement_policy
 openshim_add_test(rts_order_queue_policy_tests STD 20 SOURCES rts_order_queue_policy_tests.cpp)
 openshim_add_test(rts_build_queue_policy_tests STD 20 SOURCES rts_build_queue_policy_tests.cpp)
 openshim_add_test(unit_loadouts_policy_tests STD 20 SOURCES unit_loadouts_policy_tests.cpp)
+openshim_add_test(crash_dump_retention_tests STD 14 SOURCES crash_dump_retention_tests.cpp)
+openshim_add_test(crash_av_classify_tests STD 14 SOURCES crash_av_classify_tests.cpp)

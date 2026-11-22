@@ -179,6 +179,13 @@ namespace BZROpenShim
             }
             if (s_Bound < 0 || !light)
                 return false;
+            // A freed light's block can be decommitted; read it under SEH
+            // only after VirtualQuery says it is readable, so the probe never
+            // raises an access violation that the first-chance crash logger
+            // reports as a crash.
+            if ((reinterpret_cast<uintptr_t>(light) & (alignof(void*) - 1)) != 0 ||
+                !MemoryAccess::IsReadable(light, 2 * sizeof(void*)))
+                return false;
             __try
             {
                 const void* const* const vptrs = static_cast<const void* const*>(light);
