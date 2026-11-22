@@ -631,6 +631,10 @@ openshim_add_test(lua_handle_sync_tests STD 14 SOURCES
     lua_handle_sync_tests.cpp
 )
 
+openshim_add_test(splinter_payload_local_tests STD 14 SOURCES
+    splinter_payload_local_tests.cpp
+)
+
 openshim_add_test(memory_access_tests STD 20 SOURCES
     memory_access_tests.cpp
 )

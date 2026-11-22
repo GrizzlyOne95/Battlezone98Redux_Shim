@@ -283,6 +283,10 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # that stock peers ignore. SplinterUndead also runs in a network game
     # while this is on.
     "Fixes/SplinterSync",
+    # Keeps a splinter's own payload SprayBomb from being resent at its first
+    # bounce; nested splinters stay per-peer as stock payload ordnance is.
+    # Network games only; nothing new on the wire.
+    "Fixes/SplinterPayloadLocal",
     # Host-side Any Nation lobby toggle (1.5 parity). Inert until the host turns
     # it OFF; clients without the patch ignore the separate lobby key.
     "Fixes/AnyNationToggle",
@@ -622,6 +626,7 @@ $shippingPolicyChecks = @{
     "Fixes/DaywreckerArmoryCollision" = "1"
     "Fixes/InvitePassword" = "1"
     "Fixes/SplinterSync" = "1"
+    "Fixes/SplinterPayloadLocal" = "1"
     "Fixes/AnyNationToggle" = "1"
     "Fixes/HostLeave" = "1"
     "Fixes/SyncJoinDefaultOn" = "1"

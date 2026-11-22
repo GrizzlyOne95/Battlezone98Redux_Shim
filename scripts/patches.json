@@ -1587,6 +1587,76 @@
       "identity": "Local player net id accessor on exact GOG Redux 2.2.301: an 11-byte leaf that returns the 16-bit global at 0x009180D4 in AX (callers movzx it). Bound alongside NetPlayer::SetData 0x00575570, NetPlayer::SetFlagBuffer 0x00575810 and SetMyFlag 0x0056FA50, which the multiplayer flag helpers compare against it; the ban lookup and the career kill trace consult it as well."
     },
     {
+      "name": "SprayBuilding::Simulate payload build call",
+      "pattern": "8B 95 30 FE FF FF 8B 82 F4 00 00 00 50 8D 4D BC 51 8B 8D 28 FE FF FF E8 ?? ?? ?? ?? 89 85 2C FE FF FF 8B 95 2C FE FF FF C7 82 80 00 00 00 00 00 00 00",
+      "offset": 23,
+      "mode": "address",
+      "fallback": "0x005DAB73",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The payload `call` to the OrdnanceClass factory (WeaponPresentation::OrdnanceFactory 0x00586FF0, __thiscall ECX=class, stack Matrix* then owner OBJ76*, ret 8, EAX=ordnance) in SprayBuilding::Simulate FUN_005DA6E0 on exact GOG Redux 2.2.301. Before it: owner obj76 from [[ebp-0x1D0]+0xF4], matrix lea [ebp-0x44], class [ebp-0x1D8]; after it the result is stored to [ebp-0x1D4] and its bSend dword (+0x80) is set to 0. Anchored on the CALL. The installer additionally requires the call to reach WeaponPresentation::OrdnanceFactory. Verified by whole-image scan on 2026-11-21: one match. Rewritten by splinter_payload_local.cpp to record payload SprayBombs."
+    },
+    {
+      "name": "Mission teardown ordnance cleanup call",
+      "pattern": "85 C0 74 05 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? 6A 00",
+      "offset": 79,
+      "mode": "address",
+      "fallback": "0x0061847D",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call` to the ordnance cleanup 0x00584E60 (row OrdnanceCleanup) in the mission teardown FUN_00618370 on exact GOG Redux 2.2.301: the 16th of a run of 21 argument-less rel32 calls after `test eax,eax / jz +5`, followed by `push 0`. It is the only reference to 0x00584E60 in the image (rel32 call/jmp and absolute pointer scan, 2026-11-21). Anchored on the CALL. The installer additionally requires the call to reach OrdnanceCleanup. Verified by whole-image scan on 2026-11-21: one match. Rewritten by splinter_payload_local.cpp to clear its payload registry after the ordid counter reset."
+    },
+    {
+      "name": "SprayBomb::Hit terrain bounce my-id call",
+      "pattern": "85 C0 0F 84 ?? ?? ?? ?? 8B 85 50 FE FF FF 0F B7 70 7C E8 ?? ?? ?? ?? 0F B7 C8 3B F1 0F 85",
+      "offset": 18,
+      "mode": "address",
+      "fallback": "0x005DB444",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call Net_GetMyPlayerID` (0x00572D90) in the terrain-bounce branch (speed >= 5) of SprayBomb::Hit FUN_005DB080 on exact GOG Redux 2.2.301. Bytes before it: `test eax,eax / jz` on Net_IsNetGame, `mov eax,[ebp-0x1B0]` (the bomb), `movzx esi,word [eax+0x7C]` (source); after it `movzx ecx,ax / cmp esi,ecx / jne` skips the quantize and bSend=1 block. Anchored on the CALL. The installer additionally requires the call to reach GetLocalPlayerNetId. Verified by whole-image scan on 2026-11-21: one match (the shorter movzx/call/cmp tail alone matches 4 sites). Rewritten by splinter_payload_local.cpp."
+    },
+    {
+      "name": "SprayBomb::Hit object bounce my-id call",
+      "pattern": "85 C0 0F 84 ?? ?? ?? ?? 8B 95 50 FE FF FF 0F B7 72 7C E8 ?? ?? ?? ?? 0F B7 C0 3B F0 0F 85",
+      "offset": 18,
+      "mode": "address",
+      "fallback": "0x005DB7C6",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call Net_GetMyPlayerID` (0x00572D90) in the object-bounce branch (speed >= 1) of SprayBomb::Hit FUN_005DB080 on exact GOG Redux 2.2.301. Bytes before it: `test eax,eax / jz` on Net_IsNetGame, `mov edx,[ebp-0x1B0]` (the bomb), `movzx esi,word [edx+0x7C]` (source); after it `movzx eax,ax / cmp esi,eax / jne` skips the quantize and bSend=1 block. Anchored on the CALL. The installer additionally requires the call to reach GetLocalPlayerNetId. Verified by whole-image scan on 2026-11-21: one match (the shorter movzx/call/cmp tail alone matches 4 sites). Rewritten by splinter_payload_local.cpp."
+    },
+    {
+      "name": "BounceBomb::Hit terrain bounce my-id call",
+      "pattern": "85 C0 0F 84 ?? ?? ?? ?? 8B 85 00 FF FF FF 0F B7 70 7C E8 ?? ?? ?? ?? 0F B7 C8 3B F1 0F 85 ?? ?? ?? ?? 8B 8D 00 FF FF FF E8 ?? ?? ?? ?? 8B 95 00 FF FF FF 8B 72 14 83 C6 20 83 EC 40 B9 10 00 00 00 8B FC F3 A5 8D 85 DC FE FF FF",
+      "offset": 18,
+      "mode": "address",
+      "fallback": "0x0047E447",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call Net_GetMyPlayerID` (0x00572D90) in the terrain-bounce branch (hit object null) of BounceBomb::Hit FUN_0047E250 (BounceBombVtable slot 5) on exact GOG Redux 2.2.301. Bytes before it: `test eax,eax / jz` on Net_IsNetGame, `mov eax,[ebp-0x100]` (the bomb, stored from ECX at 0x0047E265), `movzx esi,word [eax+0x7C]` (source); after it `movzx ecx,ax / cmp esi,ecx / jne` skips the quantize and the bSend=1 store at 0x0047E5E7. Anchored on the CALL. The two branches are byte-identical up to the following `lea eax,[ebp-0x124]` / `[ebp-0x130]`, which the pattern includes. The installer additionally requires the call to reach GetLocalPlayerNetId. Verified by whole-image scan on 2026-11-21: one match. Rewritten by splinter_payload_local.cpp."
+    },
+    {
+      "name": "BounceBomb::Hit object bounce my-id call",
+      "pattern": "85 C0 0F 84 ?? ?? ?? ?? 8B 85 00 FF FF FF 0F B7 70 7C E8 ?? ?? ?? ?? 0F B7 C8 3B F1 0F 85 ?? ?? ?? ?? 8B 8D 00 FF FF FF E8 ?? ?? ?? ?? 8B 95 00 FF FF FF 8B 72 14 83 C6 20 83 EC 40 B9 10 00 00 00 8B FC F3 A5 8D 85 D0 FE FF FF",
+      "offset": 18,
+      "mode": "address",
+      "fallback": "0x0047E7B8",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The `call Net_GetMyPlayerID` (0x00572D90) in the object-bounce branch of BounceBomb::Hit FUN_0047E250 (BounceBombVtable slot 5) on exact GOG Redux 2.2.301. Bytes before it: `test eax,eax / jz` on Net_IsNetGame, `mov eax,[ebp-0x100]` (the bomb, stored from ECX at 0x0047E265), `movzx esi,word [eax+0x7C]` (source); after it `movzx ecx,ax / cmp esi,ecx / jne` skips the quantize and the bSend=1 store at 0x0047E958. Anchored on the CALL. The two branches are byte-identical up to the following `lea eax,[ebp-0x124]` / `[ebp-0x130]`, which the pattern includes. The installer additionally requires the call to reach GetLocalPlayerNetId. Verified by whole-image scan on 2026-11-21: one match. Rewritten by splinter_payload_local.cpp."
+    },
+    {
+      "name": "Popper::Control child bSend store",
+      "pattern": "66 89 50 7E 8B 8D 2C FF FF FF C7 81 80 00 00 00 01 00 00 00 8B 95 30 FF FF FF",
+      "offset": 10,
+      "mode": "address",
+      "fallback": "0x005A6A98",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "The 10-byte `mov dword [ecx+0x80],1` (the child's bSend) in Popper::Control FUN_005A6460 (PopperVtable slot 3) on exact GOG Redux 2.2.301. It runs in the `!Net_IsNetGame() || source == me` branch (compare call 0x005A6990) after the child is built by the OrdnanceClass factory at 0x005A69BA and given the Popper's source and ordid+1; bytes before it: `mov [eax+0x7E],dx` (child ordid), `mov ecx,[ebp-0xD4]` (the child); after it `mov edx,[ebp-0xD0]` (the Popper, stored from ECX at 0x005A6475), which reloads every register it uses and reads no flags. No branch targets 0x005A6A99-0x005A6AA1. The installer additionally requires the ten stock bytes. Verified by whole-image scan on 2026-11-21: one match. Rewritten (CALL + 5-byte NOP) by splinter_payload_local.cpp."
+    },
+    {
       "name": "Craft::EffectiveDamageResistanceSite",
       "platforms": ["gog"],
       "pattern": "D9 9D 04 FF FF FF F3 0F 10 05 98 24 8A 00 0F 2F 85 04 FF FF FF 72 07 32 C0 E9 D1 07 00 00",
@@ -4345,6 +4415,36 @@
       "address": "0x005DA680",
       "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 21 00 00 00 8B 45 08 83 E0 01",
       "identity": "SprayBuilding scalar deleting destructor on exact GOG Redux 2.2.301, SprayBuildingVtable slot 0: __thiscall(SprayBuilding* this, int flags) returning this, callee-clean `ret 4`; runs the real destructor then operator delete when flags & 1. mp_splinter_sync.cpp replaces the slot to drop its building<->bomb-key map entry. Bytes read from the shipped image 2026-10-27."
+    },
+    {
+      "name": "SprayBombVtable",
+      "address": "0x008881C4",
+      "kind": "data",
+      "identity": "RTTI .?AVSprayBomb@@ primary vtable (type descriptor 0x00901E24, COL 0x008ABDB8) on exact GOG Redux 2.2.301; slot 0 is SprayBombDtor. splinter_payload_local.cpp checks the RTTI name and slot 0 before replacing the slot. Read from the shipped image 2026-11-21."
+    },
+    {
+      "name": "BounceBombVtable",
+      "address": "0x008765C4",
+      "kind": "data",
+      "identity": "RTTI .?AVBounceBomb@@ primary vtable (type descriptor 0x008FFE2C, COL 0x008A61BC) on exact GOG Redux 2.2.301; slot 5 is BounceBomb::Hit 0x0047E250. splinter_payload_local.cpp checks the RTTI name and records SprayBuilding payloads with this vtable. Read from the shipped image 2026-11-21."
+    },
+    {
+      "name": "PopperVtable",
+      "address": "0x00885D48",
+      "kind": "data",
+      "identity": "RTTI .?AVPopper@@ primary vtable (type descriptor 0x00901580, COL 0x008AA368) on exact GOG Redux 2.2.301; slot 3 is Popper::Control 0x005A6460. splinter_payload_local.cpp checks the RTTI name and records SprayBuilding payloads (and payload Poppers' children) with this vtable. Read from the shipped image 2026-11-21."
+    },
+    {
+      "name": "SprayBombDtor",
+      "address": "0x005DB030",
+      "expected": "55 8B EC 51 89 4D FC 8B 4D FC E8 21 00 00 00 8B 45 08 83 E0 01",
+      "identity": "SprayBomb scalar deleting destructor on exact GOG Redux 2.2.301, SprayBombVtable slot 0: __thiscall(SprayBomb* this, int flags) returning this, callee-clean `ret 4`; calls the real destructor 0x005DB060, then operator delete when flags & 1. The byte prefix is the generic MSVC scalar-deleting-dtor shape, so identity rests on the installer's slot-0 check against SprayBombVtable. splinter_payload_local.cpp replaces the slot to drop a payload record. Bytes read from the shipped image 2026-11-21."
+    },
+    {
+      "name": "OrdnanceCleanup",
+      "address": "0x00584E60",
+      "expected": "55 8B EC 51 B9 8C 90 9C 00 E8 ?? ?? ?? ?? 0F B6 C0 85 C0 75 1E B9 8C 90 9C 00",
+      "identity": "Ordnance cleanup at mission teardown on exact GOG Redux 2.2.301, void __cdecl(void) with a plain `ret`: loops over the ordnance list 0x009C908C calling each entry's vtable+8 until empty, then zeroes the u16 ordid counter 0x00918130 (`xor eax,eax / mov [0x918130],ax` at 0x00584E93) and resets the list 0x009C9074. One caller, the mission teardown FUN_00618370 at 0x0061847D. splinter_payload_local.cpp clears its payload registry after it. Bytes read from the shipped image 2026-11-21."
     },
     {
       "name": "GameObjectUpdatePosition",
