@@ -318,6 +318,7 @@
     <ClCompile Include="src\patches\lua_formation_fix.cpp" />
     <ClCompile Include="src\patches\lua_getindependence_guard.cpp" />
     <ClCompile Include="src\patches\objective_cap_guard.cpp" />
+    <ClCompile Include="src\patches\handle_sequence_check.cpp" />
     <ClCompile Include="src\patches\anchor_drag_guard.cpp" />
     <ClCompile Include="src\patches\terrain_zone_guard.cpp" />
     <ClCompile Include="src\patches\nan_transform_guard.cpp" />
@@ -615,6 +616,8 @@
     <ClInclude Include="include\lua_getindependence_guard_install.h" />
     <ClInclude Include="include\objective_cap_guard.h" />
     <ClInclude Include="include\objective_cap_guard_install.h" />
+    <ClInclude Include="include\handle_sequence_check.h" />
+    <ClInclude Include="include\handle_sequence_check_install.h" />
     <ClInclude Include="include\anchor_drag_guard.h" />
     <ClInclude Include="include\anchor_drag_guard_install.h" />
     <ClInclude Include="include\terrain_zone_guard.h" />

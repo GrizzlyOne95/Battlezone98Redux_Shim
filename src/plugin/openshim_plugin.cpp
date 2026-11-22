@@ -69,6 +69,7 @@
 #include "lua_formation_fix_install.h"
 #include "lua_getindependence_guard_install.h"
 #include "objective_cap_guard_install.h"
+#include "handle_sequence_check_install.h"
 #include "anchor_drag_guard_install.h"
 #include "terrain_zone_guard_install.h"
 #include "nan_transform_guard_install.h"
@@ -216,6 +217,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // the engine's own Remove) first. Byte-guarded and fail-closed;
     // [Fixes] ObjectiveCapGuard = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::ObjectiveCap::InstallObjectiveCapGuardIfPossible());
+
+    // Object handles keep 20 sequence bits; past ~1M creations new objects get
+    // handles the engine cannot resolve. Read-only: binds the byte-guarded
+    // counter so the frame callback can warn at 90% and at exhaustion.
+    // [Fixes] HandleSequenceCheck = 0 leaves it off.
+    PATCH_STAGE(BZROpenShim::HandleSequence::InstallHandleSequenceCheckIfPossible());
 
     // AnchorRocket drag on a stationary or near-stationary target with a
     // negative (custom ODF) drag divides by ~0 and writes NaN into its velocity

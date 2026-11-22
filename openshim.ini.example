@@ -731,6 +731,17 @@ TerrainHeightSampleGuard = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_NAN_TRANSFORM_GUARD
 NaNTransformGuard = 1
 
+; Warn before object handles run out. A handle keeps 12 bits for the object
+; slot and 20 for a sequence number that grows by one per object created, so a
+; session (and any save of it) can make about 1,048,575 objects. Past that,
+; new objects still spawn but their handles resolve to nothing: scripts cannot
+; reference them and multiplayer peers reject them. This only reads the
+; counter: one warning at 90%, one error at exhaustion, nothing changed.
+; Stands down on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_HANDLE_SEQUENCE_CHECK
+HandleSequenceCheck = 1
+
 ; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
 ; stores a length above 30 in one extension byte, and the stock decoders read it
 ; signed: a Send string of 128..255 bytes faults every receiving peer (access
