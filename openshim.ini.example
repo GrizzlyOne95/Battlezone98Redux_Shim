@@ -744,9 +744,12 @@ NaNTransformGuard = 1
 GiveWeaponNilClearsSelected = 1
 
 ; Keep the build menu's team colour inside its three colours (white, green,
-; red for teams 0, 1, 2). Stock clamps the item team to 0..3, so an item of
-; team 3 or more is drawn in whatever the stack holds past the array. Team 3
-; and up now draw red, like team 2. Stands down on a byte-guard mismatch.
+; red for teams 0, 1, 2). The team is the build item's team value from the
+; menu ODF. Stock clamps it to 0..3 in the build menu, so team 3 or more is
+; drawn in whatever the stack holds past the array, and the control panel
+; does not clamp it at all (negative teams too). Both now clamp to 0..2:
+; team 3 and up draw red, like team 2; negative teams draw white. Stock
+; content stays in 0..2. Each site stands down on its own byte-guard mismatch.
 ; Accepted: boolean. Default: ON.
 ; Env alias to force it off: OPENSHIM_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP
 BuildMenuTeamColorClamp = 1

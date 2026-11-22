@@ -7028,6 +7028,24 @@
       "identity": "DrawBuildMenu team colour index: push 3 / push 0 / push team / call Clamp 0x00453D10 / add esp,0Ch / mov ecx,[ebp+eax*4-10h]. Clamp max 3 reads the cookie for team 3+ (same off-by-one as BZ 1.5 PathDisplay::DrawBuildMenu); build_menu_team_color.cpp writes 02 over the push imm8."
     },
     {
+      "name": "ControlPanelItemColorInit",
+      "address": "0x004A16CD",
+      "expected": "8B 0D 5C 75 91 00 89 0D 8C 2B CC 02 8B 15 B0 75 91 00 89 15 90 2B CC 02 A1 7C 75 91 00 A3 94 2B CC 02",
+      "identity": "ControlPanel render (0x004A08E0) one-time fill of the static itemColor[3] table 0x02CC2B8C: white 0x0091755C, green 0x009175B0, red 0x0091757C (BZ 1.5 ControlPanel_Render itemColor). build_menu_team_color.cpp reads the table address from the first store and checks both loads use it."
+    },
+    {
+      "name": "ControlPanelTitleColorRead",
+      "address": "0x004A1742",
+      "expected": "8B 51 14 8B 04 95 8C 2B CC 02 50",
+      "identity": "ControlPanel render menu title colour: mov edx,[ecx+14h] (BuildItem.team) / mov eax,[edx*4+itemColor] / push eax. Unclamped team index; build_menu_team_color.cpp moves the 7-byte load at +3 into a thunk that clamps edx to 0..2."
+    },
+    {
+      "name": "ControlPanelChildColorRead",
+      "address": "0x004A1A4E",
+      "expected": "8B 51 14 6B 85 B8 FD FF FF 18 8B 8D BC FD FF FF 8B 14 95 8C 2B CC 02 89 94 01 30 10 00 00",
+      "identity": "ControlPanel render child item colour: mov edx,[ecx+14h] (BuildItem.team) / imul eax,[ebp-248h],18h / mov ecx,[ebp-244h] / mov edx,[edx*4+itemColor] / mov [ecx+eax+1030h],edx. Unclamped team index; build_menu_team_color.cpp moves the 7-byte load at +10h into a thunk that clamps edx to 0..2."
+    },
+    {
       "name": "ScavengerProcessGetScrapPosition",
       "address": "0x005C40B0",
       "expected": "55 8B EC 83 EC 24 A1 00 70 8E 00 33 C5 89 45 FC 89 4D EC 8B 45 EC 83 C0 38"
