@@ -617,6 +617,10 @@ openshim_add_test(nan_transform_guard_tests STD 14 SOURCES
     nan_transform_guard_tests.cpp
 )
 
+openshim_add_test(render_sync_guard_tests STD 14 SOURCES
+    render_sync_guard_tests.cpp
+)
+
 openshim_add_test(lua_send_length_tests STD 14 SOURCES
     lua_send_length_tests.cpp
 )

@@ -731,6 +731,17 @@ TerrainHeightSampleGuard = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_NAN_TRANSFORM_GUARD
 NaNTransformGuard = 1
 
+; Skip the per-frame render-node sync for an object whose Ogre Entity or
+; SceneNode was already destroyed. GameObject::UpdatePosition calls it every
+; frame, and the stock code calls the entity without checking it; a destroyed
+; entity (seen while a Lua error alert from a DeleteObject callback is open)
+; crashed the game in OgreMain. With this on, the call is skipped for that
+; object only and logged once; live objects take the stock path. Stands down
+; on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_RENDER_SYNC_GUARD
+RenderSyncVtableGuard = 1
+
 ; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
 ; stores a length above 30 in one extension byte, and the stock decoders read it
 ; signed: a Send string of 128..255 bytes faults every receiving peer (access

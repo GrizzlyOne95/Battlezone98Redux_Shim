@@ -321,6 +321,7 @@
     <ClCompile Include="src\patches\anchor_drag_guard.cpp" />
     <ClCompile Include="src\patches\terrain_zone_guard.cpp" />
     <ClCompile Include="src\patches\nan_transform_guard.cpp" />
+    <ClCompile Include="src\patches\render_sync_guard.cpp" />
     <ClCompile Include="src\patches\lua_send_length.cpp" />
     <ClCompile Include="src\patches\mp_mission_end_sync.cpp" />
     <ClCompile Include="src\patches\mp_splinter_sync.cpp" />
@@ -621,6 +622,8 @@
     <ClInclude Include="include\terrain_zone_guard_install.h" />
     <ClInclude Include="include\nan_transform_guard.h" />
     <ClInclude Include="include\nan_transform_guard_install.h" />
+    <ClInclude Include="include\render_sync_guard_install.h" />
+    <ClInclude Include="include\render_sync_guard_policy.h" />
     <ClInclude Include="include\lua_send_length.h" />
     <ClInclude Include="include\lua_send_length_install.h" />
     <ClInclude Include="include\mp_mission_end_sync_install.h" />
