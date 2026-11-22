@@ -368,6 +368,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "ObjectiveCapGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_HANDLE_SEQUENCE_CHECK") ||
+            Equals(name, "BZR_DISABLE_HANDLE_SEQUENCE_CHECK"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "HandleSequenceCheck", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_ANCHOR_DRAG_GUARD") ||
             Equals(name, "BZR_DISABLE_ANCHOR_DRAG_GUARD"))
         {
@@ -388,10 +393,30 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "NaNTransformGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED") ||
+            Equals(name, "BZR_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "GiveWeaponNilClearsSelected", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP") ||
+            Equals(name, "BZR_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "BuildMenuTeamColorClamp", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_SNIPER_KILL_CREDIT") ||
+            Equals(name, "BZR_DISABLE_SNIPER_KILL_CREDIT"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SniperKillCredit", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX") ||
             Equals(name, "BZR_DISABLE_LUA_SEND_LENGTH_FIX"))
         {
             return TryReadMappedBool(ini, "Fixes", "LuaSendLengthUnsigned", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_OBJECTIVE_OBJECTS_FIX") ||
+            Equals(name, "BZR_DISABLE_OBJECTIVE_OBJECTS_FIX"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "ObjectiveObjectsIterator", true, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_MP_MISSION_END_SYNC") ||
             Equals(name, "BZR_DISABLE_MP_MISSION_END_SYNC"))
@@ -412,6 +437,11 @@ namespace
             Equals(name, "BZR_DISABLE_MP_DAYWRECKER_ARMORY_COLLISION"))
         {
             return TryReadMappedBool(ini, "Fixes", "DaywreckerArmoryCollision", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_SPLINTER_PAYLOAD_LOCAL") ||
+            Equals(name, "BZR_DISABLE_SPLINTER_PAYLOAD_LOCAL"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "SplinterPayloadLocal", true, out);
         }
         if (Equals(name, "OPENSHIM_DISABLE_MP_INVITE_PASSWORD") ||
             Equals(name, "BZR_DISABLE_MP_INVITE_PASSWORD"))
