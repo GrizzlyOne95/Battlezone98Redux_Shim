@@ -499,6 +499,28 @@ namespace BZROpenShim
                 protect == PAGE_EXECUTE_READWRITE || protect == PAGE_EXECUTE_WRITECOPY;
         }
 
+        // True when address lies in an executable section of the game exe's PE
+        // image. Uses section flags, not page protection: the word after the
+        // last vtable slot is string data (0x6E757274 "trun" on GOG 2.2.301),
+        // and ASLR often maps a system DLL's code there (issue #952).
+        bool IsMainImageCode(uintptr_t address)
+        {
+            const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+            if (!base || address < reinterpret_cast<uintptr_t>(base))
+                return false;
+            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS32*>(
+                base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+            const uintptr_t rva = address - reinterpret_cast<uintptr_t>(base);
+            const IMAGE_SECTION_HEADER* section = IMAGE_FIRST_SECTION(nt);
+            for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i)
+            {
+                const uintptr_t size = section[i].Misc.VirtualSize ? section[i].Misc.VirtualSize : section[i].SizeOfRawData;
+                if (rva >= section[i].VirtualAddress && rva < section[i].VirtualAddress + size)
+                    return (section[i].Characteristics & IMAGE_SCN_MEM_EXECUTE) != 0;
+            }
+            return false;
+        }
+
         bool IsTrackedClass(const void* objectClass)
         {
             if (!objectClass)
@@ -2495,13 +2517,13 @@ namespace BZROpenShim
             if (!HookEngine::ReadMemory(static_cast<uint32_t>(stockVtable - sizeof(void*)), stock, sizeof(stock)))
                 return false;
             // stock[0] is the RTTI locator, stock[1 + i] slot i, and
-            // stock[1 + 42] must not be code: that pins the slot count.
+            // stock[1 + 42] must not be game code: that pins the slot count.
             for (size_t i = 0; i < kHoverVtableSlots; ++i)
             {
                 if (!IsExecutableAddress(reinterpret_cast<uintptr_t>(stock[1 + i])))
                     return false;
             }
-            if (IsExecutableAddress(reinterpret_cast<uintptr_t>(stock[1 + kHoverVtableSlots])))
+            if (IsMainImageCode(reinterpret_cast<uintptr_t>(stock[1 + kHoverVtableSlots])))
                 return false;
             if (reinterpret_cast<uintptr_t>(stock[1 + kSimulateSlot]) != reinterpret_cast<uintptr_t>(g_StockSimulate))
                 return false;
