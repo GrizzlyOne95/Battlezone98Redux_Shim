@@ -69,6 +69,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed the game terminating when a map with a description of 2,400 bytes or more is selected. Stock's description loader copies up to 2,400 bytes into a 2,400-byte array, then rejects that length as an invalid index for the terminating zero.
 [*] Fixed a crash when a mission script error box opens while a unit is being removed. Stock's error box keeps the game running from inside the script callback, so a half-removed unit gets drawn and updated.
 [*] Fixed a crash drawing a unit whose 3D model had just been destroyed. OpenShim now checks the unit's model is still valid before syncing its position to the renderer.
+[*] Made a crash on returning to the menu much rarer on PCs with many USB input devices. Stock asks Windows for joystick details on every menu return, and Windows' own DirectInput can write past the end of its device list while rebuilding it. OpenShim now answers repeat requests itself and asks Windows again only after a device is plugged in or removed.
 [/list]
 
 [h2]Rendering, audio and UI[/h2]
