@@ -18,6 +18,7 @@
 #include "openshim_assets.h"
 #include "terrain_proxy.h"
 #include "soak_telemetry.h"
+#include "fp_trap_log.h"
 #include "terrain_tile_blend.h"
 #include "planet_environment.h"
 #include "bzr_options_ui.h"
@@ -923,6 +924,9 @@ namespace BZROpenShim
             // Stop the soak watchdog before the render system goes away; its
             // fence is leaked with the device (see below). No-op when off.
             ShutdownSoakTelemetry();
+            // Main thread: masks it again and logs the FP trap summary
+            // before Ogre teardown. No-op when [Diagnostics] FpTrapLog is off.
+            ShutdownFpTrapLog("game exit");
             __try
             {
                 ArmD3D11ExitTeardownSkip();
