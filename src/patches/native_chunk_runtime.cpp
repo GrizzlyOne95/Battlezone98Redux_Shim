@@ -72,11 +72,28 @@ std::string base(std::string s)
 // Redux's two-word SharedPtr ABI and StdAllocPolicy are already used by the
 // terrain proxy. Release a stream with the owning DLL's virtual destructor
 // and allocator, including the final reference; never free Ogre memory in CRT.
+// SharedPtrInfo::useCount sits at +0x14 in the shipped build (a mutex-backed
+// AtomicScalar follows the vtable; see ogre_script_import_cache.cpp), not the
+// header's +4. Decrementing +4 left every stream, and its open file, alive.
+constexpr size_t kUseCountOffset = 0x14;
 void release(Ptr &p, Free deallocate)
 {
     if (!p.rep || !p.info)
         return;
-    auto *count = reinterpret_cast<volatile LONG *>(static_cast<uint8_t *>(p.info) + 4);
+    auto *count = reinterpret_cast<volatile LONG *>(static_cast<uint8_t *>(p.info) + kUseCountOffset);
+    // Fail closed: openResource hands back a fresh stream we alone own, so any
+    // count but 1 means the layout is not what we think. Leak the stream
+    // rather than write into Ogre's block, and say so once.
+    if (*count != 1)
+    {
+        static LONG s_warned = 0;
+        if (InterlockedExchange(&s_warned, 1) == 0)
+            LogShimA(LogLevel::Warn, "CHUNKCACHE",
+                     "[CHUNKCACHE] stream SharedPtr layout check failed (useCount@+0x%X=%ld); streams are left open",
+                     static_cast<unsigned>(kUseCountOffset), static_cast<long>(*count));
+        p = {};
+        return;
+    }
     if (InterlockedDecrement(count) == 0)
     {
         auto destructor = reinterpret_cast<Dtor>((*static_cast<void ***>(p.info))[0]);
