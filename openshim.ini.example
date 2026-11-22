@@ -493,6 +493,26 @@ SplinterUndead = 1
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_MP_SPLINTER_SYNC
 SplinterSync = 1
 
+; Multiplayer only: keep a splinter's own payload ordnance local to each peer.
+; Every peer builds a splinter's payload itself and never sends it, but stock
+; SprayBomb::Hit and BounceBomb::Hit resend a payload bomb from every peer at
+; its first bounce, and a payload Popper sends its child from every peer. Each
+; peer then receives the others' copies as new ordnance, and each SprayBomb
+; copy deploys another splinter, so a splinter whose payload is a splinter
+; multiplies once per player each generation. This records each SprayBomb,
+; BounceBomb and Popper payload a splinter fires, keeps those bounces local
+; and builds a payload Popper's child unsent; other payload classes
+; (SniperShell, Beam) have no such resend and stay stock. The launcher's own
+; thrown splinter keeps its stock bounce resync. Payloads already in flight
+; when the fix installs mid-mission stay stock. Nested splinters stay
+; per-peer, as stock payload ordnance is; SplinterSync still syncs only the
+; top-level one. A peer without the fix still resends its own copies.
+; GOG Redux 2.2.301 only; stands down on any other build or if a site does
+; not match. No effect in single player.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_SPLINTER_PAYLOAD_LOCAL
+SplinterPayloadLocal = 1
+
 ; Multiplayer "Any Nation" lobby toggle (Battlezone 1.5 parity). The host gets an
 ; "Any Nation: On/Off" button in the lobby. ON (default) is the full vehicle
 ; pool, as before. OFF restricts the vehicle-select pool to the 1.5 netveh.odf
@@ -741,6 +761,49 @@ NaNTransformGuard = 1
 ; Accepted: boolean. Default: ON.
 ; Env alias to force it off: OPENSHIM_DISABLE_RENDER_SYNC_GUARD
 RenderSyncVtableGuard = 1
+; Clear the selected-weapon bit when Lua GiveWeapon(h, nil, slot) empties a
+; slot. Stock clears the weapon, hardpoint and enabled bits but keeps the
+; selected bit on every craft except the player's, so code that walks the
+; selected weapons (the guided-missile lock scan, the person sniper scan) reads
+; through a null weapon and crashes. Also makes GiveWeapon refuse slots outside
+; 0..4: its stock range test never rejects, and Lua passes slot 5 or more
+; through, building a weapon on a hardpoint read from the wrong field.
+; Stands down on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED
+GiveWeaponNilClearsSelected = 1
+
+; Keep the build menu's team colour inside its three colours (white, green,
+; red for teams 0, 1, 2). The team is the build item's team value from the
+; menu ODF. Stock clamps it to 0..3 in the build menu, so team 3 or more is
+; drawn in whatever the stack holds past the array, and the control panel
+; does not clamp it at all (negative teams too). Both now clamp to 0..2:
+; team 3 and up draw red, like team 2; negative teams draw white. Stock
+; content stays in 0..2. Each site stands down on its own byte-guard mismatch.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP
+BuildMenuTeamColorClamp = 1
+; Score sniper kills on craft the shooter's own machine owns. In a network
+; game a sniper shell is resolved on the shooter's machine; stock only credits
+; the kill when the victim is owned by another machine (that machine records
+; it), so a host sniping host-owned AI, or anyone sniping a craft they own,
+; got no kill, no death and no ticker line. With this on, that case records the
+; death and kill and shows the 'sniped' ticker once, the way the victim's owner
+; does for a remote victim. Single player has no kill scoring and is unchanged.
+; Stands down on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_SNIPER_KILL_CREDIT
+SniperKillCredit = 1
+; Warn before object handles run out. A handle keeps 12 bits for the object
+; slot and 20 for a sequence number that grows by one per object created, so a
+; session (and any save of it) can make about 1,048,575 objects. Past that,
+; new objects still spawn but their handles resolve to nothing: scripts cannot
+; reference them and multiplayer peers reject them. This only reads the
+; counter: one warning at 90%, one error at exhaustion, nothing changed.
+; Stands down on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_HANDLE_SEQUENCE_CHECK
+HandleSequenceCheck = 1
 
 ; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
 ; stores a length above 30 in one extension byte, and the stock decoders read it
@@ -754,6 +817,20 @@ RenderSyncVtableGuard = 1
 ; Accepted: boolean. Default: ON.
 ; Legacy env alias to force it off: OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX
 LuaSendLengthUnsigned = 1
+
+; Make the stock Lua ObjectiveObjects() iterator advance. Stock never increments
+; its list index, so `for h in ObjectiveObjects() do` gets the first objective
+; on every step and never ends (and hangs in native code if that first slot is
+; one the iterator skips). The iterator step is rewritten in place to walk the
+; engine's objective list from the top down, so each objective is listed once,
+; highest slot first. Turning objectives off inside the loop (including all of
+; them) is safe; turning off one not yet listed can list another one twice.
+; Covers every objective the engine tracks, including ones set by native code
+; or a save load. Lua-only: no simulation or network state changes. Checks the
+; whole stock step body first and stands down untouched if it differs.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_OBJECTIVE_OBJECTS_FIX
+ObjectiveObjectsIterator = 1
 
 ; Make a mission ending on the host end for everyone. Stock Redux has no
 ; network message for it: when only the host's script calls SucceedMission or
