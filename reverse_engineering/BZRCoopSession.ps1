@@ -135,9 +135,59 @@ function Copy-BZRCoopClientLogs {
     $out = Join-Path $Dest 'logs'
     robocopy $LogsDir $out /E /XF *.dmp /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { Write-Warning "robocopy of $LogsDir failed ($LASTEXITCODE)" }
+    # A crash loop writes a dump per crash; the newest two are enough to triage.
     Get-ChildItem -LiteralPath $LogsDir -Filter *.dmp -File -ErrorAction SilentlyContinue |
         Where-Object { $_.LastWriteTime -ge $Since } |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 2 |
         ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $out -Force }
+}
+
+function Limit-BZRCoopRuns {
+    # C:\BZRCoop reached hundreds of GB by 2026-11-22: nothing ever pruned
+    # runs\ (screenshots, DEBUG relay traces, client logs and dumps per run).
+    # Before each launch, delete the oldest run folders over a day old until
+    # runs\ is under the cap; refuse to launch if it is still over the cap or
+    # the drive is low. Override with BZRCOOP_RUNS_CAP_GB / BZRCOOP_MIN_FREE_GB.
+    $capGB = if ($env:BZRCOOP_RUNS_CAP_GB) { [double]$env:BZRCOOP_RUNS_CAP_GB } else { 40 }
+    $minFreeGB = if ($env:BZRCOOP_MIN_FREE_GB) { [double]$env:BZRCOOP_MIN_FREE_GB } else { 50 }
+    if (Test-Path -LiteralPath $RunsDir) {
+        # Age = newest file inside: a folder's own mtime only moves when a
+        # direct child is added, so a matrix parent still rewriting its
+        # matrix.json would look old. Reparse points are never followed
+        # or deleted.
+        $runs = @(Get-ChildItem -LiteralPath $RunsDir -Directory -Force |
+            Where-Object { -not ($_.Attributes -band [IO.FileAttributes]::ReparsePoint) -and $_.Name -ne $RunName } |
+            ForEach-Object {
+                $files = @(Get-ChildItem -LiteralPath $_.FullName -Recurse -File -Force -Attributes !ReparsePoint -ErrorAction SilentlyContinue)
+                $newest = ($files | Measure-Object LastWriteTime -Maximum).Maximum
+                [pscustomobject]@{
+                    Dir = $_
+                    Bytes = [double](($files | Measure-Object Length -Sum).Sum)
+                    Newest = if ($newest) { $newest } else { $_.LastWriteTime }
+                }
+            } | Sort-Object Newest)
+        $total = ($runs | Measure-Object Bytes -Sum).Sum
+        $cutoff = (Get-Date).AddDays(-1)
+        foreach ($r in $runs) {
+            if ($total -le $capGB * 1GB) { break }
+            if ($r.Newest -gt $cutoff) { continue }
+            # rmdir /s removes a nested junction itself, never its target.
+            cmd /c rmdir /s /q "`"$($r.Dir.FullName)`"" 2>$null
+            if (Test-Path -LiteralPath $r.Dir.FullName) { throw "could not prune $($r.Dir.FullName)" }
+            $total -= $r.Bytes
+            Write-Host ("[BZRCoop] pruned old run {0} ({1:N1} GB)" -f $r.Dir.Name, ($r.Bytes / 1GB))
+        }
+        if ($total -gt $capGB * 1GB) {
+            throw ("runs\ holds {0:N1} GB (cap {1} GB) after pruning runs older than a day; delete some under {2}" -f ($total / 1GB), $capGB, $RunsDir)
+        }
+    }
+    $root = [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($BZRCoopRoot))
+    if ($root -match '^[A-Za-z]:\\$') {
+        $free = ([IO.DriveInfo]$root).AvailableFreeSpace
+        if ($free -lt $minFreeGB * 1GB) {
+            throw ("only {0:N0} GB free on the {1} drive (need {2} GB); clear space before a co-op launch" -f ($free / 1GB), $root, $minFreeGB)
+        }
+    }
 }
 
 function New-BZRCoopInstance {
@@ -323,6 +373,7 @@ function Start-BZRCoopClients {
         if ($alive.Count) { throw "Session already running (pids $($alive.pid -join ', ')). Stop it first." }
     }
     if (-not $RunName) { $script:RunName = Get-Date -Format 'yyyyMMdd-HHmmss' }
+    Limit-BZRCoopRuns
     $runDir = New-Item -ItemType Directory -Path (Join-Path $RunsDir $RunName) -Force
 
     $env:BZR_FORCE_WINDOWED = '1'
