@@ -623,6 +623,10 @@ openshim_add_test(nan_transform_guard_tests STD 14 SOURCES
     nan_transform_guard_tests.cpp
 )
 
+openshim_add_test(render_sync_guard_tests STD 14 SOURCES
+    render_sync_guard_tests.cpp
+)
+
 openshim_add_test(give_weapon_selected_guard_tests STD 14 SOURCES
     give_weapon_selected_guard_tests.cpp
 )

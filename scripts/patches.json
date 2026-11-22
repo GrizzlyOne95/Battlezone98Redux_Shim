@@ -4463,6 +4463,18 @@
       "identity": "GameObject::UpdatePosition on exact GOG Redux 2.2.301, __thiscall(complete GameObject* this) with no stack arguments (plain `ret`): reads this+0xF0 (ent) and this+0xF4 (OBJ76), recomputes the cached position from the OBJ76 matrix posit and updates the ent bounding box from the bounding sphere. Stock SprayBuilding::Simulate calls it each frame (0x005DA862); mp_splinter_sync.cpp calls it after writing a launcher's deploy position. Bytes read from the shipped image 2026-10-27."
     },
     {
+      "name": "RenderNodeSyncCall",
+      "address": "0x004DB498",
+      "expected": "E8 33 57 1A 00 83 C4 04",
+      "identity": "Inside GameObject::UpdatePosition (0x004DB100) on exact GOG Redux 2.2.301: `mov eax,[edx+0xF0]; push eax; call rel32; add esp,4` at 0x004DB491..0x004DB49F, the only call to the render-node sync FUN_00680BD0 (0x004DB49D + 0x001A5733), passing renderData = go+0xF0; reached only when go+0xF0 is non-null. render_sync_guard.cpp redirects this rel32 to a guard that skips the sync when renderData+0x94 (Ogre::Entity) or +0x98 (Ogre::SceneNode) is a destroyed object. Bytes read from the shipped image in Ghidra 2026-11-21."
+    },
+    {
+      "name": "RenderNodeSync",
+      "address": "0x00680BD0",
+      "expected": "55 8B EC 81 EC 98 00 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 6A 00 E8 ?? ?? ?? ?? 83 C4 04 85 C0 75 05 E9 ?? ?? ?? ?? 8B 45 08 8B 88 98 00 00 00",
+      "identity": "Render-node sync FUN_00680BD0 on exact GOG Redux 2.2.301, void __cdecl(renderData*): node = renderData+0x98, entity = renderData+0x94; with a node it calls node vtbl+0x24 (setOrientation) and +0x2C (setPosition) and then entity vtbl+0xC8 (Ogre::MovableObject::setVisibilityFlags, call at 0x00680DC0) unchecked; with no node and renderData+0x74 set it builds them via FUN_0067F480 (createEntity vtbl+0x17C, createChildSceneNode +0x180, attachObject +0x124). Only caller 0x004DB498. Bytes read from the shipped image in Ghidra 2026-11-21."
+    },
+    {
       "name": "GameObjectSimulate",
       "address": "0x004DEEC0",
       "expected": "55 8B EC 81 EC A8 01 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 57 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 85 08 FF FF FF 83 BD 08 FF FF FF 00 75 05 E9 ?? ?? ?? ?? E8 ?? ?? ?? ?? 85 C0 0F 84 ?? ?? ?? ??",

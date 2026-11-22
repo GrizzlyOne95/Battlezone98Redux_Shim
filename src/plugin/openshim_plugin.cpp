@@ -73,6 +73,7 @@
 #include "anchor_drag_guard_install.h"
 #include "terrain_zone_guard_install.h"
 #include "nan_transform_guard_install.h"
+#include "render_sync_guard_install.h"
 #include "give_weapon_selected_guard_install.h"
 #include "build_menu_team_color_install.h"
 #include "sniper_kill_credit_install.h"
@@ -386,6 +387,11 @@ static unsigned __stdcall PatchThreadProc(void*)
     // detour. Byte-guarded and fail-closed; [Fixes] NaNTransformGuard = 0 leaves
     // the engine untouched.
     PATCH_STAGE(BZROpenShim::NanTransform::InstallNanTransformGuardIfPossible());
+    // Skips the render-node sync (call 0x004DB498 -> FUN_00680BD0) for an object
+    // whose Ogre Entity or SceneNode is already destroyed, instead of calling
+    // through its dead vtable. Byte-guarded and fail-closed; [Fixes]
+    // RenderSyncVtableGuard = 0 leaves the call untouched.
+    PATCH_STAGE(BZROpenShim::RenderSyncGuard::InstallRenderSyncGuardIfPossible());
     // Scores a snipe on a craft this machine owns (SniperShell::Hit IsLocal
     // call redirect, network games only). Byte-guarded and fail-closed;
     // [Fixes] SniperKillCredit = 0 leaves the engine untouched.

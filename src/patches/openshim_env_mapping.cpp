@@ -393,6 +393,11 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "NaNTransformGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_RENDER_SYNC_GUARD") ||
+            Equals(name, "BZR_DISABLE_RENDER_SYNC_GUARD"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "RenderSyncVtableGuard", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED") ||
             Equals(name, "BZR_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED"))
         {

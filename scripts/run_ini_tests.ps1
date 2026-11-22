@@ -266,6 +266,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/TerrainHeightSampleGuard",
     # Only already-NaN/infinite object state is repaired; finite state is untouched.
     "Fixes/NaNTransformGuard",
+    # The render-node sync is skipped only for an object whose Ogre Entity or
+    # SceneNode vtable is not Ogre's; live objects take the stock path.
+    "Fixes/RenderSyncVtableGuard",
     # GiveWeapon(nil) also clears the emptied slot's selected bit, and slots
     # outside 0..4 are refused; valid calls keep the stock path.
     "Fixes/GiveWeaponNilClearsSelected",
@@ -631,6 +634,7 @@ $shippingPolicyChecks = @{
     "Fixes/TerrainZoneTableGuard" = "1"
     "Fixes/TerrainHeightSampleGuard" = "1"
     "Fixes/NaNTransformGuard" = "1"
+    "Fixes/RenderSyncVtableGuard" = "1"
     "Fixes/GiveWeaponNilClearsSelected" = "1"
     "Fixes/BuildMenuTeamColorClamp" = "1"
     "Fixes/SniperKillCredit" = "1"
