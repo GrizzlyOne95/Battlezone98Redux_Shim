@@ -2,11 +2,11 @@
 // BZR Open Shim - RTS markers: terrain-conforming ground rings, drawn locally
 // for the local player only. Two features share one ring renderer:
 //
-//  * [Gameplay] RtsCommandPings (default on): one short ping per order the
+//  * [Gameplay] RtsCommandPings (default off): one short ping per order the
 //    local ControlPanel issues. Go: a green ring shrinking onto the point;
 //    Attack on an object: a red ring around the target that follows it; any
 //    other targeted order: a yellow ring.
-//  * [Gameplay] RtsArtilleryRange (default on): a max-range ring around every
+//  * [Gameplay] RtsArtilleryRange (default off): a max-range ring around every
 //    selected own-team howitzer (HowitzerVtable / HowitzerSecondaryVtable),
 //    plus a cursor ring at the reticle point, green when one of them can
 //    reach it and red when none can. Never on the piloted vehicle: the laser
@@ -144,13 +144,13 @@ namespace BZROpenShim
 
             // ---- Config ------------------------------------------------------
             bool g_ConfigLoaded = false;
-            bool g_PingsOn = true;
-            bool g_RangeOn = true;
+            bool g_PingsOn = false;
+            bool g_RangeOn = false;
             bool g_AttackOn = false;
-            bool g_WeaponOn = true;       // [Gameplay] RtsWeaponRange
+            bool g_WeaponOn = false;       // [Gameplay] RtsWeaponRange
             bool g_RadarRangeOn = false;  // [Gameplay] RtsRadarRange
             bool g_MineRangeOn = false;   // [Gameplay] RtsMineRange
-            bool g_RangeLabelsOn = true;  // [Gameplay] RtsRangeLabels
+            bool g_RangeLabelsOn = false;  // [Gameplay] RtsRangeLabels
             int g_RangeLoggedState = -1;  // change-only "range rings" line
             int g_AttackLoggedState = -1; // change-only "enabled" line
             bool g_RadarPingsOn = false;
@@ -162,10 +162,10 @@ namespace BZROpenShim
 
             void LoadConfig()
             {
-                bool value = true;
-                g_PingsOn = TryGetUserConfigBool("Gameplay", "RtsCommandPings", value) ? value : true;
-                value = true;
-                g_RangeOn = TryGetUserConfigBool("Gameplay", "RtsArtilleryRange", value) ? value : true;
+                bool value = false;
+                g_PingsOn = TryGetUserConfigBool("Gameplay", "RtsCommandPings", value) ? value : false;
+                value = false;
+                g_RangeOn = TryGetUserConfigBool("Gameplay", "RtsArtilleryRange", value) ? value : false;
                 value = false;
                 g_AttackOn = TryGetUserConfigBool("Gameplay", "RtsAttackMarks", value) ? value : false;
                 if (g_AttackLoggedState != (g_AttackOn ? 1 : 0))
@@ -186,14 +186,14 @@ namespace BZROpenShim
                                  g_RadarPingsOn ? 1 : 0, g_RadarPostDrawRegistered ? 1 : 0);
                     }
                 }
-                value = true;
-                g_WeaponOn = TryGetUserConfigBool("Gameplay", "RtsWeaponRange", value) ? value : true;
+                value = false;
+                g_WeaponOn = TryGetUserConfigBool("Gameplay", "RtsWeaponRange", value) ? value : false;
                 value = false;
                 g_RadarRangeOn = TryGetUserConfigBool("Gameplay", "RtsRadarRange", value) ? value : false;
                 value = false;
                 g_MineRangeOn = TryGetUserConfigBool("Gameplay", "RtsMineRange", value) ? value : false;
-                value = true;
-                g_RangeLabelsOn = TryGetUserConfigBool("Gameplay", "RtsRangeLabels", value) ? value : true;
+                value = false;
+                g_RangeLabelsOn = TryGetUserConfigBool("Gameplay", "RtsRangeLabels", value) ? value : false;
                 {
                     const int state = (g_WeaponOn ? 1 : 0) | (g_RadarRangeOn ? 2 : 0) | (g_MineRangeOn ? 4 : 0) |
                                       (g_RangeLabelsOn ? 8 : 0);

@@ -1,24 +1,24 @@
 // rts_commands.cpp
 // BZR Open Shim - RTS command extras for the stock unit command menu.
 //
-//   [Gameplay] RtsRemoteTarget (default ON)
+//   [Gameplay] RtsRemoteTarget (default OFF)
 //     * Shift+T (RtsRemoteTargetKey) sets the player's target to a selected
 //       own unit without touching the selection; each press moves to the next
 //       selected unit. Stock T (frontal_target) never sees the press.
 //     * B (RtsBuildingCycleKey) cycles the target through the player's
 //       buildings (Recycler, Factory and Armory included), newest first.
-//   [Gameplay] RtsSmartCommandMenu (default ON)
+//   [Gameplay] RtsSmartCommandMenu (default OFF)
 //     * A mixed selection (a Ctrl+1 group of wingmen, walkers, APCs,
 //       howitzers) keeps Hunt, Follow Close (Formation) and Defend in the
 //       menu; each is sent only to the units whose own menu offers it.
-//   [Gameplay] RtsSmartRepairReload (default ON)
+//   [Gameplay] RtsSmartRepairReload (default OFF)
 //     * Get Repair / Get Reload show when any selected unit needs them and
 //       go only to the units that do.
-//   [Gameplay] RtsAreaSelect (default ON)
+//   [Gameplay] RtsAreaSelect (default OFF)
 //     * X (RtsAreaSelectKey) adds the player's units of the same family as
 //       the reticle object (else the first selected unit) within 100 m;
 //       Shift+X within 200 m.
-//   [Gameplay] RtsHold (default 2: key and Shift menu; 1 key only; 0 off)
+//   [Gameplay] RtsHold (default 0 off; 1 key only; 2 key and Shift menu)
 //     * Z (RtsHoldKey) gives the selected units that have a Defend entry
 //       Defend(0) plus the native hold. With Shift held the Defend entry
 //       reads "Hold" and choosing it does the same. Single player only, like
@@ -28,7 +28,7 @@
 //       order the selected own units: Follow and Defend the player's vehicle,
 //       Attack the player's current target (GameObject +0x21C), Stop. The
 //       selection is kept. Single player only, like Hold. Needs NumLock on.
-//   [Gameplay] RtsBuildAtNav (default ON)
+//   [Gameplay] RtsBuildAtNav (default OFF)
 //     * With a building picked on a selected Construction Rig, the Go To
 //       Nav entry reads "Build at Nav"; picking a nav validates the spot
 //       with the rig's own GetCommand and gives BUILD there (refused rigs
@@ -251,12 +251,12 @@ namespace BZROpenShim::Hooks
 
         // Config ([Gameplay]); main thread.
         bool g_ConfigRead = false;
-        bool g_TargetEnabled = true;
-        bool g_SmartMenuEnabled = true;
-        bool g_SmartRepairEnabled = true;
-        bool g_AreaEnabled = true;
-        int g_HoldMode = Policy::kHoldKeyAndShiftMenu;
-        bool g_BuildNavEnabled = true;
+        bool g_TargetEnabled = false;
+        bool g_SmartMenuEnabled = false;
+        bool g_SmartRepairEnabled = false;
+        bool g_AreaEnabled = false;
+        int g_HoldMode = Policy::kHoldOff;
+        bool g_BuildNavEnabled = false;
         bool g_IdleAlertEnabled = false;
         bool g_AmmoAlertEnabled = false;
         bool g_ScrapAlertEnabled = false;
@@ -2650,18 +2650,18 @@ namespace BZROpenShim::Hooks
 
     void ReloadRtsCommandsConfig()
     {
-        g_TargetEnabled = ReadBoolOption("RtsRemoteTarget", true);
-        g_SmartMenuEnabled = ReadBoolOption("RtsSmartCommandMenu", true);
-        g_SmartRepairEnabled = ReadBoolOption("RtsSmartRepairReload", true);
-        g_AreaEnabled = ReadBoolOption("RtsAreaSelect", true);
-        g_BuildNavEnabled = ReadBoolOption("RtsBuildAtNav", true);
+        g_TargetEnabled = ReadBoolOption("RtsRemoteTarget", false);
+        g_SmartMenuEnabled = ReadBoolOption("RtsSmartCommandMenu", false);
+        g_SmartRepairEnabled = ReadBoolOption("RtsSmartRepairReload", false);
+        g_AreaEnabled = ReadBoolOption("RtsAreaSelect", false);
+        g_BuildNavEnabled = ReadBoolOption("RtsBuildAtNav", false);
         g_IdleAlertEnabled = ReadBoolOption("RtsIdleUnitAlert", false);
         g_AmmoAlertEnabled = ReadBoolOption("RtsAmmoAlert", false);
         g_ScrapAlertEnabled = ReadBoolOption("RtsScrapFullAlert", false);
         g_FollowEnabled = ReadBoolOption("RtsFollowCamera", false);
         g_QuickEnabled = ReadBoolOption("RtsQuickCommands", false);
         std::string hold;
-        g_HoldMode = Policy::kHoldKeyAndShiftMenu;
+        g_HoldMode = Policy::kHoldOff;
         if (TryGetUserConfigString("Gameplay", "RtsHold", hold) && !hold.empty())
             g_HoldMode = Policy::ClampHoldMode(std::atoi(hold.c_str()));
         ResolveKeysFromConfig();

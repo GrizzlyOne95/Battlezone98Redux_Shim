@@ -2869,9 +2869,9 @@ GroupStrip = 1
 ; other order on a point or object. Local visuals only: nothing is sent or
 ; saved, so it also works in multiplayer.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Command Pings".
-RtsCommandPings = 1
+RtsCommandPings = 0
 
 ; Radar pings. Each order you give also draws a short ring on the cockpit
 ; radar at the order's position, in the same colour as the ground ring (green
@@ -2890,9 +2890,9 @@ RtsRadarPings = 0
 ; cursor): green when one of them can reach it allowing for the height
 ; difference, red when none can. At most 16 units. Local visuals only.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Artillery Range".
-RtsArtilleryRange = 1
+RtsArtilleryRange = 0
 
 ; Range rings for selected units (rts_markers.cpp; Docs/RTS_RANGE_RINGS.md). Each ring shows
 ; only for your own selected units, for as long as they are selected, and never for the
@@ -2902,9 +2902,9 @@ RtsArtilleryRange = 1
 ; RtsWeaponRange: an orange ring at the direct-fire reach (shotSpeed x lifeSpan) of each
 ; selected unit's cannon-class weapon. Homing and guided weapons are skipped. The artillery
 ; ring above is separate and unchanged.
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Weapon Range".
-RtsWeaponRange = 1
+RtsWeaponRange = 0
 ;
 ; RtsRadarRange: a mint ring at [CraftClass] rangeScan for each selected unit that has one.
 ; Accepted: boolean. Default: OFF.
@@ -2919,9 +2919,9 @@ RtsMineRange = 0
 ;
 ; RtsRangeLabels: writes WEAPON RANGE / RADAR RANGE / MINE TRIGGER letter by letter along
 ; each ring, in the ring's colour, on the side facing you. Needs a range ring on.
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Range Labels".
-RtsRangeLabels = 1
+RtsRangeLabels = 0
 ; RTS command extras (rts_commands.cpp; Docs/RTS_COMMANDS.md). All five rows
 ; are on the OpenShim Settings page under Controls > RTS Commands. Orders go
 ; through the stock per-unit calls the unit menu itself uses.
@@ -2932,9 +2932,9 @@ RtsRangeLabels = 1
 ; (RtsBuildingCycleKey) cycles the target through your buildings (Recycler,
 ; Factory and Armory included), newest first. Works in multiplayer.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Remote Target".
-RtsRemoteTarget = 1
+RtsRemoteTarget = 0
 
 ; Mixed-selection command menu. Stock keeps only the entries every selected
 ; unit shares, so a Ctrl+1 group of wingmen, walkers, APCs and howitzers
@@ -2942,26 +2942,26 @@ RtsRemoteTarget = 1
 ; and each goes only to the units whose own menu has it; the others keep
 ; their current orders. Works in multiplayer.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Smart Command Menu".
-RtsSmartCommandMenu = 1
+RtsSmartCommandMenu = 0
 
 ; Get Repair and Get Reload show when any selected unit needs them (stock:
 ; only when every unit does) and go only to the units that need them.
 ; Works in multiplayer.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Smart Repair/Reload".
-RtsSmartRepairReload = 1
+RtsSmartRepairReload = 0
 
 ; Area select. X (RtsAreaSelectKey) adds your units of the same type as the
 ; unit under the reticle (else the first selected unit) within 100 m of it
 ; to the selection; Shift+X within 200 m. Works in satellite view (centred
 ; on the first selected unit there). Works in multiplayer.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Area Select".
-RtsAreaSelect = 1
+RtsAreaSelect = 0
 
 ; Hold. Z (RtsHoldKey) gives the selected units that have a Defend entry
 ; Defend with no target plus the native hold, so they stay put. With 2,
@@ -2970,9 +2970,9 @@ RtsAreaSelect = 1
 ; Shift+number (BZP's line-up Go does), choose 1 to keep only the key.
 ; Single player only: the native hold is not saved and peers never see it.
 ;
-; Accepted: 2 (key and Shift menu), 1 (key only), 0 (off). Default: 2.
+; Accepted: 2 (key and Shift menu), 1 (key only), 0 (off). Default: 0.
 ; Exposed on the OpenShim Settings page as "Hold".
-RtsHold = 2
+RtsHold = 0
 
 ; Quick commands. Four keys give an order to the selected units without the
 ; command menu: Numpad 1 Follow Me and Numpad 2 Defend Me (both on your own
@@ -3002,9 +3002,9 @@ RtsQuickCommands = 0
 ; the nav as before. Only your own, local rigs; runs in multiplayer
 ; (UNVERIFIED live there, see Docs/RTS_COMMANDS.md).
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Build at Nav".
-RtsBuildAtNav = 1
+RtsBuildAtNav = 0
 
 ; Build Ghost. While the stock placement square shows for a Construction
 ; Rig, a see-through copy of the picked building stands where it would be
@@ -3013,9 +3013,9 @@ RtsBuildAtNav = 1
 ; list offers Build at Nav, a pale blue copy stands at every listed nav,
 ; facing the way you face. Drawn for you only; nothing is sent or saved.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Build Ghost".
-RtsBuildGhost = 1
+RtsBuildGhost = 0
 
 ; Pending Build Ghost. Once a Construction Rig of yours is ordered to
 ; build (from the reticle or with Build at Nav), a dim pale blue copy of
@@ -3024,9 +3024,9 @@ RtsBuildGhost = 1
 ; first eight in the engine's object list, and none when that list holds
 ; over 4096 objects. Drawn for you only; nothing is sent or saved.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Pending Build Ghost".
-RtsPendingBuildGhost = 1
+RtsPendingBuildGhost = 0
 
 ; Power Range. While a building that needs power (gun towers, the Comm
 ; Bunker) is being placed, a ring on the ground around every allied power
@@ -3034,18 +3034,18 @@ RtsPendingBuildGhost = 1
 ; measures in 3D, so a spot just inside a ring on a steep slope can still
 ; read yellow. Drawn for you only.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Power Range".
-RtsPowerRange = 1
+RtsPowerRange = 0
 
 ; Waypoint Lines. For up to 16 selected units of yours, a thin line on the
 ; ground to where their current order takes them, and a fainter one on to
 ; their next order. Idle units and orders without a path draw nothing.
 ; Drawn for you only.
 ;
-; Accepted: boolean. Default: ON.
+; Accepted: boolean. Default: OFF.
 ; Exposed on the OpenShim Settings page as "Waypoint Lines".
-RtsWaypointLines = 1
+RtsWaypointLines = 0
 
 ; Producer Badges. A badge above each of your Recycler, Factories, Armories
 ; and Construction Rigs that is building something: the name of the item and
