@@ -78,6 +78,7 @@
 #include "mp_invite_password_install.h"
 #include "steam_tunnel_join.h"
 #include "mp_daywrecker_armory_collision_install.h"
+#include "splinter_payload_local_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
 #include "mp_any_nation.h"
@@ -270,6 +271,20 @@ static unsigned __stdcall PatchThreadProc(void*)
     // in-flight bomb; byte-guarded and fail-closed;
     // [Fixes] DaywreckerArmoryCollision = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::DaywreckerArmory::InstallDaywreckerArmoryCollisionIfPossible());
+
+    // A splinter's payload is built on every peer with source = that peer and
+    // never sent, but a SprayBomb or BounceBomb payload resends itself at its
+    // first bounce and a Popper payload sends its child, from every peer, so a
+    // splinter whose payload is a splinter multiplies per peer. In a network
+    // game the payload build call in SprayBuilding::Simulate records each
+    // payload SprayBomb, BounceBomb or Popper (the mission-teardown ordnance
+    // cleanup clears the records, the SprayBomb destructor slot drops one as a
+    // backstop). The Net_GetMyPlayerID calls in SprayBomb::Hit and
+    // BounceBomb::Hit report a non-matching id for recorded payloads only, and
+    // a recorded Popper's child is built with bSend = 0; the launcher's own
+    // thrown bomb keeps its stock resync. Byte-guarded, all eight patches or
+    // none; [Fixes] SplinterPayloadLocal = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::SplinterPayloadLocal::InstallSplinterPayloadLocalIfPossible());
 
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and
