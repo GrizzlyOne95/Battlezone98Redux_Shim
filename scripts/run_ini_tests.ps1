@@ -266,6 +266,11 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     "Fixes/TerrainHeightSampleGuard",
     # Only already-NaN/infinite object state is repaired; finite state is untouched.
     "Fixes/NaNTransformGuard",
+    # GiveWeapon(nil) also clears the emptied slot's selected bit, and slots
+    # outside 0..4 are refused; valid calls keep the stock path.
+    "Fixes/GiveWeaponNilClearsSelected",
+    # Build menu team colour index stays inside its 3 colours; teams 0..2 unchanged.
+    "Fixes/BuildMenuTeamColorClamp",
     # Lua Send lengths 128..255 decode unsigned; lengths above 255 are refused
     # by the sender instead of wrapping. Unpatched receivers still crash.
     "Fixes/LuaSendLengthUnsigned",
@@ -614,6 +619,8 @@ $shippingPolicyChecks = @{
     "Fixes/TerrainZoneTableGuard" = "1"
     "Fixes/TerrainHeightSampleGuard" = "1"
     "Fixes/NaNTransformGuard" = "1"
+    "Fixes/GiveWeaponNilClearsSelected" = "1"
+    "Fixes/BuildMenuTeamColorClamp" = "1"
     "Fixes/LuaSendLengthUnsigned" = "1"
     "Fixes/MissionEndSync" = "1"
     "Fixes/DaywreckerArmoryCollision" = "1"

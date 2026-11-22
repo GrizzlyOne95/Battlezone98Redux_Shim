@@ -617,6 +617,14 @@ openshim_add_test(nan_transform_guard_tests STD 14 SOURCES
     nan_transform_guard_tests.cpp
 )
 
+openshim_add_test(give_weapon_selected_guard_tests STD 14 SOURCES
+    give_weapon_selected_guard_tests.cpp
+)
+
+openshim_add_test(build_menu_team_color_tests STD 14 SOURCES
+    build_menu_team_color_tests.cpp
+)
+
 openshim_add_test(lua_send_length_tests STD 14 SOURCES
     lua_send_length_tests.cpp
 )

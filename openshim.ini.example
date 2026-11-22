@@ -731,6 +731,26 @@ TerrainHeightSampleGuard = 1
 ; Env alias to force it off: OPENSHIM_DISABLE_NAN_TRANSFORM_GUARD
 NaNTransformGuard = 1
 
+; Clear the selected-weapon bit when Lua GiveWeapon(h, nil, slot) empties a
+; slot. Stock clears the weapon, hardpoint and enabled bits but keeps the
+; selected bit on every craft except the player's, so code that walks the
+; selected weapons (the guided-missile lock scan, the person sniper scan) reads
+; through a null weapon and crashes. Also makes GiveWeapon refuse slots outside
+; 0..4: its stock range test never rejects, and Lua passes slot 5 or more
+; through, building a weapon on a hardpoint read from the wrong field.
+; Stands down on any build where a byte guard does not match.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED
+GiveWeaponNilClearsSelected = 1
+
+; Keep the build menu's team colour inside its three colours (white, green,
+; red for teams 0, 1, 2). Stock clamps the item team to 0..3, so an item of
+; team 3 or more is drawn in whatever the stack holds past the array. Team 3
+; and up now draw red, like team 2. Stands down on a byte-guard mismatch.
+; Accepted: boolean. Default: ON.
+; Env alias to force it off: OPENSHIM_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP
+BuildMenuTeamColorClamp = 1
+
 ; Make Lua Send carry strings and tables of 128..255 entries. The packet codec
 ; stores a length above 30 in one extension byte, and the stock decoders read it
 ; signed: a Send string of 128..255 bytes faults every receiving peer (access

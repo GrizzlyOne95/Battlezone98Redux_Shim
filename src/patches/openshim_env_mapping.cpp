@@ -388,6 +388,16 @@ namespace
         {
             return TryReadMappedBool(ini, "Fixes", "NaNTransformGuard", true, out);
         }
+        if (Equals(name, "OPENSHIM_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED") ||
+            Equals(name, "BZR_DISABLE_GIVE_WEAPON_NIL_CLEARS_SELECTED"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "GiveWeaponNilClearsSelected", true, out);
+        }
+        if (Equals(name, "OPENSHIM_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP") ||
+            Equals(name, "BZR_DISABLE_BUILD_MENU_TEAM_COLOR_CLAMP"))
+        {
+            return TryReadMappedBool(ini, "Fixes", "BuildMenuTeamColorClamp", true, out);
+        }
         if (Equals(name, "OPENSHIM_DISABLE_LUA_SEND_LENGTH_FIX") ||
             Equals(name, "BZR_DISABLE_LUA_SEND_LENGTH_FIX"))
         {
