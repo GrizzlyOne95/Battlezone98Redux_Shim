@@ -69,18 +69,22 @@
 #include "lua_formation_fix_install.h"
 #include "lua_getindependence_guard_install.h"
 #include "objective_cap_guard_install.h"
+#include "handle_sequence_check_install.h"
 #include "anchor_drag_guard_install.h"
 #include "terrain_zone_guard_install.h"
 #include "nan_transform_guard_install.h"
 #include "give_weapon_selected_guard_install.h"
 #include "build_menu_team_color_install.h"
+#include "sniper_kill_credit_install.h"
 #include "lua_send_length_install.h"
+#include "objective_objects_fix_install.h"
 #include "mp_mission_end_sync_install.h"
 #include "mp_splinter_sync_install.h"
 #include "mp_host_leave_install.h"
 #include "mp_invite_password_install.h"
 #include "steam_tunnel_join.h"
 #include "mp_daywrecker_armory_collision_install.h"
+#include "splinter_payload_local_install.h"
 #include "lua_handle_sync_install.h"
 #include "mp_faction_restrict.h"
 #include "mp_any_nation.h"
@@ -231,6 +235,11 @@ static unsigned __stdcall PatchThreadProc(void*)
     // to 0..3, so team 3+ drew in the stack cookie's colour. Clamp max becomes 2.
     // Byte-guarded; [Fixes] BuildMenuTeamColorClamp = 0 leaves it stock.
     PATCH_STAGE(BZROpenShim::BuildMenuTeamColor::InstallBuildMenuTeamColorIfPossible());
+    // Object handles keep 20 sequence bits; past ~1M creations new objects get
+    // handles the engine cannot resolve. Read-only: binds the byte-guarded
+    // counter so the frame callback can warn at 90% and at exhaustion.
+    // [Fixes] HandleSequenceCheck = 0 leaves it off.
+    PATCH_STAGE(BZROpenShim::HandleSequence::InstallHandleSequenceCheckIfPossible());
 
     // AnchorRocket drag on a stationary or near-stationary target with a
     // negative (custom ODF) drag divides by ~0 and writes NaN into its velocity
@@ -251,6 +260,12 @@ static unsigned __stdcall PatchThreadProc(void*)
     // movzx and the encoders refuse lengths above 255. Byte-guarded and
     // fail-closed; [Fixes] LuaSendLengthUnsigned = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::LuaSendLength::InstallLuaSendLengthFixIfPossible());
+
+    // Stock Lua ObjectiveObjects() never advances its index: it returns the
+    // first objective forever (or spins on a skipped slot). The step body is
+    // rewritten in place to walk the list top down. Byte-guarded and fail-closed;
+    // [Fixes] ObjectiveObjectsIterator = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::ObjectiveObjectsFix::InstallObjectiveObjectsFixIfPossible());
 
     // Stock multiplayer carries no mission-end message: when only the host's
     // script calls SucceedMission/FailMission, guests run on forever. The host
@@ -286,6 +301,20 @@ static unsigned __stdcall PatchThreadProc(void*)
     // in-flight bomb; byte-guarded and fail-closed;
     // [Fixes] DaywreckerArmoryCollision = 0 leaves the engine untouched.
     PATCH_STAGE(BZROpenShim::DaywreckerArmory::InstallDaywreckerArmoryCollisionIfPossible());
+
+    // A splinter's payload is built on every peer with source = that peer and
+    // never sent, but a SprayBomb or BounceBomb payload resends itself at its
+    // first bounce and a Popper payload sends its child, from every peer, so a
+    // splinter whose payload is a splinter multiplies per peer. In a network
+    // game the payload build call in SprayBuilding::Simulate records each
+    // payload SprayBomb, BounceBomb or Popper (the mission-teardown ordnance
+    // cleanup clears the records, the SprayBomb destructor slot drops one as a
+    // backstop). The Net_GetMyPlayerID calls in SprayBomb::Hit and
+    // BounceBomb::Hit report a non-matching id for recorded payloads only, and
+    // a recorded Popper's child is built with bSend = 0; the launcher's own
+    // thrown bomb keeps its stock resync. Byte-guarded, all eight patches or
+    // none; [Fixes] SplinterPayloadLocal = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::SplinterPayloadLocal::InstallSplinterPayloadLocalIfPossible());
 
     // Explains a "Not Ready" multiplayer entry on the main menu. Read-only: it
     // reproduces the shell's own readiness decision from the same globals and
@@ -357,6 +386,10 @@ static unsigned __stdcall PatchThreadProc(void*)
     // detour. Byte-guarded and fail-closed; [Fixes] NaNTransformGuard = 0 leaves
     // the engine untouched.
     PATCH_STAGE(BZROpenShim::NanTransform::InstallNanTransformGuardIfPossible());
+    // Scores a snipe on a craft this machine owns (SniperShell::Hit IsLocal
+    // call redirect, network games only). Byte-guarded and fail-closed;
+    // [Fixes] SniperKillCredit = 0 leaves the engine untouched.
+    PATCH_STAGE(BZROpenShim::SniperKillCredit::InstallSniperKillCreditIfPossible());
     // Opt-in per-frame mouse look ([Experimental] MouseEveryFrame).
     PATCH_STAGE(BZROpenShim::InitializeMouseEveryFrame());
     // MMCSS + power-throttling opt-out ([Fixes] ThreadScheduling). After perf
