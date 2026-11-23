@@ -139,7 +139,7 @@ $chain = [ordered]@{
     'winmm.dll'             = Join-Path $OpenShimRepo 'bin\Release\winmm.dll'
     'bzloader.dll'          = Join-Path $OpenShimRepo 'bin\Release\bzloader.dll'
     'plugins\openshim.dll'  = Join-Path $OpenShimRepo 'bin\Release\plugins\openshim.dll'
-    'scripts\patches.json'  = Join-Path $OpenShimRepo 'scripts\patches.json'
+    'openshim\patches.json' = Join-Path $OpenShimRepo 'scripts\patches.json'
 }
 $sourceHashes = [ordered]@{}
 foreach ($rel in $chain.Keys) {
@@ -149,12 +149,14 @@ foreach ($rel in $chain.Keys) {
 $instances = [ordered]@{}
 foreach ($i in 0..($Clients - 1)) {
     $inst = Join-Path $BZRCoopRoot ("instances\Instance{0}\Battlezone 98 Redux" -f $i)
-    $ini = Join-Path $inst 'openshim.ini'
+    $ini = Join-Path $inst 'openshim\openshim.ini'
+    if (-not (Test-Path -LiteralPath $ini)) { $ini = Join-Path $inst 'openshim.ini' }
     $ogre = Join-Path $inst 'ogre.cfg'
     if (-not (Test-Path -LiteralPath $ini)) { [void]$problems.Add("instance $i is not prepared"); continue }
     $h = [ordered]@{}
     foreach ($rel in $chain.Keys) {
-        $h[$rel] = Get-Hash (Join-Path $inst $rel)
+        $instRel = if ($rel -eq 'openshim\patches.json' -and -not (Test-Path -LiteralPath (Join-Path $inst $rel))) { 'scripts\patches.json' } else { $rel }
+        $h[$rel] = Get-Hash (Join-Path $inst $instRel)
         if ($h[$rel] -ne $sourceHashes[$rel]) { [void]$problems.Add("instance ${i}: $rel differs from its source") }
     }
     $h['openshim.ini'] = Get-Hash $ini

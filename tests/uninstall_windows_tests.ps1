@@ -56,7 +56,10 @@ function New-GameFixture {
     Write-Fixture $Root "Launcher\d3d9.dll" $openShimMarker
     Write-Fixture $Root "Launcher\BZLauncher.exe" "launcher"
 
-    # patches.json family.
+    # patches.json family: old layout under scripts\, new layout under openshim\.
+    Write-Fixture $Root "openshim\patches.json" "{}"
+    Write-Fixture $Root "openshim\patches.json.previous" "{}"
+    Write-Fixture $Root "openshim\patches.json.bak-20260101-000000" "{}"
     Write-Fixture $Root "scripts\patches.json" "{}"
     Write-Fixture $Root "scripts\patches.json.previous" "{}"
     Write-Fixture $Root "scripts\patches.json.bak-20260101-000000" "{}"
@@ -76,13 +79,45 @@ function New-GameFixture {
         Write-Fixture $Root "$uiDir\player_widget.png" "png"
     }
 
-    # Player configuration, its backups, the installer's canonical copy, the
+    # New-layout state, cache, bundled LAN tools and the stock backups. The
+    # stock net.ini differs from the OpenShim-edited one in the game root.
+    Write-Fixture $Root "openshim\openshim.ini" "[Player]"
+    Write-Fixture $Root "openshim\openshim.ini.bak-20260101-000000" "[Player]"
+    Write-Fixture $Root "openshim\openshim.ini.pre-reset-20260101-000000.bak" "[Player]"
+    Write-Fixture $Root "openshim\openshim.ini.premigrate-r1.bak" "[Player]"
+    Write-Fixture $Root "openshim\openshim.ini.canonical" "[Shipped]"
+    Write-Fixture $Root "openshim\state\openshim_update.status" "state=complete"
+    Write-Fixture $Root "openshim\state\steam_tunnel_peers.txt" "peers"
+    Write-Fixture $Root "openshim\cache\shaders\a.bin" "cache"
+    Write-Fixture $Root "openshim\tools\lan\BZRServer.exe" "server"
+    Write-Fixture $Root "openshim\stock-backup\net.ini" "[Stock]"
+    Write-Fixture $Root "openshim\stock-backup\Ogre.cfg" "stock ogre"
+    Write-Fixture $Root "Ogre.cfg" "openshim ogre"
+
+    # Old-layout leftovers from an install that never ran the new DLL.
+    Write-Fixture $Root "tools\lan\BZRServer.exe" "server"
+    Write-Fixture $Root "tools\lan\licenses\LICENSE.txt" "license"
+    Write-Fixture $Root "shader_cache\a.bin" "cache"
+    Write-Fixture $Root "steam_tunnel_peers.txt" "peers"
+    Write-Fixture $Root "steam_tunnel_peers.txt.lock" "lock"
+    Write-Fixture $Root "bzloader.log" "loader"
+
+    # Player data that must always survive.
+    Write-Fixture $Root "Save\slot1.sav" "save"
+    Write-Fixture $Root "career_stats.cfg" "stats"
+    Write-Fixture $Root "bans.cfg" "bans"
+    Write-Fixture $Root "flags.cfg" "flags"
+    Write-Fixture $Root "flags\one.flag" "flag"
+    Write-Fixture $Root "multi.ini" "multi"
+    Write-Fixture $Root "campaignReimagined_settings.cfg" "settings"
+
+    # Old-layout player configuration, its backups, the canonical copy, the
     # network config family, logs, and the updater status file.
     Write-Fixture $Root "openshim.ini" "[Player]"
     Write-Fixture $Root "openshim.ini.bak-20260101-000000" "[Player]"
     Write-Fixture $Root "openshim.ini.pre-reset-20260101-000000.bak" "[Player]"
     Write-Fixture $Root "openshim.ini.canonical" "[Shipped]"
-    Write-Fixture $Root "net.ini" "[Network]"
+    Write-Fixture $Root "net.ini" "[OpenShimNetwork]"
     Write-Fixture $Root "net.ini.bak-20260101-000000" "[Network]"
     Write-Fixture $Root "net.ini.previous" "[Network]"
     Write-Fixture $Root "logs\openshim.log" "log"
@@ -93,6 +128,17 @@ function New-GameFixture {
     Write-Fixture $Root "logs\BZLogger.txt" "stock"
     Write-Fixture $Root "logs\other_mod.log" "other"
     Write-Fixture $Root "logs\openshim_custom.mod" "not a log"
+    Write-Fixture $Root "logs\openshim_cpu_samples_main_100.bin" "capture"
+    Write-Fixture $Root "logs\openshim_frames_main_100.bin" "capture"
+    Write-Fixture $Root "logs\openshim_va_main_100.csv" "capture"
+    Write-Fixture $Root "logs\openshim_soak_lighting_100_01.png" "capture"
+    Write-Fixture $Root "logs\terrain_probe.json" "capture"
+    Write-Fixture $Root "logs\terrain_probe_001.json" "capture"
+    Write-Fixture $Root "logs\openshim_backend_pending.txt" "capture"
+    Write-Fixture $Root "logs\bz_buffer_log.bin" "capture"
+    Write-Fixture $Root "logs\bz_relay_control.jsonl" "capture"
+    Write-Fixture $Root "logs\terrain_notes.json" "not ours"
+    Write-Fixture $Root "logs\other_mod_capture.bin" "not ours"
     Write-Fixture $Root "openshim.log" "fallback"
     Write-Fixture $Root "openshim.ini.example" "reference"
     Write-Fixture $Root "openshim_update.status" "state=complete"
@@ -165,7 +211,11 @@ try {
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\uiline.png", "BZ_ASSETS_CORE\common\ui\CustomWidgets\uiplate.png",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\uibtn.png", "BZ_ASSETS_CORE\common\ui\CustomWidgets\uibtnhv.png",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\odyssey.ogv", "BZ_ASSETS_CORE\common\ui\CustomWidgets\openshim_widgets.sha256",
-        "openshim.ini.canonical", "openshim_update.status"
+        "openshim.ini.canonical", "openshim_update.status",
+        "openshim\patches.json", "openshim\patches.json.previous", "openshim\patches.json.bak-20260101-000000",
+        "openshim\openshim.ini.canonical", "openshim\state", "openshim\cache", "openshim\tools", "openshim\stock-backup",
+        "openshim\ui\player_widget.png", "openshim\ui",
+        "tools", "shader_cache", "steam_tunnel_peers.txt", "steam_tunnel_peers.txt.lock", "bzloader.log"
     )
     foreach ($relative in $gone) {
         Check (-not (Test-Path -LiteralPath (Join-Path $game $relative))) "removed: $relative"
@@ -176,9 +226,12 @@ try {
         "Launcher\BZLauncher.exe",
         "scripts\stock_mission.lua", "scripts",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png", "BZ_ASSETS_CORE\common\ui\CustomWidgets",
-        "openshim\ui\player_widget.png", "openshim\ui", "openshim",
+        "openshim", "openshim\openshim.ini", "openshim\openshim.ini.bak-20260101-000000",
+        "openshim\openshim.ini.pre-reset-20260101-000000.bak", "openshim\openshim.ini.premigrate-r1.bak",
         "openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
-        "net.ini", "net.ini.bak-20260101-000000", "net.ini.previous",
+        "net.ini", "net.ini.bak-20260101-000000", "net.ini.previous", "Ogre.cfg",
+        "Save\slot1.sav", "career_stats.cfg", "bans.cfg", "flags.cfg", "flags\one.flag", "multi.ini",
+        "campaignReimagined_settings.cfg",
         "logs\openshim.log", "logs\openshim_crash.log", "logs\openshim_crash_20261015_150000.dmp",
         "logs\bzloader.log", "logs\winmm_shim.log", "logs\BZLogger.txt", "logs\other_mod.log", "logs\openshim_custom.mod",
         "openshim.log", "openshim.ini.example"
@@ -188,10 +241,13 @@ try {
     }
     Check ($result.Output -match "KEEPING .*winmm\.dll\.bak-20260102-000000") "the foreign backup is reported as kept"
     Check ($result.Output -match "left in place") "the closing note says what was left"
+    Check ((Get-Content -LiteralPath (Join-Path $game "net.ini") -Raw) -eq "[Stock]") "net.ini was restored from openshim\stock-backup"
+    Check ((Get-Content -LiteralPath (Join-Path $game "Ogre.cfg") -Raw) -eq "stock ogre") "Ogre.cfg was restored from openshim\stock-backup"
+    Check ((Get-Content -LiteralPath (Join-Path $game "career_stats.cfg") -Raw) -eq "stats") "player data content is untouched"
 
-    # --- UI folders holding only OpenShim's files are removed, openshim\ too ------
+    # --- UI folders and openshim\ holding no player ini are removed entirely -------
     New-GameFixture $game
-    Remove-Item -LiteralPath (Join-Path $game "openshim\ui\player_widget.png") -Force
+    Remove-Item -Force (Join-Path $game "openshim\openshim.ini*")
     Remove-Item -LiteralPath (Join-Path $game "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png") -Force
     $result = Invoke-Uninstaller -GameDir $game
     Check $result.Ok "owned-only UI run exits cleanly: $($result.Output)"
@@ -204,10 +260,12 @@ try {
     New-GameFixture $game
     $result = Invoke-Uninstaller -GameDir $game -Env @{ OPENSHIM_PURGE_CONFIG = "1" }
     Check $result.Ok "purge run exits cleanly: $($result.Output)"
-    foreach ($relative in @("openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak")) {
+    foreach ($relative in @("openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
+            "openshim\openshim.ini", "openshim\openshim.ini.bak-20260101-000000",
+            "openshim\openshim.ini.pre-reset-20260101-000000.bak", "openshim\openshim.ini.premigrate-r1.bak", "openshim")) {
         Check (-not (Test-Path -LiteralPath (Join-Path $game $relative))) "purge removed: $relative"
     }
-    foreach ($relative in @("net.ini", "net.ini.bak-20260101-000000", "net.ini.previous", "logs\openshim.log")) {
+    foreach ($relative in @("net.ini", "net.ini.bak-20260101-000000", "net.ini.previous", "logs\openshim.log", "career_stats.cfg", "Save\slot1.sav")) {
         Check (Test-Path -LiteralPath (Join-Path $game $relative)) "purge kept: $relative"
     }
 
@@ -232,15 +290,20 @@ try {
     Check $result.Ok "full-clean completes: $($result.Output)"
     foreach ($relative in @(
         "openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
+        "openshim\openshim.ini", "openshim",
         "openshim.ini.example", "openshim.log", "logs\openshim.log", "logs\openshim_crash.log",
-        "logs\openshim_crash_20261015_150000.dmp", "logs\bzloader.log", "logs\winmm_shim.log"
+        "logs\openshim_crash_20261015_150000.dmp", "logs\bzloader.log", "logs\winmm_shim.log",
+        "logs\openshim_cpu_samples_main_100.bin", "logs\openshim_frames_main_100.bin", "logs\openshim_va_main_100.csv",
+        "logs\openshim_soak_lighting_100_01.png", "logs\terrain_probe.json", "logs\terrain_probe_001.json",
+        "logs\openshim_backend_pending.txt", "logs\bz_buffer_log.bin", "logs\bz_relay_control.jsonl"
     )) {
         Check (-not (Test-Path -LiteralPath (Join-Path $game $relative))) "full-clean removed: $relative"
     }
     foreach ($relative in @(
         "net.ini", "net.ini.previous", "net.ini.bak-20260101-000000",
         "logs\BZLogger.txt", "logs\other_mod.log", "logs\openshim_custom.mod",
-        "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png", "openshim\ui\player_widget.png"
+        "logs\terrain_notes.json", "logs\other_mod_capture.bin",
+        "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png", "career_stats.cfg", "Save\slot1.sav"
     )) {
         Check (Test-Path -LiteralPath (Join-Path $game $relative)) "full-clean preserved: $relative"
     }
@@ -251,6 +314,34 @@ try {
         Check (Test-Path -LiteralPath (Join-Path $script:root $relative)) "full-clean preserved other user data: $relative"
     }
     Check ($result.Output -match "CLEAR the OpenShim upload wrapper") "full-clean warns to clear Steam launch option"
+
+    # --- unknown entries in openshim\ stay; .before-uninstall copies never overwrite -----
+    New-GameFixture $game
+    Write-Fixture $game "openshim\my_mod\keep.txt" "mine"
+    Write-Fixture $game "openshim\notes.txt" "mine"
+    Write-Fixture $game "openshim\patches.json.superseded" "{}"
+    Write-Fixture $game "Ogre.cfg.before-uninstall-20200101-000000" "earlier"
+    $result = Invoke-Uninstaller -GameDir $game
+    Check $result.Ok "unknown-entry run exits cleanly: $($result.Output)"
+    foreach ($relative in @("openshim\my_mod\keep.txt", "openshim\notes.txt", "openshim")) {
+        Check (Test-Path -LiteralPath (Join-Path $game $relative)) "unknown entry kept: $relative"
+    }
+    Check (-not (Test-Path -LiteralPath (Join-Path $game "openshim\patches.json.superseded"))) "patches.json.superseded is removed with the family"
+    Check ($result.Output -match "KEEPING .*notes\.txt : not an OpenShim file") "an unknown file is reported"
+    Check ($result.Output -match "KEEPING .*my_mod : not an OpenShim folder") "an unknown folder is reported"
+    Check ((Get-Content -LiteralPath (Join-Path $game "Ogre.cfg.before-uninstall-20200101-000000") -Raw) -eq "earlier") "an earlier .before-uninstall copy is not overwritten"
+    Check (@(Get-ChildItem -LiteralPath $game -Filter "Ogre.cfg.before-uninstall-*").Count -eq 2) "this run's .before-uninstall copy has its own name"
+
+    # --- openshim\ that is itself a junction is not entered ---------------------------
+    New-GameFixture $game
+    $realOpenShim = Join-Path $root "elsewhere"
+    Move-Item -LiteralPath (Join-Path $game "openshim") -Destination $realOpenShim
+    New-Item -ItemType Junction -Path (Join-Path $game "openshim") -Target $realOpenShim | Out-Null
+    $result = Invoke-Uninstaller -GameDir $game
+    Check $result.Ok "linked openshim run exits cleanly: $($result.Output)"
+    Check (Test-Path -LiteralPath (Join-Path $realOpenShim "patches.json")) "a linked openshim\ target is untouched"
+    Check ($result.Output -match "KEEPING .*openshim : it is a link") "a linked openshim\ is reported"
+    [System.IO.Directory]::Delete((Join-Path $game "openshim"))
 
     # --- a foreign winmm.dll is never removed --------------------------------------
     New-GameFixture $game

@@ -38,7 +38,14 @@ try {
     # Existing OpenShim, but the loader, runtime plugin and resources are missing.
     # Repair must fill the holes without overwriting player/network settings.
     Copy-Item -LiteralPath $sourceDll -Destination (Join-Path $game "winmm.dll")
+    # Old layout on purpose: the root ini, a backup, and scripts\patches.json
+    # must move to openshim\ with the player's values untouched.
     Set-Content -LiteralPath (Join-Path $game "openshim.ini") -Value "player-setting=keep" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $game "openshim.ini.bak-20260101-000000") -Value "old-backup" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $game "openshim.ini.canonical") -Value "stale" -Encoding ASCII
+    New-Item -ItemType Directory -Path (Join-Path $game "scripts"), (Join-Path $game "shader_cache") -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $game "scripts\patches.json") -Value "{}" -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $game "shader_cache\a.bin") -Value "cache" -Encoding ASCII
     Set-Content -LiteralPath (Join-Path $game "net.ini") -Value "network-setting=keep" -Encoding ASCII
 
     $env:OPENSHIM_GAME_PATH = $game
@@ -55,15 +62,22 @@ try {
     Invoke-Setup -Action "repair" -ExpectSuccess $true
 
     foreach ($file in @("winmm.dll", "bzloader.dll", "plugins\openshim.dll",
-                        "scripts\patches.json", "openshim.ini.canonical",
+                        "openshim\patches.json", "openshim\openshim.ini.canonical",
                         "openshim\OpenShimAssets.ini",
                         "openshim\renderer\enhanced\resources.version")) {
         if (-not (Test-Path -LiteralPath (Join-Path $game $file) -PathType Leaf)) {
             throw "Repair did not restore $file"
         }
     }
-    if ((Get-Content -LiteralPath (Join-Path $game "openshim.ini") -Raw).Trim() -ne "player-setting=keep") {
-        throw "Repair overwrote player settings"
+    if ((Get-Content -LiteralPath (Join-Path $game "openshim\openshim.ini") -Raw).Trim() -ne "player-setting=keep") {
+        throw "Repair overwrote or lost player settings"
+    }
+    if ((Get-Content -LiteralPath (Join-Path $game "openshim\openshim.ini.bak-20260101-000000") -Raw).Trim() -ne "old-backup") {
+        throw "Repair did not move the old ini backup into openshim\"
+    }
+    foreach ($old in @("openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.canonical",
+                       "scripts", "shader_cache")) {
+        if (Test-Path -LiteralPath (Join-Path $game $old)) { throw "Repair left old-layout $old in the game root" }
     }
     if ((Get-Content -LiteralPath (Join-Path $game "net.ini") -Raw).Trim() -ne "network-setting=keep") {
         throw "Repair overwrote network settings"
@@ -83,6 +97,23 @@ try {
     Invoke-Setup -Action "update" -ExpectSuccess $true
     if ((Get-FileHash -LiteralPath (Join-Path $game "winmm.dll") -Algorithm SHA256).Hash -ne $installedHash) {
         throw "Same-version update modified winmm.dll"
+    }
+
+    # A fresh install saves the game's own net.ini once and never overwrites that copy.
+    $freshGame = Join-Path $temp "fresh-game"
+    New-Item -ItemType Directory -Path $freshGame -Force | Out-Null
+    New-Item -ItemType File -Path (Join-Path $freshGame "battlezone98redux.exe") -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $freshGame "net.ini") -Value "stock-net" -Encoding ASCII
+    $env:OPENSHIM_GAME_PATH = $freshGame
+    Invoke-Setup -Action "install" -ExpectSuccess $true
+    $stockNet = Join-Path $freshGame "openshim\stock-backup\net.ini"
+    if (-not (Test-Path -LiteralPath $stockNet) -or (Get-Content -LiteralPath $stockNet -Raw).Trim() -ne "stock-net") {
+        throw "Install did not save the stock net.ini"
+    }
+    Set-Content -LiteralPath (Join-Path $freshGame "net.ini") -Value "edited-net" -Encoding ASCII
+    Invoke-Setup -Action "install" -ExpectSuccess $true
+    if ((Get-Content -LiteralPath $stockNet -Raw).Trim() -ne "stock-net") {
+        throw "Reinstall overwrote the stock net.ini backup"
     }
 
     # Repair and Update are not aliases for a fresh installation.

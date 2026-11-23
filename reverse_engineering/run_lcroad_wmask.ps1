@@ -48,7 +48,8 @@ foreach ($name in $deployNames) {
 }
 
 # handle ini toggle for weaponMask fix: [SinglePlayer] AiWeaponMaskSelection=1
-$iniPath = Join-Path $GameRoot "openshim.ini"
+$iniPath = Join-Path $GameRoot "openshim\openshim.ini"
+if (-not (Test-Path -LiteralPath $iniPath)) { $iniPath = Join-Path $GameRoot "openshim.ini" }
 $iniBackup = $null
 $iniWasPatched = $false
 if ($EnableWeaponMaskFix) {

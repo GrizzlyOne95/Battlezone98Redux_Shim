@@ -60,18 +60,21 @@ if (-not $Timers.Count -or -not $Impair.Count) { throw 'Timer and impairment axe
 $Timers = @($Timers | ForEach-Object { (ConvertTo-P2PRetryTiming $_).token })
 if (@($Timers | Select-Object -Unique).Count -ne $Timers.Count) { throw 'Duplicate timer arms.' }
 $instances = @(0..3 | ForEach-Object { Join-Path $BZRCoopRoot "instances\Instance$_\Battlezone 98 Redux" })
-$chain = @('winmm.dll','bzloader.dll','plugins\openshim.dll','scripts\patches.json')
+$chain = @('winmm.dll','bzloader.dll','plugins\openshim.dll','openshim\patches.json')
 $hashes = @{}
 foreach ($rel in $chain) {
-    $source = Join-Path (Split-Path $PSScriptRoot) $(if ($rel -eq 'scripts\patches.json') { $rel } else { "bin\Release\$rel" })
+    # The repo's patches.json stays in scripts\; instances hold it in openshim\ (older ones in scripts\).
+    $source = Join-Path (Split-Path $PSScriptRoot) $(if ($rel -eq 'openshim\patches.json') { 'scripts\patches.json' } else { "bin\Release\$rel" })
     $hashes[$rel] = (Get-FileHash -LiteralPath $source).Hash
     foreach ($instance in $instances) {
-        if ((Get-FileHash -LiteralPath (Join-Path $instance $rel)).Hash -ne $hashes[$rel]) { throw "Load chain mismatch: $instance\$rel" }
+        $target = Join-Path $instance $rel
+        if (-not (Test-Path -LiteralPath $target) -and $rel -eq 'openshim\patches.json') { $target = Join-Path $instance 'scripts\patches.json' }
+        if ((Get-FileHash -LiteralPath $target).Hash -ne $hashes[$rel]) { throw "Load chain mismatch: $instance\$rel" }
     }
 }
 # Validate every INI for every timer arm without writing.
 foreach ($instance in $instances) {
-    $text = [IO.File]::ReadAllText((Join-Path $instance 'openshim.ini'))
+    $text = [IO.File]::ReadAllText((Get-P2PRetryIniPath $instance))
     foreach ($timer in $Timers) { Set-P2PRetryTimingText $text $timer | Out-Null }
 }
 $control = Join-Path $BZRCoopRoot "runs\retry-battle-matrix-$RunStamp"

@@ -81,7 +81,8 @@ New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
 
 $gameExe = Join-Path $GameRoot "battlezone98redux.exe"
 $ogreConfig = Join-Path $GameRoot "Ogre.cfg"
-$shimIni = Join-Path $GameRoot "openshim.ini"
+$shimIni = Join-Path $GameRoot "openshim\openshim.ini"
+if (-not (Test-Path -LiteralPath $shimIni)) { $shimIni = Join-Path $GameRoot "openshim.ini" }
 $missionSourceRoot = Join-Path $PSScriptRoot "test_missions\live_combat_scaling"
 $missionRoot = Join-Path $GameRoot "addon\lcbench"
 $missionConfig = Join-Path $missionRoot "lcbcfg.odf"
@@ -425,7 +426,7 @@ $stationLine
         @{ src = $shimLog; dst = "openshim.log" },
         @{ src = (Join-Path $GameRoot "logs\BZLogger.txt"); dst = "BZLogger.txt" },
         @{ src = (Join-Path $GameRoot "BZOgreLogfile.log"); dst = "BZOgreLogfile.log" },
-        @{ src = (Join-Path $GameRoot "openshim_ogre_profile.csv"); dst = "openshim_ogre_profile.csv" })) {
+        @{ src = $(if (Test-Path -LiteralPath (Join-Path $GameRoot "logs\openshim_ogre_profile.csv")) { Join-Path $GameRoot "logs\openshim_ogre_profile.csv" } else { Join-Path $GameRoot "openshim_ogre_profile.csv" }); dst = "openshim_ogre_profile.csv" })) {
         if (Test-Path -LiteralPath $log.src) {
             Copy-Item -LiteralPath $log.src -Destination (Join-Path $runRoot $log.dst) -Force
         }

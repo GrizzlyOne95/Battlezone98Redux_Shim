@@ -223,7 +223,10 @@ namespace BZROpenShim::LanSession
             return true;
         }
         const auto root = std::filesystem::path(gameRoot);
-        const auto executable = root / L"tools" / L"lan" / L"BZRServer.exe";
+        // openshim\tools\lan; an install not yet migrated still has tools\lan.
+        auto executable = root / L"openshim" / L"tools" / L"lan" / L"BZRServer.exe";
+        if (GetFileAttributesW(executable.c_str()) == INVALID_FILE_ATTRIBUTES)
+            executable = root / L"tools" / L"lan" / L"BZRServer.exe";
         const DWORD attributes = GetFileAttributesW(executable.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
         { s.snapshot.hostMessage = "LAN helper missing; set [Network] NoAuthLan=1 to host in-game."; return false; }

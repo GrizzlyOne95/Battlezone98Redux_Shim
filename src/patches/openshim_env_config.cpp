@@ -1,5 +1,6 @@
 #include "openshim_env_config.h"
 #include "openshim_env_mapping.h"
+#include "openshim_layout.h"
 
 // This translation unit is itself compiled with openshim_env_config.h forced in.
 // Undefine the redirect here so the final fallback reaches the real Win32 API.
@@ -172,6 +173,10 @@ DWORD WINAPI OpenShimGetEnvironmentVariableA(LPCSTR name, LPSTR buffer, DWORD si
 
     const IniReader ini = [&moduleDir](IniFile file, const char* section, const char* key, std::string& out)
     {
+        // openshim.ini lives in openshim\ (moved there on first use); the
+        // producer build-menu ini is user-authored and stays beside the exe.
+        if (file == IniFile::Main)
+            return TryReadIniValue(BZROpenShim::Layout::OpenShimIniPath(), section, key, out);
         return TryReadIniValue(moduleDir / IniFileName(file), section, key, out);
     };
     return GetEnvironmentValue(name, buffer, size, &ini, processEnvironment);

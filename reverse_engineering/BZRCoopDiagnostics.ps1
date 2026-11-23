@@ -13,11 +13,19 @@ function Set-BZRCoopIniValue([string]$Path, [string]$Section, [string]$Key, [str
     [IO.File]::WriteAllText($Path, $text)
 }
 
+function Get-BZRCoopShimIniPath([string]$Dir) {
+    # openshim\openshim.ini since the footprint move; an older install keeps it in the root.
+    $new = Join-Path $Dir 'openshim\openshim.ini'
+    $old = Join-Path $Dir 'openshim.ini'
+    if (-not (Test-Path -LiteralPath $new) -and (Test-Path -LiteralPath $old)) { $old } else { $new }
+}
+
 function Set-BZRCoopMaxNetworkLogging([string]$Dir) {
+    $shimIni = Get-BZRCoopShimIniPath $Dir
     foreach ($key in 'RelayLogging', 'RelayLogAllControl', 'RelayLogDatagrams', 'RelayLoggingPrivateForensic', 'RelayLoggingAllUdp') {
-        Set-BZRCoopIniValue (Join-Path $Dir 'openshim.ini') Diagnostics $key 1
+        Set-BZRCoopIniValue $shimIni Diagnostics $key 1
     }
-    Set-BZRCoopIniValue (Join-Path $Dir 'openshim.ini') Diagnostics RelayLoggingQueueRecords 65536
+    Set-BZRCoopIniValue $shimIni Diagnostics RelayLoggingQueueRecords 65536
     foreach ($key in 'EnableLogging', 'LogSocketErrors', 'LogSocketLifecycle', 'LogSocketPackets', 'LogSockOptCalls', 'LogPacketReorder',
                      'EnableBufferLog', 'EnableRelayCapture', 'RelayLogAllControl', 'RelayLogDatagrams', 'EnableBZRNetTrace', 'BZRNetTracePrivate', 'BZRNetTraceAllUdp') {
         Set-BZRCoopIniValue (Join-Path $Dir 'net.ini') OpenShimSocket $key 1

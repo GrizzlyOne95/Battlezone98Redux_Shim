@@ -76,8 +76,8 @@ Save-AuditFile (Join-Path $GameRoot 'ogre.cfg')
 try {
     if(Get-Process battlezone98redux -ErrorAction SilentlyContinue){throw 'Another game session is active'}
     foreach($file in Get-ChildItem -LiteralPath $auditSaveRoot -File -Recurse){Save-AuditFile $file.FullName}
-    foreach($relative in @('openshim.ini','net.ini','modEnabled.dat','campaignReimagined_settings.cfg','career_stats.cfg','winmm.dll','bzloader.dll','plugins\openshim.dll','scripts\patches.json','openshim\OpenShimAssets.ini',
-        'openshim_update.status','winmm.dll.previous','bzloader.dll.previous','plugins\openshim.dll.previous','net.ini.previous','scripts\patches.json.previous',
+    foreach($relative in @('openshim.ini','openshim\openshim.ini','net.ini','modEnabled.dat','campaignReimagined_settings.cfg','career_stats.cfg','winmm.dll','bzloader.dll','plugins\openshim.dll','scripts\patches.json','openshim\patches.json','openshim\OpenShimAssets.ini',
+        'openshim_update.status','openshim\state\openshim_update.status','winmm.dll.previous','bzloader.dll.previous','plugins\openshim.dll.previous','net.ini.previous','scripts\patches.json.previous','openshim\patches.json.previous',
         "$ModContainer\3686673790\winmm.dll","$ModContainer\3686673790\exu.dll","$ModContainer\3686673790\bzfile.dll","$ModContainer\3686673790\bzfile_replace_helper.exe")){
         Save-AuditFile (Join-Path $GameRoot $relative)
     }
@@ -95,7 +95,7 @@ try {
     $ogre=Join-Path $GameRoot 'ogre.cfg'
     $renderName=if($Renderer -eq 'dx11'){'Direct3D11 Rendering Subsystem'}else{'Direct3D9 Rendering Subsystem'}
     [IO.File]::WriteAllText($ogre,([IO.File]::ReadAllText($ogre)-replace '(?m)^Render System=.*$',"Render System=$renderName"))
-    $auditArtifacts=@(foreach($relative in @('battlezone98redux.exe','winmm.dll','bzloader.dll','plugins\openshim.dll','scripts\patches.json',"$ModContainer\3686673790\exu.dll","$ModContainer\3686673790\bzfile.dll")){
+    $auditArtifacts=@(foreach($relative in @('battlezone98redux.exe','winmm.dll','bzloader.dll','plugins\openshim.dll',$(if(Test-Path -LiteralPath (Join-Path $GameRoot 'openshim\patches.json')){'openshim\patches.json'}else{'scripts\patches.json'}),"$ModContainer\3686673790\exu.dll","$ModContainer\3686673790\bzfile.dll")){
         $p=Join-Path $GameRoot $relative
         [pscustomobject]@{Path=$relative;Sha256=(Get-FileHash -LiteralPath $p).Hash}
     })
@@ -137,7 +137,8 @@ try {
     foreach($helper in @(Get-Process bzfile_replace_helper -ErrorAction SilentlyContinue)){
         if($helper.StartTime -ge $auditStarted){Wait-Process -Id $helper.Id -Timeout 45 -ErrorAction Stop}
     }
-    $status=Join-Path $GameRoot 'openshim_update.status'
+    $status=Join-Path $GameRoot 'openshim\state\openshim_update.status'
+    if(-not (Test-Path -LiteralPath $status)){$status=Join-Path $GameRoot 'openshim_update.status'}
     if(Test-Path -LiteralPath $status){Copy-Item -LiteralPath $status -Destination (Join-Path $auditRoot 'openshim_update.status')}
     Copy-AuditLogs @('BZLogger.txt','openshim.log','exu.log','BZOgreLogfile.log','openshim_crash.log','openpatch_setup.log','openshim_update.log')
     $auditNewDumps=@(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'logs') -Filter '*.dmp' -File | Where-Object { $auditDumpsBefore -notcontains $_.FullName })

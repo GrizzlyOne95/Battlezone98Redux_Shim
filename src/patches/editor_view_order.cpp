@@ -52,6 +52,7 @@
 
 #include "editor_view_order.h"
 #include "bool_token.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -136,7 +137,9 @@ namespace BZROpenShim
             *(lastBackslash + 1) = '\0';
 
             char iniPath[MAX_PATH] = {};
-            if (_snprintf_s(iniPath, sizeof(iniPath), _TRUNCATE, "%sopenshim.ini", exePath) < 0)
+            // openshim\openshim.ini; an old root copy moves there on first use.
+            if (_snprintf_s(iniPath, sizeof(iniPath), _TRUNCATE, "%s",
+                            Layout::OpenShimIniPathA().c_str()) < 0)
                 return kEditorPlacementOrderEnabledDefault;
 
             // A sentinel default reliably detects a missing key: a present key

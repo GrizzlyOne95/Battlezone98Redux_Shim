@@ -2,6 +2,7 @@
 #include "json_escape.h"
 #include "com_vtable_patch.h"
 #include "diagnostic_switch.h"
+#include "game_log_path.h"
 #include "iat_patch.h"
 #include "shim_log.h"
 #include "terrain_proxy.h"
@@ -276,13 +277,15 @@ namespace BZROpenShim
             return config;
         }
 
-        std::string GetExecutableDirectory()
+        // Probe output goes to logs\ with the other diagnostics (it used to
+        // land in the game root, beside openshim.ini).
+        std::string GetProbeOutputDirectory()
         {
-            std::string iniPath = BZROpenShim::DiagnosticSwitch::OpenShimIniPath();
-            const size_t slash = iniPath.find_last_of("\\/");
+            const std::string probe = BZROpenShim::GetGameLogPath("terrain_probe.json");
+            const size_t slash = probe.find_last_of("\\/");
             if (slash == std::string::npos)
                 return {};
-            return iniPath.substr(0, slash + 1);
+            return probe.substr(0, slash + 1);
         }
 
         const char* DxgiFormatName(DXGI_FORMAT format)
@@ -580,7 +583,7 @@ namespace BZROpenShim
                 name << "terrain_probe_" << std::setw(3) << std::setfill('0')
                      << captureIndex << ".json";
             }
-            return GetExecutableDirectory() + name.str();
+            return GetProbeOutputDirectory() + name.str();
         }
 
         bool WriteTerrainProbeJson(

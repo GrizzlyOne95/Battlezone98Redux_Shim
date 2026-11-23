@@ -7,17 +7,22 @@
 # Removes everything install_linux.sh deploys, from every detected game
 # directory of the chosen Steam flavour (or the one named by --game-path): the
 # three-binary load chain (winmm.dll, bzloader.dll, plugins/openshim.dll),
-# scripts/patches.json, the Enhanced renderer resources and asset manifest
-# under openshim/, the four UI widget tiles, openshim.ini.canonical, the
-# .bak-<stamp> copies the installer made of those files on each run, and what
-# the Workshop updater leaves behind (winmm.dll.previous,
-# scripts/patches.json.previous, openshim_update.status).
+# the whole openshim/ folder (patches.json, renderer resources, asset manifest,
+# UI tiles, cache, state, tools/lan, canonical ini) except the player's ini
+# files, the .bak-<stamp> copies the installer made of the binaries, and what
+# the Workshop updater leaves behind (winmm.dll.previous). Files in the older
+# layout (scripts/patches.json, tools/lan, shader_cache/, openshim_update.status,
+# steam_tunnel_peers.txt, root openshim.ini.canonical) are removed too.
+#
+# Before openshim/ goes, every file in openshim/stock-backup/ (the game's own
+# Ogre.cfg, net.ini, input.map, gamekey.map as OpenShim first found them) is
+# copied back over the game-folder file OpenShim edited.
 #
 # A binary is removed only when it identifies as OpenShim; a foreign winmm.dll
-# (another proxy) is kept and reported. openshim.ini and its backups, net.ini
-# and its backups, and logs/ are left in place so a reinstall finds the
-# player's settings; net.ini in particular is a game file OpenShim replaced,
-# and the stock bytes are not known here.
+# (another proxy) is kept and reported. openshim/openshim.ini and its backups,
+# and logs/, are left in place so a reinstall finds the player's settings.
+# Player data (Save/, career_stats.cfg, bans.cfg, flags.cfg, multi.ini, ...)
+# is never touched.
 #
 # The Steam launch options and the optional log-upload wrapper are outside the
 # game directory; the script says where they are and leaves them.
@@ -165,9 +170,85 @@ remove_dir_if_empty() {
     fi
 }
 
+# Copy each file in openshim/stock-backup/ over its game-folder original.
+# Returns 1 when any copy failed, so the backup folder is not deleted.
+restore_stock_backups() {
+    local game_dir="$1"
+    local backup_dir="$game_dir/openshim/stock-backup" file ok=0 kept_name
+    [[ -d "$backup_dir" ]] || return 0
+    for file in "$backup_dir"/*; do
+        [[ -f "$file" ]] || continue
+        if [[ "$DRY_RUN" == "1" ]]; then
+            echo "  would restore $game_dir/$(basename "$file") from openshim/stock-backup"
+            continue
+        fi
+        # Settings changed since the backup (resolution, key binds) are kept
+        # beside it rather than silently lost.
+        if [[ -f "$game_dir/$(basename "$file")" ]] && ! cmp -s -- "$file" "$game_dir/$(basename "$file")"; then
+            # Timestamped, so an earlier copy is never overwritten.
+            kept_name="$(basename "$file").before-uninstall-$(date +%Y%m%d-%H%M%S)"
+            cp -- "$game_dir/$(basename "$file")" "$game_dir/$kept_name" &&
+                echo "  kept your current $(basename "$file") as $kept_name"
+        fi
+        if cp -f -- "$file" "$game_dir/$(basename "$file")"; then
+            echo "  restored $game_dir/$(basename "$file")"
+        else
+            echo "  FAILED  restoring $game_dir/$(basename "$file")"
+            failed=$((failed + 1))
+            ok=1
+        fi
+    done
+    return "$ok"
+}
+
+# Remove what OpenShim put in openshim/, by name. The player's ini files are
+# kept unless --purge-config, and the stock backups are kept when a restore
+# failed. Anything else in the folder is not OpenShim's: report it and leave
+# it. An openshim/ that is itself a symlink is never entered.
+remove_openshim_folder() {
+    local dir="$1" keep_backups="$2" child name
+    [[ -d "$dir" || -L "$dir" ]] || return 0
+    if [[ -L "$dir" ]]; then
+        echo "  KEEPING $dir : it is a link, not a folder OpenShim made"
+        kept=$((kept + 1))
+        return 0
+    fi
+    for child in "$dir"/* "$dir"/.[!.]*; do
+        [[ -e "$child" || -L "$child" ]] || continue
+        name="$(basename "$child")"
+        if [[ -L "$child" && -d "$child" ]]; then
+            echo "  KEEPING symlink $child"
+            kept=$((kept + 1))
+        elif [[ -d "$child" ]]; then
+            if [[ "$keep_backups" == "1" && "$name" == "stock-backup" ]]; then
+                echo "  KEEPING $child : restoring from it failed"
+                kept=$((kept + 1))
+            elif [[ "$name" =~ ^(cache|state|tools|stock-backup|renderer|ui|lan|_generated)$ ]]; then
+                remove_planned "$child"
+            else
+                echo "  KEEPING $child : not an OpenShim folder"
+                kept=$((kept + 1))
+            fi
+        elif [[ "$name" =~ ^openshim\.ini(\.bak-.*|\.pre-reset-.*\.bak|\.premigrate-r.*\.bak)?$ ]]; then
+            if [[ "$PURGE_CONFIG" == "1" ]]; then
+                remove_planned "$child"
+            else
+                echo "  KEEPING $child"
+                kept=$((kept + 1))
+            fi
+        elif [[ "$name" =~ ^(patches\.json(\..+)?|OpenShimAssets\.ini|openshim\.ini\.(canonical|new))$ ]]; then
+            remove_planned "$child"
+        else
+            echo "  KEEPING $child : not an OpenShim file"
+            kept=$((kept + 1))
+        fi
+    done
+    remove_dir_if_empty "$dir"
+}
+
 uninstall_from() {
     local game_dir="$1"
-    local relative patches openshim_dir render_dir ui_dir tile ini reset
+    local relative patches openshim_dir ui_dir tile ini reset old keep_backups=0
 
     echo
     echo "Game folder: $game_dir"
@@ -182,42 +263,39 @@ uninstall_from() {
     done
     remove_dir_if_empty "$game_dir/plugins"
 
-    # patches.json travels with the DLL and nothing else writes that name.
+    # Put the game's own files back before anything under openshim/ goes.
+    restore_stock_backups "$game_dir" || keep_backups=1
+
+    # Older layout: patches.json under scripts/ (the game's scripts/ stays),
+    # then the older loose files. The new layout holds all of it under openshim/.
     patches="$game_dir/scripts/patches.json"
     remove_if_present "$patches"
     remove_if_present "$patches.previous"
     remove_backups "$patches"
-
-    # Enhanced renderer resources and the asset manifest. openshim/ is created
-    # by the installer, but only its own entries are removed; anything else a
-    # player put there is reported and left.
-    openshim_dir="$game_dir/openshim"
-    render_dir="$openshim_dir/renderer/enhanced"
-    [[ -d "$render_dir" ]] && remove_planned "$render_dir"
-    remove_if_present "$openshim_dir/OpenShimAssets.ini"
-    remove_dir_if_empty "$openshim_dir/renderer"
-
-    # UI images: openshim/ui now, BZ_ASSETS_CORE/common/ui/CustomWidgets in
-    # older releases. Only OpenShim's own files go; either folder may also hold
-    # the game's or the player's files, so it goes only when it is then empty.
-    for ui_dir in "$openshim_dir/ui" "$game_dir/BZ_ASSETS_CORE/common/ui/CustomWidgets"; do
-        for tile in "${UI_TILES[@]}" openshim_widgets.sha256; do
-            remove_if_present "$ui_dir/$tile"
-        done
-        remove_dir_if_empty "$ui_dir"
+    remove_dir_if_empty "$game_dir/scripts"
+    for old in tools/lan shader_cache; do
+        [[ -d "$game_dir/$old" ]] && remove_planned "$game_dir/$old"
+    done
+    remove_dir_if_empty "$game_dir/tools"
+    for old in openshim_update.status steam_tunnel_peers.txt steam_tunnel_peers.txt.lock \
+            openshim.ini.canonical openshim.ini.new bzloader.log; do
+        remove_if_present "$game_dir/$old"
     done
 
-    remove_dir_if_empty "$openshim_dir"
-    if [[ "$DRY_RUN" != "1" && -d "$openshim_dir" ]]; then
-        echo "  KEEPING $openshim_dir : it still holds files the installer did not put there"
-        kept=$((kept + 1))
-    fi
+    # Current layout: the whole openshim/ folder except the player's ini files.
+    openshim_dir="$game_dir/openshim"
+    remove_openshim_folder "$openshim_dir" "$keep_backups"
 
-    # Installer-owned copy of the shipped preset, and the updater's status file.
-    remove_if_present "$game_dir/openshim.ini.canonical"
-    remove_if_present "$game_dir/openshim_update.status"
+    # UI images older releases put in BZ_ASSETS_CORE/common/ui/CustomWidgets.
+    # Only OpenShim's own files go; the folder goes only when it is then empty.
+    ui_dir="$game_dir/BZ_ASSETS_CORE/common/ui/CustomWidgets"
+    for tile in "${UI_TILES[@]}" openshim_widgets.sha256; do
+        remove_if_present "$ui_dir/$tile"
+    done
+    remove_dir_if_empty "$ui_dir"
 
     if [[ "$PURGE_CONFIG" == "1" ]]; then
+        # Old-layout ini in the game root (the current one sits in openshim/).
         ini="$game_dir/openshim.ini"
         remove_if_present "$ini"
         remove_backups "$ini"
@@ -319,9 +397,10 @@ else
     echo "Uninstall complete: $removed item(s) removed, $kept kept."
 fi
 if [[ "$PURGE_CONFIG" == "1" ]]; then
-    echo "openshim.ini and its backups were removed. net.ini and logs were left in place."
+    echo "openshim.ini and its backups were removed. Stock files were restored from openshim/stock-backup; logs were left in place."
 else
-    echo "openshim.ini, net.ini, their backups, and logs were left in place."
+    echo "openshim/openshim.ini, its backups, and logs were left in place; all other OpenShim files were removed."
+    echo "Stock files in openshim/stock-backup (net.ini, ...) were restored to the game folder."
     echo "Run again with --purge-config to remove openshim.ini as well."
 fi
 

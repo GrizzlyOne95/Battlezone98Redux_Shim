@@ -76,7 +76,14 @@ namespace
 int main()
 {
     const std::filesystem::path dir = ExeDir();
-    const auto ini = dir / "openshim.ini";
+    // The seam reads openshim\openshim.ini (openshim_layout.h) and keeps a
+    // stock-backup of Ogre.cfg there; start from an empty openshim\.
+    {
+        std::error_code cleanup;
+        std::filesystem::remove_all(dir / "openshim", cleanup);
+        std::filesystem::create_directories(dir / "openshim", cleanup);
+    }
+    const auto ini = dir / "openshim" / "openshim.ini";
     const auto cfg = dir / "Ogre.cfg";
     const auto dx11 = dir / "RenderSystem_Direct3D11.dll";
     const auto dx9 = dir / "RenderSystem_Direct3D9.dll";

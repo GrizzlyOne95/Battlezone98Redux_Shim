@@ -114,7 +114,7 @@ function Install-OpenShimBuild([string]$Dir) {
         if (-not (Test-Path -LiteralPath $src)) { throw "Missing OpenShim build output $src; build Release|Win32 first." }
         Copy-Item -LiteralPath $src -Destination (Join-Path $Dir $rel) -Force
     }
-    Copy-Item -LiteralPath (Join-Path $OpenShimRepo 'scripts\patches.json') -Destination (Join-Path $Dir 'scripts\patches.json') -Force
+    Copy-Item -LiteralPath (Join-Path $OpenShimRepo 'scripts\patches.json') -Destination (Join-Path $Dir 'openshim\patches.json') -Force
     # Mirrored, not copied over: the instance's openshim folder starts as a
     # copy of the real install's, and a file a newer build added there (say
     # openshim_menu_theme.program) shadows this build's payload, so Enhanced
@@ -249,7 +249,7 @@ function New-BZRCoopInstance {
     # Clients are driven by posted window messages. OpenShim's RawMouseInput
     # setting (openshim.ini) overrides /norawinput and makes the game ignore
     # them, so every test instance turns it off in its own copy.
-    $shimIni = Join-Path $dir 'openshim.ini'
+    $shimIni = Get-BZRCoopShimIniPath $dir
     if (Test-Path -LiteralPath $shimIni) {
         $ini = [IO.File]::ReadAllText($shimIni)
         $ini = [regex]::Replace($ini, '(?m)^(\s*RawMouseInput\s*=\s*)\S+', '${1}0')
@@ -269,7 +269,7 @@ function New-BZRCoopInstance {
     }
     Copy-Item -LiteralPath (Join-Path $SourceRoot 'scripts') -Destination $dir -Recurse
     if ($OpenShimRepo -and -not $NoOpenShim) { Install-OpenShimBuild $dir }
-    foreach ($name in 'logs', 'save', 'shader_cache', 'mods', 'addon') {
+    foreach ($name in 'logs', 'save', 'openshim\cache\shaders', 'mods', 'addon') {
         New-Item -ItemType Directory -Path (Join-Path $dir $name) -Force | Out-Null
     }
 
@@ -416,11 +416,11 @@ function Start-BZRCoopClients {
             # selection can accept the lobby but reject their gameplay UDP
             # source, leaving both clients in Network Part 2 indefinitely.
             # Pin only these disposable clients to the private server relay.
-            Set-BZRCoopIniValue (Join-Path $inst 'openshim.ini') 'Network' 'RoutePreference' 'Relay'
+            Set-BZRCoopIniValue (Get-BZRCoopShimIniPath $inst) 'Network' 'RoutePreference' 'Relay'
             # An install set up for LAN play (NoAuthLan = 1) would send the
             # private server an Authorization with an empty authtype, which it
             # closes with 4002. The test clients authenticate as Goldberg Steam.
-            Set-BZRCoopIniValue (Join-Path $inst 'openshim.ini') 'Network' 'NoAuthLan' '0'
+            Set-BZRCoopIniValue (Get-BZRCoopShimIniPath $inst) 'Network' 'NoAuthLan' '0'
         }
         if ($i -gt 0) { Start-Sleep -Seconds $LaunchDelaySeconds }
         if ($MaxNetworkLogging) { Set-BZRCoopMaxNetworkLogging $inst }
@@ -489,7 +489,7 @@ function Stop-BZRCoopClients {
             $src = Join-Path $c.dir $f
             if (Test-Path -LiteralPath $src) { Copy-Item -LiteralPath $src -Destination $dest }
         }
-        foreach ($f in 'openshim.ini', 'net.ini') {
+        foreach ($f in 'openshim\openshim.ini', 'openshim.ini', 'net.ini') {
             Copy-Item -LiteralPath (Join-Path $c.dir $f) -Destination $dest -ErrorAction SilentlyContinue
         }
         Copy-BZRCoopClientLogs -LogsDir (Join-Path $c.dir 'logs') -Dest $dest -Since (Get-Item -LiteralPath $session.runDir).CreationTime

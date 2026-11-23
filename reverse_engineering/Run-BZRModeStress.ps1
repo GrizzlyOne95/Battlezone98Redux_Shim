@@ -518,7 +518,8 @@ try {
     [IO.File]::WriteAllText($ogre, $cfg)
 
     if ($hasMpHost) {
-        foreach ($n in @('multi.ini', 'openshim.ini')) {
+        $shimIniRel = if (Test-Path -LiteralPath (Join-Path $GameRoot 'openshim\openshim.ini')) { 'openshim\openshim.ini' } else { 'openshim.ini' }
+        foreach ($n in @('multi.ini', $shimIniRel)) {
             $src = Join-Path $GameRoot $n
             $bak = "$src.modestress-bak"
             if (Test-Path -LiteralPath $bak) { throw "$bak exists (an earlier run did not restore it); restore it by hand first" }
@@ -526,7 +527,7 @@ try {
             $iniBackups += [pscustomobject]@{ file = $src; backup = $bak }
         }
         Set-IniValue (Join-Path $GameRoot 'multi.ini') 'multi' 'syncJoin' '0'
-        Set-IniValue (Join-Path $GameRoot 'openshim.ini') 'Network' 'NoAuthLan' '1'
+        Set-IniValue (Join-Path $GameRoot $shimIniRel) 'Network' 'NoAuthLan' '1'
         $env:OPENSHIM_DISABLE_SYNC_JOIN_DEFAULT_ON = '1'
     }
 
@@ -609,7 +610,9 @@ try {
         }
     }
     if ($FrameCapture) {
-        foreach ($f in @(Get-ChildItem -LiteralPath $GameRoot -File -Filter 'openshim_frame_*.png' |
+        # Captures land in logs\ now; older builds wrote them beside the exe.
+        foreach ($f in @(@($GameRoot, (Join-Path $GameRoot 'logs')) | Where-Object { Test-Path -LiteralPath $_ } |
+                ForEach-Object { Get-ChildItem -LiteralPath $_ -File -Filter 'openshim_frame_*.png' } |
                 Where-Object { $_.LastWriteTimeUtc -ge $startUtc })) {
             Move-Item -LiteralPath $f.FullName -Destination (Join-Path $ReportDir $f.Name) -Force
             $meta.frameCaptures += $f.Name

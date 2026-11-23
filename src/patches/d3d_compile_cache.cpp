@@ -14,7 +14,7 @@
 // What: RenderSystem_Direct3D11.dll's import of D3DCompile is redirected.
 // The source is run through D3DPreprocess (same defines and include handler
 // the caller passed), and the output plus entry point, target and flags key a
-// DXBC file under <game root>/shader_cache/dxbc. A hit returns the stored
+// DXBC file under <game root>/openshim/cache/shaders/dxbc. A hit returns the stored
 // blob. A miss runs the real D3DCompile on a worker thread while the calling
 // thread pumps its message queue (PM_NOREMOVE, as terrain_native_hd does),
 // then stores the result. If the worker hits any exception, the compile is
@@ -32,16 +32,17 @@
 // OPENSHIM_DISABLE_SHADER_CACHE / BZR_DISABLE_SHADER_CACHE) leaves the
 // renderer stock. A failed cache write latches the cache off.
 //
-// Seed: a miss in shader_cache/dxbc then looks in the read-only pack
+// Seed: a miss in openshim/cache/shaders/dxbc then looks in the read-only pack
 // <game root>/openshim/renderer/enhanced/openshim_dxbc_seed.pack, shipped in
 // the renderer asset set (built by tools/build_dxbc_seed.py from a warm
 // cache). A fresh install or a cleared cache then serves those programs
 // instead of compiling them (the cold MP game room spent ~19 s compiling 188).
-// A seed hit is copied into shader_cache/dxbc. Stale seed entries simply miss.
+// A seed hit is copied into openshim/cache/shaders/dxbc. Stale seed entries simply miss.
 #include "d3d_compile_cache.h"
 #include "dxbc_cache_policy.h"
 #include "iat_patch.h"
 #include "ogre_shader_cache.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -510,7 +511,7 @@ namespace BZROpenShim
                 LogShimA(LogLevel::Warn, kComponent, "[DXBC] game root unknown; D3DCompile left stock");
                 return;
             }
-            const std::filesystem::path dir = root / L"shader_cache" / L"dxbc";
+            const std::filesystem::path dir = Layout::ShaderCacheDirectory() / L"dxbc";
             std::error_code ec;
             std::filesystem::create_directories(dir, ec);
             if (!std::filesystem::is_directory(dir, ec))

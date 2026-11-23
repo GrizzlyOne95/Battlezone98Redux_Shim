@@ -34,7 +34,8 @@ $variables = @{
 }
 $saved = @{}
 $process = $null
-$hdIni = Join-Path $GameRoot 'openshim.ini'
+$hdIni = Join-Path $GameRoot 'openshim\openshim.ini'
+if (-not (Test-Path -LiteralPath $hdIni)) { $hdIni = Join-Path $GameRoot 'openshim.ini' }
 $hdSaved = @{}
 if ($HdTiles) {
     if (-not ('BzrTerrainTestIni' -as [type])) {

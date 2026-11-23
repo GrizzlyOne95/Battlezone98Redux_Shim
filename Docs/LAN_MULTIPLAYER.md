@@ -79,7 +79,7 @@ priority and suppress access to the LAN chooser.
 
 ## Helper packaging
 
-The optional helper is `tools/lan/BZRServer.exe` relative to the game executable.
+The optional helper is `openshim/tools/lan/BZRServer.exe` relative to the game executable (older installs: `tools/lan/`).
 It is a standalone **i386 Win32 PE**, with Python and websockets bundled; the
 player needs no Python installation. Build it in the companion DedicatedServer
 repository using `build_lan_helper.py` with a Windows 32-bit Python interpreter.

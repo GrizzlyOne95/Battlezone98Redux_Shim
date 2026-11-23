@@ -29,7 +29,8 @@ int main()
     const auto workshop = root / "workshop";
     const auto game = root / "game";
     fs::create_directories(game);
-    const auto config = game / "openshim.ini";
+    const auto config = game / "openshim" / "openshim.ini";
+    const auto legacyConfig = game / "openshim.ini";
     const auto assets = game / "openshim" / "OpenShimAssets.ini";
     OpenShimUpdateManifest manifest;
     // The production verifier uses SHA-256; this fixture verifies exact bytes.
@@ -60,6 +61,16 @@ int main()
     Check(RepairOpenShimUpdateSupport(workshop, game, manifest, verify, changed, error) && changed,
           "missing player config is installed");
     Check(Read(config) == manifest.playerConfig.sha256, "installed defaults are verified");
+
+    // A root openshim.ini not yet moved by the shim still counts as settings.
+    fs::remove(config);
+    Put(legacyConfig, "old root choices");
+    Check(RepairOpenShimUpdateSupport(workshop, game, manifest, verify, changed, error) && !changed,
+          "a pre-move root config blocks a default install");
+    Check(!fs::exists(config) && Read(legacyConfig) == "old root choices",
+          "the pre-move root config is left for the shim to move");
+    fs::remove(legacyConfig);
+    Put(config, manifest.playerConfig.sha256);
 
     fs::remove(config);
     Put(workshop / "OpenShimAssets.ini.payload", "corrupt download");

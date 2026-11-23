@@ -240,7 +240,8 @@ function Get-ShimMinidumpEnabled([string]$GameDir) {
         if ($v -and $v -ne "0") { return $false }
     }
     if (-not $GameDir) { return $true }
-    $ini = Join-Path $GameDir "openshim.ini"
+    $ini = Join-Path $GameDir "openshim\openshim.ini"
+    if (-not (Test-Path -LiteralPath $ini)) { $ini = Join-Path $GameDir "openshim.ini" }
     if (-not (Test-Path -LiteralPath $ini)) { return $true }
     $section = ""
     foreach ($line in (Get-Content -LiteralPath $ini -ErrorAction SilentlyContinue)) {

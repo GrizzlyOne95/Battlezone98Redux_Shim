@@ -17,7 +17,7 @@ An open-source native patch and compatibility layer for **Battlezone 98 Redux 2.
    - **Install:** deploy the version embedded in the setup executable.
    - **Repair:** restore missing/changed files at the *same* installed version, preserving existing `openshim.ini` and `net.ini`.
    - **Update:** retrieve the latest published release; refuses downgrades. Use Repair for damaged files already at the latest version.
-   - **Uninstall:** remove OpenShim-owned files and backups; keep player configuration and logs by default. An unchecked cleanup option can also remove OpenShim settings, logs, dumps, and uploader data.
+   - **Uninstall:** restore the game files saved in `openshim\stock-backup\`, then remove OpenShim's DLLs and the `openshim\` folder; keep `openshim\openshim.ini`, player data and logs by default. By hand: delete `winmm.dll`, `bzloader.dll`, `plugins\openshim.dll`, `openshim\` and `logs\` (optionally copy `openshim\stock-backup\*` back to the game folder first). An unchecked cleanup option can also remove OpenShim settings, logs, dumps, and uploader data.
 3. Close the game before any of these actions. Start Redux normally afterward; no Windows launch option is needed.
 
 **Requires** the x86 [Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x86.exe). Without it the game closes the moment you press Play; the installer warns if it is missing.
@@ -68,7 +68,7 @@ Redux executable
   -> winmm.dll                 (Windows multimedia forwarding / bootstrap)
   -> bzloader.dll              (plugin host)
   -> plugins/openshim.dll      (runtime patches and hooks)
-       + scripts/patches.json  (version-specific patch definitions)
+       + openshim/patches.json (version-specific patch definitions)
 ```
 
 These files form a matched set; a lone `winmm.dll` does not provide OpenShim's runtime. The project is independently developed and does not require any closed-source patch DLL.
@@ -90,7 +90,7 @@ OpenShim also supports installation without the Campaign Reimagined/Workshop ass
 
 ## Defaults, configuration, and current limitations
 
-Open **Options → OpenShim Options** in game, or edit the installed `openshim.ini` and restart where a setting requires it. `openshim.ini.example` is the detailed reference for allowed values, compatibility variables, and live/restart behavior. `net.ini` holds lower-level network values.
+Open **Options → OpenShim Options** in game, or edit the installed `openshim\openshim.ini` and restart where a setting requires it. `openshim.ini.example` is the detailed reference for allowed values, compatibility variables, and live/restart behavior. `net.ini` holds lower-level network values.
 
 - Confirmed and qualified fixes may default **on**; optional and experimental features are not universally off. **Check the exact preset shipped with your release.** Current `main` selects DX11 Enhanced, enables terrain micro-relief, and enables HD-terrain manifest auto-discovery; missing HD assets degrade to stock behavior. A released build can have different defaults.
 - `RawMouseInput = 1` bypasses the legacy mouse-message smoothing/acceleration path; restart required.

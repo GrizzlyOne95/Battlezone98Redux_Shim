@@ -1,6 +1,7 @@
 #include "openshim_preset_migration.h"
 
 #include "openshim_ini.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 
 #include <algorithm>
@@ -1157,7 +1158,8 @@ namespace BZROpenShim
             LogShimA(LogLevel::Warn, "config", "%s", r.logMessage.c_str());
             return r;
         }
-        return TryMigratePlayerPresetInDirectory(std::filesystem::path(modDirStr));
+        // The player preset and its canonical copy live in openshim\.
+        return TryMigratePlayerPresetInDirectory(Layout::OpenShimIniPath().parent_path());
     }
 
 } // namespace BZROpenShim

@@ -12,6 +12,7 @@
 
 #include "ui_performance.h"
 #include "bool_token.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 
 #include <Windows.h>
@@ -265,7 +266,7 @@ namespace BZROpenShim::UiPerf
         if (exeLen > 0 && exeLen < MAX_PATH)
         {
             char* slash = strrchr(gameDir, '\\');
-            if (slash) { *(slash+1) = '\0'; iniPath = std::string(gameDir) + "openshim.ini"; }
+            if (slash) iniPath = Layout::OpenShimIniPathA();
         }
         if (!iniPath.empty())
         {

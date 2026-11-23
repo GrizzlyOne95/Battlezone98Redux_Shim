@@ -16,6 +16,7 @@
 #include "bzr_hooks.h"
 #include "bzr_options_ui.h"
 #include "openshim_preset_migration.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 #include "sun_flash.h"
 #include "screen_flash.h"
@@ -237,14 +238,8 @@ namespace BZROpenShim
     // default of 1: this is only used to make the autoload MORE conservative,
     // and an unreadable ini must not silently change the stock startup path.
     static bool AutoSaveEnabledForStartup() {
-        char exePath[MAX_PATH] = {};
-        const DWORD len = GetModuleFileNameA(nullptr, exePath, static_cast<DWORD>(sizeof(exePath)));
-        if (len == 0 || len >= sizeof(exePath)) return false;
-        char* const slash = strrchr(exePath, '\\');
-        if (!slash) return false;
-        slash[1] = '\0';
-        std::string ini(exePath);
-        ini += "openshim.ini";
+        const std::string ini = Layout::OpenShimIniPathA();
+        if (ini.empty()) return false;
         return GetPrivateProfileIntA("AutoSave", "Enabled", 0, ini.c_str()) != 0;
     }
 
@@ -605,17 +600,13 @@ namespace BZROpenShim
         if (s_init) return s_config;
         s_init = true; s_config.enabled = true; s_config.requestedChannels = kDefaultMaxSoundChannels; s_config.maxChannels = kDefaultMaxSoundChannels;
 
-        char exePath[MAX_PATH] = {};
-        const DWORD exePathLen = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-        if (exePathLen > 0 && exePathLen < MAX_PATH) {
-            char* slash = strrchr(exePath, '\\');
-            if (slash) {
-                *(slash + 1) = '\0';
-                strcat_s(exePath, "openshim.ini");
+        const std::string iniPath = Layout::OpenShimIniPathA();
+        if (!iniPath.empty()) {
+            {
                 static constexpr char kUnset[] = "\x01__openshim_unset__";
                 char iniValue[32] = {};
                 GetPrivateProfileStringA("General", "SoundChannels", kUnset, iniValue,
-                    static_cast<DWORD>(sizeof(iniValue)), exePath);
+                    static_cast<DWORD>(sizeof(iniValue)), iniPath.c_str());
                 if (strcmp(iniValue, kUnset) != 0 && iniValue[0] != '\0') {
                     s_config.iniOverride = true;
                     char* end = nullptr;
@@ -1605,6 +1596,13 @@ namespace BZROpenShim
     }
 
     static void RunPatcherUnguarded(uint32_t shimVersion) {
+        // Move OpenShim's old root files (openshim.ini, scripts\patches.json,
+        // shader_cache\, state files, tools\lan, profiler CSVs, frame PNGs)
+        // under openshim\ and logs\ before any config read below.
+        Layout::MigrateLegacyLayout();
+        Layout::DrainMigrationLog([](const char* line) {
+            LogShimA(LogLevel::Info, "layout", "%s", line);
+        });
         g_Config.Load();
         // Preset migration must happen before normal player configuration is
         // fully applied, or the loader must explicitly reload the migrated

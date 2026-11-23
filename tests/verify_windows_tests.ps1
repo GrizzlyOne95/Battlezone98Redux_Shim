@@ -20,14 +20,14 @@ function Assert-Verdict([bool]$ExpectedPass, [string]$Name) {
 }
 
 try {
-    foreach ($relative in @('scripts','logs','mods\3686673790')) {
+    foreach ($relative in @('openshim','logs','mods\3686673790')) {
         New-Item -ItemType Directory -Path (Join-Path $fixture $relative) -Force | Out-Null
     }
     $deployed = Join-Path $fixture 'winmm.dll'
     $bundled = Join-Path $fixture 'mods\3686673790\winmm.dll'
     Copy-Item -LiteralPath $ShimPath -Destination $deployed
     Copy-Item -LiteralPath $ShimPath -Destination $bundled
-    Copy-Item -LiteralPath (Join-Path $repo 'scripts\patches.json') -Destination (Join-Path $fixture 'scripts\patches.json')
+    Copy-Item -LiteralPath (Join-Path $repo 'scripts\patches.json') -Destination (Join-Path $fixture 'openshim\patches.json')
     $log = Join-Path $fixture 'logs\openshim.log'
     @('session start', 'Real winmm.dll loaded successfully', 'Initialization complete',
       'Winsock IAT hooks installed: 1', 'SO_SNDBUF 65536 -> 524288',

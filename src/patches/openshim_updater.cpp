@@ -11,6 +11,7 @@
 #include "openshim_update_manifest.h"
 #include "openshim_update_support.h"
 #include "openshim_assets.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -676,8 +677,18 @@ namespace BZROpenShim
             }
 
             const std::filesystem::path gameRoot = GetGameRoot();
-            const std::filesystem::path status = gameRoot / L"openshim_update.status";
+            const std::filesystem::path status = Layout::StatePath(L"openshim_update.status");
             const std::filesystem::path log = GetGameLogPath("openshim_update.log");
+            // Keep the player's untouched net.ini once before the helper
+            // replaces it (never overwrites an existing stock backup).
+            // A net.ini.previous means an earlier update already replaced it,
+            // so the live file is OpenShim's, not stock.
+            std::error_code previousError;
+            if (!std::filesystem::exists(gameRoot / L"net.ini.previous", previousError))
+                Layout::BackupStockFileOnce(gameRoot / L"net.ini");
+            Layout::DrainMigrationLog([](const char* line) {
+                LogShimA(LogLevel::Info, "updater", "%s", line);
+            });
             std::vector<std::wstring> arguments = {
                 L"--suite-v3", std::to_wstring(GetCurrentProcessId()),
                 log.wstring(), status.wstring()
@@ -743,8 +754,8 @@ namespace BZROpenShim
                 { &manifest.network, itemDirectory / L"openshim_net.ini.payload",
                   gameRoot / L"net.ini", {}, gameRoot / L"net.ini.previous" },
                 { &manifest.patches, itemDirectory / L"openshim_patches.json.payload",
-                  gameRoot / L"scripts" / L"patches.json", {},
-                  gameRoot / L"scripts" / L"patches.json.previous" },
+                  Layout::PatchesJsonPath(), {},
+                  Layout::OpenShimDirectory() / L"patches.json.previous" },
                 { &manifest.loader, itemDirectory / L"bzloader.dll",
                   gameRoot / L"bzloader.dll", {}, gameRoot / L"bzloader.dll.previous" },
                 { &manifest.plugin, itemDirectory / L"openshim.dll",
@@ -1178,7 +1189,7 @@ namespace BZROpenShim
 
         std::wstring script;
         if (!BuildUpdateRestartWatcherScript(
-                (GetGameRoot() / L"openshim_update.status").wstring(), kSteamAppIdW,
+                Layout::StatePath(L"openshim_update.status").wstring(), kSteamAppIdW,
                 kRestartWatcherTimeoutSeconds, script))
         {
             error = "could not build the restart watcher";

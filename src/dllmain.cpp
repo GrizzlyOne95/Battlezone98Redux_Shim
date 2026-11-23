@@ -30,6 +30,7 @@
 #include "render_profile_runtime.h"
 #include "steam_launcher_argument.h"
 #include "BZROpenShim.h"
+#include "openshim_layout.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -168,6 +169,13 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID reserved)
         BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "dllmain",
                               "DLL_PROCESS_ATTACH hModule=0x%p reserved=0x%p",
                               hModule, reserved);
+        // openshim.ini moves into openshim\ on its first read (the CLI and
+        // editor-order fixes may already have triggered that above); record
+        // what moved now that the log is open.
+        (void)BZROpenShim::Layout::OpenShimIniPath();
+        BZROpenShim::Layout::DrainMigrationLog([](const char* line) {
+            BZROpenShim::LogShimA(BZROpenShim::LogLevel::Info, "layout", "%s", line);
+        });
         DisableThreadLibraryCalls(hModule);
 
         if (!LoadRealWinmm())

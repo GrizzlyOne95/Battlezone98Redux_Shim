@@ -48,7 +48,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$iniPath = Join-Path $GameDir 'openshim.ini'
+$iniPath = Join-Path $GameDir 'openshim\openshim.ini'
+if (-not (Test-Path -LiteralPath $iniPath)) { $iniPath = Join-Path $GameDir 'openshim.ini' }
 $logPath = Join-Path $GameDir 'logs\openshim.log'
 
 function Set-IniValue {

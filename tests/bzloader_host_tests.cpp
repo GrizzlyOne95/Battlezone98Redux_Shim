@@ -59,14 +59,19 @@ int wmain()
 {
     const std::wstring directory = ExecutableDirectory();
     const std::wstring loaderPath = directory + L"\\bzloader.dll";
-    const std::wstring logPath = directory + L"\\bzloader.log";
+    const std::wstring logPath = directory + L"\\logs\\bzloader.log";
 
     // Start from no log at all, so a stale file cannot contribute anything and
     // an undeletable one fails loudly instead of silently passing the run.
-    if (!DeleteFileW(logPath.c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND)
+    // A missing logs\ folder is fine too: the loader must create it itself.
+    if (!DeleteFileW(logPath.c_str()))
     {
-        std::wcerr << L"could not clear " << logPath << L" error=" << GetLastError() << L'\n';
-        return 1;
+        const DWORD error = GetLastError();
+        if (error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND)
+        {
+            std::wcerr << L"could not clear " << logPath << L" error=" << error << L'\n';
+            return 1;
+        }
     }
 
     HMODULE loader = LoadLibraryExW(

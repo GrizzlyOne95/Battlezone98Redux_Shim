@@ -52,9 +52,14 @@ namespace
 
     bool ToggleOn(const std::wstring& gameRoot)
     {
+        // openshim\openshim.ini; a root copy the shim has not moved yet
+        // still counts. Read-only: the shim owns the move.
+        std::wstring ini = gameRoot + L"\\openshim\\openshim.ini";
+        if (!FileExists(ini))
+            ini = gameRoot + L"\\openshim.ini";
         wchar_t value[32] = {};
         GetPrivateProfileStringW(L"Steam", L"SkipRebellionLauncher", L"", value, 32,
-                                 (gameRoot + L"\\openshim.ini").c_str());
+                                 ini.c_str());
         return BZROpenShim::LauncherProxy::ParseToggle(value);
     }
 

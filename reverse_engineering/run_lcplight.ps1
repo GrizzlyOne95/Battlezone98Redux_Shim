@@ -129,7 +129,8 @@ if (-not $OutputRoot) {
 New-Item -ItemType Directory -Force -Path $OutputRoot | Out-Null
 
 $gameExe = Join-Path $GameRoot "battlezone98redux.exe"
-$installedIni = Join-Path $GameRoot "openshim.ini"
+$installedIni = Join-Path $GameRoot "openshim\openshim.ini"
+if (-not (Test-Path -LiteralPath $installedIni)) { $installedIni = Join-Path $GameRoot "openshim.ini" }
 $missionRoot = Join-Path $GameRoot "addon\lcbench"
 $worldSource = Join-Path $repoRoot "reverse_engineering\test_missions\live_combat_scaling"
 $fixture = Join-Path $repoRoot "reverse_engineering\test_missions\lcbench_pilotlight\rmplight.lua"
