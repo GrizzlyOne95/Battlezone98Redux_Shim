@@ -395,6 +395,9 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # inert unless the websocket closes mid-mission, and a real P2P loss still
     # ends the session through the stock ping check. Added 2026-10-26.
     "Network/LobbyDropKeepsMatch",
+    # Keeps Lua LockAllies(true) from Start() in multiplayer; stock zeroes it when
+    # the ally editor is rebuilt after Start(). Stock bug fix. Added 2026-11-23.
+    "Network/AllyLockSurvivesStart",
     # Client-local DNS only: the BZRNet matchmaking lookup asks for IPv4,
     # which the server's only record is; falls back to the stock lookup.
     "Network/ForceIPv4Matchmaking",
@@ -570,6 +573,7 @@ $stockValueChecks = @{
     "Network/EarlyNakHoldoffMs" = "300"
     "Network/EarlyNakReorderMs" = "0"
     "Network/LobbyDropKeepsMatch" = "1"
+    "Network/AllyLockSurvivesStart" = "1"
     "SinglePlayer/HeadlightColor" = "Stock"
     "SinglePlayer/HeadlightBeam" = "Stock"
     "SinglePlayer/HeadlightReach" = "0"

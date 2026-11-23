@@ -2508,6 +2508,12 @@ EarlyNakReorderMs = 0
 ; Kill switch: OPENSHIM_DISABLE_LOBBY_DROP_KEEPS_MATCH (or BZR_ prefix).
 ; Sites: GOG 2.2.301 0x006BF11B, 0x0073F13F, 0x005718C7; a signature mismatch keeps stock.
 LobbyDropKeepsMatch = 1
+; Keeps a Lua LockAllies(true) made in Start() (multiplayer/co-op). Stock rebuilds the
+; ally editor after Start() and zeroes the lock, so Y/U could still ally; 1.5 kept it.
+; Accepted: boolean. Default: ON (stock bug fix). Restart required.
+; Kill switch: OPENSHIM_DISABLE_ALLY_LOCK_SURVIVES_START (or BZR_ prefix).
+; Site: GOG 2.2.301 0x00681E2A; a signature mismatch keeps stock.
+AllyLockSurvivesStart = 1
 
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,
 ; ramp rates and auto-kick envelope -- lives in net.ini under [OpenShimSocket],

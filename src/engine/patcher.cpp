@@ -25,6 +25,7 @@
 #include "redux_compatibility.h"
 #include "p2p_reliable_send_fix.h"
 #include "lobby_drop_keeps_match.h"
+#include "ally_lock_keep.h"
 #include "shell_casing_config.h"
 #include "weapon_presentation_call_bridges.h"
 #include "weapon_presentation_native.h"
@@ -1267,6 +1268,12 @@ namespace BZROpenShim
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
                     : HookEngine::ResolveRelCallTarget(p.address - 1);
                 target = Hooks::PrepareLobbyDropKeepsMatchHook(p.name.c_str(), p.address - 1, original);
+            }
+            else if (Hooks::IsAllyLockKeepPatchName(p.name.c_str())) {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                target = Hooks::PrepareAllyLockKeepHook(p.name.c_str(), p.address - 1, original);
             }
             else if (p.name == "HoverCraft Turbo Sound Stop Guard") {
                 void* original = isSteam

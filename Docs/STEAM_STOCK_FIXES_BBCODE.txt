@@ -34,6 +34,7 @@ Each fix below targets a confirmed defect in the stock game: one we traced to it
 [*] Fixed lost reliable messages waiting for the slow retry timer because the request to resend them was discarded. Stock discards the resend request unless every reliable message has already arrived, which is rarely true under load.
 [*] Fixed Lua Send of a 128-255 byte string or table crashing every receiving player. Stock reads the string length as a signed byte, so lengths of 128 to 255 came out wrong.
 [*] Fixed Lua Send of map-placed objects (geysers, beacons, scenery) arriving as nil on other players. Stock sends objects by a network ID that map-placed objects never get, so receivers could not find them.
+[*] Fixed Lua LockAllies(true) called from a mission's Start() having no effect, so players could unally in a forced co-op mission. Battlezone 1.5 keeps the lock; Redux rebuilds the ally screen after Start() and clears the lock as it does.
 [*] Fixed the Lua Formation(unit, leader, priority) binding. Stock registered a copy of Recycle, which rejected the leader handle.
 [*] Fixed a crash when a mission script calls GetIndependence while a save is still loading. Stock only checks for a missing AI, not the temporary stand-in used while a save loads.
 [*] Fixed the Lua CanBuild and IsBusy checks giving wrong answers for base producers. Stock only recognises the four specific producer types, not the base producer. [i](SP)[/i]

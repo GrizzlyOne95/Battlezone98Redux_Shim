@@ -378,6 +378,7 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Local", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Remote", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Ping", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Ally Lock Survives UI Rebuild", false, {} },
         };
 
         // Future: could also load this list from JSON

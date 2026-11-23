@@ -12,6 +12,12 @@ if IsNetGame() then
     exu.DisableStartingRecycler()
 end
 local CRCoop = require("CRCoop")
+-- LockAllies case (coopflow\scenarios\mpbugs-lock-allies.ps1): Start() locks
+-- the ally prompt the way a stock forced co-op mission does, once. CRCoop
+-- re-locks every 5 s through the global, which would hide the stock reset, so
+-- the global is taken away and BugLockAllies calls the native one later on.
+local nativeLockAllies = LockAllies
+LockAllies = nil
 -- Results go through this table so CRFlowProbe records each call as an op.
 local native = {SucceedMission = SucceedMission, FailMission = FailMission}
 local M
@@ -149,6 +155,8 @@ function Start()
     CRCoop.Initialize({getLocalPlayerId = function() return exu.GetMyNetID() end,
         leaderTeam = 1, humanTeamMin = 1, humanTeamMax = 4})
     alliances()
+    if nativeLockAllies then nativeLockAllies(true) end
+    M.lockedInStart = nativeLockAllies ~= nil
 end
 
 function CreatePlayer(id, name, team) CRCoop.CreatePlayer(id, name, team); alliances() end
@@ -167,6 +175,12 @@ function Update()
     end
     trackExplosives()
     serviceLaunches()
+end
+
+-- A later LockAllies call, which works on stock Redux too.
+function BugLockAllies(on)
+    nativeLockAllies(on ~= false)
+    return {lockedInStart = M.lockedInStart, global = type(LockAllies), native = type(nativeLockAllies)}
 end
 
 -- Ends the mission on this peer only, the way a stock script does: the
@@ -225,6 +239,7 @@ function BugState()
     for _ in pairs(CRCoop.GetPlayers()) do roster = roster + 1 end
     s.roster = roster
     s.leaderDeparted = CRCoop.HasLeaderDeparted()
+    s.lockedInStart = M.lockedInStart
     return s
 end
 

@@ -12,10 +12,12 @@
 #               per owner (receiver / launcher ratio), and whether destroying
 #               the deployed Splinter on one peer ends it on the others. Turns on the
 #               MPAUTH trace (Docs\MPAUTH_* investigations) unless -NoTrace.
+#   LockAllies  LockAllies(true) from Start(), then U/Y on every peer: whether
+#               the ally box still opens (stock Redux resets the lock).
 #
 # -Expect Stock passes when the stock defect reproduces; -Expect Fixed passes
 # when it is gone, so the same case serves as a regression test after a fix.
-param([Parameter(Mandatory)][ValidateSet('MissionEnd','HostLeave','Weapons')][string]$Case,
+param([Parameter(Mandatory)][ValidateSet('MissionEnd','HostLeave','Weapons','LockAllies')][string]$Case,
       [ValidateRange(2,4)][int]$Clients = 2,
       [ValidateSet('Stock','Fixed')][string]$Expect = 'Stock',
       [hashtable]$ScenarioArgs = @{},
@@ -36,12 +38,12 @@ $ErrorActionPreference = 'Stop'
 $override = Join-Path 'C:\BZRCoop\runs' ($RunName + '-map')
 & $Python (Join-Path $PSScriptRoot 'coopflow\battleload\prepare_battle_map.py') --output $override --map mpbugs
 if ($LASTEXITCODE -ne 0) { throw 'Bug pack map staging failed.' }
-$scenarioName = @{ MissionEnd = 'mpbugs-mission-end.ps1'; HostLeave = 'mpbugs-host-leave.ps1'; Weapons = 'mpbugs-weapons.ps1' }[$Case]
+$scenarioName = @{ MissionEnd = 'mpbugs-mission-end.ps1'; HostLeave = 'mpbugs-host-leave.ps1'; Weapons = 'mpbugs-weapons.ps1'; LockAllies = 'mpbugs-lock-allies.ps1' }[$Case]
 # The clients inherit this process's environment.
 if ($Case -eq 'Weapons' -and -not $NoTrace) { $env:OPENSHIM_TRACE_MPAUTH = '1' }
 # The Stock arm turns the case's OpenShim fix off in each instance's ini, so a
 # fixed build still shows the stock defect. Needs Prepare (no -SkipPrepare).
-$stockOff = @{ MissionEnd = 'Fixes.MissionEndSync=0'; Weapons = 'Fixes.DaywreckerArmoryCollision=0;Fixes.SplinterSync=0'; HostLeave = 'Fixes.HostLeave=0' }[$Case]
+$stockOff = @{ MissionEnd = 'Fixes.MissionEndSync=0'; Weapons = 'Fixes.DaywreckerArmoryCollision=0;Fixes.SplinterSync=0'; HostLeave = 'Fixes.HostLeave=0'; LockAllies = 'Network.AllyLockSurvivesStart=0' }[$Case]
 if ($Expect -eq 'Stock' -and $stockOff) {
     if ($SkipPrepare) { throw "-Expect Stock for $Case writes the instance ini; drop -SkipPrepare." }
     $env:BZRCOOP_INI_SET = (@($env:BZRCOOP_INI_SET, $stockOff) | Where-Object { $_ }) -join ';'
