@@ -275,7 +275,7 @@ namespace Layout
         // Put the current file back rather than leave no patches.json.
         const DWORD error = GetLastError();
         MoveFileExW(superseded.c_str(), newJson.c_str(), MOVEFILE_REPLACE_EXISTING);
-        Detail::Note("[LAYOUT] could not move the newer %s into place (error %lu); keeping %s",
+        Detail::Note("[LAYOUT] could not move the newer %s into place over %s (error %lu); keeping the current file",
                      oldJson, newJson, error);
     }
 
