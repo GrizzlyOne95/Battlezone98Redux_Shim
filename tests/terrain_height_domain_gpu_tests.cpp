@@ -162,6 +162,30 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
             binding.Reset(); restored.Reset(); context->DSGetShaderResources(127,1,&restored);
             check(restored.Get()==foreign.Get(),"mission cleanup failed to restore prior resource");
         }
+        {
+            // A split paint control array rides slot 126 beside the height
+            // array and restores in step with it.
+            BZROpenShim::TerrainHeight::DomainBinding binding;
+            auto control=height_texture(device.Get(),3), previousControl=height_texture(device.Get(),5);
+            auto* previousControlRaw=previousControl.Get();
+            context->DSSetShaderResources(126,1,&previousControlRaw); context->HSSetShaderResources(126,1,&previousControlRaw);
+            binding.view=sentinel; binding.controlView=control; binding.domains.emplace_back(domain.Get());
+            context->DSSetShader(domain.Get(),nullptr,0); binding.Select(context.Get(),domain.Get());
+            check(binding.Bound(context.Get()),"split control array not bound with the height array");
+            ComPtr<ID3D11ShaderResourceView> slot; context->HSGetShaderResources(126,1,&slot);
+            check(slot.Get()==control.Get(),"split control array not bound to the hull");
+            context->DSSetShaderResources(126,1,&previousControlRaw);
+            check(!binding.Bound(context.Get()),"lost control slot still reported bound");
+            auto* controlRaw=control.Get(); context->DSSetShaderResources(126,1,&controlRaw);
+            context->DSSetShader(nullptr,nullptr,0); binding.Select(context.Get(),nullptr);
+            slot.Reset(); context->DSGetShaderResources(126,1,&slot);
+            check(slot.Get()==previousControl.Get(),"foreign domain did not restore the DS control slot");
+            slot.Reset(); context->HSGetShaderResources(126,1,&slot);
+            check(slot.Get()==previousControl.Get(),"foreign domain did not restore the HS control slot");
+            binding.Reset();
+            ID3D11ShaderResourceView* none=nullptr; context->DSSetShaderResources(126,1,&none); context->HSSetShaderResources(126,1,&none);
+            context->DSSetShader(domain.Get(),nullptr,0);
+        }
         unsigned runs=0;
         for (int orientation=0;orientation<4;++orientation)
         for (float eye:{0.f,320.f})
@@ -282,7 +306,7 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
         check(hullPrimitives(0,0,true)>2,"hull culled a patch on screen");
         check(hullPrimitives(0,-1.1f-amplitude*.5f,true)>2,"hull culled a patch relief can raise into view");
         check(hullPrimitives(0,-1.1f-amplitude*1.5f,true)==0,"hull kept a patch below its relief reach");
-        std::cout<<"PASS: "<<runs<<" actual height-domain/SO runs; signed geometry, UV rotation/reflection, camera translation, normals/tangents/depth/shadow receivers, zero seams, invalid/missing textures, PS retention and hull off-screen cull\n";
+        std::cout<<"PASS: "<<runs<<" actual height-domain/SO runs; signed geometry, UV rotation/reflection, camera translation, normals/tangents/depth/shadow receivers, zero seams, invalid/missing textures, PS retention, split control slot and hull off-screen cull\n";
         return 0;
     }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }

@@ -391,10 +391,35 @@ namespace BZROpenShim
             // paint.live: autopaint recipe for maps without a baked entry (terrain-live-paint.md).
             nlohmann::json livePaint;
         };
-        std::array<std::string, 3> g_hdChannelResources;
+        // Channels 0-2 are the material maps; the last entry is the paint
+        // control array.
+        constexpr int kHdControlChannel = 3;
+        std::array<std::string, 4> g_hdChannelResources;
         // Borrowed from the owned Ogre arrays; cleared before removing them.
-        std::array<ID3D11Texture2D*, 3> g_hdChannelNativeTextures{};
+        std::array<ID3D11Texture2D*, 4> g_hdChannelNativeTextures{};
         ID3D11Texture2D* g_hdDiffuseNativeTexture = nullptr;
+
+        // Paint control maps live in their own uncompressed array, one slice
+        // per bank, so colour and normal+height slices may ship block
+        // compressed. The colour array keeps the manifest slice numbering;
+        // its control slots hold the fallback image and are never sampled.
+        void SplitTerrainPaintControl(const TerrainHdMaterialBinding& binding,
+            TerrainHdMaterialBinding& colour, TerrainHdMaterialBinding& control)
+        {
+            colour = binding; control = binding;
+            control.tiles.clear();
+            for (auto& channel : control.channels) channel = {};
+            const auto slices = TerrainHd::PaintControlSlices(binding.sliceCount);
+            control.sliceCount = uint32_t(slices.size());
+            for (uint32_t i = 0; i < slices.size(); ++i)
+            {
+                const auto it = binding.tiles.find(slices[i]);
+                const std::string& resource = it != binding.tiles.end() ? it->second : binding.fallback;
+                if (i == 0) control.fallback = resource;
+                else control.tiles[i] = resource;
+                colour.tiles.erase(slices[i]);
+            }
+        }
 
         struct TerrainHdManifest
         {
@@ -502,6 +527,8 @@ namespace BZROpenShim
         using FnGetNumTextureUnitStates = uint16_t(__thiscall*)(void*);
         using FnGetTextureUnitState = void* (__thiscall*)(void*, uint16_t);
         using FnSetTexture = void(__thiscall*)(void*, const OgreSharedPtr&);
+        using FnCreateTextureUnitState = void* (__thiscall*)(void*);
+        using FnRemoveTextureUnitState = void(__thiscall*)(void*, uint16_t);
         using FnGetTextureManager = void* (__cdecl*)();
         using FnLoadTexture = OgreSharedPtr* (__thiscall*)(
             void*, OgreSharedPtr*, const std::string&, const std::string&,
@@ -627,6 +654,9 @@ namespace BZROpenShim
             FnGetNumTextureUnitStates getNumTextureUnitStates = nullptr;
             FnGetTextureUnitState getTextureUnitState = nullptr;
             FnSetTexture setTexture = nullptr;
+            // Paint control arrays ride one appended unit per HD pass.
+            FnCreateTextureUnitState createTextureUnitState = nullptr;
+            FnRemoveTextureUnitState removeTextureUnitState = nullptr;
             FnGetTextureManager getTextureManager = nullptr;
             FnLoadTexture loadTexture = nullptr;
             FnCreateManualTexture createManualTexture = nullptr;
@@ -1624,6 +1654,10 @@ namespace BZROpenShim
                 "?getTextureUnitState@Pass@Ogre@@QAEPAVTextureUnitState@2@G@Z");
             g_ogre.setTexture = Resolve<FnSetTexture>(module,
                 "?setTexture@TextureUnitState@Ogre@@QAEXABV?$SharedPtr@VTexture@Ogre@@@2@@Z");
+            g_ogre.createTextureUnitState = Resolve<FnCreateTextureUnitState>(module,
+                "?createTextureUnitState@Pass@Ogre@@QAEPAVTextureUnitState@2@XZ");
+            g_ogre.removeTextureUnitState = Resolve<FnRemoveTextureUnitState>(module,
+                "?removeTextureUnitState@Pass@Ogre@@QAEXG@Z");
             g_ogre.getTextureManager = Resolve<FnGetTextureManager>(module,
                 "?getSingletonPtr@TextureManager@Ogre@@SAPAV12@XZ");
             g_ogre.loadTexture = Resolve<FnLoadTexture>(module,
@@ -3195,14 +3229,27 @@ namespace BZROpenShim
                     std::to_string(g_proxy.semanticMaterialGeneration);
                 const std::string group = "General";
                 const std::string empty;
-                int arrayMips = static_cast<int>(mipmaps);
-                if (binding.compact)
+                // Each array validates on its own: the first slice sets size,
+                // mips and format, and every later slice must match it.
+                const bool control = channel == kHdControlChannel;
+                const char* arrayLabel = control ? "control" : channel < 0 ? "colour" : "channel";
+                // Logs name the manifest slice: control slice b is bank b's slice 4.
+                const auto manifestSlice = [&](uint32_t slice) { return control ? slice * 9 + 4 : slice; };
+                auto* native = g_ogre.getD3D11Texture2D(fallbackTexture.rep);
+                if (!native) throw std::runtime_error("HD source texture descriptor unavailable");
+                D3D11_TEXTURE2D_DESC description{}; native->GetDesc(&description);
+                // Live paint rewrites control texels, and the weights must
+                // not carry block artefacts: controls stay uncompressed.
+                if (control && TerrainHd::BlockCompressed(description.Format))
                 {
-                    auto* native = g_ogre.getD3D11Texture2D(fallbackTexture.rep);
-                    if (!native) throw std::runtime_error("HD source texture descriptor unavailable");
-                    D3D11_TEXTURE2D_DESC description{}; native->GetDesc(&description);
-                    arrayMips = TerrainHd::OgreArrayMipRequest(mipmaps, description.Format);
+                    LogShimA(LogLevel::Warn, "terrain-hd",
+                        "[TERRAIN-HD] paint control must be uncompressed material=\"%s\" array=control slice=%u resource=\"%s\" dxgiFormat=%u; stock atlas retained",
+                        g_proxy.materialName.c_str(), manifestSlice(0), binding.fallback.c_str(), unsigned(description.Format));
+                    ReleaseCloneHandoff(fallbackTexture);
+                    releaseUploadSources();
+                    return false;
                 }
+                const int arrayMips = TerrainHd::OgreArrayMipRequest(mipmaps, description.Format);
                 g_ogre.createManualTexture(textureManager, &arrayTexture,
                     ownedName, group, kOgreTextureType2DArray,
                     width, height, binding.sliceCount,
@@ -3238,8 +3285,8 @@ namespace BZROpenShim
                                 resource, sourceTexture, binding.compact))
                         {
                             LogShimA(LogLevel::Warn, "terrain-hd",
-                                "[TERRAIN-HD] tile load failed slice=%u resource=\"%s\"; stock atlas retained",
-                                slice, resource.c_str());
+                                "[TERRAIN-HD] tile load failed material=\"%s\" array=%s slice=%u resource=\"%s\"; stock atlas retained",
+                                g_proxy.materialName.c_str(), arrayLabel, manifestSlice(slice), resource.c_str());
                             ReleaseCloneHandoff(sourceTexture);
                             throw std::runtime_error("tile load failed");
                         }
@@ -3254,9 +3301,11 @@ namespace BZROpenShim
                             width, height, mipmaps))
                     {
                         LogShimA(LogLevel::Warn, "terrain-hd",
-                            "[TERRAIN-HD] tile contract/copy failed slice=%u resource=\"%s\" expected=%ux%u mips=%u format=%d; stock atlas retained",
-                            slice, resource.c_str(), width, height, mipmaps + 1,
-                            format);
+                            "[TERRAIN-HD] tile contract/copy failed material=\"%s\" array=%s slice=%u resource=\"%s\" expected=%ux%u mips=%u format=%d actual=%ux%u mips=%u format=%d; stock atlas retained",
+                            g_proxy.materialName.c_str(), arrayLabel, manifestSlice(slice), resource.c_str(),
+                            width, height, mipmaps + 1, format,
+                            g_ogre.getTextureWidth(source), g_ogre.getTextureHeight(source),
+                            g_ogre.getTextureMipmaps(source) + 1, g_ogre.getTextureFormat(source));
                         ReleaseCloneHandoff(sourceTexture);
                         throw std::runtime_error("tile contract/copy failed");
                     }
@@ -3278,10 +3327,10 @@ namespace BZROpenShim
                     g_proxy.hdMipmaps = mipmaps;
                 }
                 LogShimA(LogLevel::Info, "terrain-hd",
-                    "[TERRAIN-HD] array ready material=\"%s\" name=\"%s\" slices=%u overrides=%zu selectedMaxTileIndex=%u size=%ux%u mips=%u format=%d fallback=\"%s\"",
-                    g_proxy.materialName.c_str(), ownedName.c_str(),
+                    "[TERRAIN-HD] array ready material=\"%s\" array=%s name=\"%s\" slices=%u overrides=%zu selectedMaxTileIndex=%u size=%ux%u mips=%u format=%d dxgiFormat=%u fallback=\"%s\"",
+                    g_proxy.materialName.c_str(), arrayLabel, ownedName.c_str(),
                     binding.sliceCount, overrideCopies, maximumTileIndex,
-                    width, height, mipmaps + 1, format,
+                    width, height, mipmaps + 1, format, unsigned(description.Format),
                     binding.fallback.c_str());
                 if (channel < 0 && !binding.compact) LogTerrainHdTileCoverage(binding);
                 return true;
