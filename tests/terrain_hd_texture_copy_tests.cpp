@@ -77,6 +77,68 @@ static void qualify(ID3D11Device* device, ID3D11DeviceContext* context, UINT siz
     }
 }
 
+// DXT5 (BC3) block data: 16 bytes per 4x4 block, blocks seeded per slice
+// and mip so a copy to the wrong subresource shows.
+static ComPtr<ID3D11Texture2D> makeBc3(ID3D11Device* device, UINT size, UINT mips, UINT slices, uint8_t base)
+{
+    std::vector<std::vector<uint8_t>> blocks(mips * slices);
+    std::vector<D3D11_SUBRESOURCE_DATA> data(mips * slices);
+    for (UINT slice = 0; slice < slices; ++slice)
+    for (UINT mip = 0; mip < mips; ++mip)
+    {
+        const UINT across = (std::max)(1u, ((std::max)(1u, size >> mip) + 3) / 4);
+        auto& bytes = blocks[D3D11CalcSubresource(mip, slice, mips)];
+        bytes.resize(across * across * 16);
+        for (size_t i = 0; i < bytes.size(); ++i) bytes[i] = base ? uint8_t(base + mip * 3 + i % 13) : 0;
+        data[D3D11CalcSubresource(mip, slice, mips)] = {bytes.data(), across * 16, across * across * 16};
+    }
+    D3D11_TEXTURE2D_DESC desc = {};
+    desc.Width = desc.Height = size; desc.MipLevels = mips; desc.ArraySize = slices;
+    desc.Format = DXGI_FORMAT_BC3_UNORM; desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT; desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    ComPtr<ID3D11Texture2D> texture;
+    ok(device->CreateTexture2D(&desc, data.data(), &texture));
+    return texture;
+}
+
+// Paint colour/normal arrays may be DXT5 with full mips; control arrays stay
+// uncompressed. Each array copies only slices of its own format.
+static void qualifyCompressed(ID3D11Device* device, ID3D11DeviceContext* context)
+{
+    using namespace BZROpenShim::TerrainHd;
+    const UINT size = 16, mips = 5, slices = 9;
+    auto colour = makeBc3(device, size, mips, 1, 40);
+    auto array = makeBc3(device, size, mips, slices, 0);
+    check(CopyTextureSlice(array.Get(), colour.Get(), 8, size, size, mips - 1), "BC3 slice copy declined");
+    auto png = makeTexture(device, size, mips, 1, 10);
+    check(!CopyTextureSlice(array.Get(), png.Get(), 5, size, size, mips - 1), "uncompressed slice accepted into a BC3 array");
+    auto control = makeTexture(device, size, mips, 2, 0);
+    check(!CopyTextureSlice(control.Get(), colour.Get(), 0, size, size, mips - 1), "BC3 slice accepted into an uncompressed control array");
+    check(CopyTextureSlice(control.Get(), png.Get(), 1, size, size, mips - 1), "control slice copy declined");
+    D3D11_TEXTURE2D_DESC desc; array->GetDesc(&desc);
+    desc.Usage = D3D11_USAGE_STAGING; desc.BindFlags = 0; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ComPtr<ID3D11Texture2D> staging;
+    ok(device->CreateTexture2D(&desc, nullptr, &staging));
+    context->CopyResource(staging.Get(), array.Get());
+    for (UINT slice : {5u, 8u})
+    for (UINT mip = 0; mip < mips; ++mip)
+    {
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        const UINT sub = D3D11CalcSubresource(mip, slice, mips);
+        ok(context->Map(staging.Get(), sub, D3D11_MAP_READ, 0, &mapped));
+        const UINT across = (std::max)(1u, ((std::max)(1u, size >> mip) + 3) / 4);
+        bool matched = true;
+        for (UINT row = 0; row < across; ++row)
+        for (UINT i = 0; i < across * 16; ++i)
+        {
+            const uint8_t expected = slice == 8 ? uint8_t(40 + mip * 3 + (row * across * 16 + i) % 13) : 0;
+            matched &= static_cast<const uint8_t*>(mapped.pData)[row * mapped.RowPitch + i] == expected;
+        }
+        context->Unmap(staging.Get(), sub);
+        check(matched, "BC3 slice/mip blocks or untouched neighbour changed");
+    }
+}
+
 int main()
 {
     try
@@ -86,18 +148,27 @@ int main()
         check(BZROpenShim::TerrainHd::OgreArrayMipRequest(0, DXGI_FORMAT_BC1_UNORM) == 0 &&
             BZROpenShim::TerrainHd::OgreArrayMipRequest(10, DXGI_FORMAT_R8G8B8A8_UNORM) == 10,
             "single-level or uncompressed mip request changed");
+        check(BZROpenShim::TerrainHd::OgreArrayMipRequest(11, DXGI_FORMAT_BC3_UNORM) == 13 &&
+            BZROpenShim::TerrainHd::BlockCompressed(DXGI_FORMAT_BC3_UNORM) &&
+            !BZROpenShim::TerrainHd::BlockCompressed(DXGI_FORMAT_B8G8R8A8_UNORM), "DXT5 paint array mip request wrong");
+        using Slices = std::vector<UINT>;
+        check(BZROpenShim::TerrainHd::PaintControlSlices(5) == Slices{4} &&
+            BZROpenShim::TerrainHd::PaintControlSlices(9) == Slices{4} &&
+            BZROpenShim::TerrainHd::PaintControlSlices(18) == Slices{4, 13} &&
+            BZROpenShim::TerrainHd::PaintControlSlices(7).empty(), "paint control slices wrong");
         ComPtr<ID3D11Device> device; ComPtr<ID3D11DeviceContext> context;
         ok(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
             D3D11_SDK_VERSION, &device, nullptr, &context));
         qualify(device.Get(), context.Get(), 512, 10, 3);
         qualify(device.Get(), context.Get(), 16, 5, 256);
+        qualifyCompressed(device.Get(), context.Get());
         ComPtr<ID3D11Device> other; ComPtr<ID3D11DeviceContext> otherContext;
         ok(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
             D3D11_SDK_VERSION, &other, nullptr, &otherContext));
         auto source = makeTexture(other.Get(), 16, 5, 1, 10);
         auto destination = makeTexture(device.Get(), 16, 5, 3, 0);
         check(!BZROpenShim::TerrainHd::CopyTextureSlice(destination.Get(), source.Get(), 0, 16, 16, 4), "cross-device copy accepted");
-        std::cout << "PASS: explicit 512px mips, 256 slices, preserved neighbours and invalid contracts\n";
+        std::cout << "PASS: explicit 512px mips, 256 slices, DXT5 slices, per-array formats, control slices, preserved neighbours and invalid contracts\n";
         return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

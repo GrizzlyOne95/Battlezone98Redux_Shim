@@ -565,17 +565,26 @@ float4 OpenShimPaintTap(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g
     OpenShimPaintTaps t = OpenShimPaintSampleTaps(tex, sam, g, repeat, slice, detile);
     return t.x * g.blend.x + t.y * g.blend.y + t.z * g.blend.z;
 }
+// A split control array (one uncompressed slice per bank) frees the colour
+// array to ship block compressed; otherwise control is slice 4 of each bank.
+#if OPENSHIM_PAINT_CONTROL_SPLIT
+#define OPENSHIM_PAINT_CONTROL_TEX(tex) openShimPaintControlMap
+#define OPENSHIM_PAINT_CONTROL_SLICE(b) (b)
+#else
+#define OPENSHIM_PAINT_CONTROL_TEX(tex) tex
+#define OPENSHIM_PAINT_CONTROL_SLICE(b) OpenShimPaintSlice((b) * 4, 4)
+#endif
 OpenShimPaintMix OpenShimPaintControl(Texture2DArray tex, SamplerState sam, float2 worldXZ)
 {
     uint width, height, slices;
-    tex.GetDimensions(width, height, slices);
+    OPENSHIM_PAINT_CONTROL_TEX(tex).GetDimensions(width, height, slices);
     float2 paintUV = (worldXZ - openShimPaintBounds.xy) / (openShimPaintBounds.zw - openShimPaintBounds.xy);
     float2 inset = 0.5 / float2(width, height);
     // Level zero plus a half-texel clamp prevents the shared wrapping sampler
     // from blending the opposite edge of the map into its border.
     float4 banks[OPENSHIM_PAINT_LAYERS / 4];
     [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
-        banks[b] = tex.SampleLevel(sam, float3(clamp(paintUV, inset, 1.0-inset), OpenShimPaintSlice(b * 4, 4)), 0);
+        banks[b] = OPENSHIM_PAINT_CONTROL_TEX(tex).SampleLevel(sam, float3(clamp(paintUV, inset, 1.0-inset), OPENSHIM_PAINT_CONTROL_SLICE(b)), 0);
     return OpenShimPaintNormalize(banks);
 }
 #if OPENSHIM_PAINT_MATERIAL
@@ -927,7 +936,11 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
         return reads > 0 && reads == shared;
     }
     // why, when given, names the check that declined, or a liquid skip on success.
-    inline bool Specialize(std::string& source, bool pixel, const Config& config, std::string* why = nullptr)
+    // controlRegister >= 0 reads the control maps from their own array, one
+    // slice per bank, bound at that pixel-shader texture register (the HD
+    // pass's appended unit); otherwise control is slice 4 of each bank.
+    inline bool Specialize(std::string& source, bool pixel, const Config& config, std::string* why = nullptr,
+        int controlRegister = -1)
     {
         const auto decline = [&](std::string reason) { if (why) *why = std::move(reason); return false; };
         config.Validate();
@@ -964,6 +977,12 @@ float3 OpenShimSampleTerrainPaintSpecular(Texture2DArray tex, SamplerState sam, 
             }
             std::ostringstream constants; constants.imbue(std::locale::classic()); constants << std::setprecision(9) << std::scientific;
             constants << "#define OPENSHIM_PAINT_MATERIAL " << (config.Material() ? 1 : 0) << "\n";
+            if (controlRegister > 127) return decline("control register out of range");
+            constants << "#define OPENSHIM_PAINT_CONTROL_SPLIT " << (controlRegister >= 0 ? 1 : 0) << "\n";
+            // Registers declared under inactive #if branches are harmless; a
+            // live overlap fails to compile and the pack declines.
+            if (controlRegister >= 0)
+                constants << "Texture2DArray openShimPaintControlMap : register(t" << controlRegister << ");\n";
             // Triplanar needs a view normal and the inverse view; the HLSL
             // also checks the #if conditions that declare them.
             const bool triplanar = source.find("in float3 vViewNormal") != std::string::npos &&

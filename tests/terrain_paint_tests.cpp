@@ -195,6 +195,16 @@ int main(int argc, char** argv)
         std::string wide = pixelSource;
         check(TerrainPaint::Specialize(wide, true, eight) && wide.find("#define OPENSHIM_PAINT_LAYERS 8") != std::string::npos &&
             wide.find("openShimPaintRepeats[8]") != std::string::npos, "eight-layer specialization failed");
+        // A split control array declares its own register; without one the
+        // combined bank slices stay in use; past t127 the pack declines.
+        check(wide.find("#define OPENSHIM_PAINT_CONTROL_SPLIT 0") != std::string::npos &&
+            wide.find("Texture2DArray openShimPaintControlMap") == std::string::npos, "combined control path changed");
+        std::string split = pixelSource, beyond = pixelSource;
+        check(TerrainPaint::Specialize(split, true, eight, nullptr, 5) &&
+            split.find("#define OPENSHIM_PAINT_CONTROL_SPLIT 1") != std::string::npos &&
+            split.find("Texture2DArray openShimPaintControlMap : register(t5);") != std::string::npos,
+            "split control declaration missing");
+        check(!TerrainPaint::Specialize(beyond, true, eight, nullptr, 128), "control register past t127 accepted");
         // A colour-only pass (terrain glow) keeps working; a normal sample in
         // an unknown form must decline rather than follow stock atlas UVs.
         std::string noNormals = "float4 d = diffuseMap.Sample(diffuseSam, float3(openShimHdUV, openShimTileSlice));";

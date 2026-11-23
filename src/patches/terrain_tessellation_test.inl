@@ -257,8 +257,10 @@ bool InstallNativeTerrainTessellationTest()
         if (level < D3D_FEATURE_LEVEL_11_0)
             throw std::runtime_error("feature level 11_0 required");
 
-        const auto shaderPath = GetIniPath().parent_path() /
-            "openshim/renderer/enhanced/openshim_terrain_tessellation_test.hlsl";
+        // The ini moved into openshim\ (#970), so its parent is no longer the
+        // game root: resolve from the OpenShim directory itself.
+        const auto shaderPath = Layout::OpenShimDirectory() /
+            "renderer/enhanced/openshim_terrain_tessellation_test.hlsl";
         std::ifstream input(shaderPath, std::ios::binary);
         std::string source((std::istreambuf_iterator<char>(input)), {});
         if (source.empty() || source.size() > 64 * 1024)
@@ -304,11 +306,11 @@ bool InstallNativeTerrainTessellationTest()
         }
         if (paintHeight)
         {
-            PrepareTerrainPaintHeightTexture(g_hdDiffuseNativeTexture);
+            PrepareTerrainPaintHeightTexture(g_hdDiffuseNativeTexture, g_hdChannelNativeTextures[kHdControlChannel]);
             std::ostringstream defines; defines.imbue(std::locale::classic()); defines << std::setprecision(9) << std::scientific;
             const auto vector = [&](const char* name, const std::array<float, 4>& v) {
                 defines << "#define " << name << " float4(" << v[0] << "," << v[1] << "," << v[2] << "," << v[3] << ")\n"; };
-            defines << "#define OPENSHIM_PAINT_HEIGHT 1\n";
+            defines << "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_CONTROL_SPLIT 1\n";
             vector("OPENSHIM_PAINT_BOUNDS", g_HdPaint.bounds);
             if (g_HdPaint.craters[0] > 0)
                 vector("OPENSHIM_PAINT_CRATERS", g_HdPaint.craters);

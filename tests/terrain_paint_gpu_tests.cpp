@@ -619,6 +619,39 @@ RWStructuredBuffer<float4> testResults : register(u0);
             for(UINT i=0;i<3;++i)for(unsigned c=0;c<4;++c)check(std::abs((&values[i].r)[c]-(&layerFive[i].r)[c])<1e-5f,"eight-layer bank or blend failed");
             context->Unmap(staging.Get(),0);
         }
+        // Split control: the same weights from their own array (one slice per
+        // bank, register t4) shade identically, while the colour array's
+        // control slots hold unrelated texels that must not be read.
+        std::vector<Pixel> combined(count);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));
+        std::memcpy(combined.data(),mapped.pData,count*sizeof(Pixel));context->Unmap(staging.Get(),0);
+        std::string splitSource = materialRaw;
+        check(TerrainPaint::Specialize(splitSource, true, eight, nullptr, 4) &&
+            splitSource.find("Texture2DArray openShimPaintControlMap : register(t4);") != std::string::npos &&
+            splitSource.find("#define OPENSHIM_PAINT_CONTROL_SPLIT 1") != std::string::npos, "split-control PS specialization failed");
+        splitSource = frame + splitSource;
+        ok(D3DCompile(splitSource.data(),splitSource.size(),nullptr,nullptr,nullptr,"PixelMain","ps_4_0",0,0,&code,&errors));
+        const std::string splitCompute = noDerivatives + splitSource;
+        compiled = D3DCompile(splitCompute.data(),splitCompute.size(),nullptr,nullptr,nullptr,"ComputeMain","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> splitShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&splitShader));
+        std::vector<Pixel> colourOnly = banks;
+        for(unsigned i=0;i<16;++i) colourOnly[4*16+i]=colourOnly[13*16+i]=Pixel{0,0,1,0};
+        for(unsigned i=0;i<18;++i)bankData[i]={colourOnly.data()+16*i,4*sizeof(Pixel),0};
+        ComPtr<ID3D11Texture2D> colourTexture;ok(device->CreateTexture2D(&td,bankData,&colourTexture));
+        ComPtr<ID3D11ShaderResourceView> colourView;ok(device->CreateShaderResourceView(colourTexture.Get(),nullptr,&colourView));
+        D3D11_TEXTURE2D_DESC cd=td; cd.ArraySize=2; D3D11_SUBRESOURCE_DATA controlData[2]={{banks.data()+4*16,4*sizeof(Pixel),0},{banks.data()+13*16,4*sizeof(Pixel),0}};
+        ComPtr<ID3D11Texture2D> controlTexture;ok(device->CreateTexture2D(&cd,controlData,&controlTexture));
+        ComPtr<ID3D11ShaderResourceView> controlView;ok(device->CreateShaderResourceView(controlTexture.Get(),nullptr,&controlView));
+        context->CSSetShader(splitShader.Get(),nullptr,0);
+        ID3D11ShaderResourceView* splitViews[]={colourView.Get()};context->CSSetShaderResources(0,1,splitViews);
+        ID3D11ShaderResourceView* controlViews[]={controlView.Get()};context->CSSetShaderResources(4,1,controlViews);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+        for(UINT i=0;i<count;++i)for(unsigned c=0;c<4;++c)
+            check(std::abs((&values[i].r)[c]-(&combined[i].r)[c])<1e-5f,"split control array shaded differently from bank slices");
+        context->Unmap(staging.Get(),0);
         std::string eightTess = tessDefines + TerrainPaint::LayerHlsl(eight) + TerrainPaint::DetileHlsl() + tessRaw + R"(
 RWStructuredBuffer<float4> testResults : register(u0);
 [numthreads(1,1,1)] void TestEight(uint3 id : SV_DispatchThreadID)
@@ -627,6 +660,41 @@ RWStructuredBuffer<float4> testResults : register(u0);
         compiled = D3DCompile(eightTess.data(),eightTess.size(),nullptr,nullptr,nullptr,"TestEight","cs_5_0",0,0,&code,&errors);
         if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
         ok(compiled);
+        // The domain's relief agrees between bank control slices (t127) and
+        // the split control array (t126) beside a colour array without them.
+        // Heights on layers zero and five so the relief moves.
+        TerrainPaint::Config eightHeight = eight; eightHeight.heightMeters = {1,0,0,0,0,2,0,0};
+        const std::string reliefTess = tessDefines + TerrainPaint::LayerHlsl(eightHeight) + TerrainPaint::DetileHlsl() + tessRaw + R"(
+RWStructuredBuffer<float4> testResults : register(u0);
+[numthreads(1,1,1)] void TestEight(uint3 id : SV_DispatchThreadID)
+{ testResults[id.x] = float4(TerrainPaintRelief(float2(1.3 + 9.1 * id.x, 0.7 + 4.3 * id.x)), 0); }
+)";
+        ComPtr<ID3D11ComputeShader> reliefShader, splitReliefShader;
+        compiled = D3DCompile(reliefTess.data(),reliefTess.size(),nullptr,nullptr,nullptr,"TestEight","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&reliefShader));
+        const std::string splitTess = "#define OPENSHIM_PAINT_CONTROL_SPLIT 1\n" + reliefTess;
+        compiled = D3DCompile(splitTess.data(),splitTess.size(),nullptr,nullptr,nullptr,"TestEight","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&splitReliefShader));
+        std::vector<Pixel> relief(count);
+        ID3D11ShaderResourceView* bankTess[]={eightView.Get()};context->CSSetShaderResources(127,1,bankTess);
+        context->CSSetShader(reliefShader.Get(),nullptr,0);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));
+        std::memcpy(relief.data(),mapped.pData,count*sizeof(Pixel));context->Unmap(staging.Get(),0);
+        ID3D11ShaderResourceView* splitTessViews[]={controlView.Get(),colourView.Get()};context->CSSetShaderResources(126,2,splitTessViews);
+        context->CSSetShader(splitReliefShader.Get(),nullptr,0);
+        dispatch();ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));values=static_cast<const Pixel*>(mapped.pData);
+        bool reliefMoved=false;
+        for(UINT i=0;i<count;++i)
+        {
+            for(unsigned c=0;c<3;++c) check(std::abs((&values[i].r)[c]-(&relief[i].r)[c])<1e-4f,"split control relief differs from bank slices");
+            reliefMoved = reliefMoved || std::abs(relief[i].r)>1e-3f;
+        }
+        context->Unmap(staging.Get(),0);
+        check(reliefMoved,"eight-layer relief stayed flat, so the split comparison proves nothing");
         // The adaptive hull reads both control banks for its relief scale.
         const std::string adaptiveHull = "#define OPENSHIM_TESS_ADAPTIVE 1\n#define OPENSHIM_TESS_FACTOR 8\n"
             "static const float openShimPaintReliefMeters[8] = {1,0,0,0,0,2,0,0};\n" + eightTess;
@@ -636,8 +704,13 @@ RWStructuredBuffer<float4> testResults : register(u0);
                 stage[7] == 'H' ? "hs_5_0" : "ds_5_0",0,0,&code,&errors);
             if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
             ok(compiled);
+            const std::string splitHull = "#define OPENSHIM_PAINT_CONTROL_SPLIT 1\n" + adaptiveHull;
+            compiled = D3DCompile(splitHull.data(),splitHull.size(),nullptr,nullptr,nullptr,stage,
+                stage[7] == 'H' ? "hs_5_0" : "ds_5_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
         }
-        std::cout<<"PASS: eight-layer banks and adaptive hull, close-up parallax, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        std::cout<<"PASS: split control array (pixel and domain parity), eight-layer banks and adaptive hull, close-up parallax, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

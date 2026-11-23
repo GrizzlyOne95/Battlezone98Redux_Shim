@@ -1,17 +1,31 @@
 #pragma once
 #include <d3d11.h>
 #include <wrl/client.h>
+#include <vector>
 
 namespace BZROpenShim::TerrainHd
 {
+inline bool BlockCompressed(DXGI_FORMAT format)
+{
+    return (format >= DXGI_FORMAT_BC1_TYPELESS && format <= DXGI_FORMAT_BC5_SNORM) ||
+        (format >= DXGI_FORMAT_BC6H_TYPELESS && format <= DXGI_FORMAT_BC7_UNORM_SRGB);
+}
+
 // Ogre 1.10 D3D11Texture::_create2DTex subtracts two levels from explicit
 // BC requests. Match an already-loaded source, then still verify real GPU
 // descriptors in CopyTextureSlice. Single-level textures need no adjustment.
 inline int OgreArrayMipRequest(UINT additionalMips, DXGI_FORMAT format)
 {
-    const bool compressed = (format >= DXGI_FORMAT_BC1_TYPELESS && format <= DXGI_FORMAT_BC5_SNORM) ||
-        (format >= DXGI_FORMAT_BC6H_TYPELESS && format <= DXGI_FORMAT_BC7_UNORM_SRGB);
-    return int(additionalMips + (compressed && additionalMips ? 2u : 0u));
+    return int(additionalMips + (BlockCompressed(format) && additionalMips ? 2u : 0u));
+}
+
+// Manifest slices that hold paint control maps: slice 4 of each 9-slice
+// bank, and slice 4 of the diffuse-and-control-only 5-slice form.
+inline std::vector<UINT> PaintControlSlices(UINT sliceCount)
+{
+    if (sliceCount == 5 || sliceCount == 9) return {4};
+    if (sliceCount == 18) return {4, 13};
+    return {};
 }
 
 // Copy explicit 2D mip subresources to one array slice. Ogre's pixel-buffer

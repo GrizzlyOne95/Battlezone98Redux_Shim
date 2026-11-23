@@ -8,6 +8,8 @@ struct NativeHdPass
     uint16_t technique, pass;
     std::string vertex, fragment;
     std::array<bool, 3> channels{};
+    // Index of the appended paint control unit, or -1.
+    int controlUnit = -1;
 };
 std::map<std::string, NativeHdStream> g_HdStreams;
 std::vector<NativeHdPass> g_HdPasses;
@@ -163,6 +165,13 @@ void RestoreNativeTerrainHd()
                     const auto* originalTexture = g_hdGetTexture(g_ogre.getTextureUnitState(original, uint16_t(c + 2)));
                     if (!originalTexture || !originalTexture->rep) throw std::runtime_error("HD original material channel unavailable");
                     g_ogre.setTexture(g_ogre.getTextureUnitState(pass, uint16_t(c + 2)), *originalTexture);
+                }
+                // A failed install may stop before this pass got its unit.
+                if (saved.controlUnit >= 0)
+                {
+                    const uint16_t units = g_ogre.getNumTextureUnitStates(pass);
+                    if (units == uint16_t(saved.controlUnit + 1)) g_ogre.removeTextureUnitState(pass, uint16_t(saved.controlUnit));
+                    else if (units != uint16_t(saved.controlUnit)) throw std::runtime_error("HD paint control unit owner changed");
                 }
             }
             materialRestored = true;
@@ -481,27 +490,26 @@ void DumpLivePaint(const TerrainLivePaint::Input& input, const std::vector<std::
         base.c_str(), size, int(bin.good() && rgba.good()));
 }
 
-// Overwrite the placeholder control slices (4, and 13 for eight layers) of the
-// built diffuse array, every mip. Bytes go in raw like the PNG path; Ogre loads
-// PNGs as BGRA, so swizzle for a B8G8R8A8 array.
+// Overwrite the placeholder control slices (one per bank) of the built control
+// array, every mip. Bytes go in raw like the PNG path; Ogre loads PNGs as
+// BGRA, so swizzle for a B8G8R8A8 array.
 void UploadLivePaint(const std::vector<std::vector<uint8_t>>& images, UINT size)
 {
-    ID3D11Texture2D* texture = g_hdDiffuseNativeTexture;
-    if (!texture) throw std::runtime_error("live paint diffuse array unavailable");
+    ID3D11Texture2D* texture = g_hdChannelNativeTextures[kHdControlChannel];
+    if (!texture) throw std::runtime_error("live paint control array unavailable");
     D3D11_TEXTURE2D_DESC desc = {};
     texture->GetDesc(&desc);
     const bool bgra = desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM || desc.Format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
     const bool rgba = desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM || desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
     if ((!bgra && !rgba) || desc.Width != size || desc.Height != size || desc.Usage != D3D11_USAGE_DEFAULT ||
-        desc.ArraySize < (images.size() > 1 ? 14u : 5u))
-        throw std::runtime_error("live paint needs an uncompressed square default-usage diffuse array: format=" +
+        desc.ArraySize < (images.size() > 1 ? 2u : 1u))
+        throw std::runtime_error("live paint needs an uncompressed square default-usage control array: format=" +
             std::to_string(int(desc.Format)) + " size=" + std::to_string(desc.Width) + "x" + std::to_string(desc.Height));
     Microsoft::WRL::ComPtr<ID3D11Device> device;
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
     texture->GetDevice(device.GetAddressOf());
     if (device) device->GetImmediateContext(context.GetAddressOf());
     if (!context) throw std::runtime_error("live paint device context unavailable");
-    const UINT slices[2] = {4, 13};
     for (std::size_t i = 0; i < images.size() && i < 2; ++i)
     {
         std::vector<uint8_t> level = images[i];
@@ -509,7 +517,7 @@ void UploadLivePaint(const std::vector<std::vector<uint8_t>>& images, UINT size)
         UINT w = size;
         for (UINT mip = 0; mip < desc.MipLevels; ++mip)
         {
-            context->UpdateSubresource(texture, D3D11CalcSubresource(mip, slices[i], desc.MipLevels), nullptr,
+            context->UpdateSubresource(texture, D3D11CalcSubresource(mip, UINT(i), desc.MipLevels), nullptr,
                 level.data(), w * 4, 0);
             if (w == 1) break;
             const UINT half = w / 2;
@@ -601,7 +609,7 @@ bool InstallNativeTerrainHd()
     }
     g_HdProfileSuspended = false;
     if (g_HdActive) return true;
-    OgreSharedPtr source, backup, array, program;
+    OgreSharedPtr source, backup, array, controlArray, program;
     std::array<OgreSharedPtr, 3> channelArrays{};
     try
     {
@@ -729,15 +737,28 @@ bool InstallNativeTerrainHd()
             !SafeReadIntAddress(g_terrainOriginZVa, selected.originZ) ||
             !TerrainSemantic::BuildVertices(ProvideNativeHdCell, &selected, g_proxy.semanticVertices))
             throw std::runtime_error("native HD selected tile semantics unavailable");
-        if (!BuildTerrainHdTextureArray(*binding, array)) throw std::runtime_error("native HD texture array declined");
+        if (binding->paint.enabled)
+        {
+            if (!g_ogre.createTextureUnitState || !g_ogre.removeTextureUnitState)
+                throw std::runtime_error("paint control unit API unavailable");
+            TerrainHdMaterialBinding colour, control;
+            SplitTerrainPaintControl(*binding, colour, control);
+            if (!BuildTerrainHdTextureArray(colour, array)) throw std::runtime_error("native HD texture array declined");
+            if (!BuildTerrainHdTextureArray(control, controlArray, kHdControlChannel))
+                throw std::runtime_error("native HD paint control array declined");
+        }
+        else if (!BuildTerrainHdTextureArray(*binding, array)) throw std::runtime_error("native HD texture array declined");
         if (liveInput)
         {
-            if (g_proxy.hdWidth > kLivePaintMaxSize)
-                throw std::runtime_error("live paint array too wide: " + std::to_string(g_proxy.hdWidth));
+            D3D11_TEXTURE2D_DESC controlDesc{};
+            g_hdChannelNativeTextures[kHdControlChannel]->GetDesc(&controlDesc);
+            const UINT controlSize = controlDesc.Width;
+            if (controlSize > kLivePaintMaxSize)
+                throw std::runtime_error("live paint array too wide: " + std::to_string(controlSize));
             // The baked placeholder belongs to another map: cover it with the
             // recipe's outside weights until the worker finishes.
-            UploadLivePaint(LivePaintPlaceholder(binding->livePaint, g_proxy.hdWidth), g_proxy.hdWidth);
-            StartLivePaint(binding->livePaint, std::move(*liveInput), binding->paint.fingerprint, g_proxy.hdWidth);
+            UploadLivePaint(LivePaintPlaceholder(binding->livePaint, controlSize), controlSize);
+            StartLivePaint(binding->livePaint, std::move(*liveInput), binding->paint.fingerprint, controlSize);
         }
         for (unsigned c = 0; c < 3; ++c)
         {
@@ -750,7 +771,9 @@ bool InstallNativeTerrainHd()
         }
         std::map<std::string, std::string> cache;
         std::map<std::string, std::array<bool, 3>> programChannels;
-        const auto generate = [&](const OgreSharedPtr* input, bool pixel) -> std::string {
+        // controlUnit: the pass texture unit (and PS register) the paint
+        // control array is appended at, or -1.
+        const auto generate = [&](const OgreSharedPtr* input, bool pixel, int controlUnit) -> std::string {
             if (!input || !input->rep) return {};
             const std::string* text = g_ogre.getProgramSource(input->rep);
             if (!text || text->empty()) { input = g_ogre.getUnifiedDelegate(input->rep); if (!input || !input->rep) return {}; text = g_ogre.getProgramSource(input->rep); }
@@ -761,7 +784,8 @@ bool InstallNativeTerrainHd()
             if (!text || target.rfind(pixel ? "ps_4" : "vs_4", 0) != 0 || entry != (pixel ? "terrain_fragment" : "terrain_vertex") ||
                 defines.find("VERTEX_LIGHTING") != std::string::npos) return {};
             const std::string key = *g_ogre.getResourceName(input->rep);
-            auto known = cache.find(key); if (known != cache.end()) return known->second;
+            const std::string cacheKey = key + "#" + std::to_string(controlUnit);
+            auto known = cache.find(cacheKey); if (known != cache.end()) return known->second;
             std::string generated; bool debug = false;
             if (!(pixel ? BuildSemanticFragmentSource(*text, false, true, generated) :
                 BuildSemanticProgramSource(*text, true, true, 0, key, generated, debug))) return {};
@@ -770,7 +794,7 @@ bool InstallNativeTerrainHd()
             if (pixel && !TerrainHdMaterial::SpecializeDetail(generated, binding->detail))
                 throw std::runtime_error("HD detail tuning shader contract unavailable");
             std::string paintWhy;
-            if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint, &paintWhy))
+            if (binding->paint.enabled && !TerrainPaint::Specialize(generated, pixel, binding->paint, &paintWhy, pixel ? controlUnit : -1))
                 throw std::runtime_error("native paint shader specialization declined (" + std::string(pixel ? "PS " : "VS ") + key + ": " + paintWhy + ")");
             if (!paintWhy.empty())
                 LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] %s %s: %s", pixel ? "PS" : "VS", key.c_str(), paintWhy.c_str());
@@ -795,7 +819,7 @@ bool InstallNativeTerrainHd()
                     channels[c] = g_HdChannelEnabled[c] && TerrainHdMaterial::HasDefine(defines, flags[c]);
                 programChannels.emplace(name, channels);
             }
-            ReleaseCloneHandoff(program); cache.emplace(key, name);
+            ReleaseCloneHandoff(program); cache.emplace(cacheKey, name);
             // This compile blocks the main thread for up to seconds, dozens of times on a
             // cold cache: keep the window responsive and the finished work on disk, so
             // a load the player gives up on doesn't start over.
@@ -816,9 +840,16 @@ bool InstallNativeTerrainHd()
                 const auto* name = g_hdGetTextureName(g_ogre.getTextureUnitState(pass, 0));
                 if (!name || _stricmp(name->c_str(), binding->diffuseResource.c_str()) != 0) continue;
             }
-            const std::string vs = generate(g_ogre.getVertexProgram(pass), false);
+            const std::string vs = generate(g_ogre.getVertexProgram(pass), false, -1);
             if (vs.empty()) continue;
-            const std::string ps = generate(g_ogre.getFragmentProgram(pass), true);
+            // Ogre binds unit N to register tN, so the control array takes
+            // the next unit after the pass's own.
+            const int controlUnit = binding->paint.enabled ? int(g_ogre.getNumTextureUnitStates(pass)) : -1;
+            // Past D3D11's 16 sampler units Ogre would drop the technique
+            // rather than fail, so decline to the stock atlas instead.
+            if (controlUnit >= 16)
+                throw std::runtime_error("HD paint pass has no free texture unit for the control array: units=" + std::to_string(controlUnit));
+            const std::string ps = generate(g_ogre.getFragmentProgram(pass), true, controlUnit);
             if (ps.empty() || !g_ogre.getNumTextureUnitStates(pass)) throw std::runtime_error("native HD matching fragment unavailable");
             const auto channels = programChannels.at(ps);
             for (unsigned c = 0; c < 3; ++c)
@@ -831,7 +862,7 @@ bool InstallNativeTerrainHd()
                     throw std::runtime_error("HD material source identity mismatch: slot=" + std::to_string(c + 2) +
                         " expected=" + binding->channels[c].sourceResource + " actual=" + (resource ? *resource : "<missing>"));
             }
-            g_HdPasses.push_back({t,p,vs,ps,channels});
+            g_HdPasses.push_back({t,p,vs,ps,channels,controlUnit});
         }
         if (g_HdPasses.empty()) throw std::runtime_error("native HD compatible terrain passes unavailable");
         for (unsigned c = 0; c < 3; ++c)
@@ -849,6 +880,15 @@ bool InstallNativeTerrainHd()
             g_ogre.setTexture(g_ogre.getTextureUnitState(pass, 0), array);
             for (unsigned c = 0; c < 3; ++c)
                 if (saved.channels[c]) g_ogre.setTexture(g_ogre.getTextureUnitState(pass, uint16_t(c + 2)), channelArrays[c]);
+            if (saved.controlUnit >= 0)
+            {
+                if (g_ogre.getNumTextureUnitStates(pass) != uint16_t(saved.controlUnit))
+                    throw std::runtime_error("HD paint pass units changed before control bind");
+                void* unit = g_ogre.createTextureUnitState(pass);
+                if (!unit || g_ogre.getNumTextureUnitStates(pass) != uint16_t(saved.controlUnit + 1))
+                    throw std::runtime_error("HD paint control unit creation failed");
+                g_ogre.setTexture(unit, controlArray);
+            }
         }
         g_HdActive = true;
         LogShimA(LogLevel::Info, "terrain-hd",
@@ -857,9 +897,9 @@ bool InstallNativeTerrainHd()
         LogShimA(LogLevel::Info, "terrain-hd", "[TERRAIN-HD] shared native material installed source=\"%s\" passes=%zu meshes=%zu size=%ux%u slices=%u packedUV=exact",
             g_HdSourceMaterial.c_str(), g_HdPasses.size(), g_HdStreams.size(), g_proxy.hdWidth, g_proxy.hdHeight, g_proxy.hdSliceCount);
         if (g_HdPaint.enabled) LogShimA(LogLevel::Info, "terrain-hd",
-            "[TERRAIN-PAINT] %u-layer diffuse installed weights=%s coordinates=native-world-XZ alpha=opaque",
-            g_HdPaint.Layers(), g_HdPaint.Layers() == 8 ? "slice4+slice13" : "slice4");
-        ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup); ReleaseCloneHandoff(array);
+            "[TERRAIN-PAINT] %u-layer diffuse installed weights=control-array:%s coordinates=native-world-XZ alpha=opaque",
+            g_HdPaint.Layers(), g_HdPaint.Layers() == 8 ? "slice0+slice1" : "slice0");
+        ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup); ReleaseCloneHandoff(array); ReleaseCloneHandoff(controlArray);
         for (auto& channel : channelArrays) ReleaseCloneHandoff(channel);
         return true;
     }
@@ -870,6 +910,7 @@ bool InstallNativeTerrainHd()
     }
     catch (...) { g_HdPaintDeferredZones = 0; LogShimA(LogLevel::Warn, "terrain-hd", "[TERRAIN-HD] native tiles declined after Ogre exception"); }
     ReleaseCloneHandoff(program); ReleaseCloneHandoff(source); ReleaseCloneHandoff(backup); ReleaseCloneHandoff(array);
+    ReleaseCloneHandoff(controlArray);
     for (auto& channel : channelArrays) ReleaseCloneHandoff(channel);
     RestoreNativeTerrainHd(); RemoveSemanticResources("native-hd-declined");
     // A deferred paint match stays retryable: ObserveZone reinstalls when a zone is added.

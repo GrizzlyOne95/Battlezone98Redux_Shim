@@ -159,14 +159,24 @@ float3 TerrainHeightRelief(float2 uv, float2 xz0, float2 xz1, float2 xz2,
 // are a pure function of world XZ at a fixed mip per layer, so the two
 // patches on a shared edge displace it identically and no cracks open.
 Texture2DArray<float4> terrainPaintArray : register(t127);
+// A split control array (one uncompressed slice per bank) lets the paint
+// array above ship block compressed, as the pixel shader does.
+#if OPENSHIM_PAINT_CONTROL_SPLIT
+Texture2DArray<float4> terrainPaintControlArray : register(t126);
+#define TERRAIN_PAINT_CONTROL_ARRAY terrainPaintControlArray
+#define TERRAIN_PAINT_CONTROL_SLICE(b) uint(b)
+#else
+#define TERRAIN_PAINT_CONTROL_ARRAY terrainPaintArray
+#define TERRAIN_PAINT_CONTROL_SLICE(b) uint(OpenShimPaintSlice((b) * 4, 4))
+#endif
 
 // A bilinear tap and its exact derivative per unit of uv (piecewise constant
 // per texel, like the filter), so the relief's slope needs no extra taps.
 struct TerrainPaintTap { float4 v; float4 du; float4 dv; };
-TerrainPaintTap TerrainPaintBilinearGrad(float2 uv, uint slice, uint mip, bool wrap)
+TerrainPaintTap TerrainPaintBilinearGrad(Texture2DArray<float4> tex, float2 uv, uint slice, uint mip, bool wrap)
 {
     uint width, height, elements, levels;
-    terrainPaintArray.GetDimensions(mip, width, height, elements, levels);
+    tex.GetDimensions(mip, width, height, elements, levels);
     int2 size = int2(width, height);
     float2 pixel = (wrap ? frac(uv) : uv) * float2(size) - 0.5;
     // A clamped axis is flat past the edge texels.
@@ -176,10 +186,10 @@ TerrainPaintTap TerrainPaintBilinearGrad(float2 uv, uint slice, uint mip, bool w
     float2 f = pixel - float2(lo);
     int2 hi = min(lo + 1, size - 1);
     if (wrap) { hi = lo + 1 >= size ? 0 : lo + 1; lo = lo < 0 ? size - 1 : lo; }
-    float4 a = terrainPaintArray.Load(int4(lo, slice, mip));
-    float4 b = terrainPaintArray.Load(int4(hi.x, lo.y, slice, mip));
-    float4 c = terrainPaintArray.Load(int4(lo.x, hi.y, slice, mip));
-    float4 d = terrainPaintArray.Load(int4(hi, slice, mip));
+    float4 a = tex.Load(int4(lo, slice, mip));
+    float4 b = tex.Load(int4(hi.x, lo.y, slice, mip));
+    float4 c = tex.Load(int4(lo.x, hi.y, slice, mip));
+    float4 d = tex.Load(int4(hi, slice, mip));
     TerrainPaintTap t;
     t.v = lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
     t.du = lerp(b - a, d - c, f.y) * (size.x * inside.x);
@@ -187,9 +197,9 @@ TerrainPaintTap TerrainPaintBilinearGrad(float2 uv, uint slice, uint mip, bool w
     return t;
 }
 
-float4 TerrainPaintBilinear(float2 uv, uint slice, uint mip, bool wrap)
+float4 TerrainPaintBilinear(Texture2DArray<float4> tex, float2 uv, uint slice, uint mip, bool wrap)
 {
-    return TerrainPaintBilinearGrad(uv, slice, mip, wrap).v;
+    return TerrainPaintBilinearGrad(tex, uv, slice, mip, wrap).v;
 }
 
 uint TerrainPaintMip(float repeat)
@@ -209,7 +219,7 @@ float3 TerrainPaintLayerHeightGrad(float2 worldXZ, float repeat, uint slice, boo
     uint mip = TerrainPaintMip(repeat);
     if (!detile)
     {
-        TerrainPaintTap t = TerrainPaintBilinearGrad(uv, slice, mip, true);
+        TerrainPaintTap t = TerrainPaintBilinearGrad(terrainPaintArray, uv, slice, mip, true);
         return float3(t.v.a, float2(t.du.a, t.dv.a) / repeat);
     }
     // Same offsets as the pixel shader's top projection; outside the band
@@ -218,12 +228,12 @@ float3 TerrainPaintLayerHeightGrad(float2 worldXZ, float repeat, uint slice, boo
     float3 a = 0, b = 0;
     [branch] if (d.t < 1)
     {
-        TerrainPaintTap t = TerrainPaintBilinearGrad(uv + d.a, slice, mip, true);
+        TerrainPaintTap t = TerrainPaintBilinearGrad(terrainPaintArray, uv + d.a, slice, mip, true);
         a = float3(t.v.a, t.du.a, t.dv.a);
     }
     [branch] if (d.t > 0)
     {
-        TerrainPaintTap t = TerrainPaintBilinearGrad(uv + d.b, slice, mip, true);
+        TerrainPaintTap t = TerrainPaintBilinearGrad(terrainPaintArray, uv + d.b, slice, mip, true);
         b = float3(t.v.a, t.du.a, t.dv.a);
     }
     float3 h = lerp(a, b, d.t);
@@ -249,7 +259,7 @@ float3 TerrainPaintRelief(float2 worldXZ)
     float3 total = 0;
     [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
     {
-        TerrainPaintTap t = TerrainPaintBilinearGrad(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
+        TerrainPaintTap t = TerrainPaintBilinearGrad(TERRAIN_PAINT_CONTROL_ARRAY, paintUV, TERRAIN_PAINT_CONTROL_SLICE(b), 0, false);
         [unroll] for (int c = 0; c < 4; ++c)
         {
             control[b * 4 + c] = t.v[c] > 0 ? float3(t.v[c], t.du[c] / span.x, t.dv[c] / span.y) : 0.0;
@@ -329,7 +339,7 @@ float TerrainPaintReliefScale(float2 worldXZ)
     float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / (OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy);
     float4 banks[OPENSHIM_PAINT_LAYERS / 4];
     [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
-        banks[b] = TerrainPaintBilinear(paintUV, uint(OpenShimPaintSlice(b * 4, 4)), 0, false);
+        banks[b] = TerrainPaintBilinear(TERRAIN_PAINT_CONTROL_ARRAY, paintUV, TERRAIN_PAINT_CONTROL_SLICE(b), 0, false);
     float span = OpenShimPaintDot(OpenShimPaintNormalize(banks), openShimPaintReliefMeters) * OPENSHIM_PAINT_HEIGHT_SCALE;
     return isfinite(span) ? lerp(OPENSHIM_TESS_RELIEF_FLAT, 1.0, saturate(span / OPENSHIM_TESS_RELIEF_FULL)) : 1.0;
 }
