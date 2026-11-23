@@ -573,6 +573,15 @@
       "identity": "Ping-check call (E8 at 0x005718C7, `if (local id != 0) call 0x00576B70`) in Net::Execute 0x005715D0 on GOG Redux 2.2.301. It runs on every peer once per NetManager+0x430 ms ping interval, not only on the host. Redirected only by [Network] LobbyDropKeepsMatch after the call target matches Net::PingCheck; the wrapper re-checks players whose lobby leave was held back and drops those that stopped answering pings, then runs the stock ping check."
     },
     {
+      "name": "Ally Lock Survives UI Rebuild",
+      "pattern": "83 7D FC 02 74 22 E8 ?? ?? ?? ?? 85 C0 74 14 E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ?? E8 ?? ?? ?? ??",
+      "offset": 31,
+      "expected_size": 4,
+      "fallback": "0x00681E2B",
+      "require_unique": true,
+      "identity": "Ally-editor init call (E8 at 0x00681E2A, last of 0x006246D0, 0x0046CE20 free-editor, 0x00624210, 0x0046CC80) in the UI rebuild 0x00681DF0, which runs `if (state != 9 && state != 2 && FUN_00572A70() /*net game*/)` on GOG Redux 2.2.301. Its callers include sim startup 0x006185F0 (call at 0x00618955, after mission load and Lua Start()). Stock target AllyEditor::Init 0x0046CC80 (void __cdecl(void)) recreates the editor in 0x0260D184 and writes the Lua LockAllies gate 0x0260D5EC = 0 (write at 0x0046CCED), so LockAllies(true) from Start() is lost. Redirected only by [Network] AllyLockSurvivesStart after the call target matches AllyEditor::Init; the wrapper saves the gate, runs the stock init and restores it. The network-startup reset (call at 0x00570170) is left stock. Signature unique in the shipped image."
+    },
+    {
       "name": "TRO Banner Mode Refresh 1/2",
       "platforms": [
         "gog"
@@ -2250,6 +2259,26 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Ping check 0x00576B70, void __cdecl(void): lagging/auto-kick pass, then pings every remote player (0x00576480 shifts Player+0x1B0 left per ping; the reply handler sets bit 0). Only caller is Net::Execute at 0x005718C7 (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "AllyLock::Gate",
+      "pattern": "55 8B EC 8B 45 08 A3 ?? ?? ?? ?? 5D C3 CC CC CC 55 8B EC A1 ?? ?? ?? ?? 50 E8",
+      "offset": 7,
+      "mode": "abs32_operand",
+      "fallback": "0x0260D5EC",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "LockAllies gate dword on GOG Redux 2.2.301: the operand of `mov [gate], eax` (A3 at 0x0046CE16) in the setter 0x0046CE10 (`push ebp; mov ebp,esp; mov eax,[ebp+8]; mov [gate],eax`), reached from Lua LockAllies handler 0x00501CB0 via 0x005C9450. Read by the getter 0x0046CE40 and the Y/U ally handler 0x0046CD10 (does nothing when nonzero); zeroed by AllyEditor::Init at 0x0046CCED. Unique whole-image match 2026-11-23. Used by [Network] AllyLockSurvivesStart."
+    },
+    {
+      "name": "AllyEditor::Init",
+      "pattern": "55 8B EC 83 EC 4C A1 ?? ?? ?? ?? 33 C5 89 45 FC C7 45 B4 0A 00 00 00 C7 45 B8 2C 01 00 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x0046CC80",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Ally-editor initializer 0x0046CC80, void __cdecl(void), on GOG Redux 2.2.301: creates the editor in 0x0260D184 and writes the LockAllies gate 0x0260D5EC = 0 (0x0046CCED). Called by network startup 0x0056FD20 (0x00570170) and by the UI rebuild 0x00681DF0 (0x00681E2A). Unique whole-image match 2026-11-23. Used by [Network] AllyLockSurvivesStart."
     },
     {
       "name": "Net::ManagerSlot",
