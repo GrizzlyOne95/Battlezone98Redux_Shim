@@ -262,6 +262,8 @@ namespace BZROpenShim::WeaponPresentation
         };
 
         Settings settings;
+        // Production always passes true (presentation is local, so it runs
+        // online too); the flag stays so tests can exercise the stand-down.
         bool singleplayer = false;
         bool running = false;
         size_t sceneDepth = 0;

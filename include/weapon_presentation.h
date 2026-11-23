@@ -1,6 +1,6 @@
 #pragma once
 
-// Engine-independent singleplayer weapon presentation. Native hooks supply
+// Engine-independent weapon presentation. Native hooks supply
 // copied identities/poses; this layer never reads game memory or changes aim.
 // The native adapter remains gated pending live Windows lifetime/order
 // qualification. See Docs/WEAPON_PRESENTATION_IMPLEMENTATION.md.

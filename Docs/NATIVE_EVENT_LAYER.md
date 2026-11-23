@@ -77,7 +77,7 @@ The four `int32` slots are packed into the record's `arg0`/`arg1` by
 application; letting them into the 256-entry polling queue would evict the
 lifecycle events companions actually poll for.
 
-`SimDamageApplied` is an optional, GOG single-player producer enabled by
+`SimDamageApplied` is an optional GOG producer (single player and online) enabled by
 `[Display] HitMarkers`. It verifies health decreased after the original damage
 handler and validates the same object lifetime. It is independent of career
 tracking and is not a general-purpose damage API. See [HUD_FEEDBACK.md](HUD_FEEDBACK.md)

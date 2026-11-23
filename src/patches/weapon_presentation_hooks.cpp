@@ -19,6 +19,7 @@ namespace BZROpenShim::Hooks
             int state = kBzrRunStateUnknown;
             const bool running = g_MissionSeamInstalled &&
                 TryReadBzrRunState(state) && state == kBzrRunStateStarted;
+            // Always true by design: presentation is local rendering.
             g_Runtime->SetSession(true, running);
         }
     }

@@ -76,7 +76,7 @@ int main()
     sample = hit; sample.weaponSource = false;
     Check(!ConfirmsHit(sample), "collision/environmental damage does not confirm");
     sample = hit; sample.singlePlayer = false;
-    Check(!ConfirmsHit(sample), "unqualified multiplayer authority is excluded");
+    Check(ConfirmsHit(sample), "online hits are confirmed too");
     sample = hit; sample.victim = sample.attacker;
     Check(!ConfirmsHit(sample), "self damage does not confirm");
     sample = hit; sample.after = std::numeric_limits<float>::quiet_NaN();

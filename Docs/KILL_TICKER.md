@@ -98,9 +98,8 @@ a damage wrapper.
 No new engine addresses. Every site is an existing qualified row:
 
 - The four `HudFeedback*Damage` `DamageAlloc` entries, installed when the
-  ticker, hit markers or damage indicators are on. Hit markers and arcs stay
-  single player because the wrappers pass the real session type through to
-  their checks.
+  ticker, hit markers or damage indicators are on. Hit markers and arcs also run
+  online; the wrappers pass the real session type through to the kill ticker.
 - `HudPaletteFriendTeam` / `HudPaletteEnemyTeam` for the allied filter
   (optional).
 - `AutoSaveNoticeHudGauge` plus the HUD text, measure, fill, viewport, depth,

@@ -63,6 +63,7 @@ namespace BZROpenShim::HudFeedback
         std::atomic<uintptr_t> g_originalDamage[4] = {};
         LONG g_drawLog = 1;
         LONG g_hitLogBudget = 8;
+        LONG g_incomingLogBudget = 8;
 
         bool NeedsDamage(const Settings& settings)
         {
@@ -441,6 +442,11 @@ namespace BZROpenShim::HudFeedback
                     g_incoming.Add(GetTickCount64(), g_incomingSettings.durationMs,
                         context.sample.victim, context.sample.attacker, context.direction, context.sample.before - context.sample.after);
                 ReleaseSRWLockExclusive(&g_stateLock);
+                // Budgeted decision log (a few lines per mission).
+                if (InterlockedDecrement(&g_incomingLogBudget) >= 0)
+                    Log(L"[HUDFEEDBACK] Incoming arc recorded victim=0x%x attacker=0x%x sp=%d\n",
+                        static_cast<unsigned>(context.sample.victim), static_cast<unsigned>(context.sample.attacker),
+                        context.sample.singlePlayer ? 1 : 0);
             }
         }
 
@@ -524,7 +530,8 @@ namespace BZROpenShim::HudFeedback
             g_pulse.Start(event.tickMs, SimEventArg(event, 0), SimEventArg(event, 2) != 0);
             ReleaseSRWLockExclusive(&g_stateLock);
             if (InterlockedDecrement(&g_hitLogBudget) >= 0)
-                Log(L"[HUDFEEDBACK] Confirmed player hit victim=%d attacker=%d\n", SimEventArg(event, 0), SimEventArg(event, 1));
+                Log(L"[HUDFEEDBACK] Confirmed player hit victim=%d attacker=%d sp=%d\n", SimEventArg(event, 0), SimEventArg(event, 1),
+                    IsSinglePlayerSession() ? 1 : 0);
         }
     }
 
@@ -648,5 +655,6 @@ namespace BZROpenShim::HudFeedback
         g_incoming.Reset();
         ReleaseSRWLockExclusive(&g_stateLock);
         InterlockedExchange(&g_hitLogBudget, 8);
+        InterlockedExchange(&g_incomingLogBudget, 8);
     }
 }
