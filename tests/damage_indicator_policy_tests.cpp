@@ -77,7 +77,7 @@ int main()
     bad = sample; bad.attacker = bad.victim; Check(!ConfirmsIncoming(bad, true), "self damage excluded");
     bad = sample; bad.weaponSource = false; Check(!ConfirmsIncoming(bad, true), "environment excluded");
     bad = sample; bad.sameLifetime = false; Check(!ConfirmsIncoming(bad, true), "stale victim excluded");
-    bad = sample; bad.singlePlayer = false; Check(!ConfirmsIncoming(bad, true), "multiplayer excluded");
+    bad = sample; bad.singlePlayer = false; Check(ConfirmsIncoming(bad, true), "online arcs are confirmed too");
     bad = sample; bad.before = 0; Check(!ConfirmsIncoming(bad, true), "dead victim excluded");
     bad = sample; bad.after = -1; Check(ConfirmsIncoming(bad, true), "lethal damage accepted until identity changes");
     bad.after = std::numeric_limits<float>::quiet_NaN();

@@ -10,10 +10,10 @@ smoke evidence and remaining gates are recorded in `ODF_MUZZLE_FLASH.md` and
 `ODF_RECOIL_TRIAL.md`. This document also retains the original native candidate
 research and its broader qualification checklist.**
 
-The scope is singleplayer muzzle flash and primary mesh recoil. Existing weapon
-convergence remains the aiming implementation. The bridge uses the existing
-`IsSinglePlayerSession()` predicate, including its unreadable-state rejection,
-and requires the verified mission seam to report a running mission. There are
+The scope is muzzle flash and primary mesh recoil (local rendering; single player and online). Existing weapon
+convergence remains the aiming implementation. The bridge always passes
+singleplayer = true to the runtime (the flag stays in the API for tests) and
+requires the verified mission seam to report a running mission. There are
 no multiplayer packets, SDK exports or Lua events. `SinglePlayer/MuzzleFlash`
 and `SinglePlayer/MeshRecoil` both default to 0. These are the master switches
 for authored ODF mesh/render effects and recoil respectively. No generic effect
@@ -194,7 +194,7 @@ This is why `InvalidateResources` is not called from the Ogre hooks. Use that
 stronger operation only after proving native back-references have ended.
 
 Mission departure and hook reset queue cleanup without assuming the scene was
-destroyed. Leaving singleplayer invalidates binding epochs; returning to SP
+destroyed. Leaving a mission invalidates binding epochs; returning
 cannot revive old tokens. Rebinding a shared node waits for its previous visual
 restoration, unless scene destruction has already removed that presentation.
 Slots still held by failed detach count toward the binding cap; refusing new

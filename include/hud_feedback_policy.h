@@ -68,12 +68,14 @@ namespace BZROpenShim::HudFeedback
         bool sameLifetime = false;
         bool localAttacker = false;
         bool weaponSource = false;
+        // Real session type, read by the kill ticker only; hit and arc
+        // confirmation do not depend on it (they run online too).
         bool singlePlayer = false;
     };
 
     inline bool ConfirmsHit(const DamageSample& s)
     {
-        return s.singlePlayer && s.localAttacker && s.weaponSource && s.sameLifetime &&
+        return s.localAttacker && s.weaponSource && s.sameLifetime &&
             s.victim != 0 && s.attacker != 0 && s.victim != s.attacker &&
             std::isfinite(s.before) && std::isfinite(s.after) &&
             s.before > 0.0f && s.after < s.before;

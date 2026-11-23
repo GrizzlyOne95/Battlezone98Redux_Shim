@@ -104,7 +104,8 @@ one/two/three-attacker arc samples.
 The existing nine-tile hub is unchanged; HUD links to this subpage, keeping
 all thirteen appearance/feedback controls reachable without truncating rows.
 
-Hit markers and damage indicators are disabled in network sessions; the
+Hit markers and damage indicators also run in network sessions (display only,
+no sim writes); the
 reactive contact tint and custom static reticle styles are cosmetic and run
 there too. Unreadable session state fails
 closed. Steam, Proton and Wine are not qualified; the initial adapter is
@@ -157,8 +158,8 @@ partial detour installation forwards stock calls without publishing hits.
 
 The incoming-damage extension in `Docs/DAMAGE_INDICATORS.md` also uses these
 four wrappers when enabled. So does the kill ticker (`Docs/KILL_TICKER.md`),
-which, unlike hits and arcs, also runs in network sessions; the wrappers pass
-the real session type through, so hit and arc confirmation stay single player. It stores copied directional pulses independently
+which, like hits and arcs, also runs in network sessions; the wrappers pass
+the real session type through to the kill ticker. It stores copied directional pulses independently
 of outgoing hit markers; `SimDamageApplied` retains its outgoing-only meaning.
 
 ## Qualification, 2026-10-19

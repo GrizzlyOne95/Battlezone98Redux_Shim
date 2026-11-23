@@ -63,6 +63,7 @@ namespace BZROpenShim::HudFeedback
         std::atomic<uintptr_t> g_originalDamage[4] = {};
         LONG g_drawLog = 1;
         LONG g_hitLogBudget = 8;
+        LONG g_incomingLogBudget = 8;
 
         bool NeedsDamage(const Settings& settings)
         {
@@ -217,13 +218,10 @@ namespace BZROpenShim::HudFeedback
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
 
-            // Contact tint reads only the stock reticle's own object, so it
-            // runs online too. Hits stay single player: online, a local health
-            // drop may not be a hit the host counted.
-            const bool singlePlayer = IsSinglePlayerSession();
+            // Display only (contact tint, hit markers), so it runs online too.
             const Settings& effective = settings;
             const uint64_t frameNow = GetTickCount64();
-            const bool hitsOn = settings.hits && singlePlayer;
+            const bool hitsOn = settings.hits;
             const float strength = hitsOn ? pulse.Strength(frameNow, settings.hitDurationMs) : 0.0f;
             const float kick = hitsOn ? pulse.Kick(frameNow, settings.hitDurationMs) : 0.0f;
             const int targets = hitsOn ? pulse.Targets(frameNow, settings.hitDurationMs) : 1;
@@ -271,7 +269,7 @@ namespace BZROpenShim::HudFeedback
             }
             std::array<float, 9> inverse{};
             int player = 0;
-            if (valid && singlePlayer && incomingSettings.enabled && ReadView(inverse, player))
+            if (valid && incomingSettings.enabled && ReadView(inverse, player))
             {
                 const auto now = GetTickCount64();
                 const auto groups = GroupIncomingArcs(incoming, now, incomingSettings.durationMs, player, inverse);
@@ -350,12 +348,11 @@ namespace BZROpenShim::HudFeedback
         DamageContext BeforeDamage(void* receiver, void* damage, KillTicker::DamageKind kind) noexcept
         {
             DamageContext context;
-            // Hit markers and incoming arcs stay single player: online, a
-            // local health drop may not be a hit the host counted. The kill
-            // ticker runs everywhere under its own stricter rules.
+            // Hit markers, incoming arcs and the kill ticker run in every
+            // session; the ticker applies its own stricter online rules.
             const bool singlePlayer = IsSinglePlayerSession();
-            const bool wantHits = g_hitsEnabled.load(std::memory_order_relaxed) && singlePlayer;
-            const bool wantIncoming = g_incomingEnabled.load(std::memory_order_relaxed) && singlePlayer;
+            const bool wantHits = g_hitsEnabled.load(std::memory_order_relaxed);
+            const bool wantIncoming = g_incomingEnabled.load(std::memory_order_relaxed);
             const bool wantKills = g_killsEnabled.load(std::memory_order_relaxed);
             if (!g_damageReady.load(std::memory_order_acquire) ||
                 (!wantHits && !wantIncoming && !wantKills) ||
@@ -436,7 +433,7 @@ namespace BZROpenShim::HudFeedback
                 PublishSimEvent(OpenShimEventType::SimDamageApplied, context.sample.victim, context.sample.attacker,
                     IsKillshot(context.sample) ? 1 : 0, 1);
             if (g_incomingEnabled.load(std::memory_order_relaxed) && context.hasDirection &&
-                IsSinglePlayerSession() && ConfirmsIncoming(context.sample, context.localVictim))
+                ConfirmsIncoming(context.sample, context.localVictim))
             {
                 // Copy values only; no object pointer survives this callback.
                 // Fixed storage, no allocation and no rendering in the hook.
@@ -445,6 +442,11 @@ namespace BZROpenShim::HudFeedback
                     g_incoming.Add(GetTickCount64(), g_incomingSettings.durationMs,
                         context.sample.victim, context.sample.attacker, context.direction, context.sample.before - context.sample.after);
                 ReleaseSRWLockExclusive(&g_stateLock);
+                // Budgeted decision log (a few lines per mission).
+                if (InterlockedDecrement(&g_incomingLogBudget) >= 0)
+                    Log(L"[HUDFEEDBACK] Incoming arc recorded victim=0x%x attacker=0x%x sp=%d\n",
+                        static_cast<unsigned>(context.sample.victim), static_cast<unsigned>(context.sample.attacker),
+                        context.sample.singlePlayer ? 1 : 0);
             }
         }
 
@@ -508,7 +510,7 @@ namespace BZROpenShim::HudFeedback
                 g_originalDamage[i].store(reinterpret_cast<uintptr_t>(g_damageDetours[i].trampoline), std::memory_order_release);
             }
             g_damageReady.store(true, std::memory_order_release);
-            Log(L"[HUDFEEDBACK] Post-damage confirmation adapters installed (hits/arcs single player; kill ticker all sessions)\n");
+            Log(L"[HUDFEEDBACK] Post-damage confirmation adapters installed (hits/arcs/kill ticker all sessions)\n");
             return true;
         }
 
@@ -518,7 +520,7 @@ namespace BZROpenShim::HudFeedback
             if (type == OpenShimEventType::SimSessionStarted || type == OpenShimEventType::SimSessionEnded)
                 ResetMission();
             if (type != OpenShimEventType::SimDamageApplied || !g_hitsEnabled.load(std::memory_order_relaxed) ||
-                !IsSinglePlayerSession() || SimEventArg(event, 3) == 0) return;
+                SimEventArg(event, 3) == 0) return;
             const Settings settings = ReadSettings();
             const uint64_t now = GetTickCount64();
             if (now < event.tickMs || now - event.tickMs >= static_cast<uint64_t>(settings.hitDurationMs)) return;
@@ -528,7 +530,8 @@ namespace BZROpenShim::HudFeedback
             g_pulse.Start(event.tickMs, SimEventArg(event, 0), SimEventArg(event, 2) != 0);
             ReleaseSRWLockExclusive(&g_stateLock);
             if (InterlockedDecrement(&g_hitLogBudget) >= 0)
-                Log(L"[HUDFEEDBACK] Confirmed player hit victim=%d attacker=%d\n", SimEventArg(event, 0), SimEventArg(event, 1));
+                Log(L"[HUDFEEDBACK] Confirmed player hit victim=%d attacker=%d sp=%d\n", SimEventArg(event, 0), SimEventArg(event, 1),
+                    IsSinglePlayerSession() ? 1 : 0);
         }
     }
 
@@ -621,7 +624,7 @@ namespace BZROpenShim::HudFeedback
         {
             std::array<float, 9> inverse{};
             int player = 0;
-            if (!IsSinglePlayerSession() || !ReadView(inverse, player)) player = 0;
+            if (!ReadView(inverse, player)) player = 0;
             if (player != g_indicatorPlayer || !player)
             {
                 AcquireSRWLockExclusive(&g_stateLock);
@@ -652,5 +655,6 @@ namespace BZROpenShim::HudFeedback
         g_incoming.Reset();
         ReleaseSRWLockExclusive(&g_stateLock);
         InterlockedExchange(&g_hitLogBudget, 8);
+        InterlockedExchange(&g_incomingLogBudget, 8);
     }
 }

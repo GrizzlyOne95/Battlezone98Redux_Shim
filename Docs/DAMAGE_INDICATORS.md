@@ -54,8 +54,8 @@ direction groups draw together. At capacity, a new attacker replaces the
 least recently refreshed record. This is a count of recent damaging owners,
 not a census of nearby enemies or a persistent attacker tracker.
 
-Feedback is limited to single-player cockpit/chase views. Other views,
-unreadable session state and multiplayer suppress drawing; safe-frame cleanup
+Feedback is limited to cockpit/chase views, in single player and online. Other views
+and unreadable session state suppress drawing; safe-frame cleanup
 also clears stored pulses when the player changes or a qualified view/session
 is left. Shell screens suppress all feedback. Mission lifecycle and config
 changes reset pulses. This does not change native damage, AI or weapon behavior.
