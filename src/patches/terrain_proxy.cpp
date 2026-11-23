@@ -399,7 +399,8 @@ namespace BZROpenShim
         std::array<ID3D11Texture2D*, 4> g_hdChannelNativeTextures{};
         ID3D11Texture2D* g_hdDiffuseNativeTexture = nullptr;
 
-        // Paint control maps live in their own uncompressed array, one slice
+        // Paint control maps live in their own array (uncompressed, or BC7 when
+        // no live paint rewrites them), one slice
         // per bank, so colour and normal+height slices may ship block
         // compressed. The colour array keeps the manifest slice numbering;
         // its control slots hold the fallback image and are never sampled.
@@ -3142,7 +3143,7 @@ namespace BZROpenShim
 
         bool BuildTerrainHdTextureArray(
             const TerrainHdMaterialBinding& binding,
-            OgreSharedPtr& arrayTexture, int channel = -1)
+            OgreSharedPtr& arrayTexture, int channel = -1, bool liveControl = false)
         {
             if (!TerrainHdApiAvailable())
             {
@@ -3238,13 +3239,14 @@ namespace BZROpenShim
                 auto* native = g_ogre.getD3D11Texture2D(fallbackTexture.rep);
                 if (!native) throw std::runtime_error("HD source texture descriptor unavailable");
                 D3D11_TEXTURE2D_DESC description{}; native->GetDesc(&description);
-                // Live paint rewrites control texels, and the weights must
-                // not carry block artefacts: controls stay uncompressed.
-                if (control && TerrainHd::BlockCompressed(description.Format))
+                // Controls are uncompressed, or BC7_UNORM when live paint
+                // will not rewrite their texels. A later slice in another
+                // format fails the per-slice contract check below.
+                if (control && !TerrainHd::ControlFormatAccepted(description.Format, liveControl))
                 {
                     LogShimA(LogLevel::Warn, "terrain-hd",
-                        "[TERRAIN-HD] paint control must be uncompressed material=\"%s\" array=control slice=%u resource=\"%s\" dxgiFormat=%u; stock atlas retained",
-                        g_proxy.materialName.c_str(), manifestSlice(0), binding.fallback.c_str(), unsigned(description.Format));
+                        "[TERRAIN-HD] paint control must be uncompressed or BC7_UNORM (uncompressed under live paint) material=\"%s\" array=control slice=%u resource=\"%s\" dxgiFormat=%u live=%d; stock atlas retained",
+                        g_proxy.materialName.c_str(), manifestSlice(0), binding.fallback.c_str(), unsigned(description.Format), int(liveControl));
                     ReleaseCloneHandoff(fallbackTexture);
                     releaseUploadSources();
                     return false;
@@ -3333,6 +3335,22 @@ namespace BZROpenShim
                     width, height, mipmaps + 1, format, unsigned(description.Format),
                     binding.fallback.c_str());
                 if (channel < 0 && !binding.compact) LogTerrainHdTileCoverage(binding);
+                if (control)
+                {
+                    // Change-only: which format the control array took.
+                    static DXGI_FORMAT loggedControlFormat = DXGI_FORMAT_UNKNOWN;
+                    D3D11_TEXTURE2D_DESC built{};
+                    if (auto* nativeArray = g_ogre.getD3D11Texture2D(arrayTexture.rep)) nativeArray->GetDesc(&built);
+                    if (built.Format != loggedControlFormat)
+                    {
+                        loggedControlFormat = built.Format;
+                        LogShimA(LogLevel::Info, "terrain-hd",
+                            "[TERRAIN-PAINT] control array format=%s dxgiFormat=%u size=%ux%u slices=%u mips=%u bytes=%llu",
+                            TerrainHd::ControlFormatName(built.Format), unsigned(built.Format), built.Width, built.Height,
+                            built.ArraySize, built.MipLevels,
+                            TerrainHd::ArrayBytes(built.Format, built.Width, built.Height, built.MipLevels, built.ArraySize));
+                    }
+                }
                 return true;
             }
             catch (...)

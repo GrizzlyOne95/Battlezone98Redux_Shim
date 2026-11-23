@@ -565,7 +565,7 @@ float4 OpenShimPaintTap(Texture2DArray tex, SamplerState sam, OpenShimPaintGeo g
     OpenShimPaintTaps t = OpenShimPaintSampleTaps(tex, sam, g, repeat, slice, detile);
     return t.x * g.blend.x + t.y * g.blend.y + t.z * g.blend.z;
 }
-// A split control array (one uncompressed slice per bank) frees the colour
+// A split control array (one RGBA8 or BC7 slice per bank) frees the colour
 // array to ship block compressed; otherwise control is slice 4 of each bank.
 #if OPENSHIM_PAINT_CONTROL_SPLIT
 #define OPENSHIM_PAINT_CONTROL_TEX(tex) openShimPaintControlMap

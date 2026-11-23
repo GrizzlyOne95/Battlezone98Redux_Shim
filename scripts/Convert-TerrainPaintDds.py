@@ -2,8 +2,9 @@
 """Convert terrain HD paint colour and _n tiles from PNG to DXT5 DDS.
 
 Colour and normal+height slices may ship as DXT5 (BC3) with a full mip chain;
-control maps stay uncompressed PNG because the shim builds them into their own
-uncompressed array and live paint rewrites them. Every one of these images
+control maps stay PNG unless --control-bc7 is given (below); live-paint
+materials always keep PNG controls because live paint rewrites their
+texels in an uncompressed array. Every one of these images
 uses alpha (height or layer weight), so DXT1 is not an option.
 
 The script never touches its input. It writes the DDS files and a rewritten
@@ -18,6 +19,14 @@ may still load them.
 A material is converted whole or not at all: if any of its colour/_n slices
 cannot convert (missing file, also used as a control elsewhere), it keeps
 PNG for every slice, since one array cannot mix formats.
+
+--control-bc7 TEXCONV (opt-in) also encodes control maps to BC7_UNORM DDS
+with a full mip chain, using Microsoft's texconv.exe (DirectXTex) on the CPU
+at maximum quality: its fast GPU encoder leaves visible 4x4 steps in smooth
+weight ramps. That costs about a minute per 2048x2048 map. The shim builds a BC7 control array from them (a quarter of
+the RGBA8 bytes). Materials with a live paint recipe keep PNG controls,
+since live paint rewrites the control texels. Each material's controls
+convert all together or not at all, since one array cannot mix formats.
 """
 from __future__ import annotations
 
@@ -26,7 +35,9 @@ import io
 import json
 import os
 import struct
+import subprocess
 import sys
+import tempfile
 
 CONTROL_SLICES = {5: {4}, 9: {4}, 18: {4, 13}}
 DDS_HEADER = 128
@@ -42,6 +53,37 @@ def dxt5_bytes(width: int, height: int) -> int:
         if width == 1 and height == 1:
             return total
         width, height = max(1, width // 2), max(1, height // 2)
+
+
+DX10_HEADER = DDS_HEADER + 20
+DXGI_FORMAT_BC7_UNORM = 98
+
+
+def bc7_bytes(width: int, height: int) -> int:
+    """Payload bytes of a full BC7 mip chain: same block size as DXT5."""
+    return dxt5_bytes(width, height)
+
+
+def encode_bc7_mips(path: str, texconv: str) -> bytes:
+    """One DX10 DDS: BC7_UNORM, full mip chain, alpha filtered on its own."""
+    with tempfile.TemporaryDirectory() as work:
+        # --ignore-srgb: weights are raw data; a gAMA/sRGB chunk must not curve them.
+        run = subprocess.run([texconv, "-nologo", "-nogpu", "--ignore-srgb", "-f", "BC7_UNORM",
+                              "-bc", "x", "-m", "0", "-sepalpha", "-if", "BOX", "-y", "-o", work, path],
+                             capture_output=True, text=True)
+        if run.returncode:
+            raise RuntimeError(f"texconv failed on {path} ({run.returncode}): {run.stdout.strip()} {run.stderr.strip()}")
+        target = os.path.join(work, os.path.splitext(os.path.basename(path))[0] + ".dds")
+        with open(target, "rb") as handle:
+            data = handle.read()
+    width, height = png_size(path)
+    dxgi, = struct.unpack_from("<I", data, DDS_HEADER)
+    mips, = struct.unpack_from("<I", data, 28)
+    if data[:4] != b"DDS " or data[84:88] != b"DX10" or dxgi != DXGI_FORMAT_BC7_UNORM:
+        raise RuntimeError(f"texconv did not write a DX10 BC7_UNORM DDS for {path}")
+    if len(data) - DX10_HEADER != bc7_bytes(width, height) or mips < 2:
+        raise RuntimeError(f"unexpected BC7 payload for {path}: {len(data) - DX10_HEADER} bytes, {mips} mips")
+    return data
 
 
 def png_size(path: str) -> tuple[int, int]:
@@ -147,6 +189,54 @@ def plan(manifest: dict, files: dict[str, str]):
     return convert, skipped
 
 
+def material_controls(material: dict) -> list[str]:
+    control = CONTROL_SLICES.get(material.get("sliceCount", 0), set())
+    names = [v for k, v in material.get("tiles", {}).items() if int(k) in control]
+    for entry in (material.get("paint") or {}).get("maps", []):
+        names.extend(entry[k] for k in ("control", "control2") if entry.get(k))
+    return names
+
+
+def plan_controls(manifest: dict, files: dict[str, str]):
+    """Control PNGs to encode as BC7: ({png name: path}, {material: reason})."""
+    convert: dict[str, str] = {}
+    skipped: dict[str, str] = {}
+    for name, material in manifest.get("materials", {}).items():
+        paint = material.get("paint")
+        if not paint:
+            continue
+        if "live" in paint:
+            skipped[name] = "live paint rewrites its control texels"
+            continue
+        names = material_controls(material)
+        reason = next((f"{v} is not a PNG on disk" for v in names
+                       if not v.lower().endswith(".png") or v.lower() not in files), None)
+        reason = reason or next((f"{v[:-4]}.dds already exists in the mod" for v in names
+                                 if v[:-4].lower() + ".dds" in files), None)
+        if not names:
+            reason = "no control maps"
+        if reason:
+            skipped[name] = reason
+            continue
+        convert.update((v.lower(), files[v.lower()]) for v in names)
+    return convert, skipped
+
+
+def rewrite_controls(manifest: dict, converted: set[str], skipped: dict[str, str]) -> dict:
+    out = json.loads(json.dumps(manifest))
+    swap = lambda value: value[:-4] + ".dds" if value.lower() in converted else value
+    for name, material in out.get("materials", {}).items():
+        if name in skipped or not material.get("paint"):
+            continue
+        control = CONTROL_SLICES.get(material.get("sliceCount", 0), set())
+        material["tiles"] = {k: swap(v) if int(k) in control else v for k, v in material.get("tiles", {}).items()}
+        for entry in material["paint"].get("maps", []):
+            for key in ("control", "control2"):
+                if entry.get(key):
+                    entry[key] = swap(entry[key])
+    return out
+
+
 def rewrite(manifest: dict, converted: set[str], skipped: dict[str, str]) -> dict:
     """Swaps .png for .dds in converted materials only; a skipped material
     keeps PNG even where it shares a file with a converted one."""
@@ -177,7 +267,11 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--dry-run", action="store_true", help="report sizes without encoding")
     mode.add_argument("--out", help="empty output folder for DDS files and the rewritten manifest")
+    parser.add_argument("--control-bc7", metavar="TEXCONV",
+                        help="also encode control maps to BC7 DDS with this texconv.exe (opt-in)")
     args = parser.parse_args()
+    if args.control_bc7 and not args.dry_run and not os.path.isfile(args.control_bc7):
+        parser.error(f"--control-bc7: texconv not found: {args.control_bc7}")
 
     mod = os.path.abspath(args.mod)
     manifest_path = os.path.join(mod, args.manifest)
@@ -212,6 +306,29 @@ def main() -> int:
         print(f"wrote {os.path.relpath(target, out)} ({len(data) / 2**20:.1f} MiB)")
 
     rewritten = rewrite(manifest, set(convert), skipped)
+    encoded = dict(convert)
+    if args.control_bc7:
+        controls, control_skipped = plan_controls(manifest, files)
+        for name, reason in sorted(control_skipped.items()):
+            print(f"keep PNG controls for material {name}: {reason}")
+        control_before = control_after = 0
+        for lower, path in sorted(controls.items()):
+            control_before += os.path.getsize(path)
+            width, height = png_size(path)
+            if args.dry_run:
+                control_after += DX10_HEADER + bc7_bytes(width, height)
+                continue
+            data = encode_bc7_mips(path, args.control_bc7)
+            target = os.path.join(out, os.path.relpath(path, mod))[:-4] + ".dds"
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with open(target, "wb") as handle:
+                handle.write(data)
+            control_after += len(data)
+            print(f"wrote {os.path.relpath(target, out)} ({len(data) / 2**20:.1f} MiB)")
+        print(f"encoded {len(controls)} control PNGs to BC7: {control_before / 2**20:.1f} MiB -> "
+              f"{control_after / 2**20:.1f} MiB{' (estimate)' if args.dry_run else ''}")
+        rewritten = rewrite_controls(rewritten, set(controls), control_skipped)
+        encoded.update(controls)
     if args.out:
         target = os.path.join(out, args.manifest)
         os.makedirs(os.path.dirname(target) or out, exist_ok=True)
@@ -220,12 +337,12 @@ def main() -> int:
             handle.write("\n")
 
     still = referenced(rewritten)
-    orphaned = sorted(name for name in convert if name not in still)
+    orphaned = sorted(name for name in encoded if name not in still)
     print(f"converted {len(convert)} PNGs: {before / 2**20:.1f} MiB -> {after / 2**20:.1f} MiB DDS"
           f"{' (estimate)' if args.dry_run else ''}; saves {(before - after) / 2**20:.1f} MiB once the PNGs go")
     print(f"PNGs the manifest no longer names ({len(orphaned)}); delete only if nothing else loads them:")
     for name in orphaned:
-        print(f"  {os.path.relpath(convert[name], mod)}")
+        print(f"  {os.path.relpath(encoded[name], mod)}")
     return 0
 
 

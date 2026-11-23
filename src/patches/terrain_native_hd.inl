@@ -744,7 +744,7 @@ bool InstallNativeTerrainHd()
             TerrainHdMaterialBinding colour, control;
             SplitTerrainPaintControl(*binding, colour, control);
             if (!BuildTerrainHdTextureArray(colour, array)) throw std::runtime_error("native HD texture array declined");
-            if (!BuildTerrainHdTextureArray(control, controlArray, kHdControlChannel))
+            if (!BuildTerrainHdTextureArray(control, controlArray, kHdControlChannel, liveInput.has_value()))
                 throw std::runtime_error("native HD paint control array declined");
         }
         else if (!BuildTerrainHdTextureArray(*binding, array)) throw std::runtime_error("native HD texture array declined");

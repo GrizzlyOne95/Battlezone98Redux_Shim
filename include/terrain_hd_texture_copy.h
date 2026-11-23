@@ -19,6 +19,43 @@ inline int OgreArrayMipRequest(UINT additionalMips, DXGI_FORMAT format)
     return int(additionalMips + (BlockCompressed(format) && additionalMips ? 2u : 0u));
 }
 
+// Paint control (blend weight) arrays: any uncompressed format, or
+// BC7_UNORM when nothing rewrites the texels. Live paint uploads raw RGBA
+// over the slices, so it keeps them uncompressed. BC1-5 are too coarse for
+// weights, and SRGB would curve them.
+inline bool ControlFormatAccepted(DXGI_FORMAT format, bool liveRewrite)
+{
+    if (!BlockCompressed(format)) return true;
+    return format == DXGI_FORMAT_BC7_UNORM && !liveRewrite;
+}
+
+inline const char* ControlFormatName(DXGI_FORMAT format)
+{
+    switch (format)
+    {
+    case DXGI_FORMAT_BC7_UNORM: return "BC7_UNORM";
+    case DXGI_FORMAT_R8G8B8A8_UNORM: return "R8G8B8A8_UNORM";
+    case DXGI_FORMAT_B8G8R8A8_UNORM: return "B8G8R8A8_UNORM";
+    default: return "other";
+    }
+}
+
+// GPU bytes of a 2D array with every listed mip: 16 bytes per 4x4 block for
+// BC formats (8 for BC1/BC4), otherwise 4 bytes per texel. Log-only estimate.
+inline unsigned long long ArrayBytes(DXGI_FORMAT format, UINT width, UINT height, UINT mips, UINT slices)
+{
+    const bool bc = BlockCompressed(format);
+    const bool half = (format >= DXGI_FORMAT_BC1_TYPELESS && format <= DXGI_FORMAT_BC1_UNORM_SRGB) ||
+        (format >= DXGI_FORMAT_BC4_TYPELESS && format <= DXGI_FORMAT_BC4_SNORM);
+    unsigned long long total = 0;
+    for (UINT mip = 0; mip < mips; ++mip)
+    {
+        const UINT w = width >> mip ? width >> mip : 1, h = height >> mip ? height >> mip : 1;
+        total += bc ? 1ull * ((w + 3) / 4) * ((h + 3) / 4) * (half ? 8 : 16) : 4ull * w * h;
+    }
+    return total * slices;
+}
+
 // Manifest slices that hold paint control maps: slice 4 of each 9-slice
 // bank, and slice 4 of the diffuse-and-control-only 5-slice form.
 inline std::vector<UINT> PaintControlSlices(UINT sliceCount)

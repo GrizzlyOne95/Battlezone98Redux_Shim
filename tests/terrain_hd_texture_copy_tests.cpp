@@ -156,6 +156,16 @@ int main()
             BZROpenShim::TerrainHd::PaintControlSlices(9) == Slices{4} &&
             BZROpenShim::TerrainHd::PaintControlSlices(18) == Slices{4, 13} &&
             BZROpenShim::TerrainHd::PaintControlSlices(7).empty(), "paint control slices wrong");
+        using BZROpenShim::TerrainHd::ControlFormatAccepted;
+        check(ControlFormatAccepted(DXGI_FORMAT_B8G8R8A8_UNORM, false) && ControlFormatAccepted(DXGI_FORMAT_R8G8B8A8_UNORM, true) &&
+            ControlFormatAccepted(DXGI_FORMAT_BC7_UNORM, false) && !ControlFormatAccepted(DXGI_FORMAT_BC7_UNORM, true) &&
+            !ControlFormatAccepted(DXGI_FORMAT_BC7_UNORM_SRGB, false) && !ControlFormatAccepted(DXGI_FORMAT_BC3_UNORM, false),
+            "control format policy wrong");
+        using BZROpenShim::TerrainHd::ArrayBytes;
+        check(ArrayBytes(DXGI_FORMAT_B8G8R8A8_UNORM, 2048, 2048, 1, 2) == 32ull << 20 &&
+            ArrayBytes(DXGI_FORMAT_BC7_UNORM, 2048, 2048, 1, 2) == 8ull << 20 &&
+            ArrayBytes(DXGI_FORMAT_BC7_UNORM, 4, 4, 3, 1) == 48 && ArrayBytes(DXGI_FORMAT_BC1_UNORM, 8, 8, 1, 1) == 32,
+            "control array byte estimate wrong");
         ComPtr<ID3D11Device> device; ComPtr<ID3D11DeviceContext> context;
         ok(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
             D3D11_SDK_VERSION, &device, nullptr, &context));
@@ -168,7 +178,7 @@ int main()
         auto source = makeTexture(other.Get(), 16, 5, 1, 10);
         auto destination = makeTexture(device.Get(), 16, 5, 3, 0);
         check(!BZROpenShim::TerrainHd::CopyTextureSlice(destination.Get(), source.Get(), 0, 16, 16, 4), "cross-device copy accepted");
-        std::cout << "PASS: explicit 512px mips, 256 slices, DXT5 slices, per-array formats, control slices, preserved neighbours and invalid contracts\n";
+        std::cout << "PASS: explicit 512px mips, 256 slices, DXT5 slices, per-array formats, control slices, control formats, preserved neighbours and invalid contracts\n";
         return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
