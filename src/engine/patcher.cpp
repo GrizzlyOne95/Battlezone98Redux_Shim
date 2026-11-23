@@ -1542,6 +1542,50 @@ namespace BZROpenShim
         }
     }
 
+    // The shell reads the campaign INIs once, about 2.5 s into a Steam launch,
+    // which is before the main batch below writes its patches. Missing that
+    // read collapses every campaignID in a folder to the folder key, so CR's
+    // four campaigns all open the first INI found (Black Dog). Write this one
+    // site as soon as its scan verifies and take it out of the batch; on any
+    // failure it stays in the batch, as before.
+    static bool g_CampaignManifestIdEarlyTried = false;
+    static std::vector<uint8_t> g_CampaignManifestIdEarlyPayload;
+    static uint32_t g_CampaignManifestIdEarlyAddress = 0;
+    static void ApplyCampaignManifestIdEarly(std::vector<HookEngine::PatchDef>& patches) {
+        if (g_CampaignManifestIdEarlyTried) return;
+        const auto it = std::find_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) {
+            return p.name == "Campaign Manifest ID";
+        });
+        if (it == patches.end() || !it->verified || it->address == 0) return;
+        HookEngine::PatchDef site = *it;
+        const uint32_t target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+            CampaignManifestId::PrepareThunk(site.address - 1)));
+        if (!target) return;
+        const int32_t rel = static_cast<int32_t>(target) - static_cast<int32_t>(site.address + 4);
+        site.payload.resize(4);
+        memcpy(site.payload.data(), &rel, 4);
+        if (!HookEngine::ApplyPatches({ site })[0]) {
+            Log(L"[CAMPAIGN-ID] early write failed at 0x%08X; left to the main batch\n", site.address);
+            return;
+        }
+        g_CampaignManifestIdEarlyTried = true;
+        g_CampaignManifestIdEarlyPayload = site.payload;
+        g_CampaignManifestIdEarlyAddress = site.address;
+        Log(L"[OK]   Campaign Manifest ID wrote 4 bytes to 0x%08X (early, before the campaign INI scan)\n", site.address);
+        patches.erase(it);
+    }
+
+    // SteamStub only decrypts once, but say so plainly if the early write
+    // was lost by the time the main batch runs.
+    static void VerifyCampaignManifestIdEarly() {
+        if (g_CampaignManifestIdEarlyAddress == 0) return;
+        uint8_t cur[4] = {}; SIZE_T r = 0;
+        if (!ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<LPCVOID>(g_CampaignManifestIdEarlyAddress), cur, sizeof(cur), &r) ||
+            r != sizeof(cur) || memcmp(cur, g_CampaignManifestIdEarlyPayload.data(), sizeof(cur)) != 0)
+            LogShimA(LogLevel::Warn, "patcher", "[CAMPAIGN-ID] early write at 0x%08X no longer present; campaign IDs revert to folder keys",
+                g_CampaignManifestIdEarlyAddress);
+    }
+
     static void WaitForExpectedBytes(std::vector<HookEngine::PatchDef>& patches, bool isSteam) {
         if (!isSteam) return;
         for (int i = 0; i < 2500; ++i) {
@@ -1657,6 +1701,7 @@ namespace BZROpenShim
         // On Steam a first-pass miss is not yet a verdict: the retry loop below
         // follows. Report it as pending rather than failed.
         ScanForPatchAddresses(patches, isSteam, false, isSteam);
+        ApplyCampaignManifestIdEarly(patches);
         if (isSteam) {
             const auto unresolvedCount = [&patches]() {
                 size_t count = 0;
@@ -1686,6 +1731,7 @@ namespace BZROpenShim
                     attempt + 1 == kSettleAttempts || barren + 1 > kMaxBarrenPasses;
                 Sleep(100);
                 ScanForPatchAddresses(patches, isSteam, true, !lastChance);
+                ApplyCampaignManifestIdEarly(patches);
                 const size_t after = unresolvedCount();
                 if (after == 0) break;
                 barren = (after < before) ? 0 : barren + 1;
@@ -1730,6 +1776,8 @@ namespace BZROpenShim
         // snapshot and a suspension round per patch, which put four seconds
         // between the game reaching this point and its critical fixes.
         const std::vector<bool> applied = HookEngine::ApplyPatches(patches);
+        VerifyCampaignManifestIdEarly();
+        if (g_CampaignManifestIdEarlyAddress) app++;
         for (size_t i = 0; i < patches.size(); ++i) {
             const auto& p = patches[i];
             if (applied[i]) {
@@ -1755,7 +1803,7 @@ namespace BZROpenShim
         // Shared firing sites must be committed before the ODF/presentation
         // installer validates/adopts them; it never competes for these calls.
         Hooks::InstallWeaponPresentationNativeIfRequested();
-        Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size()));
+        Log(L"[DONE] Applied=%d of %u\n", app, static_cast<unsigned>(patches.size() + (g_CampaignManifestIdEarlyAddress ? 1 : 0)));
         RestoreSavedTroMode();
         // A patch this build knows about that still sits at address 0 either had
         // no scripts/patches.json entry (a deploy where winmm.dll moved and the
