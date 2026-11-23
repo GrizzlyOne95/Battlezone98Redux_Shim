@@ -107,8 +107,16 @@ foreach ($i in $C) {
             Add-CRFlowCheck "c$i saw the websocket close and kept the match" `
                 ([bool]($wsClose.Count -and ($lobbyDrop -match 'keeping the match'))) $detail
         } elseif (-not $Silent) {
-            Add-CRFlowCheck "c$i kept c$Subject when the lobby dropped it" `
-                ([bool](($lobbyDrop -match 'kept in the match') -and $last.roster -eq $before["c$i"].roster)) $detail
+            # The server dropped the seat, and stock removes c$Subject from
+            # this peer's P2P handler at that lobby event ("BZRNet P2P Removing
+            # Player ... From P2P Handler"), so the link dies here. The leave
+            # is held while pings still answer, then dropped once none of the
+            # last 10 is answered, so the roster must shrink inside the watch.
+            $held = @($lobbyDrop -match 'held, re-checked').Count -gt 0
+            $dropped = @($lobbyDrop -match 'answered none of the last 10 P2P pings').Count -gt 0
+            $ok = $held -and $dropped -and $last -and ([int]$last.roster -lt [int]$before["c$i"].roster)
+            Add-CRFlowCheck "c$i held c$Subject when the lobby dropped it, and dropped it only once its P2P went silent" `
+                ([bool]$ok) $detail
         } else {
             Add-CRFlowCheck "observed on c${i}: roster $($before["c$i"].roster) -> $($last.roster)" $true $detail
         }

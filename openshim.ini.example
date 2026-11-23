@@ -2499,11 +2499,14 @@ EarlyNakReorderMs = 0
 ; local lobby leave is skipped, and a remote player whose lobby session ended
 ; is kept while their P2P is live (kicks and bans still drop). A real P2P
 ; loss still ends the session through the stock ping check and host
-; auto-kick.
+; auto-kick. A kept player is re-checked at each ping and dropped once they
+; have answered none of the last 10 pings, so a player who quits is still
+; removed (10 ping intervals: 6 s at 600 ms, up to 30 s at the 3000 ms cap).
+; One still answering after max(10 s, 15 ping intervals) stays.
 ; Accepted: boolean. Default: ON (stock behaviour is a defect; inert unless
 ; the websocket drops mid-match). Restart required.
 ; Kill switch: OPENSHIM_DISABLE_LOBBY_DROP_KEEPS_MATCH (or BZR_ prefix).
-; Sites: GOG 2.2.301 0x006BF11B, 0x0073F13F; a signature mismatch keeps stock.
+; Sites: GOG 2.2.301 0x006BF11B, 0x0073F13F, 0x005718C7; a signature mismatch keeps stock.
 LobbyDropKeepsMatch = 1
 
 ; Granular netcode tuning -- the send-rate governor, bandwidth floor/ceiling,

@@ -127,8 +127,44 @@ Citations (GOG exe, Ghidra `/battlezone98redux.exe-007c64`):
 
 Fix: the new REL32 site "Lobby Drop Keeps Match Ping" wraps that call. A
 Remote leave that is held back is recorded (NetId copy) and looked at again
-before each stock ping check. After 3 checks with `replies & 3 == 0`, the
-stock `PlayerLeft(id, 0)` runs and logs `stopped answering ... dropping it
-now`. A player still answering after 20 checks is released from the table
-and stays, which is the old lobby-only-drop behaviour. With no Ping hook,
-nothing is held and the leave takes the stock drop.
+before each stock ping check. Once `replies & 0x3FF == 0` (none of the last
+10 pings answered), the stock `PlayerLeft(id, 0)` runs and logs `answered
+none of the last 10 P2P pings ... dropping it now`. A player still answering
+after max(10 s, 15 ping intervals) is released from the table and stays,
+which is the old lobby-only-drop behaviour. With no Ping hook, nothing is
+held and the leave takes the stock drop.
+
+The first version dropped after 3 checks with `replies & 3 == 0`. The
+`Run-BZRLobbyDrop -Mode Keep` live test (websocket reset only, P2P fine)
+failed with it: the host held the guest with `replies=0x3FF`, then dropped it
+1.4 s later at `replies=0x3FC`, two pings missed right after the reset. The
+whole 10-ping window is the bar now.
+
+With that bar the non-silent Keep run (the server drops the seat) still
+drops the guest, 7.0 s after the leave, with no reply in 10 pings. That is
+correct: at the same lobby event the host's BZLogger shows
+`CNetGameLobby::OnLobbyChatUpdate ... changes 0` followed by `BZRNet P2P
+Removing Player S... From P2P Handler` (run ghost-keep-144236, and the same
+line on origin/main in ghost-keepctl-144909). Stock tears the P2P link down
+there whatever the Remote hook decides, so the old "kept in the match" result
+in that case was a guest with a dead link, the same ghost as the player
+report. The scenario check now asks for a hold followed by a drop once P2P is
+silent. The silent case (`-Silent`, the DedicatedServer #16 seat takeover)
+sends no member-removed event and is the real reconnect path.
+
+For comparison, the stock lag logic in the ping check `0x00576B70` (Ghidra
+decompile of that function): a non-local player counts as lagging once
+`now > Player+0x40 + DAT_008e8d0c` and the rate checks `FUN_00575f80` /
+`FUN_00575ff0` exceed `DAT_008e8cf8` / `DAT_008e8bfc`; the first such check
+sets `Player+0x44 = now` ("start_lagging"), and the host (`FUN_00572a60`)
+queues a kick (`FUN_00579090`) once `Player+0x44 + DAT_008e8ce4 < now`.
+`DAT_008e8d0c` and `DAT_008e8ce4` both read `0x2710` (10000 ms, `read_bytes`),
+the "10 s + 10 s" in the source comment.
+
+Review hardening: a hold records the `Player` entry that `FindPlayer`
+returned at the leave. If the id later resolves to a different entry (a
+rejoin, whose `+0x1B0` history starts at 0) the hold ends with no drop. An
+unreadable reply history is never treated as silent. A repeat leave for the
+same entry keeps the first hold time, so the release timer cannot be pushed
+back forever. Live reruns on that build: ghost-keep3-150212 (21/21) and
+ghost-fixed3-150515 (22/22, roster 2 -> 1).

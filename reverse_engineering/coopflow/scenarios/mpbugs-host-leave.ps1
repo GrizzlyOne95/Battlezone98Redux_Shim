@@ -118,13 +118,15 @@ foreach ($series in @($samples)) {
         deletedPlayers = $last.deletedPlayers; rosterBefore = $pre.roster; rosterAfter = $last.roster
         leaderDeparted = $last.leaderDeparted }
     $electedBy["c$g"] = $elected.Count
-    if ($Leaver -and $pre) {
+    if ($Leaver) {
+        # No before or after sample is a failed check, never a vacuous pass.
         $lobbyDrop = @(Get-LogLines $shimLogs $shimMarks $g '\[LOBBYDROP\]')
-        $deleted = [int]$last.deletedPlayers - [int]$pre.deletedPlayers
-        $gone = $deleted -gt 0
-        $want = $Leaver -eq 'Gone'
+        $sampled = [bool]($pre -and $last)
+        $deleted = if ($sampled) { [int]$last.deletedPlayers - [int]$pre.deletedPlayers } else { 0 }
+        $shrank = $sampled -and ([int]$last.roster -lt [int]$pre.roster)
+        $ok = if ($Leaver -eq 'Gone') { $sampled -and $deleted -gt 0 -and $shrank } else { $sampled -and $deleted -eq 0 -and -not $shrank }
         Add-CRFlowCheck "leaver ${Leaver}: guest c$g deleted the departed host from its player list ($deleted DeletePlayer call(s), roster $($pre.roster) -> $($last.roster))" `
-            ($gone -eq $want) ([ordered]@{ lobbyDrop = $lobbyDrop; deleted = $deleted; rosterBefore = $pre.roster; rosterAfter = $last.roster })
+            ([bool]$ok) ([ordered]@{ sampled = $sampled; lobbyDrop = $lobbyDrop; deleted = $deleted; rosterBefore = $pre.roster; rosterAfter = $last.roster })
     }
     if ($guests.Count -gt 1) {
         # Host migration: both arms expect the mission to carry on.
