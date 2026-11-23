@@ -101,3 +101,70 @@ redirecting, and log `[LOBBYDROP]` at each decision.
   leave is never replayed.
 - If the host's websocket drops, the server may migrate lobby ownership. That
   case is out of scope here.
+
+## Ping re-check for held leaves (2026-11-23)
+
+Player report: the host quit through the menu, and the guest kept the host in
+its player count for the rest of the match (units gone, player still listed).
+The guest's log showed three `[LOBBYDROP] ... kept in the match` lines with
+`replies=0x3FF`. A deliberate quitter answered the last pings before leaving,
+so the Remote site skipped `PlayerLeft` and nothing ever replayed it. The
+ping check's own auto-kick only runs on the host (gate `FUN_00572a60`), and
+here the leaver was the host.
+
+Citations (GOG exe, Ghidra `/battlezone98redux.exe-007c64`):
+
+- `Net::Execute` `0x005715D0` calls the ping check `0x00576B70` at
+  `0x005718C7` (only caller, `list_cross_references`). The call sits inside
+  the `NetManager+0x430` ms interval block, behind `local id != 0`, so it runs
+  on every peer, not just the host. Bytes at `0x005718A8`:
+  `55b0898a30040000 8b45b08b4dac898828040000 0fb715d4809100 85d27405 e8a4520000`.
+- Ping send `0x00576480` shifts `Player+0x1B0` left one bit per ping. A reply
+  sets bit 0, so `replies & 3` = "answered one of the last two pings".
+- NetId is 16 bytes: compare `0x0056F780` reads dwords 0, 2 and 3, and
+  FindPlayer's `0x00577200` map node holds the value at `+0x10`.
+- `PlayerLeft` `0x00578640` removes through `0x00576710` -> `0x005715A0`.
+
+Fix: the new REL32 site "Lobby Drop Keeps Match Ping" wraps that call. A
+Remote leave that is held back is recorded (NetId copy) and looked at again
+before each stock ping check. Once `replies & 0x3FF == 0` (none of the last
+10 pings answered), the stock `PlayerLeft(id, 0)` runs and logs `answered
+none of the last 10 P2P pings ... dropping it now`. A player still answering
+after max(10 s, 15 ping intervals) is released from the table and stays,
+which is the old lobby-only-drop behaviour. With no Ping hook, nothing is
+held and the leave takes the stock drop.
+
+The first version dropped after 3 checks with `replies & 3 == 0`. The
+`Run-BZRLobbyDrop -Mode Keep` live test (websocket reset only, P2P fine)
+failed with it: the host held the guest with `replies=0x3FF`, then dropped it
+1.4 s later at `replies=0x3FC`, two pings missed right after the reset. The
+whole 10-ping window is the bar now.
+
+With that bar the non-silent Keep run (the server drops the seat) still
+drops the guest, 7.0 s after the leave, with no reply in 10 pings. That is
+correct: at the same lobby event the host's BZLogger shows
+`CNetGameLobby::OnLobbyChatUpdate ... changes 0` followed by `BZRNet P2P
+Removing Player S... From P2P Handler` (run ghost-keep-144236, and the same
+line on origin/main in ghost-keepctl-144909). Stock tears the P2P link down
+there whatever the Remote hook decides, so the old "kept in the match" result
+in that case was a guest with a dead link, the same ghost as the player
+report. The scenario check now asks for a hold followed by a drop once P2P is
+silent. The silent case (`-Silent`, the DedicatedServer #16 seat takeover)
+sends no member-removed event and is the real reconnect path.
+
+For comparison, the stock lag logic in the ping check `0x00576B70` (Ghidra
+decompile of that function): a non-local player counts as lagging once
+`now > Player+0x40 + DAT_008e8d0c` and the rate checks `FUN_00575f80` /
+`FUN_00575ff0` exceed `DAT_008e8cf8` / `DAT_008e8bfc`; the first such check
+sets `Player+0x44 = now` ("start_lagging"), and the host (`FUN_00572a60`)
+queues a kick (`FUN_00579090`) once `Player+0x44 + DAT_008e8ce4 < now`.
+`DAT_008e8d0c` and `DAT_008e8ce4` both read `0x2710` (10000 ms, `read_bytes`),
+the "10 s + 10 s" in the source comment.
+
+Review hardening: a hold records the `Player` entry that `FindPlayer`
+returned at the leave. If the id later resolves to a different entry (a
+rejoin, whose `+0x1B0` history starts at 0) the hold ends with no drop. An
+unreadable reply history is never treated as silent. A repeat leave for the
+same entry keeps the first hold time, so the release timer cannot be pushed
+back forever. Live reruns on that build: ghost-keep3-150212 (21/21) and
+ghost-fixed3-150515 (22/22, roster 2 -> 1).

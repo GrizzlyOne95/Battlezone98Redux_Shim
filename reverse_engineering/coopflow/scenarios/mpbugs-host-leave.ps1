@@ -27,7 +27,11 @@ param([ValidateSet('Stock','Fixed')][string]$Expect = 'Stock',
       # Seconds of combat before the host leaves.
       [int]$PlaySeconds = 15,
       # Seconds of guest samples after the host has gone.
-      [int]$WatchSeconds = 30)
+      [int]$WatchSeconds = 30,
+      # [Network] LobbyDropKeepsMatch: 'Gone' asks that each guest drops the
+      # departed host from its player list (DeletePlayer) within the watch;
+      # 'Kept' asks for the old ghost (the host never deleted). Empty: no check.
+      [ValidateSet('','Gone','Kept')][string]$Leaver = '')
 
 $H = $HostClient
 $C = @(Get-CRFlowClientIndices)
@@ -114,6 +118,16 @@ foreach ($series in @($samples)) {
         deletedPlayers = $last.deletedPlayers; rosterBefore = $pre.roster; rosterAfter = $last.roster
         leaderDeparted = $last.leaderDeparted }
     $electedBy["c$g"] = $elected.Count
+    if ($Leaver) {
+        # No before or after sample is a failed check, never a vacuous pass.
+        $lobbyDrop = @(Get-LogLines $shimLogs $shimMarks $g '\[LOBBYDROP\]')
+        $sampled = [bool]($pre -and $last)
+        $deleted = if ($sampled) { [int]$last.deletedPlayers - [int]$pre.deletedPlayers } else { 0 }
+        $shrank = $sampled -and ([int]$last.roster -lt [int]$pre.roster)
+        $ok = if ($Leaver -eq 'Gone') { $sampled -and $deleted -gt 0 -and $shrank } else { $sampled -and $deleted -eq 0 -and -not $shrank }
+        Add-CRFlowCheck "leaver ${Leaver}: guest c$g deleted the departed host from its player list ($deleted DeletePlayer call(s), roster $($pre.roster) -> $($last.roster))" `
+            ([bool]$ok) ([ordered]@{ sampled = $sampled; lobbyDrop = $lobbyDrop; deleted = $deleted; rosterBefore = $pre.roster; rosterAfter = $last.roster })
+    }
     if ($guests.Count -gt 1) {
         # Host migration: both arms expect the mission to carry on.
         $running = [bool]($first -and $last -and $last.time -gt $first.time)

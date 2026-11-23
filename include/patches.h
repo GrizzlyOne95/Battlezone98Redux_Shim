@@ -377,6 +377,7 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::JMP5, {}, "Infinite Lives Launch Fill", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Local", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Remote", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Lobby Drop Keeps Match Ping", false, {} },
         };
 
         // Future: could also load this list from JSON

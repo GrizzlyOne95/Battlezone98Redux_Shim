@@ -7,6 +7,7 @@
 #include "hook_engine.h"
 #include "patcher.h"
 #include <Windows.h>
+#include <algorithm>
 #include <cstring>
 
 namespace BZROpenShim
@@ -56,6 +57,23 @@ namespace BZROpenShim
         // drop. A peer whose P2P really died is still flagged lagging and then
         // auto-kicked by the host's ping check (10 s + 10 s), and a client
         // whose P2P is silent too quits exactly as stock.
+        //
+        // Ping: a player who quits on purpose also answered the last pings,
+        // so the Remote check alone kept every quitter in the match forever
+        // (no one auto-kicks a departed host). A held-back leave is therefore
+        // only a deferral: the ping-check call in Net::Execute (0x005718C7,
+        // every ping interval, on every peer) is wrapped, and before the
+        // stock check runs each held player is looked at again. Once none of
+        // the 10 pings in the reply history (Player+0x1B0 & 0x3FF) has been
+        // answered, the stock player-left runs for that player. The whole
+        // window, not the last two pings: right after a websocket reset a
+        // player whose P2P is fine can miss two pings (live test, replies
+        // 0x3FC). A player still answering max(10 s, 15 ping intervals)
+        // after the leave had only lost its lobby link and stays. A rejoin
+        // (a new Player entry for the same id) ends the hold.
+        //
+        // The NetId is 16 bytes (FindPlayer's map node keeps the value at +0x10; the compare 0x0056F780 reads
+        // dwords 0, 2 and 3), so a copy can be replayed later.
 
         namespace
         {
@@ -85,6 +103,30 @@ namespace BZROpenShim
             uintptr_t g_NetManagerSlot = 0;
             LONG g_LocalKept = 0;
             LONG g_RemoteKept = 0;
+
+            using PingCheckFn = void(__cdecl*)();
+            PingCheckFn g_PingCheck = nullptr;
+
+            // Remote leaves held back while the player still answered pings.
+            // Game thread only: the Remote site is where stock itself runs
+            // PlayerLeft on the player map, and Net::Execute owns that map.
+            constexpr size_t kNetIdSize = 16;
+            constexpr int kHeldSlots = 16;
+            constexpr uint32_t kPingWindow = 0x3FF;     // the whole 10-ping reply history
+            constexpr uint32_t kHoldReleasePings = 15;  // still answering after this many intervals: lobby-only drop
+            constexpr uint32_t kHoldReleaseMinMs = 10000;
+            constexpr uint32_t kPingIntervalCapMs = 3000;
+            struct HeldLeave
+            {
+                bool used = false;
+                uint8_t id[kNetIdSize] = {};
+                uint16_t shortId = 0;
+                uintptr_t player = 0;   // the Player entry at hold time
+                ULONGLONG heldAt = 0;
+            };
+            HeldLeave g_Held[kHeldSlots];
+            bool g_AnyHeld = false;
+            bool g_PingHooked = false;
 
             bool ReadU32(uintptr_t address, uint32_t& out)
             {
@@ -159,6 +201,106 @@ namespace BZROpenShim
                 g_LeaveLobby(lobby);
             }
 
+            bool CopyNetId(const void* id, uint8_t (&out)[kNetIdSize])
+            {
+                __try { std::memcpy(out, id, kNetIdSize); return true; }
+                __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+            }
+
+            // Records a held-back leave; false when it cannot be re-checked
+            // later (no ping hook, unreadable id, table full).
+            bool HoldLeave(const void* id, uint16_t shortId, uintptr_t player)
+            {
+                if (!g_PingHooked) return false;
+                uint8_t copy[kNetIdSize] = {};
+                if (!CopyNetId(id, copy)) return false;
+                HeldLeave* slot = nullptr;
+                for (HeldLeave& h : g_Held)
+                {
+                    // A repeat leave (websocket flapping) keeps the first
+                    // hold time, so the release timer has an upper bound.
+                    if (h.used && std::memcmp(h.id, copy, kNetIdSize) == 0)
+                    {
+                        if (h.player != player) { h.player = player; h.heldAt = GetTickCount64(); }
+                        return true;
+                    }
+                    if (!h.used && !slot) slot = &h;
+                }
+                if (!slot) return false;
+                std::memcpy(slot->id, copy, kNetIdSize);
+                slot->shortId = shortId;
+                slot->player = player;
+                slot->heldAt = GetTickCount64();
+                slot->used = true;
+                g_AnyHeld = true;
+                return true;
+            }
+
+            void ClearHeld()
+            {
+                for (HeldLeave& h : g_Held) h = HeldLeave{};
+                g_AnyHeld = false;
+            }
+
+            void ReviewHeldLeaves()
+            {
+                uint32_t netState = 0, gameState = 0;
+                if (!MatchRunning(netState, gameState))
+                {
+                    ClearHeld();
+                    return;
+                }
+                const ULONGLONG now = GetTickCount64();
+                // An unreadable interval assumes the 3000 ms cap, so a quitter's
+                // 10 missed pings always fit inside the hold.
+                const uint32_t interval = PingIntervalMs();
+                const ULONGLONG releaseMs = (std::max)(static_cast<ULONGLONG>(kHoldReleaseMinMs),
+                    static_cast<ULONGLONG>(interval ? interval : kPingIntervalCapMs) * kHoldReleasePings);
+                for (HeldLeave& h : g_Held)
+                {
+                    if (!h.used) continue;
+                    // Gone, or a new Player entry for the same id (a rejoin,
+                    // whose reply history starts empty): nothing left to drop.
+                    const uintptr_t player = g_FindPlayer(h.id);
+                    if (!player || player != h.player)
+                    {
+                        h = HeldLeave{};
+                        continue;
+                    }
+                    uint32_t replies = 0;
+                    const bool readable = ReadU32(player + kPlayerPingRepliesOffset, replies);
+                    const unsigned heldMs = static_cast<unsigned>(now - h.heldAt);
+                    if (readable && !(replies & kPingWindow))
+                    {
+                        Log(L"[LOBBYDROP] player %u answered none of the last 10 P2P pings, %u ms after leaving the lobby; dropping it now\n",
+                            static_cast<unsigned>(h.shortId), heldMs);
+                        uint8_t id[kNetIdSize];
+                        std::memcpy(id, h.id, kNetIdSize);
+                        h = HeldLeave{};
+                        g_PlayerLeft(id, 0);
+                        continue;
+                    }
+                    if (now - h.heldAt >= releaseMs)
+                    {
+                        Log(L"[LOBBYDROP] player %u still answers P2P pings %u ms after leaving the lobby (replies=0x%03X); lobby-only drop, kept\n",
+                            static_cast<unsigned>(h.shortId), heldMs, replies & 0x3FF);
+                        h = HeldLeave{};
+                        continue;
+                    }
+                }
+                // Rescanned rather than tracked in the loop: the stock
+                // player-left above may hold another leave in a visited slot.
+                bool any = false;
+                for (const HeldLeave& h : g_Held) any = any || h.used;
+                g_AnyHeld = any;
+            }
+
+            void __cdecl PingCheckHook()
+            {
+                if (g_AnyHeld) ReviewHeldLeaves();
+                g_PingCheck();
+            }
+
             void __cdecl RemotePlayerLeftHook(const void* id, int kicked)
             {
                 uint32_t netState = 0, gameState = 0;
@@ -171,14 +313,16 @@ namespace BZROpenShim
                         const uint32_t replies = PingReplies(player);
                         uint16_t shortId = 0;
                         ReadU16(player + kPlayerShortIdOffset, shortId);
-                        if (replies & kRecentPings)
+                        if ((replies & kRecentPings) && HoldLeave(id, shortId, player))
                         {
                             const LONG n = InterlockedIncrement(&g_RemoteKept);
-                            Log(L"[LOBBYDROP] player %u left the lobby mid-match but answers P2P pings (replies=0x%03X); kept in the match (#%ld)\n",
+                            Log(L"[LOBBYDROP] player %u left the lobby mid-match but answers P2P pings (replies=0x%03X); held, re-checked at each ping (#%ld)\n",
                                 static_cast<unsigned>(shortId), replies & 0x3FF, n);
                             return;
                         }
-                        Log(L"[LOBBYDROP] player %u left the lobby mid-match and missed the last two P2P pings (replies=0x%03X); stock drop\n",
+                        Log((replies & kRecentPings)
+                                ? L"[LOBBYDROP] player %u left the lobby mid-match and answers P2P pings (replies=0x%03X), but the leave cannot be held for a re-check; stock drop\n"
+                                : L"[LOBBYDROP] player %u left the lobby mid-match and missed the last two P2P pings (replies=0x%03X); stock drop\n",
                             static_cast<unsigned>(shortId), replies & 0x3FF);
                     }
                 }
@@ -223,9 +367,11 @@ namespace BZROpenShim
             if (!enabled || !ResolveHelpers()) return 0;
 
             const bool local = strcmp(name, "Lobby Drop Keeps Match Local") == 0;
+            const bool ping = strcmp(name, "Lobby Drop Keeps Match Ping") == 0;
             const uint32_t expected = local
                 ? HookEngine::ResolveNamedAddress("Net::LeaveLobbyOnClose")
-                : HookEngine::ResolveNamedAddress("Net::PlayerLeft");
+                : ping ? HookEngine::ResolveNamedAddress("Net::PingCheck")
+                       : HookEngine::ResolveNamedAddress("Net::PlayerLeft");
             if (!original || !expected || reinterpret_cast<uintptr_t>(original) != expected)
             {
                 Log(L"[LOBBYDROP] %hs identity failed site=0x%08X original=%p expected=0x%08X; stock call kept\n",
@@ -234,6 +380,12 @@ namespace BZROpenShim
             }
             g_Enabled = true;
             Log(L"[LOBBYDROP] %hs redirected site=0x%08X original=%p\n", name, site, original);
+            if (ping)
+            {
+                g_PingCheck = reinterpret_cast<PingCheckFn>(original);
+                g_PingHooked = true;
+                return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&PingCheckHook));
+            }
             if (local)
             {
                 g_LeaveLobby = reinterpret_cast<LeaveLobbyFn>(original);

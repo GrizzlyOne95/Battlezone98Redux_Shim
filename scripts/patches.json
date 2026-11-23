@@ -564,6 +564,15 @@
       "identity": "Player-left call (E8 at 0x0073F13F, cdecl(member NetId*, kicked||banned), add esp 8) in CNetGameLobby::OnLobbyChatUpdate 0x0073EEB0 for a member-left lobby update on GOG Redux 2.2.301. Stock target Net::PlayerLeft 0x00578640 drops that player from the running game. Redirected only by [Network] LobbyDropKeepsMatch after the call target matches the resolve; signature unique in the shipped image."
     },
     {
+      "name": "Lobby Drop Keeps Match Ping",
+      "pattern": "8B 45 B0 8B 4D AC 89 88 28 04 00 00 0F B7 15 D4 80 91 00 85 D2 74 05 E8 ?? ?? ?? ??",
+      "offset": 24,
+      "expected_size": 4,
+      "fallback": "0x005718C8",
+      "require_unique": true,
+      "identity": "Ping-check call (E8 at 0x005718C7, `if (local id != 0) call 0x00576B70`) in Net::Execute 0x005715D0 on GOG Redux 2.2.301. It runs on every peer once per NetManager+0x430 ms ping interval, not only on the host. Redirected only by [Network] LobbyDropKeepsMatch after the call target matches Net::PingCheck; the wrapper re-checks players whose lobby leave was held back and drops those that stopped answering pings, then runs the stock ping check."
+    },
+    {
       "name": "TRO Banner Mode Refresh 1/2",
       "platforms": [
         "gog"
@@ -2231,6 +2240,16 @@
       "prefer": "scan",
       "require_unique": true,
       "identity": "Player-left 0x00578640, void __cdecl(const NetId*, bool kicked): FindPlayer, then for the local player (+0x8E) Net state 5, else player_left/host_autokicked and removal (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
+    },
+    {
+      "name": "Net::PingCheck",
+      "pattern": "55 8B EC 6A FF 68 8B B9 84 00 64 A1 00 00 00 00 50 81 EC 8C 01 00 00",
+      "offset": 0,
+      "mode": "address",
+      "fallback": "0x00576B70",
+      "prefer": "scan",
+      "require_unique": true,
+      "identity": "Ping check 0x00576B70, void __cdecl(void): lagging/auto-kick pass, then pings every remote player (0x00576480 shifts Player+0x1B0 left per ping; the reply handler sets bit 0). Only caller is Net::Execute at 0x005718C7 (GOG Redux 2.2.301.) Used by [Network] LobbyDropKeepsMatch."
     },
     {
       "name": "Net::ManagerSlot",
