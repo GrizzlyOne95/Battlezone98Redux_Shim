@@ -115,6 +115,26 @@ static void qualifyCompressed(ID3D11Device* device, ID3D11DeviceContext* context
     auto control = makeTexture(device, size, mips, 2, 0);
     check(!CopyTextureSlice(control.Get(), colour.Get(), 0, size, size, mips - 1), "BC3 slice accepted into an uncompressed control array");
     check(CopyTextureSlice(control.Get(), png.Get(), 1, size, size, mips - 1), "control slice copy declined");
+    // A level-0-only control array takes just the top level of a mipped source.
+    auto topOnly = makeTexture(device, size, 1, 2, 0);
+    check(CopyTextureSlice(topOnly.Get(), png.Get(), 1, size, size, mips - 1, 0), "level-0 control copy declined");
+    check(!CopyTextureSlice(topOnly.Get(), png.Get(), 1, size, size, mips - 1), "full chain accepted into a level-0 array");
+    check(!CopyTextureSlice(topOnly.Get(), png.Get(), 1, size, size, mips - 1, 1), "wrong array mip count accepted");
+    check(!CopyTextureSlice(control.Get(), png.Get(), 1, size, size, mips - 1, mips), "more array levels than source accepted");
+    {
+        D3D11_TEXTURE2D_DESC topDesc; topOnly->GetDesc(&topDesc);
+        topDesc.Usage = D3D11_USAGE_STAGING; topDesc.BindFlags = 0; topDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+        ComPtr<ID3D11Texture2D> topStaging;
+        ok(device->CreateTexture2D(&topDesc, nullptr, &topStaging));
+        context->CopyResource(topStaging.Get(), topOnly.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped;
+        ok(context->Map(topStaging.Get(), D3D11CalcSubresource(0, 1, 1), D3D11_MAP_READ, 0, &mapped));
+        const auto* last = static_cast<const uint8_t*>(mapped.pData) + (size - 1) * mapped.RowPitch + (size - 1) * 4;
+        const bool matched = last[0] == uint8_t(10 + (size - 1) % 17) && last[1] == 0 &&
+            last[2] == uint8_t((size - 1) % 19) && last[3] == 255;
+        context->Unmap(topStaging.Get(), D3D11CalcSubresource(0, 1, 1));
+        check(matched, "level-0 control copy content wrong");
+    }
     D3D11_TEXTURE2D_DESC desc; array->GetDesc(&desc);
     desc.Usage = D3D11_USAGE_STAGING; desc.BindFlags = 0; desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     ComPtr<ID3D11Texture2D> staging;
@@ -156,6 +176,10 @@ int main()
             BZROpenShim::TerrainHd::PaintControlSlices(9) == Slices{4} &&
             BZROpenShim::TerrainHd::PaintControlSlices(18) == Slices{4, 13} &&
             BZROpenShim::TerrainHd::PaintControlSlices(7).empty(), "paint control slices wrong");
+        check(BZROpenShim::TerrainHd::ArrayBytes(DXGI_FORMAT_B8G8R8A8_UNORM, 2048, 2048, 1, 2) == 32ull << 20 &&
+            BZROpenShim::TerrainHd::ArrayBytes(DXGI_FORMAT_B8G8R8A8_UNORM, 2048, 2048, 12, 2) == 44739240ull &&
+            BZROpenShim::TerrainHd::ArrayBytes(DXGI_FORMAT_BC3_UNORM, 4, 4, 3, 1) == 48 &&
+            BZROpenShim::TerrainHd::ArrayBytes(DXGI_FORMAT_BC1_UNORM, 8, 8, 1, 1) == 32, "array byte estimate wrong");
         ComPtr<ID3D11Device> device; ComPtr<ID3D11DeviceContext> context;
         ok(D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0,
             D3D11_SDK_VERSION, &device, nullptr, &context));
@@ -168,7 +192,7 @@ int main()
         auto source = makeTexture(other.Get(), 16, 5, 1, 10);
         auto destination = makeTexture(device.Get(), 16, 5, 3, 0);
         check(!BZROpenShim::TerrainHd::CopyTextureSlice(destination.Get(), source.Get(), 0, 16, 16, 4), "cross-device copy accepted");
-        std::cout << "PASS: explicit 512px mips, 256 slices, DXT5 slices, per-array formats, control slices, preserved neighbours and invalid contracts\n";
+        std::cout << "PASS: explicit 512px mips, 256 slices, DXT5 slices, per-array formats, control slices, level-0 control arrays, byte estimates, preserved neighbours and invalid contracts\n";
         return 0;
     }
     catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

@@ -328,7 +328,13 @@ height array as the domain shader (HS `t127`, bound and restored in step).
 adaptive on, `OPENSHIM_TERRAIN_TESSELLATION_FACTOR=8` raises the cap.
 
 Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory;
-eighteen cost about 384 MiB.
+eighteen cost about 384 MiB. The separate control array keeps level 0
+only: every control read is `SampleLevel` or
+`Load` at level 0. Paint materials also free the tile textures each upload
+loaded once they are copied into the arrays (`"releaseSourceTextures": false`
+on the material keeps them, at the cost of VRAM). Each mission load then
+decodes the tile images from disk again instead of reusing Ogre's cache. The `[TERRAIN-HD] array ready` line reports
+`mips`, `bytes` and `sourcesReleased` per array.
 
 ### Base pads
 

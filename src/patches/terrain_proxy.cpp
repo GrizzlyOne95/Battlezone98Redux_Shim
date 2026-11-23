@@ -1257,6 +1257,9 @@ namespace BZROpenShim
                             throw std::runtime_error("paint needs 5, 9 or 18 explicit slices, atlas identity and minZ row order");
                         if (binding.compact) throw std::runtime_error("compact material arrays do not support paint mode");
                         binding.paint.enabled = true;
+                        // Paint tiles are array upload inputs: free the ones this
+                        // upload loaded once copied. A pack can opt out.
+                        binding.releaseSourceTextures = materialIt.value().value("releaseSourceTextures", true);
                         binding.paint.sliceCount = binding.sliceCount;
                         // Per-layer lists carry one value per layer: four, or eight with 18 slices.
                         const auto layers = [&](const char* name, std::array<float, 8>& out) {
@@ -3062,22 +3065,23 @@ namespace BZROpenShim
                                 uint32_t slice,
                                 uint32_t width,
                                 uint32_t height,
-                                uint32_t mipmaps)
+                                uint32_t mipmaps,
+                                uint32_t arrayMipmaps)
         {
             if (!g_ogre.getD3D11Texture2D) return false;
             // Exported getters return borrowed resources. Ogre owns both
             // Texture shared pointers throughout this submission.
             auto* destination = g_ogre.getD3D11Texture2D(arrayTexture);
             auto* source = g_ogre.getD3D11Texture2D(sourceTexture);
-            const bool copied = TerrainHd::CopyTextureSlice(destination, source, slice, width, height, mipmaps);
+            const bool copied = TerrainHd::CopyTextureSlice(destination, source, slice, width, height, mipmaps, arrayMipmaps);
             if (!copied && source && destination)
             {
                 D3D11_TEXTURE2D_DESC src{}, dst{};
                 source->GetDesc(&src); destination->GetDesc(&dst);
                 LogShimA(LogLevel::Warn, "terrain-hd",
-                    "[TERRAIN-HD] copy descriptors src=%ux%u/m%u/a%u/f%u dst=%ux%u/m%u/a%u/f%u expectedMips=%u",
+                    "[TERRAIN-HD] copy descriptors src=%ux%u/m%u/a%u/f%u dst=%ux%u/m%u/a%u/f%u expectedSrcMips=%u expectedDstMips=%u",
                     src.Width, src.Height, src.MipLevels, src.ArraySize, unsigned(src.Format),
-                    dst.Width, dst.Height, dst.MipLevels, dst.ArraySize, unsigned(dst.Format), mipmaps + 1);
+                    dst.Width, dst.Height, dst.MipLevels, dst.ArraySize, unsigned(dst.Format), mipmaps + 1, arrayMipmaps + 1);
             }
             return copied;
         }
@@ -3249,7 +3253,11 @@ namespace BZROpenShim
                     releaseUploadSources();
                     return false;
                 }
-                const int arrayMips = TerrainHd::OgreArrayMipRequest(mipmaps, description.Format);
+                // Every shader read of a split control array is SampleLevel or
+                // Load at level 0, so it keeps that level only; the colour and
+                // channel arrays keep the source's full chain.
+                const uint32_t arrayMipmaps = control ? 0u : mipmaps;
+                const int arrayMips = TerrainHd::OgreArrayMipRequest(arrayMipmaps, description.Format);
                 g_ogre.createManualTexture(textureManager, &arrayTexture,
                     ownedName, group, kOgreTextureType2DArray,
                     width, height, binding.sliceCount,
@@ -3298,7 +3306,7 @@ namespace BZROpenShim
                         g_ogre.getTextureMipmaps(source) != mipmaps ||
                         g_ogre.getTextureFormat(source) != format ||
                         !CopyTerrainHdSlice(arrayTexture.rep, source, slice,
-                            width, height, mipmaps))
+                            width, height, mipmaps, arrayMipmaps))
                     {
                         LogShimA(LogLevel::Warn, "terrain-hd",
                             "[TERRAIN-HD] tile contract/copy failed material=\"%s\" array=%s slice=%u resource=\"%s\" expected=%ux%u mips=%u format=%d actual=%ux%u mips=%u format=%d; stock atlas retained",
@@ -3327,11 +3335,12 @@ namespace BZROpenShim
                     g_proxy.hdMipmaps = mipmaps;
                 }
                 LogShimA(LogLevel::Info, "terrain-hd",
-                    "[TERRAIN-HD] array ready material=\"%s\" array=%s name=\"%s\" slices=%u overrides=%zu selectedMaxTileIndex=%u size=%ux%u mips=%u format=%d dxgiFormat=%u fallback=\"%s\"",
+                    "[TERRAIN-HD] array ready material=\"%s\" array=%s name=\"%s\" slices=%u overrides=%zu selectedMaxTileIndex=%u size=%ux%u mips=%u format=%d dxgiFormat=%u bytes=%llu sourcesReleased=%zu fallback=\"%s\"",
                     g_proxy.materialName.c_str(), arrayLabel, ownedName.c_str(),
                     binding.sliceCount, overrideCopies, maximumTileIndex,
-                    width, height, mipmaps + 1, format, unsigned(description.Format),
-                    binding.fallback.c_str());
+                    width, height, arrayMipmaps + 1, format, unsigned(description.Format),
+                    TerrainHd::ArrayBytes(description.Format, width, height, arrayMipmaps + 1, binding.sliceCount),
+                    released, binding.fallback.c_str());
                 if (channel < 0 && !binding.compact) LogTerrainHdTileCoverage(binding);
                 return true;
             }
