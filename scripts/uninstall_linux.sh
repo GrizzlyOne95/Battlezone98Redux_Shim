@@ -174,7 +174,7 @@ remove_dir_if_empty() {
 # Returns 1 when any copy failed, so the backup folder is not deleted.
 restore_stock_backups() {
     local game_dir="$1"
-    local backup_dir="$game_dir/openshim/stock-backup" file ok=0
+    local backup_dir="$game_dir/openshim/stock-backup" file ok=0 kept_name
     [[ -d "$backup_dir" ]] || return 0
     for file in "$backup_dir"/*; do
         [[ -f "$file" ]] || continue
@@ -185,8 +185,10 @@ restore_stock_backups() {
         # Settings changed since the backup (resolution, key binds) are kept
         # beside it rather than silently lost.
         if [[ -f "$game_dir/$(basename "$file")" ]] && ! cmp -s -- "$file" "$game_dir/$(basename "$file")"; then
-            cp -f -- "$game_dir/$(basename "$file")" "$game_dir/$(basename "$file").before-uninstall" &&
-                echo "  kept your current $(basename "$file") as $(basename "$file").before-uninstall"
+            # Timestamped, so an earlier copy is never overwritten.
+            kept_name="$(basename "$file").before-uninstall-$(date +%Y%m%d-%H%M%S)"
+            cp -- "$game_dir/$(basename "$file")" "$game_dir/$kept_name" &&
+                echo "  kept your current $(basename "$file") as $kept_name"
         fi
         if cp -f -- "$file" "$game_dir/$(basename "$file")"; then
             echo "  restored $game_dir/$(basename "$file")"
@@ -199,22 +201,46 @@ restore_stock_backups() {
     return "$ok"
 }
 
-# Remove everything inside openshim/ except the player's ini files (kept
-# unless --purge-config) and, when a restore failed, the stock backups.
+# Remove what OpenShim put in openshim/, by name. The player's ini files are
+# kept unless --purge-config, and the stock backups are kept when a restore
+# failed. Anything else in the folder is not OpenShim's: report it and leave
+# it. An openshim/ that is itself a symlink is never entered.
 remove_openshim_folder() {
     local dir="$1" keep_backups="$2" child name
-    [[ -d "$dir" ]] || return 0
+    [[ -d "$dir" || -L "$dir" ]] || return 0
+    if [[ -L "$dir" ]]; then
+        echo "  KEEPING $dir : it is a link, not a folder OpenShim made"
+        kept=$((kept + 1))
+        return 0
+    fi
     for child in "$dir"/* "$dir"/.[!.]*; do
         [[ -e "$child" || -L "$child" ]] || continue
         name="$(basename "$child")"
-        if [[ "$keep_backups" == "1" && "$name" == "stock-backup" ]]; then
-            echo "  KEEPING $child : restoring from it failed"
+        if [[ -L "$child" && -d "$child" ]]; then
+            echo "  KEEPING symlink $child"
             kept=$((kept + 1))
-        elif [[ -f "$child" && "$PURGE_CONFIG" != "1" && "$name" =~ ^openshim\.ini(\.bak-.*|\.pre-reset-.*\.bak|\.premigrate-r.*\.bak)?$ ]]; then
-            echo "  KEEPING $child"
-            kept=$((kept + 1))
-        else
+        elif [[ -d "$child" ]]; then
+            if [[ "$keep_backups" == "1" && "$name" == "stock-backup" ]]; then
+                echo "  KEEPING $child : restoring from it failed"
+                kept=$((kept + 1))
+            elif [[ "$name" =~ ^(cache|state|tools|stock-backup|renderer|ui|lan|_generated)$ ]]; then
+                remove_planned "$child"
+            else
+                echo "  KEEPING $child : not an OpenShim folder"
+                kept=$((kept + 1))
+            fi
+        elif [[ "$name" =~ ^openshim\.ini(\.bak-.*|\.pre-reset-.*\.bak|\.premigrate-r.*\.bak)?$ ]]; then
+            if [[ "$PURGE_CONFIG" == "1" ]]; then
+                remove_planned "$child"
+            else
+                echo "  KEEPING $child"
+                kept=$((kept + 1))
+            fi
+        elif [[ "$name" =~ ^(patches\.json(\..+)?|OpenShimAssets\.ini|openshim\.ini\.(canonical|new))$ ]]; then
             remove_planned "$child"
+        else
+            echo "  KEEPING $child : not an OpenShim file"
+            kept=$((kept + 1))
         fi
     done
     remove_dir_if_empty "$dir"

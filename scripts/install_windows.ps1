@@ -773,6 +773,12 @@ function Remove-LegacyLayout {
     param([string]$GameDir)
     $oldPatches = Join-Path $GameDir "scripts\patches.json"
     Remove-Item -LiteralPath $oldPatches, "$oldPatches.previous" -Force -ErrorAction SilentlyContinue
+    # Earlier installers' timestamped backups of it move beside the new one so
+    # scripts\ can go when nothing else is in it.
+    foreach ($backup in @(Get-ChildItem -LiteralPath (Join-Path $GameDir "scripts") -File -Force -Filter "patches.json.bak-*" -ErrorAction SilentlyContinue)) {
+        Move-IfAbsent -From $backup.FullName -To (Join-Path $GameDir "openshim\$($backup.Name)")
+        Remove-Item -LiteralPath $backup.FullName -Force -ErrorAction SilentlyContinue
+    }
     $scriptsDir = Join-Path $GameDir "scripts"
     if ((Test-Path -LiteralPath $scriptsDir -PathType Container) -and
         -not (Get-ChildItem -LiteralPath $scriptsDir -Force | Select-Object -First 1)) {

@@ -54,7 +54,7 @@ Get-ChildItem -LiteralPath $payload -File -Recurse | ForEach-Object {
     $relative = [IO.Path]::GetRelativePath($payload, $_.FullName).Replace('\', '/')
     $files[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
-$helper = Get-Content -LiteralPath (Join-Path $payload 'openshim	ools\lan\manifest.json') -Raw | ConvertFrom-Json
+$helper = Get-Content -LiteralPath (Join-Path $payload 'openshim\tools\lan\manifest.json') -Raw | ConvertFrom-Json
 [ordered]@{
     format = 1; sourceRevision = $revision; helperRevision = $helper.revision
     status = 'development-preview'; nativeGameplayValidated = $false; sha256 = $files

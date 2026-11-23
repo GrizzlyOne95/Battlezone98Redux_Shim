@@ -1,6 +1,6 @@
 """Explicit frozen-helper integration, without loading or launching the game.
 
-Use a scratch game-shaped root containing tools/lan/BZRServer.exe. Default
+Use a scratch game-shaped root containing openshim/tools/lan/BZRServer.exe. Default
 ports must be free; do not run against an existing user's server.
 """
 from __future__ import annotations

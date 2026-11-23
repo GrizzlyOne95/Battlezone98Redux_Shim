@@ -239,6 +239,46 @@ namespace Layout
 
     inline std::string OpenShimIniPathA() { return AnsiPath(OpenShimIniPath()); }
 
+    // An older installer or updater can still write scripts\patches.json after
+    // the layout move. When both copies exist and the old one was written
+    // later, the old one is the fresh one: set the current file aside as
+    // patches.json.superseded (replacing any earlier one) and put the old file
+    // in its place. Anything else is left to MigrateEntry. patches.json only;
+    // openshim.ini is player data and is never replaced this way.
+    inline void ReplaceIfOldPatchesNewer(const std::filesystem::path& oldJson,
+                                         const std::filesystem::path& newJson)
+    {
+        WIN32_FILE_ATTRIBUTE_DATA oldData = {};
+        WIN32_FILE_ATTRIBUTE_DATA newData = {};
+        if (!GetFileAttributesExW(oldJson.c_str(), GetFileExInfoStandard, &oldData) ||
+            !GetFileAttributesExW(newJson.c_str(), GetFileExInfoStandard, &newData) ||
+            (oldData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0 ||
+            (newData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+            return;
+        if (CompareFileTime(&oldData.ftLastWriteTime, &newData.ftLastWriteTime) <= 0)
+            return;
+        std::filesystem::path superseded = newJson;
+        superseded += L".superseded";
+        if (!MoveFileExW(newJson.c_str(), superseded.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH))
+        {
+            Detail::Note("[LAYOUT] could not set %s%s aside (error %lu); keeping it in use",
+                         newJson, {}, GetLastError());
+            return;
+        }
+        if (MoveFileExW(oldJson.c_str(), newJson.c_str(), MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH))
+        {
+            Detail::Note("[LAYOUT] %s is newer than %s: moved it into place and kept the other as .superseded",
+                         oldJson, newJson);
+            return;
+        }
+        // Put the current file back rather than leave no patches.json.
+        const DWORD error = GetLastError();
+        MoveFileExW(superseded.c_str(), newJson.c_str(), MOVEFILE_REPLACE_EXISTING);
+        Detail::Note("[LAYOUT] could not move the newer %s into place (error %lu); keeping %s",
+                     oldJson, newJson, error);
+    }
+
     // openshim\patches.json, or scripts\patches.json when moving it failed.
     inline const std::filesystem::path& PatchesJsonPath()
     {
@@ -249,6 +289,7 @@ namespace Layout
                 return std::filesystem::path(L"openshim") / L"patches.json";
             const std::filesystem::path oldJson = root / L"scripts" / L"patches.json";
             const std::filesystem::path newJson = OpenShimDirectory() / L"patches.json";
+            ReplaceIfOldPatchesNewer(oldJson, newJson);
             const bool moved = MigrateEntry(oldJson, newJson);
             MigrateEntry(root / L"scripts" / L"patches.json.previous",
                          OpenShimDirectory() / L"patches.json.previous");

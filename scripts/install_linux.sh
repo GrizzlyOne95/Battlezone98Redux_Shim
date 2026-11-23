@@ -387,8 +387,15 @@ move_legacy_ini() {
 
 # Drop the old-layout copies once the new ones are in place.
 remove_legacy_layout() {
-    local game_dir="$1"
+    local game_dir="$1" old
     rm -f "$game_dir/scripts/patches.json" "$game_dir/scripts/patches.json.previous"
+    # Earlier installers' timestamped backups of it move beside the new one so
+    # scripts/ can go when nothing else is in it.
+    for old in "$game_dir"/scripts/patches.json.bak-*; do
+        [[ -f "$old" ]] || continue
+        move_if_absent "$old" "$game_dir/openshim/$(basename "$old")"
+        rm -f -- "$old"
+    done
     rmdir "$game_dir/scripts" 2>/dev/null || true
 
     # Bundled LAN tools: carried over when the new folder is absent, else dropped.

@@ -346,8 +346,9 @@ jobs:
           | `winmm.dll` | game root |
           | `bzloader.dll` | game root |
           | `openshim.dll` | game root `plugins/` |
-          | `patches.json` | game root `scripts/` |
-          | `openshim.ini`, `net.ini` | game root |
+          | `patches.json` | game root `openshim/` |
+          | `openshim.ini` | game root `openshim/` |
+          | `net.ini` | game root |
           | `resources/renderer/enhanced/*` (Suite zip) | game root `openshim/renderer/enhanced/` |
           | `resources/openshim/OpenShimAssets.ini` (Suite zip) | game root `openshim/` |
           | `resources/ui/custom_widgets/*.png`, `odyssey.ogv` (Suite zip) | game root `openshim/ui/` |

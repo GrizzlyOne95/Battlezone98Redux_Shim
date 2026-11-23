@@ -1129,6 +1129,16 @@ if(WIN32 AND MSVC)
     add_test(NAME bootstrap_file_io_tests COMMAND bootstrap_file_io_tests)
 endif()
 
+# Layout migration rules (header-only, Win32 file APIs).
+if(WIN32 AND MSVC)
+    add_executable(layout_migration_tests layout_migration_tests.cpp)
+    target_include_directories(layout_migration_tests PRIVATE ../include)
+    target_compile_features(layout_migration_tests PRIVATE cxx_std_20)
+    target_compile_definitions(layout_migration_tests PRIVATE _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(layout_migration_tests PRIVATE /W4 /WX)
+    add_test(NAME layout_migration_tests COMMAND layout_migration_tests)
+endif()
+
 # The bootstrap startup renderer seam with nothing else alive. This is the
 # case the renderer split exists for: the decision must be complete before the
 # intercepted ConfigFile::load returns, so "a plugin will supply it later" is

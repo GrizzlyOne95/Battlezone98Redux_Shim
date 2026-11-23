@@ -128,6 +128,17 @@ function New-GameFixture {
     Write-Fixture $Root "logs\BZLogger.txt" "stock"
     Write-Fixture $Root "logs\other_mod.log" "other"
     Write-Fixture $Root "logs\openshim_custom.mod" "not a log"
+    Write-Fixture $Root "logs\openshim_cpu_samples_main_100.bin" "capture"
+    Write-Fixture $Root "logs\openshim_frames_main_100.bin" "capture"
+    Write-Fixture $Root "logs\openshim_va_main_100.csv" "capture"
+    Write-Fixture $Root "logs\openshim_soak_lighting_100_01.png" "capture"
+    Write-Fixture $Root "logs\terrain_probe.json" "capture"
+    Write-Fixture $Root "logs\terrain_probe_001.json" "capture"
+    Write-Fixture $Root "logs\openshim_backend_pending.txt" "capture"
+    Write-Fixture $Root "logs\bz_buffer_log.bin" "capture"
+    Write-Fixture $Root "logs\bz_relay_control.jsonl" "capture"
+    Write-Fixture $Root "logs\terrain_notes.json" "not ours"
+    Write-Fixture $Root "logs\other_mod_capture.bin" "not ours"
     Write-Fixture $Root "openshim.log" "fallback"
     Write-Fixture $Root "openshim.ini.example" "reference"
     Write-Fixture $Root "openshim_update.status" "state=complete"
@@ -281,13 +292,17 @@ try {
         "openshim.ini", "openshim.ini.bak-20260101-000000", "openshim.ini.pre-reset-20260101-000000.bak",
         "openshim\openshim.ini", "openshim",
         "openshim.ini.example", "openshim.log", "logs\openshim.log", "logs\openshim_crash.log",
-        "logs\openshim_crash_20261015_150000.dmp", "logs\bzloader.log", "logs\winmm_shim.log"
+        "logs\openshim_crash_20261015_150000.dmp", "logs\bzloader.log", "logs\winmm_shim.log",
+        "logs\openshim_cpu_samples_main_100.bin", "logs\openshim_frames_main_100.bin", "logs\openshim_va_main_100.csv",
+        "logs\openshim_soak_lighting_100_01.png", "logs\terrain_probe.json", "logs\terrain_probe_001.json",
+        "logs\openshim_backend_pending.txt", "logs\bz_buffer_log.bin", "logs\bz_relay_control.jsonl"
     )) {
         Check (-not (Test-Path -LiteralPath (Join-Path $game $relative))) "full-clean removed: $relative"
     }
     foreach ($relative in @(
         "net.ini", "net.ini.previous", "net.ini.bak-20260101-000000",
         "logs\BZLogger.txt", "logs\other_mod.log", "logs\openshim_custom.mod",
+        "logs\terrain_notes.json", "logs\other_mod_capture.bin",
         "BZ_ASSETS_CORE\common\ui\CustomWidgets\player_widget.png", "career_stats.cfg", "Save\slot1.sav"
     )) {
         Check (Test-Path -LiteralPath (Join-Path $game $relative)) "full-clean preserved: $relative"
@@ -299,6 +314,34 @@ try {
         Check (Test-Path -LiteralPath (Join-Path $script:root $relative)) "full-clean preserved other user data: $relative"
     }
     Check ($result.Output -match "CLEAR the OpenShim upload wrapper") "full-clean warns to clear Steam launch option"
+
+    # --- unknown entries in openshim\ stay; .before-uninstall copies never overwrite -----
+    New-GameFixture $game
+    Write-Fixture $game "openshim\my_mod\keep.txt" "mine"
+    Write-Fixture $game "openshim\notes.txt" "mine"
+    Write-Fixture $game "openshim\patches.json.superseded" "{}"
+    Write-Fixture $game "Ogre.cfg.before-uninstall-20200101-000000" "earlier"
+    $result = Invoke-Uninstaller -GameDir $game
+    Check $result.Ok "unknown-entry run exits cleanly: $($result.Output)"
+    foreach ($relative in @("openshim\my_mod\keep.txt", "openshim\notes.txt", "openshim")) {
+        Check (Test-Path -LiteralPath (Join-Path $game $relative)) "unknown entry kept: $relative"
+    }
+    Check (-not (Test-Path -LiteralPath (Join-Path $game "openshim\patches.json.superseded"))) "patches.json.superseded is removed with the family"
+    Check ($result.Output -match "KEEPING .*notes\.txt : not an OpenShim file") "an unknown file is reported"
+    Check ($result.Output -match "KEEPING .*my_mod : not an OpenShim folder") "an unknown folder is reported"
+    Check ((Get-Content -LiteralPath (Join-Path $game "Ogre.cfg.before-uninstall-20200101-000000") -Raw) -eq "earlier") "an earlier .before-uninstall copy is not overwritten"
+    Check (@(Get-ChildItem -LiteralPath $game -Filter "Ogre.cfg.before-uninstall-*").Count -eq 2) "this run's .before-uninstall copy has its own name"
+
+    # --- openshim\ that is itself a junction is not entered ---------------------------
+    New-GameFixture $game
+    $realOpenShim = Join-Path $root "elsewhere"
+    Move-Item -LiteralPath (Join-Path $game "openshim") -Destination $realOpenShim
+    New-Item -ItemType Junction -Path (Join-Path $game "openshim") -Target $realOpenShim | Out-Null
+    $result = Invoke-Uninstaller -GameDir $game
+    Check $result.Ok "linked openshim run exits cleanly: $($result.Output)"
+    Check (Test-Path -LiteralPath (Join-Path $realOpenShim "patches.json")) "a linked openshim\ target is untouched"
+    Check ($result.Output -match "KEEPING .*openshim : it is a link") "a linked openshim\ is reported"
+    [System.IO.Directory]::Delete((Join-Path $game "openshim"))
 
     # --- a foreign winmm.dll is never removed --------------------------------------
     New-GameFixture $game

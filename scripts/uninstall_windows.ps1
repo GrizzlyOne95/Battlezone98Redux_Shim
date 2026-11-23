@@ -24,7 +24,8 @@
 #   OPENSHIM_PURGE_CONFIG=1      also remove openshim.ini and its backups
 #   OPENSHIM_PURGE_LEFTOVERS=1   additionally purge OpenShim logs, crash dumps,
 #                               settings, and current-user uploader/data folders.
-#                               Keeps net.ini and the game's shared logs.
+#                               Keeps the game's shared logs and any stock file
+#                               (net.ini, ...) that was restored from backup.
 #   OPENSHIM_DRY_RUN=1           print removals without changing anything
 #
 # Keep this file pure ASCII: Windows PowerShell 5.1 reads a BOM-less UTF-8
@@ -394,7 +395,7 @@ function Remove-OpenShimLogs {
             continue
         }
         foreach ($file in Get-ChildItem -LiteralPath $logDir -File -Force) {
-            if ($file.Name -match '^(?:openshim.*\.(?:log|dmp)(?:\.\d+)?|bzloader\.log|winmm_shim\.log|openshim_ogre_profile(?:\.prev)?\.csv|openshim_frame_.*\.png)$') {
+            if ($file.Name -match '^(?:openshim.*\.(?:log|dmp)(?:\.\d+)?|bzloader\.log|winmm_shim\.log|openshim_ogre_profile(?:\.prev)?\.csv|openshim_frame_.*\.png|openshim_cpu_samples_.*\.bin|openshim_frames_.*\.bin|openshim_va_.*\.csv|openshim_soak_lighting_.*\.png|terrain_probe.*\.json|openshim_backend_pending\.txt|bz_buffer_log\.(?:bin|meta\.txt)|bz_relay_control\.jsonl)$') {
                 Remove-Planned -Path $file.FullName
             }
         }
@@ -461,8 +462,10 @@ function Restore-StockBackups {
             # kept beside it rather than silently lost.
             if ((Test-Path -LiteralPath $dest -PathType Leaf) -and
                 (Get-FileHash -LiteralPath $dest).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash) {
-                Copy-Item -LiteralPath $dest -Destination "$dest.before-uninstall" -Force
-                Write-Host "  kept your current $($file.Name) as $($file.Name).before-uninstall"
+                # Timestamped, so an earlier copy is never overwritten.
+                $keptName = "$($file.Name).before-uninstall-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+                Copy-Item -LiteralPath $dest -Destination (Join-Path $GameDir $keptName)
+                Write-Host "  kept your current $($file.Name) as $keptName"
             }
             Copy-Item -LiteralPath $file.FullName -Destination $dest -Force
             Write-Host "  restored $dest"
@@ -475,11 +478,21 @@ function Restore-StockBackups {
     return $ok
 }
 
-# Remove everything inside openshim\ except the player's ini files (kept unless
-# -PurgeConfig) and, when a restore failed, the stock backups.
+# Remove what OpenShim put in openshim\, by name. The player's ini files are
+# kept unless -PurgeConfig, and the stock backups are kept when a restore
+# failed. Anything else in the folder is not OpenShim's: report it and leave
+# it. An openshim\ that is itself a reparse point is never entered.
+$script:ownedOpenShimDirs = @("cache", "state", "tools", "stock-backup", "renderer", "ui", "lan", "_generated")
+$script:ownedOpenShimFiles = '^(?:patches\.json(?:\..+)?|OpenShimAssets\.ini|openshim\.ini\.(?:canonical|new))$'
 function Remove-OpenShimFolder {
     param([string]$OpenShimDir, [bool]$KeepBackups)
     if (-not (Test-Path -LiteralPath $OpenShimDir -PathType Container)) { return }
+    $top = Get-Item -LiteralPath $OpenShimDir -Force
+    if ($top.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+        Write-Host "  KEEPING $OpenShimDir : it is a link, not a folder OpenShim made"
+        $script:kept++
+        return
+    }
     foreach ($child in @(Get-ChildItem -LiteralPath $OpenShimDir -Force)) {
         if ($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint -and $child.PSIsContainer) {
             Write-Host "  KEEPING reparse point $($child.FullName)"
@@ -488,14 +501,24 @@ function Remove-OpenShimFolder {
             if ($KeepBackups -and $child.Name -eq "stock-backup") {
                 Write-Host "  KEEPING $($child.FullName) : restoring from it failed"
                 $script:kept++
-            } else {
+            } elseif ($script:ownedOpenShimDirs -contains $child.Name) {
                 Remove-OpenShimDataTree -Path $child.FullName
+            } else {
+                Write-Host "  KEEPING $($child.FullName) : not an OpenShim folder"
+                $script:kept++
             }
-        } elseif ($child.Name -match $script:iniKeepPattern -and -not $purgeConfig) {
-            Write-Host "  KEEPING $($child.FullName)"
-            $script:kept++
-        } else {
+        } elseif ($child.Name -match $script:iniKeepPattern) {
+            if ($purgeConfig) {
+                Remove-Planned -Path $child.FullName
+            } else {
+                Write-Host "  KEEPING $($child.FullName)"
+                $script:kept++
+            }
+        } elseif ($child.Name -match $script:ownedOpenShimFiles) {
             Remove-Planned -Path $child.FullName
+        } else {
+            Write-Host "  KEEPING $($child.FullName) : not an OpenShim file"
+            $script:kept++
         }
     }
     Remove-DirectoryIfEmpty $OpenShimDir

@@ -177,6 +177,34 @@ for relative in net.ini net.ini.bak-20260101-000000 net.ini.previous logs/opensh
     check "$(present "$game/$relative")" "purge kept: $relative"
 done
 
+# --- unknown entries in openshim/ stay; .before-uninstall copies never overwrite
+new_game_fixture "$game"
+write_fixture "$game/openshim/my_mod/keep.txt" "mine"
+write_fixture "$game/openshim/notes.txt" "mine"
+write_fixture "$game/openshim/patches.json.superseded" "{}"
+write_fixture "$game/Ogre.cfg.before-uninstall-20200101-000000" "earlier"
+output="$(bash "$uninstaller" --game-path "$game" 2>&1)" && ok=1 || ok=0
+check "$ok" "unknown-entry run exits cleanly: $output"
+for relative in openshim/my_mod/keep.txt openshim/notes.txt openshim; do
+    check "$(present "$game/$relative")" "unknown entry kept: $relative"
+done
+check "$(absent "$game/openshim/patches.json.superseded")" "patches.json.superseded is removed with the family"
+check "$([[ "$output" == *"notes.txt : not an OpenShim file"* ]] && echo 1 || echo 0)" "an unknown file is reported"
+check "$([[ "$output" == *"my_mod : not an OpenShim folder"* ]] && echo 1 || echo 0)" "an unknown folder is reported"
+check "$([[ "$(cat "$game/Ogre.cfg.before-uninstall-20200101-000000")" == "earlier" ]] && echo 1 || echo 0)" "an earlier .before-uninstall copy is not overwritten"
+copies="$(ls "$game"/Ogre.cfg.before-uninstall-* | wc -l)"
+check "$([[ "$copies" == "2" ]] && echo 1 || echo 0)" "this run's .before-uninstall copy has its own name"
+
+# --- openshim/ that is itself a symlink is not entered --------------------------
+new_game_fixture "$game"
+mv "$game/openshim" "$test_root/elsewhere"
+ln -s "$test_root/elsewhere" "$game/openshim"
+output="$(bash "$uninstaller" --game-path "$game" 2>&1)" && ok=1 || ok=0
+check "$ok" "linked openshim run exits cleanly: $output"
+check "$(present "$test_root/elsewhere/patches.json")" "a linked openshim/ target is untouched"
+check "$([[ "$output" == *"openshim : it is a link"* ]] && echo 1 || echo 0)" "a linked openshim/ is reported"
+rm -f "$game/openshim"
+
 # --- a foreign winmm.dll is never removed ---------------------------------------
 new_game_fixture "$game"
 write_fixture "$game/winmm.dll" "$foreign_marker"

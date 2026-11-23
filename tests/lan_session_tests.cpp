@@ -50,7 +50,7 @@ int wmain(int argc, wchar_t** argv)
     }
 
     // Optional real-helper integration lane, run explicitly with a scratch
-    // game-shaped root containing tools/lan/BZRServer.exe. No game is loaded.
+    // game-shaped root containing openshim/tools/lan/BZRServer.exe. No game is loaded.
     if (argc == 3 && (std::wstring(argv[1]) == L"--real-helper" || std::wstring(argv[1]) == L"--owner-exit"))
     {
         REQUIRE(LAN::StartHost(argv[2]));
@@ -75,9 +75,9 @@ int wmain(int argc, wchar_t** argv)
 
     wchar_t temp[MAX_PATH]{}; REQUIRE(GetTempPathW(MAX_PATH, temp) != 0);
     const fs::path root = fs::path(temp) / (L"OpenShim LAN test \u03a9 " + std::to_wstring(GetCurrentProcessId()));
-    REQUIRE(fs::create_directories(root / "tools" / "lan"));
+    REQUIRE(fs::create_directories(root / "openshim" / "tools" / "lan"));
     wchar_t self[32768]{}; REQUIRE(GetModuleFileNameW(nullptr, self, DWORD(std::size(self))) != 0);
-    const auto helper = root / "tools" / "lan" / "BZRServer.exe";
+    const auto helper = root / "openshim" / "tools" / "lan" / "BZRServer.exe";
     fs::copy_file(self, helper);
     // Steam hosting binds a loopback address and needs no LAN adapter.
     CHECK(!LAN::StartHost(root.wstring(), false, "192.168.1.5"));
@@ -90,7 +90,8 @@ int wmain(int argc, wchar_t** argv)
     if (!LAN::StartHost(root.wstring()) && LAN::Status().hostAddress.empty())
     {
         std::puts("SKIP: no active private IPv4 adapter for LAN host lifecycle test");
-        fs::remove(helper); fs::remove(helper.parent_path()); fs::remove(root / "tools"); fs::remove(root);
+        fs::remove(helper); fs::remove(helper.parent_path()); fs::remove(helper.parent_path().parent_path());
+        fs::remove(root / "openshim"); fs::remove(root);
         return 77;
     }
     REQUIRE(Wait(LAN::HostState::Running));
@@ -109,10 +110,18 @@ int wmain(int argc, wchar_t** argv)
     CHECK(LAN::Status().hostAddress == first);
     LAN::StopHost(); CHECK(Wait(LAN::HostState::Stopped));
     fs::remove(helper);
+    // An install not yet migrated still has tools/lan; it is found as a fallback.
+    const auto oldHelper = root / "tools" / "lan" / "BZRServer.exe";
+    REQUIRE(fs::create_directories(oldHelper.parent_path()));
+    fs::copy_file(self, oldHelper);
+    CHECK(LAN::StartHost(root.wstring())); CHECK(Wait(LAN::HostState::Running));
+    LAN::StopHost(); CHECK(Wait(LAN::HostState::Stopped));
+    fs::remove(oldHelper);
     CHECK(!LAN::StartHost(root.wstring()));
     CHECK(LAN::Status().hostMessage.find("helper missing") != std::string::npos);
     fs::remove(root / "openshim" / "lan" / "host.log");
-    fs::remove(root / "openshim" / "lan"); fs::remove(root / "openshim");
+    fs::remove(root / "openshim" / "lan"); fs::remove(root / "openshim" / "tools" / "lan");
+    fs::remove(root / "openshim" / "tools"); fs::remove(root / "openshim");
     fs::remove(root / "tools" / "lan"); fs::remove(root / "tools"); fs::remove(root);
     return OpenShimTest::ExitCode();
 }
