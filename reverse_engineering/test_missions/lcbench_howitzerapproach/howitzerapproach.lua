@@ -32,6 +32,8 @@ local whoChanges = 0
 local whoOther = 0
 local startPos = nil
 local maxMoved = 0.0
+local loadedAt = nil      -- elapsed when a save was loaded (not saved)
+local stopSent = false
 
 local kSampleStep = 8.0
 local kEndTime = 130.0
@@ -142,6 +144,15 @@ function Update(dt)
     end
 
     if stage == 2 then
+        -- StopAfterLoad (set by run_lchowapproach.ps1 -StopAfterLoad): order
+        -- Stop that many seconds after a load, so the attack state ends while
+        -- the approach is still driving.
+        local stopAfter = tonumber(StopAfterLoad)
+        if stopAfter and loadedAt and not stopSent and elapsed >= loadedAt + stopAfter then
+            stopSent = true
+            local ok, err = pcall(Stop, howitzer, 1)
+            print(string.format("[LCHOWA] T+%.2f STOP ok=%s ret=%s", elapsed, tostring(ok), tostring(err)))
+        end
         if elapsed >= nextHitCheck or not IsValid(enemy) then
             nextHitCheck = elapsed + 0.25
             local health = IsValid(enemy) and GetCurHealth(enemy) or 0
@@ -198,6 +209,44 @@ function Update(dt)
             stage = 3
         end
     end
+end
+
+-- Save/load (run_lchowapproach.ps1 -SaveLoad): the mission state survives a
+-- save made mid-approach, so the loaded run carries on from the same stage.
+function Save()
+    return {
+        elapsed = elapsed, stage = stage, nextPoll = nextPoll, nextHitCheck = nextHitCheck,
+        howitzer = howitzer, enemy = enemy, decoy = decoy,
+        enemyStartHealth = enemyStartHealth, decoyStartHealth = decoyStartHealth,
+        lastHealth = lastHealth, hits = hits, firstHitTime = firstHitTime,
+        startDist = startDist, minDist = minDist, minDecoyDist = minDecoyDist,
+        whoChanges = whoChanges, whoOther = whoOther, maxMoved = maxMoved,
+        startX = startPos and startPos.x or nil, startY = startPos and startPos.y or nil,
+        startZ = startPos and startPos.z or nil,
+    }
+end
+
+function Load(s)
+    if type(s) ~= "table" then
+        print("[LCHOWA] LOAD no state")
+        return
+    end
+    elapsed = s.elapsed or 0.0
+    stage = s.stage or 0
+    nextPoll = s.nextPoll or 0.0
+    nextHitCheck = s.nextHitCheck or 0.0
+    howitzer, enemy, decoy = s.howitzer, s.enemy, s.decoy
+    enemyStartHealth, decoyStartHealth = s.enemyStartHealth, s.decoyStartHealth
+    lastHealth, hits, firstHitTime = s.lastHealth, s.hits or 0, s.firstHitTime
+    startDist, minDist, minDecoyDist = s.startDist, s.minDist, s.minDecoyDist
+    whoChanges, whoOther, maxMoved = s.whoChanges or 0, s.whoOther or 0, s.maxMoved or 0.0
+    startPos = s.startX and SetVector(s.startX, s.startY, s.startZ) or nil
+    -- Command/target are re-logged on the first poll after the load.
+    lastCmd, lastWho = nil, nil
+    loadedAt = elapsed
+    local d = (IsValid(howitzer) and IsValid(enemy)) and Distance(howitzer, enemy) or -1.0
+    print(string.format("[LCHOWA] T+%.2f LOADED stage=%d howitzer=%s enemy=%s dist=%.1f moved=%.1f",
+        elapsed, stage, tostring(howitzer), tostring(enemy), d, maxMoved))
 end
 
 function CreateObject(h) end

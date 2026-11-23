@@ -31,6 +31,7 @@ beyond its shell arc and it says "out of range" and goes idle. It never moves:
 | ArtilleryProcess::DoAttack | 0x00475B30 | hooked on the ArtilleryFriend vtable only (row `ArtilleryProcessDoAttack`) |
 | EndAttack (shared empty fn) | 0x00417C60 | row `GameObjectDeselect`; hooked on the ArtilleryFriend vtable only |
 | UnitProcess::InitGoto | 0x005FB500 | row `UnitProcessInitGoto` |
+| GotoTask vtable | 0x0087A61C | row `GotoTaskVtable`; RTTI `.?AVGotoTask@@` checked at install; slot 6 done 0x004714B0, slot 7 execute 0x006002A0 |
 | Weapon ballistic reach | 0x0056AF20 | row `WeaponBallisticReach`; thiscall(ECX = weapon)(float* outTime, const VECTOR3* target, char highArc), ret 0xC, AL = reachable |
 | Howitzer craft vtable | 0x0087AD70 | slot 24 Craft::Deploy 0x004AE2B0, slot 25 Craft::Packup 0x004AE330 |
 | ArtilleryFriend ShouldSwitch | 0x00476F90 | vt+0xE8; not hooked, cited below |
@@ -96,6 +97,30 @@ Our task is deleted only while +0x38 still holds it, with vt[0](1) and
 state deletes our task, since the next InitGoto overwrites +0x38 without a
 delete (`FUN_005fb500` line 143).
 
+**Save and load.** The process save writes +0x38 as an object pointer named
+"task" (`FUN_005f9ab0`, the ArtilleryFriend slot-3 chain via `FUN_00582ea0`
+line 81, writes it at lines 205-207; the string at 0x00875DCC is `task`),
+and the load reads it back as "UnitProcess::task" (`FUN_005f9490` lines
+213-215, chained from `FUN_00582ca0` line 79). The process state at +0x1C
+comes back too (lines 81-105), and ArtilleryFriend's post-load
+(`FUN_004758a0` lines 13-17) re-arms the 30 s timeout for state 7. So a game
+saved mid-approach loads with the GotoTask at +0x38 and no track. Live run
+2026-11-23 (save during `drive`, then load): `foreign task 0x360DACD0
+vt=0x0087A61C at +0x38 state=7 next=0 deploy=0`.
+
+A loaded attack runs DoAttack on the first sim ticks after the mission
+reset. So only a process's first attack tick since the reset, and only within
+1 s (game time) of the first attack tick any process made, may adopt; a task
+stock leaves at +0x38 later in a mission is never taken. On that tick, with a
+new track, a task at +0x38 whose vtable is `GotoTaskVtable` is adopted: it becomes the track's task, with the live
+target as the re-path snapshot, and the approach carries on; every later
+delete (in reach, deployed, re-path, arrived, gate, EndAttack) goes through
+the same owned-task path and logs `deleted adopted task ... (<why>)`. Any
+other task type is left to stock as before (`foreign task ... ; stock
+attack`). `InitGoto` builds a `GoGet` instead of a GotoTask when the target
+is a building other than a 'CPOD' (`FUN_005fb500` lines 101-121); such a
+restored task is not adopted.
+
 **Keeping the ordered target.** In the attack state stock does not pick a new
 target by ordinary acquisition: `OffensiveProcess::DoSubTask` asks
 ShouldSwitch (vt+0xE8, `FUN_00583520` line 295), and ArtilleryFriend's
@@ -119,9 +144,8 @@ track owns the GotoTask at +0x38.
 
 ## Open questions (UNVERIFIED)
 
-- Save mid-approach: the save writes +0x38 (the GotoTask). After a load the
-  task is not ours; the hook logs "foreign task" and leaves the attack to
-  stock, so the task leaks until the process ends. Not tested.
+- A save made mid-approach against a building target restores a `GoGet`,
+  which is not adopted: it is left to stock and leaks as before. Not tested.
 - The muzzle matrix of a packed howitzer may sit lower than when deployed;
   the 5% margin is meant to absorb that. Not measured.
 - Enemy howitzers and the ArtilleryProcess base vtable stay stock by design.

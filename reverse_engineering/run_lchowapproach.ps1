@@ -10,6 +10,16 @@
 #
 #   pwsh -File reverse_engineering/run_lchowapproach.ps1              # feature on
 #   pwsh -File reverse_engineering/run_lchowapproach.ps1 -FeatureOff  # A/B: stock out of range
+#   pwsh -File reverse_engineering/run_lchowapproach.ps1 -SaveLoad    # save mid-drive, load, resume
+#
+# -SaveLoad runs two launches. The first lets OpenShim's autosave write
+# Save\auto.sav while the approach is driving (InitialDelaySeconds = 10), copies
+# it to Save\lchowa_saveload.sav and stops; the second loads that copy (the
+# engine's LoadGame path, positional argument) with the autosave off and runs
+# -RunSeconds. The overlay's Save/Load keeps the mission state across the
+# load. Save\auto* files are backed up and restored, and the copy removed.
+# -StopAfterLoad N orders Stop N s after the load, ending the attack state
+# while the approach still drives (exercises EndAttack on a restored task).
 #
 # Runs in the background (never takes the foreground): RunInBackground is set
 # to 1 for the run. Takes bzr_livetest.lock in the game root and refuses if
@@ -20,6 +30,11 @@ param(
     [ValidateRange(0, 300)]
     [int]$RunSeconds = 170,   # ~18 s of loading + the 130 s script
     [switch]$FeatureOff,
+    [switch]$SaveLoad,
+    [ValidateRange(0, 60)]
+    [int]$StopAfterLoad = 0,  # -SaveLoad only: order Stop this many seconds after the load (0 = never)
+    [ValidateRange(15, 120)]
+    [int]$SaveTimeoutSeconds = 60,
     [ValidateRange(50, 1200)]
     [int]$EnemyGap = 800,
     [string]$OutputRoot = ""
@@ -40,6 +55,11 @@ $watchdog = Join-Path $env:TEMP "bzr_foreground_watchdog.log"
 $watchdogStart = if (Test-Path -LiteralPath $watchdog) { @(Get-Content -LiteralPath $watchdog).Count } else { 0 }
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $tag = if ($FeatureOff) { "off" } else { "on" }
+if ($SaveLoad) { $tag += "_saveload" }
+if ($StopAfterLoad -gt 0) {
+    if (-not $SaveLoad) { throw "-StopAfterLoad needs -SaveLoad" }
+    $tag += "_stop"
+}
 if (-not $OutputRoot) { $OutputRoot = Join-Path $GameRoot "openshim_test_results\lchowapproach_${tag}_$stamp" }
 
 if (-not (Test-Path -LiteralPath $gameExe)) { throw "Game not found: $gameExe" }
@@ -59,6 +79,40 @@ $bytes = [Text.Encoding]::UTF8.GetBytes("run_lchowapproach.ps1 pid=$PID $(Get-Da
 $stream.Write($bytes, 0, $bytes.Length)
 $stream.Dispose()
 $process = $null
+$saveRoot = Join-Path $GameRoot "Save"
+$saveCopy = Join-Path $saveRoot "lchowa_saveload.sav"
+$saveBackup = Join-Path $OutputRoot "save.orig"
+
+# The game holds its logs open for writing.
+function Read-SharedText([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return "" }
+    $fs = [IO.FileStream]::new($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    try { return [IO.StreamReader]::new($fs).ReadToEnd() } finally { $fs.Dispose() }
+}
+function Set-AutoSaveIni([int]$Enabled) {
+    $t = [IO.File]::ReadAllText($ini)
+    $values = [ordered]@{ Enabled = $Enabled; InitialDelaySeconds = 10; IntervalSeconds = 3600; BackupExisting = 0; RespectExternalAutoSave = 0 }
+    if ($t -notmatch '(?m)^\[AutoSave\]\s*$') { $t = $t.TrimEnd() + "`r`n`r`n[AutoSave]`r`n" }
+    foreach ($k in $values.Keys) {
+        $section = [regex]::Match($t, '(?ms)^\[AutoSave\]\s*$.*?(?=^\[|\z)')
+        $body = $section.Value
+        $line = "$k = $($values[$k])"
+        if ($body -match "(?m)^\s*$k\s*=") { $body = [regex]::Replace($body, "(?m)^\s*$k\s*=.*$", $line) }
+        else { $body = [regex]::Replace($body, '(?m)^\[AutoSave\]\s*$', "[AutoSave]`r`n$line", 1) }
+        $t = $t.Substring(0, $section.Index) + $body + $t.Substring($section.Index + $section.Length)
+    }
+    [IO.File]::WriteAllText($ini, $t)
+}
+function Copy-RunLogs([string]$Suffix) {
+    foreach ($name in @("BZLogger.txt", "openshim.log")) {
+        $source = Join-Path $logRoot $name
+        if (Test-Path -LiteralPath $source) {
+            $leaf = [IO.Path]::GetFileNameWithoutExtension($name) + $Suffix + [IO.Path]::GetExtension($name)
+            Copy-Item -LiteralPath $source -Destination (Join-Path $OutputRoot $leaf) -Force
+        }
+    }
+}
 
 $live = Join-Path $missionRoot "lcbench.lua"
 $had = Test-Path -LiteralPath $live
@@ -67,8 +121,16 @@ try {
     New-Item -ItemType Directory -Path $OutputRoot -Force | Out-Null
     if ($had) { Copy-Item -LiteralPath $live -Destination (Join-Path $OutputRoot "lcbench.lua.orig") -Force }
     Copy-Item -LiteralPath $ini -Destination $iniBackup -Force
+    if ($SaveLoad) {
+        New-Item -ItemType Directory -Path $saveBackup -Force | Out-Null
+        foreach ($f in @(Get-ChildItem -LiteralPath $saveRoot -File -Filter "auto*")) {
+            Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $saveBackup $f.Name) -Force
+        }
+    }
 
-    [IO.File]::WriteAllText($live, "EnemyGap = $EnemyGap`n" + [IO.File]::ReadAllText($overlay))
+    $prefix = "EnemyGap = $EnemyGap`n"
+    if ($StopAfterLoad -gt 0) { $prefix += "StopAfterLoad = $StopAfterLoad`n" }
+    [IO.File]::WriteAllText($live, $prefix + [IO.File]::ReadAllText($overlay))
     $text = [IO.File]::ReadAllText($ini)
     $text = [regex]::Replace($text, '(?m)^(\s*RunInBackground\s*=\s*)0\b', '${1}1')
     $value = if ($FeatureOff) { '0' } else { '1' }
@@ -83,7 +145,44 @@ try {
     $dll = Join-Path $GameRoot "plugins\openshim.dll"
     Write-Host "openshim.dll SHA256: $((Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash)"
     Assert-BZRSafeToLaunch   # refuses unless the game cannot steal foreground/mouse; starts the watchdog
-    $process = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
+    if ($SaveLoad) {
+        # Launch 1: autosave mid-drive, then stop.
+        Set-AutoSaveIni 1
+        $process = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
+        $deadline = (Get-Date).AddSeconds(20 + $SaveTimeoutSeconds)
+        $saved = $false
+        while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $shim = Read-SharedText (Join-Path $logRoot "openshim.log")
+            if ($shim -match "\[pid:$($process.Id) [^\]]*\] \[INFO\] \[autosave\] Saved .*auto\.sav") { $saved = $true; break }
+        }
+        if ($saved) { Copy-Item -LiteralPath (Join-Path $saveRoot "auto.sav") -Destination $saveCopy -Force }
+        Start-Sleep -Seconds 2
+        if (-not $process.HasExited) { Stop-BZRGame -Id $process.Id }
+        $process.WaitForExit(30000) | Out-Null
+        Copy-RunLogs ".save"
+        if (-not $saved) { throw "FIXTURE: the autosave did not land within $SaveTimeoutSeconds s of the mission" }
+        Copy-Item -LiteralPath $saveCopy -Destination (Join-Path $OutputRoot "lchowa_saveload.sav") -Force
+        $phaseLines = @([regex]::Matches((Get-Content -LiteralPath (Join-Path $OutputRoot "openshim.save.log") -Raw),
+            '(?m)^.*(\[HOWAPPR\] \w+ -> \w+|\[autosave\] Saved).*$') | ForEach-Object { $_.Value.Trim() } |
+            Where-Object { $_ -match "\[pid:$($process.Id) " })
+        $phaseLines | ForEach-Object { Write-Host "  save run: $_" }
+        # Precondition: the save landed while the approach was driving.
+        $atSave = ""
+        foreach ($l in $phaseLines) {
+            if ($l -match '\[autosave\] Saved') { break }
+            if ($l -match '-> (\w+) process') { $atSave = $Matches[1] }
+        }
+        Write-Host "Phase when the save landed: $atSave"
+        if ($atSave -ne "drive" -and -not $FeatureOff) { Write-Warning "FIXTURE: the save did not land mid-drive (phase '$atSave'); results are not evidence." }
+
+        # Launch 2: load that save, autosave off.
+        Set-AutoSaveIni 0
+        Write-Host "openshim.dll SHA256: $((Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash)"
+        $process = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "Save\lchowa_saveload.sav" -WorkingDirectory $GameRoot -PassThru
+    } else {
+        $process = Start-BZRGameProcess -FilePath $gameExe -ArgumentList "lcbench.bzn" -WorkingDirectory $GameRoot -PassThru
+    }
     if ($RunSeconds -gt 0) {
         if (-not $process.WaitForExit($RunSeconds * 1000)) { Stop-BZRGame -Id $process.Id }
     } else {
@@ -92,7 +191,20 @@ try {
 } finally {
     # Only the PID this run started.
     if ($process -and -not $process.HasExited) { Stop-BZRGame -Id $process.Id }
+    # The game may still be writing auto.sav or the ini while it exits.
+    if ($process) { $process.WaitForExit(30000) | Out-Null }
     if (Test-Path -LiteralPath $iniBackup) { Copy-Item -LiteralPath $iniBackup -Destination $ini -Force }
+    if ($SaveLoad -and (Test-Path -LiteralPath $saveBackup)) {
+        try {
+            foreach ($f in @(Get-ChildItem -LiteralPath $saveRoot -File -Filter "auto*")) {
+                if (-not (Test-Path -LiteralPath (Join-Path $saveBackup $f.Name))) { Remove-Item -LiteralPath $f.FullName -Force }
+            }
+            foreach ($f in @(Get-ChildItem -LiteralPath $saveBackup -File)) {
+                Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $saveRoot $f.Name) -Force
+            }
+            if (Test-Path -LiteralPath $saveCopy) { Remove-Item -LiteralPath $saveCopy -Force }
+        } catch { Write-Warning "Save restore: $_" }
+    }
     if ($had) { Copy-Item -LiteralPath (Join-Path $OutputRoot "lcbench.lua.orig") -Destination $live -Force }
     elseif (Test-Path -LiteralPath $live) { Remove-Item -LiteralPath $live -Force }
     foreach ($name in @("BZLogger.txt", "openshim.log")) {
@@ -106,10 +218,15 @@ if ((Test-Path -LiteralPath $watchdog) -and
     (@(Get-Content -LiteralPath $watchdog | Select-Object -Skip $watchdogStart) -match "FOREGROUND-STOLEN").Count -gt 0) {
     Write-Warning "FOREGROUND-STOLEN in $watchdog - stop launching and report."
 }
-# Fixture check: the run must have loaded the lcbench mission.
-$bzLog = Join-Path $OutputRoot "BZLogger.txt"
+# Fixture check: the run must have loaded the lcbench mission (for -SaveLoad:
+# the save launch loaded it and the load launch ran the overlay's Load).
+$bzLog = Join-Path $OutputRoot $(if ($SaveLoad) { "BZLogger.save.txt" } else { "BZLogger.txt" })
 if (-not ((Test-Path -LiteralPath $bzLog) -and
         (Select-String -LiteralPath $bzLog -SimpleMatch "addon\lcbench\lcbench.bzn" -Quiet))) {
-    Write-Warning "FIXTURE: BZLogger.txt does not show addon\lcbench\lcbench.bzn loading; results are not evidence."
+    Write-Warning "FIXTURE: $bzLog does not show addon\lcbench\lcbench.bzn loading; results are not evidence."
+}
+if ($SaveLoad -and -not (Select-String -LiteralPath (Join-Path $OutputRoot "BZLogger.txt") -SimpleMatch "[LCHOWA]" -Quiet -ErrorAction SilentlyContinue |
+        Where-Object { $_ }) ) {
+    Write-Warning "FIXTURE: the load launch shows no [LCHOWA] lines; results are not evidence."
 }
 Write-Host "Logs: $OutputRoot (look for [LCHOWA] in BZLogger.txt and [HOWAPPR] in openshim.log)"

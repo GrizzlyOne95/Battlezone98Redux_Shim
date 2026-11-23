@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace BZROpenShim::Hooks
 {
@@ -106,6 +107,10 @@ namespace BZROpenShim::Hooks
         uint32_t g_CraftPackupAddr = 0;
         uint32_t g_GetObjAddr = 0;
         uint32_t g_GetTimeAddr = 0;
+        uint32_t g_GotoTaskVtableAddr = 0;
+        // Adopting a GotoTask restored by a save load needs the vtable row to
+        // pass its RTTI check; without it such a task is left to stock.
+        bool g_AdoptGotoTask = false;
 
         FnProcessVoid g_StockDoAttack = nullptr;
         FnProcessVoid g_StockEndAttack = nullptr;
@@ -159,8 +164,17 @@ namespace BZROpenShim::Hooks
             Phase phase = Phase::None;
             float lastTime = -1.0e9f;
             bool suppressLogged = false;
+            bool adopted = false;          // task came from a save load, not our InitGoto
         };
         std::unordered_map<uintptr_t, ApproachTrack> g_Tracks;
+        // Adoption window: a loaded attack runs DoAttack on the first sim
+        // ticks after the mission reset, so adoption is offered only to a
+        // process's first attack tick, and only within kAdoptWindowSeconds of
+        // the first attack tick any process made since the reset.
+        constexpr float kAdoptWindowSeconds = 1.0f;
+        std::unordered_set<uintptr_t> g_AdoptOffered;
+        bool g_SawAttackTick = false;
+        float g_FirstAttackTickAt = 0.0f;
 
         // ---- small fault-safe helpers (no C++ objects, so __try is legal) ----
 
@@ -554,25 +568,39 @@ namespace BZROpenShim::Hooks
                     static_cast<uint32_t>(key), GateName(gate));
         }
 
+        // Deletes the track's task (when +0x38 still holds it) and says so
+        // once for a task adopted from a save load.
+        void ReleaseTrackTask(void* process, ApproachTrack& track, const wchar_t* why)
+        {
+            const bool owned = ReadPtr(process, kProcessTaskOffset) == track.task;
+            if (track.adopted && TakeLogBudget())
+                Log(L"[HOWAPPR] process=0x%08X %ls adopted task 0x%08X (%ls)\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(process)),
+                    owned ? L"deleted" : L"dropped (no longer at +0x38)",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(track.task)), why);
+            DeleteOwnedTask(process, track.task);
+            track.task = nullptr;
+            track.adopted = false;
+        }
+
         // Ends our part of the approach: our task goes, the drive controls
         // go back to zero.
-        void StopDriving(void* process, void* craft, ApproachTrack& track)
+        void StopDriving(void* process, void* craft, ApproachTrack& track, const wchar_t* why)
         {
             if (!track.task)
                 return;
-            DeleteOwnedTask(process, track.task);
-            track.task = nullptr;
+            ReleaseTrackTask(process, track, why);
             ZeroDriveControls(craft);
         }
 
-        void DropTrack(void* process)
+        void DropTrack(void* process, const wchar_t* why)
         {
             auto it = g_Tracks.find(reinterpret_cast<uintptr_t>(process));
             if (it == g_Tracks.end())
                 return;
             if (it->second.task)
             {
-                DeleteOwnedTask(process, it->second.task);
+                ReleaseTrackTask(process, it->second, why);
                 ZeroDriveControls(ReadPtr(process, kProcessCraftOffset));
             }
             g_Tracks.erase(it);
@@ -588,7 +616,7 @@ namespace BZROpenShim::Hooks
             {
                 // Target dead or order changed: stock DoAttack clears the
                 // command and drops to idle (0x00475B30 lines 385-401).
-                DropTrack(process);
+                DropTrack(process, GateName(gate));
                 return false;
             }
 
@@ -608,23 +636,63 @@ namespace BZROpenShim::Hooks
                 }
             }
             ApproachTrack& track = g_Tracks[key];
+            // New this tick: no entry, a stale one (a load turns the clock
+            // back), or a new target.
+            bool freshTrack = false;
             if (track.target != ctx.target || now < track.lastTime ||
                 now - track.lastTime > kTrackMaxAgeSeconds)
             {
                 if (track.task)
-                    DeleteOwnedTask(process, track.task);
+                    ReleaseTrackTask(process, track, L"new attack");
                 track = ApproachTrack();
                 track.target = ctx.target;
+                freshTrack = true;
             }
             track.lastTime = now;
 
             void* const liveTask = ReadPtr(process, kProcessTaskOffset);
             if (track.task && liveTask != track.task)
+            {
                 track.task = nullptr; // replaced by someone else; not ours to delete
+                track.adopted = false;
+            }
+
+            // A save made mid-approach writes the GotoTask at +0x38
+            // (UnitProcess save 0x005F9AB0 line 207, load 0x005F9490 line
+            // 215) but not our track. A loaded attack ticks on the first sim
+            // tick after the mission reset, with no track; a stock GotoTask
+            // there is the one we built, so it is ours again and EndAttack
+            // deletes it. Only that first tick per process, inside the
+            // window, may adopt, so a task stock leaves at +0x38 later in a
+            // mission is never taken.
+            // Any other task type is left to stock below.
+            if (!g_SawAttackTick)
+            {
+                g_SawAttackTick = true;
+                g_FirstAttackTickAt = now;
+            }
+            const bool inAdoptWindow = now >= g_FirstAttackTickAt &&
+                now - g_FirstAttackTickAt <= kAdoptWindowSeconds;
+            const bool firstSinceReset = inAdoptWindow && g_AdoptOffered.insert(key).second;
+            if (firstSinceReset && freshTrack && !track.task && liveTask && g_AdoptGotoTask &&
+                reinterpret_cast<uintptr_t>(ReadPtr(liveTask, 0)) == g_GotoTaskVtableAddr)
+            {
+                track.task = liveTask;
+                track.adopted = true;
+                track.taskTargetPos[0] = ctx.targetPos[0];
+                track.taskTargetPos[1] = ctx.targetPos[1];
+                track.taskTargetPos[2] = ctx.targetPos[2];
+                track.taskCreatedAt = now;
+                if (TakeLogBudget())
+                    Log(L"[HOWAPPR] process=0x%08X adopted GotoTask 0x%08X at +0x38 (restored by a load) dist=%.1f deploy=%d\n",
+                        static_cast<uint32_t>(key),
+                        static_cast<uint32_t>(reinterpret_cast<uintptr_t>(liveTask)),
+                        HorizontalDistance(ctx.craftPos, ctx.targetPos), ctx.deployState);
+            }
 
             if (ctx.deployState == kDeployStateDeploying || ctx.deployState == kDeployStateDeployed)
             {
-                StopDriving(process, ctx.craft, track);
+                StopDriving(process, ctx.craft, track, L"deployed");
                 if (ctx.reachHold)
                 {
                     track.everInReach = true;
@@ -658,7 +726,7 @@ namespace BZROpenShim::Hooks
 
             if (ctx.reachDeploy)
             {
-                StopDriving(process, ctx.craft, track);
+                StopDriving(process, ctx.craft, track, L"in reach");
                 RefreshAttackTimeout(process, now);
                 if (ctx.deployState == kDeployStateUndeployed)
                 {
@@ -686,13 +754,19 @@ namespace BZROpenShim::Hooks
                 {
                     // A task we did not make (e.g. restored by a save load):
                     // leave the attack to stock.
+                    int curState = -1;
+                    int nextState = -1;
+                    ReadInt(process, 0x1C, curState);
+                    ReadInt(process, 0x20, nextState);
                     if (TakeLogBudget())
-                        Log(L"[HOWAPPR] process=0x%08X foreign task 0x%08X at +0x38; stock attack\n",
+                        Log(L"[HOWAPPR] process=0x%08X foreign task 0x%08X vt=0x%08X at +0x38 state=%d next=%d deploy=%d; stock attack\n",
                             static_cast<uint32_t>(key),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(liveTask)));
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(liveTask)),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(ReadPtr(liveTask, 0))),
+                            curState, nextState, ctx.deployState);
                     return false;
                 }
-                StopDriving(process, ctx.craft, track);
+                StopDriving(process, ctx.craft, track, L"re-path");
                 RequestPackup(ctx.craft);
                 // UnitProcess::InitGoto 0x005FB500 builds a GotoTask to the
                 // live target at +0x3C (lines 101-143) and stores it at +0x38.
@@ -711,7 +785,7 @@ namespace BZROpenShim::Hooks
             if (step != 0)
             {
                 // Arrived (or faulted) and still out of reach: stock decides.
-                StopDriving(process, ctx.craft, track);
+                StopDriving(process, ctx.craft, track, L"arrived");
                 SetPhase(track, Phase::Arrived, process, ctx);
                 return false;
             }
@@ -732,7 +806,7 @@ namespace BZROpenShim::Hooks
             // Leaving the attack state: our GotoTask must not outlive it
             // (the next InitGoto would overwrite +0x38 without deleting).
             if (!g_Tracks.empty())
-                DropTrack(process);
+                DropTrack(process, L"EndAttack");
             g_StockEndAttack(process);
         }
 
@@ -836,6 +910,7 @@ namespace BZROpenShim::Hooks
             { "CraftPackup", &g_CraftPackupAddr },
             { "GameObjectHandleGetObj", &g_GetObjAddr },
             { "GetGameTime", &g_GetTimeAddr },
+            { "GotoTaskVtable", &g_GotoTaskVtableAddr },
         };
         if (!HookEngine::BindEngineRows("Howitzer attack approach", rows))
         {
@@ -851,6 +926,10 @@ namespace BZROpenShim::Hooks
         g_FnCraftPackup = reinterpret_cast<FnCraftVoid>(g_CraftPackupAddr);
         g_FnGetObj = reinterpret_cast<FnGetObj>(g_GetObjAddr);
         g_FnGetTime = reinterpret_cast<FnGetTime>(g_GetTimeAddr);
+        g_AdoptGotoTask = VtableTypeNameMatches(g_GotoTaskVtableAddr, ".?AVGotoTask@@");
+        if (!g_AdoptGotoTask)
+            Log(L"[HOWAPPR] GotoTask RTTI mismatch vtable=0x%08X; a task restored by a load is left to stock\n",
+                g_GotoTaskVtableAddr);
 
         const SlotPlan plans[] = {
             { L"ArtilleryFriend::EndAttack", g_FriendVtableAddr, ".?AVArtilleryFriend@@",
@@ -897,6 +976,8 @@ namespace BZROpenShim::Hooks
         // Mission end: the processes (and their tasks) are gone with the world.
         g_Tracks.clear();
         g_LastGates.clear();
+        g_AdoptOffered.clear();
+        g_SawAttackTick = false;
         g_LogBudget = 96;
         RefreshHowitzerAttackApproachState();
     }
