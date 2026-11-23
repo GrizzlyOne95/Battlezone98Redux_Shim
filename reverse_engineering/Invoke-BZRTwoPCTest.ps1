@@ -45,11 +45,9 @@
 .PARAMETER Pc2Suite
     Game folder copied to PC 2 with -DeploySuite. Default: PC 1's Steam root (after -Pc1Build).
 .PARAMETER ContentDir
-    Optional folder (probe addon, CR co-op fix addon or mod) deployed to BOTH PCs under
-    <game>\<ContentDest>, backing up anything already there and restoring it after. PC 2 receives it
-    through -Do as base64 chunks (limit 200 KB) until bzr-friend-test.ps1 gains a native switch.
-.PARAMETER ContentDest
-    Path under the game root for -ContentDir. Default: addon\<leaf of ContentDir>.
+    Optional folder (probe addon or CR co-op fix addon) deployed to BOTH PCs as <game>\addon\<leaf>,
+    backing up anything already there and restoring it after. PC 2 uses bzr-friend-test.ps1
+    -DeployAddon; its -Restore/-Remove undo it.
 .PARAMETER Map
     Map file written to PC 1's multi.ini ('map = <Map>'). Default: leave multi.ini untouched.
     When given, the 'Launching Network Game' log line must name the same map or the run is FIXTURE.
@@ -69,7 +67,6 @@ param(
     [string]$Pc1Build = '',
     [string]$Pc2Suite = '',
     [string]$ContentDir = '',
-    [string]$ContentDest = '',
     [string]$Map = '',
     [string]$DoneRegex = '',
     [string]$GameRoot = 'C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux',
@@ -116,10 +113,8 @@ $contentLeaf = ''
 if ($ContentDir) {
     if (-not (Test-Path -LiteralPath $ContentDir -PathType Container)) { throw "-ContentDir not found: $ContentDir" }
     $ContentDir = (Resolve-Path -LiteralPath $ContentDir).Path
-    if (-not $ContentDest) { $ContentDest = 'addon\' + (Split-Path $ContentDir -Leaf) }
-    if ([IO.Path]::IsPathRooted($ContentDest) -or $ContentDest -match '(^|[\\/])\.\.([\\/]|$)') { throw "-ContentDest must be a relative path under the game root: $ContentDest" }
-    $ContentDest = $ContentDest.TrimEnd('\', '/')
-    $contentLeaf = Split-Path $ContentDest -Leaf
+    $contentLeaf = Split-Path $ContentDir -Leaf
+    $ContentDest = 'addon\' + $contentLeaf  # bzr-friend-test.ps1 -DeployAddon always uses addon\<leaf>
 }
 if ($Pc1Build) {
     foreach ($f in 'bin\Release\plugins\openshim.dll', 'scripts\patches.json') { if (-not (Test-Path -LiteralPath (Join-Path $Pc1Build $f))) { throw "-Pc1Build missing $f under $Pc1Build" } }
@@ -144,8 +139,9 @@ function Invoke-Pc2 {
     try { Add-Content -LiteralPath (Join-Path $OutDir 'pc2_driver.log') -Value ("--- $(Get-Date -Format HH:mm:ss) $Label`r`n$o") } catch { }
     $o
 }
-function Invoke-Pc2Do([string]$Cmd, [int]$Wait = 15, [string]$Label = 'do') {
-    $o = Invoke-Pc2 @{ Do = $Cmd; Wait = $Wait } $Label
+function Invoke-Pc2Do([string]$Cmd, [int]$Wait = 15, [string]$Label = 'do', [int]$Lines = 0) {
+    $a = @{ Do = $Cmd; Wait = $Wait }; if ($Lines -gt 0) { $a['Lines'] = $Lines }
+    $o = Invoke-Pc2 $a $Label
     if ($o -match 'not finished after') { Say "PC2 -Do '$Label' did not finish in $Wait s" }
     $o
 }
@@ -170,48 +166,19 @@ function Get-Pc2LogHits([int]$ProcId, [string[]]$Patterns, [int]$TailLines = 0, 
     'if(-not $l){"PC2NOLOG"}else{ $fs=[IO.File]::Open($l.FullName,"Open","Read","ReadWrite"); $t=(New-Object IO.StreamReader($fs)).ReadToEnd(); $fs.Dispose(); $i=0; ' +
     'foreach($p in ' + $pl + '){ $m=[regex]::Matches($t,$p); if($m.Count){$v=$m[$m.Count-1].Value; if($v.Length -gt 170){$v=$v.Substring(0,170)}; "PC2HIT$i=$v"}else{"PC2MISS$i"}; $i++ } ' +
     $(if ($TailLines -gt 0) { '$t -split "`n" | select -Last ' + $TailLines + ' | % { "PC2T=" + $_.Trim() }' } else { '' }) + ' }'
-    $o = Invoke-Pc2Do $cmd 20 $Label
+    $o = Invoke-Pc2Do $cmd 20 $Label $(if ($TailLines -gt 0) { $Patterns.Count + $TailLines + 4 } else { 0 })
     $res = @{ Raw = $o; NoLog = ($o -match 'PC2NOLOG'); Hits = @{} }
     for ($i = 0; $i -lt $Patterns.Count; $i++) { $m = [regex]::Match($o, "PC2HIT$i=([^\r\n]*)"); if ($m.Success) { $res.Hits[$i] = $m.Groups[1].Value } }
     $res
 }
-function Send-Pc2Content([string]$Dir, [string]$Dest) {
-    $files = @(Get-ChildItem -LiteralPath $Dir -File -Recurse)
-    $total = ($files | Measure-Object Length -Sum).Sum
-    if ($total -gt 200KB) { throw "FIXTURE: -ContentDir is $([int]($total/1KB)) KB; the -Do route is limited to 200 KB (ask for the native deploy switch)" }
-    $destFull = Join-Path $pc2G $Dest
-    $leafBak = $contentLeaf + '.bzrtest-bak'
-    $pre = '$d=' + (Q $destFull) + '; $b=Join-Path (Split-Path $d) ' + (Q $leafBak) + '; if(Test-Path $b){"PC2BAKEXISTS"}elseif(Test-Path $d){Rename-Item $d ' + (Q $leafBak) + '; "PC2BACKED"}else{"PC2NEW"}; New-Item -ItemType Directory $d -Force | Out-Null'
-    $script:pc2ContentDeployed = $true
-    $o = Invoke-Pc2Do $pre 15 'content-prep'
-    if ($o -match 'PC2BAKEXISTS') { $script:pc2ContentDeployed = $false; throw "FIXTURE: PC 2 already has a $leafBak next to the target; resolve it by hand" }
-    if ($o -notmatch 'PC2BACKED|PC2NEW') { throw "FIXTURE: PC 2 content prep gave no marker: $o" }
-    $script:pc2ContentBacked = ($o -match 'PC2BACKED')
-    foreach ($f in $files) {
-        $rel = $f.FullName.Substring($Dir.Length).TrimStart('\')
-        $remote = Join-Path $destFull $rel
-        $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($f.FullName))
-        $chunks = [Math]::Max(1, [int][Math]::Ceiling($b64.Length / 24000.0))
-        for ($c = 0; $c -lt $chunks; $c++) {
-            $piece = $b64.Substring($c * 24000, [Math]::Min(24000, $b64.Length - $c * 24000))
-            $cmd = '$r=' + (Q $remote) + '; $t=$r+".b64"; '
-            if ($c -eq 0) { $cmd += 'New-Item -ItemType Directory (Split-Path $r) -Force | Out-Null; Set-Content $t "" -NoNewline; ' }
-            $cmd += '[IO.File]::AppendAllText($t,' + (Q $piece) + '); '
-            if ($c -eq $chunks - 1) { $cmd += '[IO.File]::WriteAllBytes($r,[Convert]::FromBase64String([IO.File]::ReadAllText($t))); Remove-Item $t; "PC2SUM=" + (Get-FileHash $r).Hash.Substring(0,8)' }
-            $o = Invoke-Pc2Do $cmd 20 "content $rel $($c + 1)/$chunks"
-        }
-        $want = (Get-FileHash $f.FullName).Hash.Substring(0, 8)
-        if ($o -notmatch "PC2SUM=$want") { throw "FIXTURE: PC 2 copy of $rel does not match ($want expected)" }
-    }
-    Say "PC 2 content deployed: $($files.Count) file(s) -> $destFull (backup=$($script:pc2ContentBacked))"
-}
-function Restore-Pc2Content {
-    if (-not $script:pc2ContentDeployed) { return }
-    $destFull = Join-Path $pc2G $ContentDest
-    $cmd = '$d=' + (Q $destFull) + '; $b=Join-Path (Split-Path $d) ' + (Q ($contentLeaf + '.bzrtest-bak')) + '; if(Test-Path $d){Remove-Item $d -Recurse -Force}; if(Test-Path $b){Rename-Item $b ' + (Q $contentLeaf) + '}; "PC2CONTENT target=$(Test-Path $d) bak=$(Test-Path $b)"'
-    $o = Invoke-Pc2Do $cmd 20 'content-restore'
-    Say "PC 2 content restore: $(([regex]::Match($o, 'PC2CONTENT[^\r\n]*')).Value)"
-    $script:pc2ContentDeployed = $false
+function Send-Pc2Content([string]$Dir) {
+    # bzr-friend-test.ps1 -DeployAddon copies to addon\<leaf>, moves an existing copy to C:\BZRCoop\addon-bak,
+    # and -Restore/-Remove delete ours and put the original back.
+    $script:pc2Deployed = $true
+    $o = Invoke-Pc2 @{ DeployAddon = $Dir } 'deploy-addon'
+    if ($o -match 'PC2-ERROR') { throw "FIXTURE: PC 2 -DeployAddon failed: $($o.Trim())" }
+    if ($o -notmatch ('addons=[^\r\n]*' + [regex]::Escape($contentLeaf))) { throw "FIXTURE: PC 2 -Status does not list addon $contentLeaf after -DeployAddon" }
+    Say "PC 2 addon deployed: addon\$contentLeaf"
 }
 function Stop-Pc2Game([int]$ProcId) {
     if ($ProcId -le 0) { return }
@@ -232,7 +199,6 @@ if ($LASTEXITCODE -ne 0) { Say 'VERDICT: FIXTURE - live-test lock wait timed out
 
 $lockTaken = $false; $pids = @(); $pc2Pid = 0; $multiSaved = $false; $suiteSaved = $false; $offDone = $false
 $contentDeployed1 = $false; $contentBacked1 = $false; $pc2Setup = $false; $pc2Deployed = $false
-$script:pc2ContentDeployed = $false; $script:pc2ContentBacked = $false
 $verdict = 'FIXTURE'; $reason = 'did not finish'
 $suiteBak = Join-Path $OutDir 'suite_bak'; $multiBak = Join-Path $OutDir 'multi.ini.bak'
 $content1 = if ($ContentDir) { Join-Path $GameRoot $ContentDest } else { '' }
@@ -340,7 +306,7 @@ try {
     if (-not $stock) {
         $null = Invoke-Pc2 @{ DeploySuite = $Pc2Suite } 'deploy-suite'; $pc2Deployed = $true
     }
-    if ($ContentDir) { Send-Pc2Content $ContentDir $ContentDest }
+    if ($ContentDir) { Send-Pc2Content $ContentDir }
 
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         Say "=== attempt $attempt of $Attempts ==="
@@ -480,7 +446,7 @@ try {
             }
             # PC 2 log read-back BEFORE any teardown
             $pats = @('Sync Start Complete', 'Game Simulation Initialized[^\r\n]*Playing', 'Start Sync Failure', 'Exiting Game', 'Launching Network Game')
-            $r2 = Get-Pc2LogHits $pc2Pid $pats 12 'pc2-keylines'
+            $r2 = Get-Pc2LogHits $pc2Pid $pats 40 'pc2-keylines'
             Set-Content -LiteralPath (Join-Path $OutDir "pc2_keylines_$ap.txt") -Value $r2.Raw
             Say "PC1 judge: $(($h.GetEnumerator() | Sort-Object Name | ForEach-Object { '{0}={1}' -f $_.Name, $_.Value }) -join ' ')"
             Say "PC2 judge: nolog=$($r2.NoLog) syncOk=$($r2.Hits.ContainsKey(0)) playing=$($r2.Hits.ContainsKey(1)) syncFail=$($r2.Hits.ContainsKey(2)) exited=$($r2.Hits.ContainsKey(3))"
@@ -516,7 +482,7 @@ try {
             foreach ($l in 'BZLogger.txt', 'BZChatLog.txt', 'logs\BZLogger.txt', 'logs\openshim.log') {
                 try { $src = Join-Path $GameRoot $l; if ((Test-Path $src) -and (Get-Item $src).LastWriteTime -gt $script:t0) { Copy-Item $src (Join-Path $OutDir ("host_${ap}_" + ($l -replace '\\', '_'))) -Force } } catch { }
             }
-            try { if ($pc2Pid -gt 0) { $r3 = Get-Pc2LogHits $pc2Pid @('Exiting Game') 18 'pc2-tail'; Set-Content -LiteralPath (Join-Path $OutDir "pc2_tail_$ap.txt") -Value $r3.Raw } } catch { }
+            try { if ($pc2Pid -gt 0) { $r3 = Get-Pc2LogHits $pc2Pid @('Exiting Game') 40 'pc2-tail'; Set-Content -LiteralPath (Join-Path $OutDir "pc2_tail_$ap.txt") -Value $r3.Raw } } catch { }
             # the updater swaps PC 1 DLLs on exit: put every file back before the next attempt
             foreach ($f in $suite) { try { if (-not $suiteHash.ContainsKey($f)) { continue }; if ($offDone -and $f -eq 'winmm.dll') { continue }; $dst = Join-Path $GameRoot $f; $want = if ($hashes0.ContainsKey($f)) { $hashes0[$f] } else { $suiteHash[$f] }; $bk = if ($hashes0.ContainsKey($f)) { $buildBak } else { $suiteBak }; if ((Get-FileHash $dst).Hash -ne $want) { Copy-Item -LiteralPath (Join-Path $bk ($f -replace '\\', '_')) -Destination $dst -Force; Say "restored $f" } } catch { Say "suite restore $f : $_" } }
             Say "attempt $attempt result: $verdict - $reason"
@@ -531,7 +497,6 @@ catch {
 }
 finally {
     # stuartserver: content, then suite/setup, never Steam
-    try { Restore-Pc2Content } catch { Say "PC2 content restore: $_" }
     try {
         if ($pc2Setup -and -not $KeepPc2Staged) { $o = Invoke-Pc2 @{ Remove = $true } 'remove'; if ($o -match 'PC2-ERROR|game is running') { Say 'WARNING: PC 2 NOT RESTORED (-Remove failed): run bzr-friend-test.ps1 -Remove by hand' } else { Say "PC2 -Remove done: $(([regex]::Match($o, 'task=[^\r\n]*')).Value)" } }
         elseif ($pc2Deployed -and -not $KeepPc2Staged) { $o = Invoke-Pc2 @{ Restore = $true } 'restore'; if ($o -match 'PC2-ERROR|game is running') { Say 'WARNING: PC 2 NOT RESTORED (-Restore failed): run bzr-friend-test.ps1 -Restore by hand' } else { Say "PC2 -Restore done: $(([regex]::Match($o, 'openshim\.dll=[^\r\n]*')).Value)" } }
