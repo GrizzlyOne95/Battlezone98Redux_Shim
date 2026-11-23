@@ -1646,7 +1646,7 @@ ReticleOutline = 0
 ; Also runs in network games.
 ReactiveReticle = 0
 ; Confirmed health loss from the local player's weapon, not attempted damage.
-; Hit markers and damage indicators are disabled in network games.
+; Hit markers and damage indicators also run in network games.
 HitMarkers = 0
 ; Fade duration in milliseconds, 60-400 (menu: 80, 120, 180, 250).
 HitMarkerDuration = 120
@@ -1658,7 +1658,7 @@ HitMarkerOpacity = 100
 ; ReactiveReticle and ripples its own art outward on hits. 0 draws stock art
 ; with sprite-only tinted ghost rings instead. Other backends always use those.
 StockReticleShader = 1
-; Incoming weapon damage: arcs toward the firing source at impact. Single player.
+; Incoming weapon damage: arcs toward the firing source at impact. Also runs in network games.
 ; Independent of reticle/hit markers; follows native HUD scale. Applies live.
 DamageIndicators = 0
 ; Red/Amber/White/Cyan/Magenta/Green/Blue/Yellow or #RRGGBB / 0xAARRGGBB (RGB only).
@@ -3224,8 +3224,8 @@ MeshAccurateHits = 0
 
 ; Every setting in this section is hard-disabled in network games regardless of
 ; its configured value, except the local-render keys (Headlights and the other
-; headlight keys, PilotFlashlight and its keys, SatelliteVisibilityFix), which
-; also run online. The gate is the local player's net id: non-zero means a
+; headlight keys, PilotFlashlight and its keys, SatelliteVisibilityFix,
+; MuzzleFlash, MeshRecoil), which also run online. The gate is the local player's net id: non-zero means a
 ; network session (the host has an id too), and it fails closed, so a net id
 ; that cannot be read stands the feature down rather than enabling it.
 ;
@@ -3242,8 +3242,8 @@ MeshAccurateHits = 0
 ; target for it to engage.
 ; Accepted: boolean. Default: ON.
 WeaponConvergence = 1
-; Master switches for experimental authored GOG/SP cannon presentation.
-; Restart required. No generic effects: mods must supply ODF configuration
+; Master switches for experimental authored GOG cannon presentation (local
+; rendering only; also runs in network games). Restart required. No generic effects: mods must supply ODF configuration
 ; and matching assets. MuzzleFlash gates flashMesh plus muzzleRender smoke/light.
 ; Mesh flashes and recoil clips need EXU; native render effects/node slides do not.
 MuzzleFlash = 0

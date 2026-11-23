@@ -217,7 +217,7 @@ namespace BZROpenShim::WeaponPresentation
         Runtime& operator=(Runtime&&) = delete;
 
         void Configure(Settings settings) noexcept;
-        // Production bridge passes the existing IsSinglePlayerSession() gate.
+        // Production bridge passes true (presentation only; runs in every session).
         // A transition out invalidates tokens and queues restoration/detach.
         void SetSession(bool singleplayer, bool missionRunning) noexcept;
         bool AcceptingBindings() const noexcept;

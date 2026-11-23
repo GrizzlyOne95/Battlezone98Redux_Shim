@@ -225,7 +225,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       "Smooth fade duration: Instant, Fast (200 ms), Normal (500 ms), Slow (1000 ms). Activity restores full opacity immediately." },
     { "Incoming Damage", "Display", "DamageIndicators", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
-      "Arcs toward incoming weapon damage. One tick per recent attacker; repeated hits refresh its tick. Up to eight attackers. Single-player cockpit/chase." },
+      "Arcs toward incoming weapon damage. One tick per recent attacker; repeated hits refresh its tick. Up to eight attackers. Cockpit/chase view; also online." },
     { "Damage Color", "Display", "DamageIndicatorColor", nullptr, 0,
       kShimDamageColors, kShimDamageColors, 8, 0, ShimSettingApplyGroup::HudFeedback,
       "Incoming-damage arc color, independent of reticle and hit-marker colors. Applies live." },
@@ -269,7 +269,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Hit Markers", "Display", "HitMarkers", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1, ShimSettingApplyGroup::HudFeedback,
       "Ticks pop out when your weapon actually lowers health, larger when one shot hits several targets. "
-      "None for zero damage, collisions, self hits or AI shots. Single player only." },
+      "None for zero damage, collisions, self hits or AI shots. Also runs online." },
     { "Marker Duration", "Display", "HitMarkerDuration", nullptr, 0,
       kShimHitDurations, kShimHitDurationLabels, 4, 1, ShimSettingApplyGroup::HudFeedback,
       "How long confirmed-hit ticks remain visible before fading. Applies live." },
@@ -536,12 +536,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Authored muzzle flash meshes and smoke/light effects from weapon ODFs. Needs mod assets and "
-      "ODF setup; no generic fallback. Experimental GOG single-player cannons. Restart required." },
+      "ODF setup; no generic fallback. Experimental GOG cannons; also online. Restart required." },
     { "Muzzle Recoil", "SinglePlayer", "MeshRecoil", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Authored barrel-node or animation recoil from craft ODFs. Needs model nodes/clips and ODF "
-      "setup; clips need EXU. Experimental GOG single-player cannons. Restart required." },
+      "setup; clips need EXU. Experimental GOG cannons; also online. Restart required." },
     // Absent key = off, so defaultIndex 1 selects "0" (Off).
     { "Shell Casings", "General", "ShellCasings", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,

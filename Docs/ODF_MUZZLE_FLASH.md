@@ -20,7 +20,7 @@ The `agent/odf-recoil-trial` branches in OpenShim and EXU let a weapon select a
 accepted cannon shot and muzzle pose; EXU uses the same mesh pool, owner-follow
 logic, render-space conversion and pause-aware lifetime as `exu.flash.Spawn`.
 
-This remains an experimental GOG 2.2.301 single-player cannon feature.
+This remains an experimental GOG 2.2.301 cannon feature (local rendering; it also runs online).
 In OpenShim Settings > Video, **Muzzle Flashes** is the master switch for both
 the mesh flash and companion muzzle render effects. **Muzzle Recoil** controls
 recoil independently. Both default ON in the shipped preset since revision 10

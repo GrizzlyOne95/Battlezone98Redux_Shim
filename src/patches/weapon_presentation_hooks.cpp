@@ -19,7 +19,7 @@ namespace BZROpenShim::Hooks
             int state = kBzrRunStateUnknown;
             const bool running = g_MissionSeamInstalled &&
                 TryReadBzrRunState(state) && state == kBzrRunStateStarted;
-            g_Runtime->SetSession(IsSinglePlayerSession(), running);
+            g_Runtime->SetSession(true, running);
         }
     }
 
@@ -68,7 +68,7 @@ namespace BZROpenShim::Hooks
         if (!running) RetireWeaponPresentationNativeBindings();
         if (!g_Runtime)
             return;
-        g_Runtime->SetSession(IsSinglePlayerSession(), running);
+        g_Runtime->SetSession(true, running);
         if (!running && g_Backend)
             g_Runtime->SynchronizeVisuals(*g_Backend);
     }
