@@ -56,6 +56,19 @@ namespace BZROpenShim
         // drop. A peer whose P2P really died is still flagged lagging and then
         // auto-kicked by the host's ping check (10 s + 10 s), and a client
         // whose P2P is silent too quits exactly as stock.
+        //
+        // Ping: a player who quits on purpose also answered the last pings,
+        // so the Remote check alone kept every quitter in the match forever
+        // (no one auto-kicks a departed host). A held-back leave is therefore
+        // only a deferral: the ping-check call in Net::Execute (0x005718C7,
+        // every ping interval, on every peer) is wrapped, and before the
+        // stock check runs each held player is looked at again. Once three
+        // checks have passed since the leave with neither of the last two
+        // pings answered, the stock player-left runs for that player. A
+        // player still answering after kHoldMaxChecks checks had only lost
+        // its lobby link and stays. The NetId is 16 bytes (FindPlayer's map
+        // node keeps the value at +0x10; the compare 0x0056F780 reads
+        // dwords 0, 2 and 3), so a copy can be replayed later.
 
         namespace
         {
@@ -85,6 +98,26 @@ namespace BZROpenShim
             uintptr_t g_NetManagerSlot = 0;
             LONG g_LocalKept = 0;
             LONG g_RemoteKept = 0;
+
+            using PingCheckFn = void(__cdecl*)();
+            PingCheckFn g_PingCheck = nullptr;
+
+            // Remote leaves held back while the player still answered pings.
+            // Game thread only (lobby update and Net::Execute).
+            constexpr size_t kNetIdSize = 16;
+            constexpr int kHeldSlots = 16;
+            constexpr uint32_t kHoldMinChecks = 3;   // ping checks after the leave before judging
+            constexpr uint32_t kHoldMaxChecks = 20;  // still answering by then: lobby-only drop
+            struct HeldLeave
+            {
+                bool used = false;
+                uint8_t id[kNetIdSize] = {};
+                uint16_t shortId = 0;
+                uint32_t checks = 0;
+            };
+            HeldLeave g_Held[kHeldSlots];
+            bool g_AnyHeld = false;
+            bool g_PingHooked = false;
 
             bool ReadU32(uintptr_t address, uint32_t& out)
             {
@@ -159,6 +192,92 @@ namespace BZROpenShim
                 g_LeaveLobby(lobby);
             }
 
+            bool CopyNetId(const void* id, uint8_t (&out)[kNetIdSize])
+            {
+                __try { std::memcpy(out, id, kNetIdSize); return true; }
+                __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+            }
+
+            // Records a held-back leave; false when it cannot be re-checked
+            // later (no ping hook, unreadable id, table full).
+            bool HoldLeave(const void* id, uint16_t shortId)
+            {
+                if (!g_PingHooked) return false;
+                uint8_t copy[kNetIdSize] = {};
+                if (!CopyNetId(id, copy)) return false;
+                HeldLeave* slot = nullptr;
+                for (HeldLeave& h : g_Held)
+                {
+                    if (h.used && std::memcmp(h.id, copy, kNetIdSize) == 0)
+                    {
+                        h.checks = 0;
+                        return true;
+                    }
+                    if (!h.used && !slot) slot = &h;
+                }
+                if (!slot) return false;
+                std::memcpy(slot->id, copy, kNetIdSize);
+                slot->shortId = shortId;
+                slot->checks = 0;
+                slot->used = true;
+                g_AnyHeld = true;
+                return true;
+            }
+
+            void ClearHeld()
+            {
+                for (HeldLeave& h : g_Held) h = HeldLeave{};
+                g_AnyHeld = false;
+            }
+
+            void ReviewHeldLeaves()
+            {
+                uint32_t netState = 0, gameState = 0;
+                if (!MatchRunning(netState, gameState))
+                {
+                    ClearHeld();
+                    return;
+                }
+                bool any = false;
+                for (HeldLeave& h : g_Held)
+                {
+                    if (!h.used) continue;
+                    const uintptr_t player = g_FindPlayer(h.id);
+                    if (!player)
+                    {
+                        h = HeldLeave{};
+                        continue;
+                    }
+                    ++h.checks;
+                    const uint32_t replies = PingReplies(player);
+                    if (h.checks >= kHoldMinChecks && !(replies & kRecentPings))
+                    {
+                        Log(L"[LOBBYDROP] player %u stopped answering P2P pings %u ping check(s) after leaving the lobby (replies=0x%03X); dropping it now\n",
+                            static_cast<unsigned>(h.shortId), h.checks, replies & 0x3FF);
+                        uint8_t id[kNetIdSize];
+                        std::memcpy(id, h.id, kNetIdSize);
+                        h = HeldLeave{};
+                        g_PlayerLeft(id, 0);
+                        continue;
+                    }
+                    if (h.checks >= kHoldMaxChecks)
+                    {
+                        Log(L"[LOBBYDROP] player %u still answers P2P pings %u ping checks after leaving the lobby (replies=0x%03X); lobby-only drop, kept\n",
+                            static_cast<unsigned>(h.shortId), h.checks, replies & 0x3FF);
+                        h = HeldLeave{};
+                        continue;
+                    }
+                    any = true;
+                }
+                g_AnyHeld = any;
+            }
+
+            void __cdecl PingCheckHook()
+            {
+                if (g_AnyHeld) ReviewHeldLeaves();
+                g_PingCheck();
+            }
+
             void __cdecl RemotePlayerLeftHook(const void* id, int kicked)
             {
                 uint32_t netState = 0, gameState = 0;
@@ -171,10 +290,10 @@ namespace BZROpenShim
                         const uint32_t replies = PingReplies(player);
                         uint16_t shortId = 0;
                         ReadU16(player + kPlayerShortIdOffset, shortId);
-                        if (replies & kRecentPings)
+                        if ((replies & kRecentPings) && HoldLeave(id, shortId))
                         {
                             const LONG n = InterlockedIncrement(&g_RemoteKept);
-                            Log(L"[LOBBYDROP] player %u left the lobby mid-match but answers P2P pings (replies=0x%03X); kept in the match (#%ld)\n",
+                            Log(L"[LOBBYDROP] player %u left the lobby mid-match but answers P2P pings (replies=0x%03X); held, re-checked at each ping (#%ld)\n",
                                 static_cast<unsigned>(shortId), replies & 0x3FF, n);
                             return;
                         }
@@ -223,9 +342,11 @@ namespace BZROpenShim
             if (!enabled || !ResolveHelpers()) return 0;
 
             const bool local = strcmp(name, "Lobby Drop Keeps Match Local") == 0;
+            const bool ping = strcmp(name, "Lobby Drop Keeps Match Ping") == 0;
             const uint32_t expected = local
                 ? HookEngine::ResolveNamedAddress("Net::LeaveLobbyOnClose")
-                : HookEngine::ResolveNamedAddress("Net::PlayerLeft");
+                : ping ? HookEngine::ResolveNamedAddress("Net::PingCheck")
+                       : HookEngine::ResolveNamedAddress("Net::PlayerLeft");
             if (!original || !expected || reinterpret_cast<uintptr_t>(original) != expected)
             {
                 Log(L"[LOBBYDROP] %hs identity failed site=0x%08X original=%p expected=0x%08X; stock call kept\n",
@@ -234,6 +355,12 @@ namespace BZROpenShim
             }
             g_Enabled = true;
             Log(L"[LOBBYDROP] %hs redirected site=0x%08X original=%p\n", name, site, original);
+            if (ping)
+            {
+                g_PingCheck = reinterpret_cast<PingCheckFn>(original);
+                g_PingHooked = true;
+                return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&PingCheckHook));
+            }
             if (local)
             {
                 g_LeaveLobby = reinterpret_cast<LeaveLobbyFn>(original);

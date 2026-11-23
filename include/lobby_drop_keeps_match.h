@@ -3,7 +3,7 @@
 
 namespace BZROpenShim {
 namespace Hooks {
-// [Network] LobbyDropKeepsMatch: the two REL32 call sites named
+// [Network] LobbyDropKeepsMatch: the three REL32 call sites named
 // "Lobby Drop Keeps Match ..." in scripts/patches.json.
 bool IsLobbyDropKeepsMatchPatchName(const char* name);
 // Checks that the stock call at `site` targets the expected engine routine and
