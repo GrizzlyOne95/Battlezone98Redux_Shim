@@ -1422,6 +1422,14 @@ namespace BZROpenShim
         void InstallTurretAttackOrdersHooksIfPossible();
         void RefreshTurretAttackOrdersState();
         void ResetTurretAttackOrders();
+        void InstallHowitzerAttackApproachHooksIfPossible();
+        void RefreshHowitzerAttackApproachState();
+        void ResetHowitzerAttackApproach();
+        // True while HowitzerAttackApproach is driving this ArtilleryFriend
+        // process toward its ordered target (OffensiveProcess::DoSubTask then
+        // hides the SNIP retaliation input for it).
+        bool IsHowitzerApproachProcess(void* process);
+        void NoteHowitzerApproachRetargetSuppressed(void* process);
         void InstallDaywreckerDefenceIfPossible();
         void RefreshDaywreckerDefenceState();
         void ResetDaywreckerDefence();

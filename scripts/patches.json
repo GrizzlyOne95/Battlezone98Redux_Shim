@@ -7491,6 +7491,24 @@
       "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) Shared AiProcess DoAttack (slot 26 of the TurretTankProcess/Friend/Enemy vtables and of every other unit process vtable), thiscall no args: runs the task at this+0x38; on a kill clears CMD_ATTACK and sets state [this+0x20] = 3. OpenShim wraps slot 26 of the three TurretTank process vtables only. See Docs/TURRET_ATTACK_ORDERS.md."
     },
     {
+      "name": "ArtilleryProcessDoAttack",
+      "address": "0x00475B30",
+      "expected": "55 8B EC 81 EC 38 04 00 00 A1 00 70 8E 00 33 C5",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) ArtilleryProcess::DoAttack (slot 26 of the ArtilleryProcess/Friend/Enemy vtables), thiscall no args: picks the first weapon, runs the ballistic reach test (0x0056B1C0) for a MORT weapon and on a miss says 0x13 (out of range) and sets state [this+0x20] = 3. OpenShim wraps slot 26 of the ArtilleryFriend vtable only. See Docs/HOWITZER_ATTACK_APPROACH.md."
+    },
+    {
+      "name": "UnitProcessInitGoto",
+      "address": "0x005FB500",
+      "expected": "55 8B EC 6A FF 68 10 D1 84 00 64 A1 00 00 00 00",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) UnitProcess::InitGoto (slot 15 base, called by ArtilleryProcess::InitGoto 0x00475A30), thiscall no args: zeroes the steer controls and stores a new GotoTask to the live target [this+0x3C] (or to the path [this+0x10]) at [this+0x38] without deleting the old one. See Docs/HOWITZER_ATTACK_APPROACH.md."
+    },
+    {
+      "name": "WeaponBallisticReach",
+      "address": "0x0056AF20",
+      "expected": "55 8B EC 83 EC 7C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "Released GOG 2.2.301 (SHA256 8D71F56C...3377413) Weapon ballistic reach test, thiscall(ECX = weapon)(float* outTime, const VECTOR3* target, char highArc), ret 0xC: shot speed from [[this+0xC]+0x54], muzzle from the matrix at this+0x28; AL = 1 when the arc's discriminant is >= 0. See Docs/HOWITZER_ATTACK_APPROACH.md."
+    },
+    {
       "name": "AiFollowRangeConstantSite",
       "address": "0x005833CA",
       "expected": "F3 0F 10 05 20 2E 8A 00 F3 0F 11 41 6C",

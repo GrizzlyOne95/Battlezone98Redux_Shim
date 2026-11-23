@@ -720,6 +720,10 @@ namespace BZROpenShim
             // deploy/pack-up around it. Revert drops per-process tracks.
             { "TurretAttackOrders", FeatureTier::SinglePlayer,
               &ResetTurretAttackOrders, &RefreshTurretAttackOrdersState },
+            // [SinglePlayer] HowitzerAttackApproach: a player-ordered howitzer
+            // drives into reach of its target. Revert drops per-process tracks.
+            { "HowitzerAttackApproach", FeatureTier::SinglePlayer,
+              &ResetHowitzerAttackApproach, &RefreshHowitzerAttackApproachState },
             // [SinglePlayer] DaywreckerDefence: ATTACK on enemy Daywrecker/Comet,
             // radius scan and evasion. Revert drops the bomb registry and cooldowns.
             { "DaywreckerDefence", FeatureTier::SinglePlayer,

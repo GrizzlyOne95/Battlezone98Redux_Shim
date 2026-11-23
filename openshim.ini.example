@@ -3678,6 +3678,25 @@ AttackRevealPerceivedTeam = 1
 ; Accepted: boolean. Default: ON.
 TurretAttackOrders = 1
 
+; Howitzers (Longbow avartl, svartl and any class Howitzer craft) close in on
+; a target out of reach. Stock: order a howitzer to attack something beyond
+; its shell arc and it replies "out of range" and does nothing.
+;
+; With this on, a howitzer on your team that you order to attack:
+; - packs up and drives toward the target while it is out of reach (stock
+;   pathing, the same as a Go To order);
+; - stops, deploys and fires once the stock ballistic test says the shell
+;   lands, with a 5% margin;
+; - packs up and follows again if the target stays out of reach for 1 s;
+; - keeps the target you ordered while it drives: the sniper-retaliation
+;   switch is hidden for it until it is in reach again;
+; - returns to idle as normal when the target dies.
+; Enemy and AI-team howitzers, and every other order, stay stock.
+; Read at startup (restart required). Hard-disabled in network games.
+; See Docs/HOWITZER_ATTACK_APPROACH.md.
+; Accepted: boolean. Default: OFF.
+HowitzerAttackApproach = 0
+
 ; AI defence against an enemy Daywrecker in flight and an enemy Comet
 ; (radarmsl). Stock AI ignores both: hovering over one offers only "Go To",
 ; nobody shoots at it and nobody dodges it.

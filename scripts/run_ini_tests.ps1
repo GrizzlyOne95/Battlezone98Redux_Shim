@@ -449,6 +449,7 @@ $allowedEnabledLookingValues = [System.Collections.Generic.HashSet[string]]::new
     # team only, hard-disabled in network games. Default on by design.
     "SinglePlayer/TurretAttackOrders",
     "SinglePlayer/DaywreckerDefence",
+    "SinglePlayer/HowitzerAttackApproach",
 
     # Producer rally points: V/Shift+V set and clear a Recycler/Factory rally
     # point that its new units drive to. Player team only, nothing happens until
@@ -681,6 +682,7 @@ $shippingPolicyChecks = @{
     "SinglePlayer/PilotTeamRestore" = "1"
     "SinglePlayer/TurretAttackOrders" = "1"
     "SinglePlayer/DaywreckerDefence" = "0"
+    "SinglePlayer/HowitzerAttackApproach" = "0"
     "SinglePlayer/MruGameplay" = "0"
     "Gameplay/ProducerRallyPoints" = "1"
     "Gameplay/AutoGroupNewUnits" = "0"

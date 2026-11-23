@@ -646,6 +646,12 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Artillery AI fires every hardpoint its weaponMask names as one volley instead of the "
       "first. A stock howitzer fires four rounds per cycle. Single player only." },
+    { "Howitzer Approach", "SinglePlayer", "HowitzerAttackApproach", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
+      ShimSettingApplyGroup::RestartRequired,
+      "A howitzer you order to attack a target out of reach packs up, drives toward it, "
+      "and deploys and fires once in reach, instead of replying out of range. Your team "
+      "only. Single player only. Restart required." },
     { "AI Mine Volley", "SinglePlayer", "AiWeaponMaskMinelayer", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -1207,7 +1213,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SkinnedGibs", "0" }, { "FractureOnePiece", "0" }, { "GpuSkinning", "0" }, { "PlayerReticleConvergence", "0" },
     { "SmartReticleRange", "200" }, { "SmartScavengerPathing", "0" }, { "TurretAimPitch", "0" },
     { "OrdnanceVelocityInheritance", "0" }, { "LegacyTankAi", "0" },
-    { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" },
+    { "AiOdfGameplayTuning", "0" }, { "AiWeaponMaskArtillery", "0" }, { "AiWeaponMaskMinelayer", "0" }, { "HowitzerAttackApproach", "0" },
     { "AllowNeutralAttackOrders", "0" }, { "ProducerRallyPoints", "0" }, { "AutoGroupNewUnits", "0" }, { "ExtendedUnitCap", "0" }, { "GroupMemberMenu", "0" }, { "GroupStrip", "0" }, { "RtsCommandPings", "0" }, { "RtsRadarPings", "0" }, { "RtsArtilleryRange", "0" }, { "RtsWeaponRange", "0" }, { "RtsRadarRange", "0" }, { "RtsMineRange", "0" }, { "RtsRemoteTarget", "0" }, { "RtsSmartCommandMenu", "0" }, { "RtsSmartRepairReload", "0" }, { "RtsAreaSelect", "0" }, { "RtsHold", "0" }, { "RtsQuickCommands", "0" }, { "RtsFollowCamera", "0" }, { "RtsBuildAtNav", "0" }, { "RtsBuildGhost", "0" }, { "RtsPendingBuildGhost", "0" }, { "RtsPowerRange", "0" }, { "RtsWaypointLines", "0" }, { "RtsProducerBadges", "0" }, { "RtsIdleUnitAlert", "0" }, { "RtsAmmoAlert", "0" }, { "RtsScrapFullAlert", "0" }, { "RtsAttackMarks", "0" }, { "RtsOrderQueue", "0" }, { "RtsBuildQueue", "0" }, { "UnitLoadouts", "0" }, { "Turbo", "0" }, { "NoDamageSlowdown", "0" }, { "HeadlightBrightness", "1.00" },
     { "OtherHeadlights", "0" }, { "HeadlightColor", "Stock" }, { "HeadlightBeam", "Stock" },
     { "HeadlightReach", "0" },
