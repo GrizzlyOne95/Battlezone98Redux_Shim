@@ -6043,6 +6043,65 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         ForgetTerrainProxy(TerrainForgetReason::ProcessShutdown, false, false);
     }
 
+    // Ogre's D3D11 copyContentsToMemory maps the back buffer but reads it as the
+    // render window's cached width x height. A swap-chain resize the window was
+    // not told about (HUD Size Apply in exclusive fullscreen left Ogre at
+    // 3840x2160 over a 3818x2104 buffer) makes that an out-of-bounds read, so
+    // compare the two each capture and skip the frame when they differ. DX9 and
+    // OpenGL are unchanged; on DX11, or a renderer not yet identified, a size
+    // that cannot be read also skips.
+    static bool CaptureWindowMatchesBackBuffer(void* window, uint32_t frame)
+    {
+        const int renderSystem = RenderProfiles::IdentifyActiveRenderSystem();
+        if (renderSystem == 2 || renderSystem == 3)
+            return true;
+        using FnSize = unsigned(__thiscall*)(void*);
+        using FnAttribute = void(__thiscall*)(void*, const std::string&, void*);
+        static FnSize getWidth = nullptr;
+        static FnSize getHeight = nullptr;
+        static FnAttribute attribute = nullptr;
+        static bool resolved = false;
+        static int lastLogged = -1; // 0 skipped, 1 matched; change-only log
+        if (!resolved)
+        {
+            resolved = true;
+            const HMODULE ogre = GetModuleHandleW(L"OgreMain.dll");
+            const HMODULE dx11 = GetModuleHandleW(L"RenderSystem_Direct3D11.dll");
+            getWidth = ogre ? Resolve<FnSize>(ogre, "?getWidth@RenderTarget@Ogre@@UBEIXZ") : nullptr;
+            getHeight = ogre ? Resolve<FnSize>(ogre, "?getHeight@RenderTarget@Ogre@@UBEIXZ") : nullptr;
+            // Hwnd chains to D3D11RenderWindowBase, whose "ID3D11Texture2D"
+            // answer is the back buffer copyContentsToMemory reads.
+            attribute = dx11 ? Resolve<FnAttribute>(dx11,
+                "?getCustomAttribute@D3D11RenderWindowHwnd@Ogre@@UAEXABV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@PAX@Z") : nullptr;
+        }
+        unsigned width = 0, height = 0;
+        D3D11_TEXTURE2D_DESC desc{};
+        ID3D11Texture2D* backBuffer = nullptr; // not AddRef'd; Ogre owns it
+        if (renderSystem == 1 && getWidth && getHeight && attribute)
+        {
+            width = getWidth(window);
+            height = getHeight(window);
+            attribute(window, std::string("ID3D11Texture2D"), &backBuffer);
+            if (backBuffer)
+                backBuffer->GetDesc(&desc);
+        }
+        const bool match = backBuffer && width && height &&
+            desc.Width == width && desc.Height == height;
+        static unsigned skipped = 0; // listed frames skipped since the last log line
+        if (lastLogged != (match ? 1 : 0))
+        {
+            lastLogged = match ? 1 : 0;
+            LogShimA(match ? LogLevel::Info : LogLevel::Warn, "terrain-proxy",
+                "[FRAME-CAPTURE] frame=%u renderer=%d window=%ux%u backbuffer=%ux%u skippedBefore=%u %s",
+                frame, renderSystem, width, height, desc.Width, desc.Height, skipped,
+                match ? "sizes agree; capturing" : "sizes differ or unreadable; skipping listed frames");
+            skipped = 0;
+        }
+        if (!match)
+            ++skipped;
+        return match;
+    }
+
     // Test-only: OPENSHIM_FRAME_CAPTURE="600,1200" or "150-899" writes those
     // rendered frames (counted from the first shell screen, menus included)
     // next to the exe. Reads back the render window, so it still works when the
@@ -6123,6 +6182,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         {
             void* root = getRoot();
             void* window = root ? getAutoCreatedWindow(root) : nullptr;
+            if (window && !CaptureWindowMatchesBackBuffer(window, renderFrames))
+                return;
             if (window)
                 writeContentsToFile(window, path);
             LogShimA(LogLevel::Info, "terrain-proxy",
