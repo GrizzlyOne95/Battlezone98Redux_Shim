@@ -4721,6 +4721,12 @@
       "identity": "RTTI .?AVHowitzer@@ primary vtable; slot 38 inherits TurretTank::UpdateWeaponAim"
     },
     {
+      "name": "GotoTaskVtable",
+      "address": "0x0087A61C",
+      "kind": "data",
+      "identity": "RTTI .?AVGotoTask@@ vtable (the task UnitProcess::InitGoto 0x005FB500 builds); slot 6 done 0x004714B0, slot 7 execute 0x006002A0"
+    },
+    {
       "name": "TurretTankVtable",
       "address": "0x00889498",
       "kind": "data",
