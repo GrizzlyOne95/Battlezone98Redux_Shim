@@ -7,8 +7,8 @@ This guide supplements the [quick start](../README.md). It covers the complete m
 ## Before installing
 
 - Close Battlezone 98 Redux completely before installing, repairing, updating, or uninstalling.
-- Back up custom `openshim.ini` and `net.ini` if you have modified them. Normal Install/Update can deploy `net.ini` (backing up the previous file); Repair preserves an existing one.
-- OpenShim requires the **matched** `winmm.dll`, `bzloader.dll`, `plugins/openshim.dll`, and `scripts/patches.json` set. Installing only the proxy DLL does not enable the runtime.
+- Back up custom `openshim\openshim.ini` (older installs: `openshim.ini` in the game folder) and `net.ini` if you have modified them. The first time OpenShim replaces `net.ini` it keeps the game's own copy in `openshim\stock-backup\`. Normal Install/Update can deploy `net.ini` (backing up the previous file); Repair preserves an existing one.
+- OpenShim requires the **matched** `winmm.dll`, `bzloader.dll`, `plugins/openshim.dll`, and `openshim/patches.json` set. Installing only the proxy DLL does not enable the runtime.
 - **Windows prerequisite:** the **x86 (32-bit)** [Microsoft Visual C++ 2015-2022 Redistributable](https://aka.ms/vs/17/release/vc_redist.x86.exe) (`winget install --id Microsoft.VCRedist.2015+.x86 -e`). The load-chain DLLs import `MSVCP140.dll` and `VCRUNTIME140.dll`; without them the game closes as soon as you press Play and writes no `logs\openshim.log`. The x64 package does not satisfy this. The installer warns when it is missing. Proton/Wine provide these DLLs themselves.
 - The game executable is not rewritten. Supported game folders may contain `battlezone98redux.exe` (Steam) or `BZR.exe` (GOG); the Windows installer recognizes either filename.
 - Windows may warn about the unsigned setup executable or hooking DLLs. Verify the published release and SHA-256 checksum before trusting the files. Do not disable antivirus globally.
@@ -24,9 +24,11 @@ This guide supplements the [quick start](../README.md). It covers the complete m
 | **Install** | Installs the version embedded in the setup executable. A development build without an embedded release can fetch the latest published suite. |
 | **Repair** | Restores missing/modified files from the **same version**; refuses to replace the installation with a different version. Preserves an existing `openshim.ini`, `net.ini`, and unrelated mod files. |
 | **Update** | Downloads and verifies the **latest published release** rather than using the setup executable's embedded bundle. Refuses downgrades; does nothing if the same version is already installed. Use Repair for damage at the same version. |
-| **Uninstall** | Removes OpenShim-owned deployed files and backups, preserving `openshim.ini`, `net.ini`, and logs by default. |
+| **Uninstall** | Restores the game files in `openshim\stock-backup\` (such as `net.ini`), then removes the `openshim\` folder and OpenShim's DLLs, preserving `openshim\openshim.ini` (and its backups), player data, and logs by default. |
 
 When uninstalling, an **unchecked** checkbox can additionally remove OpenShim settings, logs, crash dumps, and uploader data. This includes current-user `%LOCALAPPDATA%\openshim` and `%APPDATA%\openshim`, shared between all OpenShim installations for that Windows account. It does **not** delete `net.ini`, `BZLogger.txt`, unrelated game logs, or other mods. Remove a Steam upload-wrapper launch option yourself if previously configured.
+
+**Manual uninstall:** close the game, optionally copy the files in `openshim\stock-backup\` back over their namesakes in the game folder, then delete `winmm.dll`, `bzloader.dll`, `plugins\openshim.dll`, the `openshim\` folder and the `logs\` folder. Saves and other player data (`Save\`, `career_stats.cfg`, `bans.cfg`, `flags.cfg`, `multi.ini`) stay in the game folder; keep `openshim\openshim.ini` if you want your settings for a reinstall.
 
 ### Windows automation
 
@@ -83,7 +85,7 @@ $env:OPENSHIM_PURGE_CONFIG = '1'     # Also remove openshim.ini and backups
 $env:OPENSHIM_PURGE_LEFTOVERS = '1'  # Full OpenShim-only cleanup, including uploader data
 ```
 
-Use only the setting(s) you intend. Remove the temporary environment settings afterward if you will run other installer actions from the same shell. `OPENSHIM_PURGE_LEFTOVERS` implies the config purge; neither removes shared `net.ini`.
+Use only the setting(s) you intend. Remove the temporary environment settings afterward if you will run other installer actions from the same shell. `OPENSHIM_PURGE_LEFTOVERS` implies the config purge; neither touches player data, and both restore the game's `net.ini` from `openshim\stock-backup\`.
 
 ### Defender and SmartScreen warnings
 
@@ -135,7 +137,7 @@ To uninstall a native/Flatpak installation:
 curl -fsSL https://raw.githubusercontent.com/GrizzlyOne95/Battlezone98Redux_Shim/main/scripts/uninstall_linux.sh | bash -s -- --native
 ```
 
-For Snap, substitute `--snap`. Add `--dry-run` to inspect the plan first or `--purge-config` if you also want to remove `openshim.ini`; `net.ini` and logs are retained. Clear the Steam launch option after uninstalling the proxy DLL.
+For Snap, substitute `--snap`. Add `--dry-run` to inspect the plan first or `--purge-config` if you also want to remove `openshim/openshim.ini`; `net.ini` is restored from `openshim/stock-backup/` and logs are retained. Clear the Steam launch option after uninstalling the proxy DLL.
 
 ### Linux/GOG under Wine or a compatible Proton prefix
 
@@ -155,8 +157,8 @@ A stock Redux 2.2.301 install can run OpenShim **without** the Campaign Reimagin
 <game directory>/winmm.dll
 <game directory>/bzloader.dll
 <game directory>/plugins/openshim.dll
-<game directory>/scripts/patches.json
-<game directory>/openshim.ini
+<game directory>/openshim/patches.json
+<game directory>/openshim/openshim.ini
 ```
 
 Engine/gameplay/networking fixes do not require the Workshop pack. Native `ChunkMeshes` can generate fragments from source models without that pack, with external meshes retained as fallback for unsupported content. Enhanced renderer features need the compatible resource files; absent/partial/mismatched resources cause dependent options to become unavailable while independent features remain usable. See [Native chunk meshes](NATIVE_CHUNK_MESHES.md) and `include/openshim_assets.h` for the current implementation.

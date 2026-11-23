@@ -305,7 +305,7 @@ Write-Output "Waiting for the game-launch lock (up to ${LockTimeoutSeconds}s)...
 try {
     Wait-NoGame
     foreach($file in Get-ChildItem -LiteralPath $saveRoot -File -Recurse){Save-AuditFile $file.FullName}
-    foreach($relative in @('openshim.ini','modEnabled.dat','campaignReimagined_settings.cfg','career_stats.cfg','save\auto.sav','save\auto2.sav','save\game1.sav')){
+    foreach($relative in @('openshim.ini','openshim\openshim.ini','modEnabled.dat','campaignReimagined_settings.cfg','career_stats.cfg','save\auto.sav','save\auto2.sav','save\game1.sav')){
         Save-AuditFile (Join-Path $GameRoot $relative)
     }
     Save-AuditFile $campaignIni
@@ -320,7 +320,9 @@ try {
     $flipped=[regex]::Replace($ini,'(?m)^(\s*mapType\s*=\s*)"campaign"','$1"mod"')
     if($flipped -eq $ini){throw 'crcampgn.ini has no mapType = "campaign" line to switch'}
     # One autosave per mission, AutosaveDelaySeconds in; never deferred to CR's own.
-    Set-IniValues (Join-Path $GameRoot 'openshim.ini') 'AutoSave' ([ordered]@{
+    $shimIni=Join-Path $GameRoot 'openshim\openshim.ini'
+    if(-not (Test-Path -LiteralPath $shimIni)){$shimIni=Join-Path $GameRoot 'openshim.ini'}
+    Set-IniValues $shimIni 'AutoSave' ([ordered]@{
         Enabled=1; InitialDelaySeconds=$AutosaveDelaySeconds; IntervalSeconds=3600; RetrySeconds=5; BackupExisting=0; RespectExternalAutoSave=0})
     $ogre=Join-Path $GameRoot 'ogre.cfg'
     $renderName=if($Renderer -eq 'dx11'){'Direct3D11 Rendering Subsystem'}else{'Direct3D9 Rendering Subsystem'}

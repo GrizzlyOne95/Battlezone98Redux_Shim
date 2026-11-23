@@ -12,6 +12,7 @@
 
 #include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
+#include "openshim_layout.h"
 #include "career_kill_class.h"
 #include "openshim_l10n_text.h"
 #include "patcher.h"
@@ -86,7 +87,8 @@ namespace BZROpenShim
 
         std::filesystem::path GetCareerStatsPath()
         {
-            return GetUserConfigPath().parent_path() / "career_stats.cfg";
+            // Player data stays in the game root, not beside openshim.ini.
+            return Layout::GameRoot() / "career_stats.cfg";
         }
 
         void ReadCareerTotals(CareerTotals& out)

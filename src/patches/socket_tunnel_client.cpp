@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <iphlpapi.h>
 #include "socket_tunnel.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 #include "iat_patch.h"
 #include <cstdio>
@@ -92,7 +93,8 @@ namespace
         bridgeConfig = Config{};
         bridgeConfig.bridge = bridgeConfig.steam = true; // borrow game init and callback pump
         bridgeConfig.server = server;
-        bridgeConfig.identityMap = ExeSiblingPath(L"steam_tunnel_peers.txt");
+        // openshim\state\; a root copy from an older build moves there first.
+        bridgeConfig.identityMap = Layout::Detail::Utf8(Layout::StatePath(L"steam_tunnel_peers.txt"));
         bridgeConfig.banList = ExeSiblingPath(L"bans.cfg");
         if (bridgeConfig.identityMap.empty()) { bridgeReady = -1; BridgeLog("game path unavailable for the peer map; host bridge not started"); return false; }
         bridgeReady = 0;

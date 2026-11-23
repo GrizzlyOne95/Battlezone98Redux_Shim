@@ -113,7 +113,9 @@ if (-not $GamePath -or -not (Test-Path $GamePath)) {
 }
 
 $dllPath = Join-Path $GamePath "winmm.dll"
-$patchesPath = Join-Path $GamePath "scripts\patches.json"
+# Current layout is openshim\patches.json; scripts\patches.json is the old one.
+$patchesPath = Join-Path $GamePath "openshim\patches.json"
+if (-not (Test-Path $patchesPath)) { $patchesPath = Join-Path $GamePath "scripts\patches.json" }
 $repoPatchesPath = Join-Path $PSScriptRoot "scripts\patches.json"
 $logPath = Join-Path $GamePath "logs\openshim.log"
 $bzLoggerPath = Join-Path $GamePath "logs\BZLogger.txt"
@@ -136,11 +138,11 @@ if (Test-Path $dllPath) {
 }
 
 # winmm.dll does not carry its own patch addresses: every patch takes its
-# address from scripts/patches.json, which is deployed separately and by hand.
+# address from openshim/patches.json, which is deployed separately and by hand.
 # A json older than the DLL silently skips every patch added since, so treat a
 # missing or mismatched config as a deployment failure rather than a detail.
 if (Test-Path $patchesPath) {
-    Write-Host "[PASS] scripts/patches.json present in game folder" -ForegroundColor Green
+    Write-Host "[PASS] patches.json present in game folder" -ForegroundColor Green
 
     if (Test-Path $repoPatchesPath) {
         $deployedHash = (Get-FileHash -Algorithm SHA256 -Path $patchesPath).Hash
@@ -153,18 +155,18 @@ if (Test-Path $patchesPath) {
             Write-Host "[FAIL] deployed patches.json differs from this source tree" -ForegroundColor Red
             Write-Host "       deployed: $deployedAge" -ForegroundColor Red
             if ($dllAge) { Write-Host "       winmm.dll: $dllAge" -ForegroundColor Red }
-            Write-Host "       copy scripts/patches.json alongside winmm.dll; a stale copy skips" -ForegroundColor Red
+            Write-Host "       copy scripts/patches.json to openshim/patches.json in the game folder; a stale copy skips" -ForegroundColor Red
             Write-Host "       every patch added since it was written" -ForegroundColor Red
-            $issues += "scripts/patches.json in the game folder does not match this source tree"
+            $issues += "patches.json in the game folder does not match this source tree"
             $pass = $false
         }
     } else {
         Write-Host "[WARN] no scripts/patches.json in the source tree to compare against" -ForegroundColor Yellow
     }
 } else {
-    Write-Host "[FAIL] scripts/patches.json NOT found in game folder" -ForegroundColor Red
+    Write-Host "[FAIL] openshim/patches.json NOT found in game folder" -ForegroundColor Red
     Write-Host "       winmm.dll cannot resolve any patch address without it" -ForegroundColor Red
-    $issues += "scripts/patches.json is missing from the game folder"
+    $issues += "openshim/patches.json is missing from the game folder"
     $pass = $false
 }
 

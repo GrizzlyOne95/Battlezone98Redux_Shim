@@ -6,14 +6,23 @@
 #
 # The default path downloads ONE versioned release bundle, OpenShim-Suite.zip,
 # verifies it against the published SHA-256, and deploys the whole compatibility
-# set: winmm.dll, scripts/patches.json, openshim.ini, net.ini, the mandatory
-# Enhanced renderer resources, and the custom UI widget tiles. Downloading the
-# loose per-file assets instead would silently drop the resource trees, and the
-# Enhanced renderer refuses to enable without its validated resource set.
+# set: winmm.dll, openshim/patches.json, openshim/openshim.ini, net.ini, the
+# mandatory Enhanced renderer resources, and the custom UI widget tiles.
+# Downloading the loose per-file assets instead would silently drop the resource
+# trees, and the Enhanced renderer refuses to enable without its validated
+# resource set.
+#
+# OpenShim keeps its own files under <game>/openshim/ (and logs under logs/), so
+# removing it by hand is: winmm.dll, bzloader.dll, plugins/openshim.dll,
+# openshim/ and logs/. Files from the older layout (root openshim.ini and its
+# backups, scripts/patches.json, tools/lan, shader_cache) are moved or removed
+# on install. openshim/stock-backup/ gets one pristine copy of net.ini before
+# the installer first replaces it; an existing backup is never overwritten.
 #
 # Existing openshim.ini files are preserved by default. The installer refreshes
-# openshim.ini.canonical every run for the runtime preset-migration path. Pass
-# --reset-ini (or OPENSHIM_RESET_INI=1) for an explicit backup-and-reset.
+# openshim/openshim.ini.canonical every run for the runtime preset-migration
+# path. Pass --reset-ini (or OPENSHIM_RESET_INI=1) for an explicit
+# backup-and-reset.
 #
 # --dll is an advanced override and only proceeds when a matching artifact set
 # sits beside that DLL.
@@ -351,16 +360,75 @@ deploy_file() {
     echo "  deployed $(basename "$dst") ($(file_size "$dst") bytes)"
 }
 
+# Move a file or folder to its new home unless something is already there.
+# An existing destination always wins; the old copy is then left untouched.
+move_if_absent() {
+    local from="$1" to="$2"
+    [[ -e "$from" || -L "$from" ]] || return 0
+    [[ -e "$to" || -L "$to" ]] && return 0
+    mkdir -p "$(dirname "$to")"
+    mv -- "$from" "$to"
+    echo "  moved $(basename "$from") into $(basename "$(dirname "$to")")/"
+}
+
+# Old layout -> openshim/: the player's ini and its backups move as they are
+# (values untouched); the old canonical copy is installer-owned and just goes.
+move_legacy_ini() {
+    local game_dir="$1" old name
+    move_if_absent "$game_dir/openshim.ini" "$game_dir/openshim/openshim.ini"
+    for old in "$game_dir"/openshim.ini.bak-* "$game_dir"/openshim.ini.pre-reset-*.bak \
+            "$game_dir"/openshim.ini.premigrate-r*.bak; do
+        [[ -f "$old" ]] || continue
+        name="$(basename "$old")"
+        move_if_absent "$old" "$game_dir/openshim/$name"
+    done
+    rm -f "$game_dir/openshim.ini.canonical" "$game_dir/openshim.ini.new"
+}
+
+# Drop the old-layout copies once the new ones are in place.
+remove_legacy_layout() {
+    local game_dir="$1"
+    rm -f "$game_dir/scripts/patches.json" "$game_dir/scripts/patches.json.previous"
+    rmdir "$game_dir/scripts" 2>/dev/null || true
+
+    # Bundled LAN tools: carried over when the new folder is absent, else dropped.
+    if [[ -d "$game_dir/tools/lan" ]]; then
+        move_if_absent "$game_dir/tools/lan" "$game_dir/openshim/tools/lan"
+        rm -rf -- "$game_dir/tools/lan"
+    fi
+    rmdir "$game_dir/tools" 2>/dev/null || true
+
+    # The shader cache is rebuilt on demand, so the old one is just deleted.
+    rm -rf -- "$game_dir/shader_cache"
+}
+
+# One pristine copy of a game file the installer is about to replace. Never
+# overwrites an existing backup, and skips a file that is already the shipped one.
+save_stock_backup() {
+    local game_file="$1" shipped="$2"
+    local backup
+    [[ -f "$game_file" ]] || return 0
+    backup="$(dirname "$game_file")/openshim/stock-backup/$(basename "$game_file")"
+    [[ -e "$backup" ]] && return 0
+    cmp -s "$game_file" "$shipped" && return 0
+    mkdir -p "$(dirname "$backup")"
+    cp -f "$game_file" "$backup"
+    echo "  saved stock $(basename "$game_file") to openshim/stock-backup"
+}
+
 deploy_player_ini() {
     local src="$1" game_dir="$2" stamp="$3"
-    local live="$game_dir/openshim.ini"
-    local canonical="$game_dir/openshim.ini.canonical"
+    local live="$game_dir/openshim/openshim.ini"
+    local canonical="$game_dir/openshim/openshim.ini.canonical"
     local backup=""
+
+    mkdir -p "$game_dir/openshim"
+    move_legacy_ini "$game_dir"
 
     # Canonical is installer-owned and is the first source the runtime migration
     # path checks when a recognized bad preset needs full replacement.
     cp -f "$src" "$canonical"
-    echo "  refreshed openshim.ini.canonical"
+    echo "  refreshed openshim/openshim.ini.canonical"
 
     if [[ ! -f "$live" ]]; then
         cp -f "$src" "$live"
@@ -397,9 +465,11 @@ deploy_matched() {
         mkdir -p "$game_dir/plugins"
         deploy_file "$PLUGIN_DLL" "$game_dir/plugins/openshim.dll" "$stamp"
     fi
-    deploy_file "$PATCHES" "$game_dir/scripts/patches.json" "$stamp"
+    deploy_file "$PATCHES" "$game_dir/openshim/patches.json" "$stamp"
     deploy_player_ini "$OPENSHIM_INI" "$game_dir" "$stamp"
+    save_stock_backup "$game_dir/net.ini" "$NET_INI"
     deploy_file "$NET_INI" "$game_dir/net.ini" "$stamp"
+    remove_legacy_layout "$game_dir"
 
     if [[ -n "$RENDER_SRC" ]]; then
         local render_target="$game_dir/openshim/renderer/enhanced"
@@ -443,7 +513,7 @@ deploy_matched() {
         fi
     fi
 
-    verify_patches_json "$PATCHES" "$game_dir/scripts/patches.json"
+    verify_patches_json "$PATCHES" "$game_dir/openshim/patches.json"
     echo "  patches.json verified"
 }
 

@@ -1,6 +1,8 @@
 #include "ogre_shader_cache.h"
 #include "terrain_proxy.h"
 #include "terrain_tile_blend.h"
+#include "openshim_layout.h"
+#include "game_log_path.h"
 #include "hook_engine.h"
 #include "engine_globals.h"
 #include "frame_capture_list.h"
@@ -841,7 +843,7 @@ namespace BZROpenShim
             const DWORD length = GetModuleFileNameW(nullptr, path, MAX_PATH);
             if (length == 0 || length >= MAX_PATH)
                 return {};
-            return std::filesystem::path(path).parent_path() / L"openshim.ini";
+            return Layout::OpenShimIniPath();
         }
 
         float ReadIniFloat(const wchar_t* path, const char* key, float fallback)
@@ -6168,15 +6170,9 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             state = 2;
             return;
         }
-        char exePath[MAX_PATH] = {};
-        const DWORD length = GetModuleFileNameA(nullptr, exePath, MAX_PATH);
-        if (length == 0 || length >= MAX_PATH)
-            return;
-        std::string path(exePath, length);
-        path = path.substr(0, path.find_last_of("\\/") + 1);
         char name[64] = {};
         sprintf_s(name, "openshim_frame_%05u.png", frames[next]);
-        path += name;
+        const std::string path = GetGameLogPath(name);
         ++next;
         try
         {

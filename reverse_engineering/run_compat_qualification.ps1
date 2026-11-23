@@ -31,7 +31,8 @@ if ($PSVersionTable.PSVersion.Major -lt 7) { throw "Run under pwsh 7." }
 # shell-menu clicks run in a Windows PowerShell 5.1 child (Invoke-ShellClick).
 
 $gameExe   = Join-Path $GameRoot "battlezone98redux.exe"
-$iniPath   = Join-Path $GameRoot "openshim.ini"
+$iniPath   = Join-Path $GameRoot "openshim\openshim.ini"
+if (-not (Test-Path -LiteralPath $iniPath)) { $iniPath = Join-Path $GameRoot "openshim.ini" }
 $logDir    = Join-Path $GameRoot "logs"
 $bzLog     = Join-Path $logDir "BZLogger.txt"
 $shimLog   = Join-Path $logDir "openshim.log"

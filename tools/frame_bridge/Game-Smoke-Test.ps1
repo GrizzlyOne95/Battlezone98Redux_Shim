@@ -136,7 +136,7 @@ try {
 
     # Snapshot the whole deployment surface, including existing configs and UI
     # assets. Deploy-OpenShim's binary backups alone do not cover resource edits.
-    $targets = @('winmm.dll', 'bzloader.dll', 'plugins/openshim.dll', 'scripts/patches.json', 'openshim/OpenShimAssets.ini')
+    $targets = @('winmm.dll', 'bzloader.dll', 'plugins/openshim.dll', 'scripts/patches.json', 'openshim/patches.json', 'openshim/openshim.ini', 'openshim/OpenShimAssets.ini')
     $targets += Get-ChildItem -LiteralPath (Join-Path $repoRoot 'resources/renderer/enhanced') -File |
         ForEach-Object { 'openshim/renderer/enhanced/' + $_.Name }
     # Deploy writes openshim/ui and removes OpenShim's copies from the legacy
@@ -300,7 +300,7 @@ try {
             if (Get-Command Restore-BZROrphanedOgreConfig -ErrorAction SilentlyContinue) {
                 $null = Restore-BZROrphanedOgreConfig -GameRoot $GameRoot
             }
-            foreach ($relative in @('logs/openshim.log', 'bzloader.log', 'logs/BZLogger.txt', 'logs/BZOgreLogfile.log')) {
+            foreach ($relative in @('logs/openshim.log', 'logs/bzloader.log', 'bzloader.log', 'logs/BZLogger.txt', 'logs/BZOgreLogfile.log')) {
                 $source = Join-Path $GameRoot $relative
                 if (Test-Path -LiteralPath $source -PathType Leaf) {
                     Copy-Item -LiteralPath $source -Destination (Join-Path $outputRoot ([System.IO.Path]::GetFileName($relative))) -Force -ErrorAction Continue

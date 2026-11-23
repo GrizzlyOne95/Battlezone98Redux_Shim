@@ -30,6 +30,7 @@
 #include "backend_selection.h"
 #include "render_profile.h"
 #include "render_profile_runtime.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
@@ -113,9 +114,9 @@ namespace BZROpenShim::RenderProfiles
         bool TryGetUserConfigString(const char* section, const char* key,
                                     std::string& out)
         {
-            const auto dir = GetMainModuleDirectory();
-            if (dir.empty()) return false;
-            const auto path = dir / "openshim.ini";
+            if (GetMainModuleDirectory().empty()) return false;
+            // Moves an old root openshim.ini into openshim\ on first use.
+            const auto& path = Layout::OpenShimIniPath();
 
             constexpr char kUnsetSentinel[] = "\x01__openshim_unset__";
             char buf[128] = {};
@@ -361,6 +362,17 @@ namespace BZROpenShim::RenderProfiles
             if (haveExistingImage && updated == text)
             {
                 return true; // already correct; nothing to write
+            }
+
+            // Keep one pristine copy of the player's Ogre.cfg before the
+            // first OpenShim edit (never overwritten once it exists).
+            if (haveExistingImage)
+            {
+                Layout::BackupStockFileOnce(cfgPath);
+                Layout::DrainMigrationLog([](const char* line)
+                {
+                    LogShimA(LogLevel::Info, kLogTag, "%s", line);
+                });
             }
 
             // The helper returns ASCII by design (pure/testable); widen it

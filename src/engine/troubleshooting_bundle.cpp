@@ -26,9 +26,9 @@ namespace BZROpenShim
 
         // Files beside the exe that describe the install and its settings.
         const wchar_t* const kRootFiles[] = {
-            L"openshim.ini", L"net.ini", L"multi.ini", L"Ogre.cfg", L"bz_plugins.cfg",
-            L"bz_resources.cfg", L"bzloader.log", L"netcode_manifest.json",
-            L"campaignReimagined_settings.cfg", L"scripts\\patches.json",
+            L"openshim\\openshim.ini", L"net.ini", L"multi.ini", L"Ogre.cfg", L"bz_plugins.cfg",
+            L"bz_resources.cfg", L"netcode_manifest.json",
+            L"campaignReimagined_settings.cfg", L"openshim\\patches.json",
         };
 
         // Text logs in logs\ are included by extension; dumps are picked separately.

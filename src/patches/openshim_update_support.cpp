@@ -31,15 +31,21 @@ namespace BZROpenShim
             std::filesystem::path destination;
             const OpenShimUpdatePayloadManifest* metadata;
             bool preserve;
+            // Pre-move location of a preserved file; the shim moves it to
+            // destination at startup, so its presence also counts as settings.
+            std::filesystem::path legacy;
         };
         const SupportFile files[] = {
-            { configSource, gameRoot / "openshim.ini", &manifest.playerConfig, true },
-            { assetSource, gameRoot / "openshim" / "OpenShimAssets.ini", &manifest.assetManifest, false },
+            { configSource, gameRoot / "openshim" / "openshim.ini", &manifest.playerConfig, true,
+              gameRoot / "openshim.ini" },
+            { assetSource, gameRoot / "openshim" / "OpenShimAssets.ini", &manifest.assetManifest, false, {} },
         };
         for (const auto& file : files)
         {
             std::error_code ec;
-            const bool exists = std::filesystem::exists(file.destination, ec);
+            bool exists = std::filesystem::exists(file.destination, ec);
+            if (!ec && !exists && !file.legacy.empty())
+                exists = std::filesystem::exists(file.legacy, ec);
             if (ec) { error = "could not inspect support file: " + ec.message(); return false; }
             std::string ignored;
             if ((file.preserve && exists) || verify(file.destination, *file.metadata, ignored))

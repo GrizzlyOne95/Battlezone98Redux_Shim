@@ -3,17 +3,23 @@
 #
 # Removes everything install_windows.ps1 deploys, from every detected Steam/GOG
 # install (or the one named by OPENSHIM_GAME_PATH): the three-binary load chain
-# (winmm.dll, bzloader.dll, plugins\openshim.dll), scripts\patches.json, the
-# Enhanced renderer resources and asset manifest under openshim\, the four UI
-# widget tiles, openshim.ini.canonical, the .bak-<stamp> copies the installer
-# made of those files on each run, and what the Workshop updater leaves behind
-# (winmm.dll.previous, scripts\patches.json.previous, openshim_update.status).
+# (winmm.dll, bzloader.dll, plugins\openshim.dll), the whole openshim\ folder
+# (patches.json, renderer resources, asset manifest, UI tiles, cache, state,
+# tools\lan, canonical ini) except the player's ini files, the .bak-<stamp>
+# copies the installer made of the binaries, and what the Workshop updater
+# leaves behind (winmm.dll.previous). Files in the older layout (scripts\patches.json,
+# tools\lan, shader_cache\, openshim_update.status, steam_tunnel_peers.txt,
+# root openshim.ini.canonical) are removed too.
+#
+# Before openshim\ goes, every file in openshim\stock-backup\ (the game's
+# own Ogre.cfg, net.ini, input.map, gamekey.map as OpenShim first found them)
+# is copied back over the game-folder file OpenShim edited.
 #
 # A binary is removed only when it identifies as OpenShim; a foreign winmm.dll
-# (another proxy) is kept and reported. openshim.ini and its backups, net.ini
-# and its backups, and logs\ are left in place so a reinstall finds the
-# player's settings; net.ini in particular is a game file OpenShim replaced,
-# and the stock bytes are not known here.
+# (another proxy) is kept and reported. openshim\openshim.ini and its backups,
+# and logs\, are left in place so a reinstall finds the player's settings.
+# Player data (Save\, career_stats.cfg, bans.cfg, flags.cfg, multi.ini, ...)
+# is never touched.
 #
 #   OPENSHIM_PURGE_CONFIG=1      also remove openshim.ini and its backups
 #   OPENSHIM_PURGE_LEFTOVERS=1   additionally purge OpenShim logs, crash dumps,
@@ -388,7 +394,7 @@ function Remove-OpenShimLogs {
             continue
         }
         foreach ($file in Get-ChildItem -LiteralPath $logDir -File -Force) {
-            if ($file.Name -match '^(?:openshim.*\.(?:log|dmp)(?:\.\d+)?|bzloader\.log|winmm_shim\.log)$') {
+            if ($file.Name -match '^(?:openshim.*\.(?:log|dmp)(?:\.\d+)?|bzloader\.log|winmm_shim\.log|openshim_ogre_profile(?:\.prev)?\.csv|openshim_frame_.*\.png)$') {
                 Remove-Planned -Path $file.FullName
             }
         }
@@ -431,6 +437,68 @@ function Remove-OpenShimUserData {
     if (-not (Test-Path -LiteralPath $target -PathType Container)) { return }
     Write-Host "  dedicated current-user data: $target"
     Remove-OpenShimDataTree -Path $target
+}
+
+# Player settings that survive a default uninstall: the live ini and every
+# backup of it, in openshim\ (current layout). The canonical copy is not one.
+$script:iniKeepPattern = '^openshim\.ini(\.bak-.*|\.pre-reset-.*\.bak|\.premigrate-r.*\.bak)?$'
+
+# Copy each file in openshim\stock-backup\ over its game-folder original.
+# Returns $false when any copy failed, so the backup folder is not deleted.
+function Restore-StockBackups {
+    param([string]$GameDir)
+    $backupDir = Join-Path $GameDir "openshim\stock-backup"
+    if (-not (Test-Path -LiteralPath $backupDir -PathType Container)) { return $true }
+    $ok = $true
+    foreach ($file in @(Get-ChildItem -LiteralPath $backupDir -File -Force)) {
+        $dest = Join-Path $GameDir $file.Name
+        if ($dryRun) {
+            Write-Host "  would restore $dest from openshim\stock-backup"
+            continue
+        }
+        try {
+            # Settings changed since the backup (resolution, key binds) are
+            # kept beside it rather than silently lost.
+            if ((Test-Path -LiteralPath $dest -PathType Leaf) -and
+                (Get-FileHash -LiteralPath $dest).Hash -ne (Get-FileHash -LiteralPath $file.FullName).Hash) {
+                Copy-Item -LiteralPath $dest -Destination "$dest.before-uninstall" -Force
+                Write-Host "  kept your current $($file.Name) as $($file.Name).before-uninstall"
+            }
+            Copy-Item -LiteralPath $file.FullName -Destination $dest -Force
+            Write-Host "  restored $dest"
+        } catch {
+            Write-Host "  FAILED  restoring $dest : $($_.Exception.Message)"
+            $script:failed.Add($dest)
+            $ok = $false
+        }
+    }
+    return $ok
+}
+
+# Remove everything inside openshim\ except the player's ini files (kept unless
+# -PurgeConfig) and, when a restore failed, the stock backups.
+function Remove-OpenShimFolder {
+    param([string]$OpenShimDir, [bool]$KeepBackups)
+    if (-not (Test-Path -LiteralPath $OpenShimDir -PathType Container)) { return }
+    foreach ($child in @(Get-ChildItem -LiteralPath $OpenShimDir -Force)) {
+        if ($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint -and $child.PSIsContainer) {
+            Write-Host "  KEEPING reparse point $($child.FullName)"
+            $script:kept++
+        } elseif ($child.PSIsContainer) {
+            if ($KeepBackups -and $child.Name -eq "stock-backup") {
+                Write-Host "  KEEPING $($child.FullName) : restoring from it failed"
+                $script:kept++
+            } else {
+                Remove-OpenShimDataTree -Path $child.FullName
+            }
+        } elseif ($child.Name -match $script:iniKeepPattern -and -not $purgeConfig) {
+            Write-Host "  KEEPING $($child.FullName)"
+            $script:kept++
+        } else {
+            Remove-Planned -Path $child.FullName
+        }
+    }
+    Remove-DirectoryIfEmpty $OpenShimDir
 }
 
 function Test-GameRunningFrom {
@@ -489,48 +557,42 @@ foreach ($gameDir in $gamePaths) {
     }
     Remove-DirectoryIfEmpty (Join-Path $gameDir "plugins")
 
-    # patches.json travels with the DLL and nothing else writes that name.
+    # Put the game's own files back before anything under openshim\ goes.
+    $restored = Restore-StockBackups -GameDir $gameDir
+
+    # Older layout: patches.json under scripts\ (the game's scripts\ stays),
+    # then the older loose files. The new layout holds all of it under openshim\.
     $patches = Join-Path $gameDir "scripts\patches.json"
     Remove-IfPresent $patches
     Remove-IfPresent "$patches.previous"
     Remove-Backups -Path $patches
+    Remove-DirectoryIfEmpty (Join-Path $gameDir "scripts")
+    foreach ($oldDir in @("tools\lan", "shader_cache")) {
+        $oldPath = Join-Path $gameDir $oldDir
+        if (Test-Path -LiteralPath $oldPath -PathType Container) { Remove-OpenShimDataTree -Path $oldPath }
+    }
+    Remove-DirectoryIfEmpty (Join-Path $gameDir "tools")
+    foreach ($oldFile in @("openshim_update.status", "steam_tunnel_peers.txt", "steam_tunnel_peers.txt.lock",
+            "openshim.ini.canonical", "openshim.ini.new", "bzloader.log")) {
+        Remove-IfPresent (Join-Path $gameDir $oldFile)
+    }
 
-    # Enhanced renderer resources and the asset manifest. openshim\ is created
-    # by the installer, but only its own entries are removed; anything else a
-    # player put there is reported and left.
+    # Current layout: the whole openshim\ folder (renderer resources, asset
+    # manifest, UI tiles, patches.json, cache, state, tools\lan, canonical ini,
+    # stock backups) except the player's ini files.
     $openshimDir = Join-Path $gameDir "openshim"
-    $renderDir = Join-Path $openshimDir "renderer\enhanced"
-    # The in-game asset sync keeps a marker in the folder and swaps it through
-    # .pending/.old siblings; remove those along with the folder itself.
-    Remove-IfPresent (Join-Path $renderDir "openshim_set.sha256")
-    foreach ($leftover in @($renderDir, "$renderDir.pending", "$renderDir.old")) {
-        if (Test-Path -LiteralPath $leftover -PathType Container) {
-            Remove-Planned -Path $leftover -Recurse
-        }
-    }
-    Remove-IfPresent (Join-Path $openshimDir "OpenShimAssets.ini")
-    Remove-DirectoryIfEmpty (Join-Path $openshimDir "renderer")
+    Remove-OpenShimFolder -OpenShimDir $openshimDir -KeepBackups (-not $restored)
 
-    # UI images: openshim\ui now, BZ_ASSETS_CORE\common\ui\CustomWidgets in
-    # older releases. Only OpenShim's own files go; either folder may also hold
-    # the game's or the player's files, so it goes only when it is then empty.
-    foreach ($uiDir in @((Join-Path $openshimDir "ui"), (Join-Path $gameDir "BZ_ASSETS_CORE\common\ui\CustomWidgets"))) {
-        foreach ($tile in $uiTiles) { Remove-IfPresent (Join-Path $uiDir $tile) }
-        Remove-IfPresent (Join-Path $uiDir "openshim_widgets.sha256")
-        Remove-DirectoryIfEmpty $uiDir
-    }
-
-    Remove-DirectoryIfEmpty $openshimDir
-    if (-not $dryRun -and (Test-Path -LiteralPath $openshimDir -PathType Container)) {
-        Write-Host "  KEEPING $openshimDir : it still holds files the installer did not put there"
-        $script:kept++
-    }
-
-    # Installer-owned copy of the shipped preset, and the updater's status file.
-    Remove-IfPresent (Join-Path $gameDir "openshim.ini.canonical")
-    Remove-IfPresent (Join-Path $gameDir "openshim_update.status")
+    # UI images older releases put in BZ_ASSETS_CORE\common\ui\CustomWidgets.
+    # Only OpenShim's own files go; the folder may also hold the game's or the
+    # player's files, so it goes only when it is then empty.
+    $uiDir = Join-Path $gameDir "BZ_ASSETS_CORE\common\ui\CustomWidgets"
+    foreach ($tile in $uiTiles) { Remove-IfPresent (Join-Path $uiDir $tile) }
+    Remove-IfPresent (Join-Path $uiDir "openshim_widgets.sha256")
+    Remove-DirectoryIfEmpty $uiDir
 
     if ($purgeConfig) {
+        # Old-layout ini in the game root (the current one sits in openshim\).
         $ini = Join-Path $gameDir "openshim.ini"
         Remove-IfPresent $ini
         Remove-Backups -Path $ini
@@ -564,9 +626,10 @@ if ($purgeLeftovers) {
     Write-Host "If configured, CLEAR the OpenShim upload wrapper from Steam Launch Options."
     Write-Host "This uninstaller cannot edit Steam launch options for you."
 } elseif ($purgeConfig) {
-    Write-Host "openshim.ini and its backups were removed (OPENSHIM_PURGE_CONFIG). net.ini and logs were left in place."
+    Write-Host "openshim.ini and its backups were removed (OPENSHIM_PURGE_CONFIG). Stock files were restored from openshim\stock-backup; logs were left in place."
 } else {
-    Write-Host "openshim.ini, net.ini, their backups, and logs were left in place."
+    Write-Host "openshim\openshim.ini, its backups, and logs were left in place; all other OpenShim files were removed."
+    Write-Host "Stock files in openshim\stock-backup (net.ini, ...) were restored to the game folder."
     Write-Host "Set OPENSHIM_PURGE_CONFIG=1 for settings, or OPENSHIM_PURGE_LEFTOVERS=1 for full cleanup."
 }
 if (-not $purgeLeftovers) {

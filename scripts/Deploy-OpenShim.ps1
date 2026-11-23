@@ -3,7 +3,7 @@
     Deploys the built shim to a Battlezone 98 Redux install.
 
 .DESCRIPTION
-    winmm.dll and scripts/patches.json must move together. The DLL carries the
+    winmm.dll and openshim/patches.json must move together. The DLL carries the
     patch list by name; patches.json carries the address and guard bytes for
     each name. Deploying only the DLL leaves every new patch resolving to
     address 0, where it is silently skipped -- the only symptom is one [SKIP]
@@ -44,7 +44,7 @@ $pairs = @(
     @{ Source = Join-Path $repoRoot "bin\$Configuration\winmm.dll";            Target = Join-Path $GameDir 'winmm.dll';            Project = 'BZROpenShim.vcxproj' },
     @{ Source = Join-Path $repoRoot "bin\$Configuration\bzloader.dll";         Target = Join-Path $GameDir 'bzloader.dll';         Project = 'BZLoader.vcxproj' },
     @{ Source = Join-Path $repoRoot "bin\$Configuration\plugins\openshim.dll"; Target = Join-Path $GameDir 'plugins\openshim.dll'; Project = 'Plugin_OpenShim.vcxproj' },
-    @{ Source = Join-Path $repoRoot 'scripts\patches.json';                     Target = Join-Path $GameDir 'scripts\patches.json' }
+    @{ Source = Join-Path $repoRoot 'scripts\patches.json';                     Target = Join-Path $GameDir 'openshim\patches.json' }
 )
 
 # Renderer resources move with the DLL by the same rule as patches.json: a new
@@ -139,7 +139,7 @@ Write-Host ("symbols archived under {0}" -f $symbolRoot)
 # Verify rather than trust: every patch name the repo declares must be present
 # in the deployed json, or the DLL will resolve it to address 0.
 $repoJson = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts\patches.json') | ConvertFrom-Json
-$gameJson = Get-Content -Raw -LiteralPath (Join-Path $GameDir 'scripts\patches.json') | ConvertFrom-Json
+$gameJson = Get-Content -Raw -LiteralPath (Join-Path $GameDir 'openshim\patches.json') | ConvertFrom-Json
 
 $missing = @()
 foreach ($group in 'patches', 'globals', 'static_pointers') {

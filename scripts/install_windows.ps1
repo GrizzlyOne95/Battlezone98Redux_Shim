@@ -4,8 +4,8 @@
 # Downloads ONE versioned release bundle, OpenShim-Suite.zip, verifies it
 # against the published SHA-256, and deploys the whole compatibility set: the
 # three-binary load chain (winmm.dll -> bzloader.dll -> plugins\openshim.dll),
-# scripts\patches.json, openshim.ini, net.ini, the mandatory Enhanced renderer
-# resources, and the custom UI widget tiles. Downloading the loose per-file
+# openshim\patches.json, openshim\openshim.ini, net.ini, the mandatory Enhanced
+# renderer resources, and the custom UI widget tiles. Downloading the loose per-file
 # assets instead would silently drop the resource trees, and the Enhanced
 # renderer refuses to enable without its validated resource set.
 #
@@ -15,9 +15,17 @@
 # correct runtime behaviour and an unacceptable install outcome, so a bundle
 # that cannot supply all three is refused rather than partially deployed.
 #
+# OpenShim keeps its own files under <game>\openshim\ (and logs under logs\) so
+# removing it by hand is: winmm.dll, bzloader.dll, plugins\openshim.dll, openshim\
+# and logs\. Files from the older layout (root openshim.ini and its backups,
+# scripts\patches.json, tools\lan, shader_cache) are moved or removed on install.
+# openshim\stock-backup\ gets one pristine copy of net.ini before the installer
+# first replaces it; an existing backup is never overwritten.
+#
 # An existing player openshim.ini is preserved by default. The installer always
-# refreshes openshim.ini.canonical so startup migration has the current shipped
-# preset available. Set OPENSHIM_RESET_INI=1 for an explicit backup-and-reset.
+# refreshes openshim\openshim.ini.canonical so startup migration has the current
+# shipped preset available. Set OPENSHIM_RESET_INI=1 for an explicit
+# backup-and-reset.
 #
 # OPENSHIM_SUITE_ZIP=<path> is the offline mode OpenShimSetup.exe uses: that
 # local OpenShim-Suite.zip is deployed instead of downloading one. It is only
@@ -730,6 +738,80 @@ function Backup-ThenCopy {
     Write-Host ("  deployed {0,-14} {1,9:N0} bytes" -f $info.Name, $info.Length)
 }
 
+# Move a file or folder to its new home unless something is already there.
+# An existing destination always wins; the old copy is then left untouched.
+function Move-IfAbsent {
+    param([string]$From, [string]$To)
+    if (-not (Test-Path -LiteralPath $From)) { return }
+    if (Test-Path -LiteralPath $To) { return }
+    $toDir = Split-Path -Parent $To
+    if (-not (Test-Path -LiteralPath $toDir)) {
+        New-Item -ItemType Directory -Force -Path $toDir | Out-Null
+    }
+    Move-Item -LiteralPath $From -Destination $To
+    Write-Host "  moved $(Split-Path -Leaf $From) into $(Split-Path -Leaf $toDir)\"
+}
+
+# Old layout -> openshim\: the player's ini and its backups move as they are
+# (values untouched); the old canonical copy is installer-owned and just goes.
+function Move-LegacyIni {
+    param([string]$GameDir)
+    $openshimDir = Join-Path $GameDir "openshim"
+    Move-IfAbsent -From (Join-Path $GameDir "openshim.ini") -To (Join-Path $openshimDir "openshim.ini")
+    foreach ($old in @(Get-ChildItem -LiteralPath $GameDir -File -Force -ErrorAction SilentlyContinue)) {
+        if ($old.Name -match '^openshim\.ini(\.bak-.*|\.pre-reset-.*\.bak|\.premigrate-r.*\.bak)$') {
+            Move-IfAbsent -From $old.FullName -To (Join-Path $openshimDir $old.Name)
+        }
+    }
+    foreach ($stale in @("openshim.ini.canonical", "openshim.ini.new")) {
+        Remove-Item -LiteralPath (Join-Path $GameDir $stale) -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# Drop the old-layout copies once the new ones are in place.
+function Remove-LegacyLayout {
+    param([string]$GameDir)
+    $oldPatches = Join-Path $GameDir "scripts\patches.json"
+    Remove-Item -LiteralPath $oldPatches, "$oldPatches.previous" -Force -ErrorAction SilentlyContinue
+    $scriptsDir = Join-Path $GameDir "scripts"
+    if ((Test-Path -LiteralPath $scriptsDir -PathType Container) -and
+        -not (Get-ChildItem -LiteralPath $scriptsDir -Force | Select-Object -First 1)) {
+        Remove-Item -LiteralPath $scriptsDir -Force -ErrorAction SilentlyContinue
+    }
+
+    # Bundled LAN tools: carried over when the new folder is absent, else dropped.
+    $oldLan = Join-Path $GameDir "tools\lan"
+    if (Test-Path -LiteralPath $oldLan -PathType Container) {
+        Move-IfAbsent -From $oldLan -To (Join-Path $GameDir "openshim\tools\lan")
+        if (Test-Path -LiteralPath $oldLan) { Remove-Item -LiteralPath $oldLan -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    $toolsDir = Join-Path $GameDir "tools"
+    if ((Test-Path -LiteralPath $toolsDir -PathType Container) -and
+        -not (Get-ChildItem -LiteralPath $toolsDir -Force | Select-Object -First 1)) {
+        Remove-Item -LiteralPath $toolsDir -Force -ErrorAction SilentlyContinue
+    }
+
+    # The shader cache is rebuilt on demand, so the old one is just deleted.
+    Remove-Item -LiteralPath (Join-Path $GameDir "shader_cache") -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# One pristine copy of a game file the installer is about to replace. Never
+# overwrites an existing backup, and skips a file that is already the shipped one.
+function Save-StockBackup {
+    param([string]$GameFile, [string]$ShippedSource)
+    if (-not (Test-Path -LiteralPath $GameFile -PathType Leaf)) { return }
+    $backup = Join-Path (Join-Path (Split-Path -Parent $GameFile) "openshim\stock-backup") (Split-Path -Leaf $GameFile)
+    if (Test-Path -LiteralPath $backup) { return }
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $GameFile).Hash -eq
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $ShippedSource).Hash) { return }
+    $backupDir = Split-Path -Parent $backup
+    if (-not (Test-Path -LiteralPath $backupDir)) {
+        New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+    }
+    Copy-Item -LiteralPath $GameFile -Destination $backup
+    Write-Host "  saved stock $(Split-Path -Leaf $GameFile) to openshim\stock-backup"
+}
+
 function Deploy-PlayerIni {
     param(
         [string]$Source,
@@ -738,13 +820,18 @@ function Deploy-PlayerIni {
         [bool]$Reset
     )
 
-    $live = Join-Path $GameDir "openshim.ini"
-    $canonical = Join-Path $GameDir "openshim.ini.canonical"
+    $openshimDir = Join-Path $GameDir "openshim"
+    if (-not (Test-Path -LiteralPath $openshimDir)) {
+        New-Item -ItemType Directory -Force -Path $openshimDir | Out-Null
+    }
+    Move-LegacyIni -GameDir $GameDir
+    $live = Join-Path $openshimDir "openshim.ini"
+    $canonical = Join-Path $openshimDir "openshim.ini.canonical"
 
     # Canonical is installer-owned. Runtime preset migration already checks this
     # filename first when it needs the current shipped bytes for a full repair.
     Copy-Item -LiteralPath $Source -Destination $canonical -Force
-    Write-Host "  refreshed openshim.ini.canonical"
+    Write-Host "  refreshed openshim\openshim.ini.canonical"
 
     if (-not (Test-Path -LiteralPath $live)) {
         Copy-Item -LiteralPath $Source -Destination $live -Force
@@ -941,14 +1028,16 @@ try {
         if ($pluginDll) {
             Backup-ThenCopy -Source $pluginDll -Dest (Join-Path $gameDir "plugins\openshim.dll") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         }
-        Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "scripts\patches.json") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
+        Backup-ThenCopy -Source $patches -Dest (Join-Path $gameDir "openshim\patches.json") -Stamp $stamp -OnlyIfDifferent:$onlyChanged
         Deploy-PlayerIni -Source $openshimIni -GameDir $gameDir -Stamp $stamp -Reset $resetIni
         $netTarget = Join-Path $gameDir "net.ini"
         if ($onlyChanged -and (Test-Path -LiteralPath $netTarget -PathType Leaf)) {
             Write-Host "  preserved existing net.ini (custom network settings)"
         } else {
+            Save-StockBackup -GameFile $netTarget -ShippedSource $netIni
             Backup-ThenCopy -Source $netIni -Dest $netTarget -Stamp $stamp
         }
+        Remove-LegacyLayout -GameDir $gameDir
 
         if ($artifacts.RenderSource) {
             Copy-ResourceDirectory -Source $artifacts.RenderSource `

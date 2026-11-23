@@ -90,7 +90,9 @@ $statusFile = Join-Path $OutDir 'status.txt'
 function Say($t) { $l = "[twopc $(Get-Date -Format HH:mm:ss)] $t"; Write-Host $l; try { Add-Content -LiteralPath $statusFile -Value $l } catch { } }
 
 # ---------------------------------------------------------------- configuration
-$dlls = 'winmm.dll', 'bzloader.dll', 'plugins\openshim.dll', 'scripts\patches.json'
+# patches.json lives in openshim\ since the footprint move; an older install keeps scripts\.
+$patchesRel = if (-not (Test-Path -LiteralPath (Join-Path $GameRoot 'openshim\patches.json')) -and (Test-Path -LiteralPath (Join-Path $GameRoot 'scripts\patches.json'))) { 'scripts\patches.json' } else { 'openshim\patches.json' }
+$dlls = 'winmm.dll', 'bzloader.dll', 'plugins\openshim.dll', $patchesRel
 $suite = $dlls + 'net.ini'
 $multi = Join-Path $GameRoot 'multi.ini'
 $lock = Join-Path $GameRoot 'bzr_livetest.lock'
@@ -150,7 +152,7 @@ $pc2G = 'C:\Program Files (x86)\Steam\steamapps\common\Battlezone 98 Redux'
 function Get-Pc2Hashes([string]$statusText) {
     $h = @{}
     $m = [regex]::Match($statusText, 'openshim\.dll=(\S+) patches\.json=(\S+) winmm\.dll=(\S+) bzloader\.dll=(\S+)')
-    if ($m.Success) { $h['plugins\openshim.dll'] = $m.Groups[1].Value; $h['scripts\patches.json'] = $m.Groups[2].Value; $h['winmm.dll'] = $m.Groups[3].Value; $h['bzloader.dll'] = $m.Groups[4].Value }
+    if ($m.Success) { $h['plugins\openshim.dll'] = $m.Groups[1].Value; $h[$patchesRel] = $m.Groups[2].Value; $h['winmm.dll'] = $m.Groups[3].Value; $h['bzloader.dll'] = $m.Groups[4].Value }
     $h
 }
 function Get-Pc2Pid {
@@ -251,7 +253,7 @@ try {
 
     if ($Pc1Build) {
         Copy-Item -LiteralPath (Join-Path $Pc1Build 'bin\Release\plugins\openshim.dll') -Destination (Join-Path $GameRoot 'plugins\openshim.dll') -Force
-        Copy-Item -LiteralPath (Join-Path $Pc1Build 'scripts\patches.json') -Destination (Join-Path $GameRoot 'scripts\patches.json') -Force
+        Copy-Item -LiteralPath (Join-Path $Pc1Build 'scripts\patches.json') -Destination (Join-Path $GameRoot $patchesRel) -Force
         Say "PC 1 build deployed from $Pc1Build"
     }
     $hashes0 = @{}

@@ -48,6 +48,8 @@ new_game_fixture() {
     write_fixture "$root/plugins/openshim.dll" "$openshim_marker"
     write_fixture "$root/plugins/openshim.dll.bak-20260101-000000" "$openshim_marker"
 
+    write_fixture "$root/openshim/patches.json" "{}"
+    write_fixture "$root/openshim/patches.json.previous" "{}"
     write_fixture "$root/scripts/patches.json" "{}"
     write_fixture "$root/scripts/patches.json.previous" "{}"
     write_fixture "$root/scripts/patches.json.bak-20260101-000000" "{}"
@@ -67,11 +69,32 @@ new_game_fixture() {
         write_fixture "$root/$ui_dir/player_widget.png" "png"
     done
 
+    # New layout: ini, state, cache, LAN tools and stock backups under openshim/.
+    write_fixture "$root/openshim/openshim.ini" "[Player]"
+    write_fixture "$root/openshim/openshim.ini.bak-20260101-000000" "[Player]"
+    write_fixture "$root/openshim/openshim.ini.pre-reset-20260101-000000.bak" "[Player]"
+    write_fixture "$root/openshim/openshim.ini.canonical" "[Shipped]"
+    write_fixture "$root/openshim/state/openshim_update.status" "state=complete"
+    write_fixture "$root/openshim/cache/shaders/a.bin" "cache"
+    write_fixture "$root/openshim/tools/lan/BZRServer.exe" "server"
+    write_fixture "$root/openshim/stock-backup/net.ini" "[Stock]"
+    write_fixture "$root/openshim/stock-backup/Ogre.cfg" "stock ogre"
+    write_fixture "$root/Ogre.cfg" "openshim ogre"
+    # Old-layout leftovers and player data.
+    write_fixture "$root/tools/lan/BZRServer.exe" "server"
+    write_fixture "$root/shader_cache/a.bin" "cache"
+    write_fixture "$root/steam_tunnel_peers.txt" "peers"
+    write_fixture "$root/bzloader.log" "loader"
+    write_fixture "$root/Save/slot1.sav" "save"
+    write_fixture "$root/career_stats.cfg" "stats"
+    write_fixture "$root/bans.cfg" "bans"
+    write_fixture "$root/flags.cfg" "flags"
+    write_fixture "$root/multi.ini" "multi"
     write_fixture "$root/openshim.ini" "[Player]"
     write_fixture "$root/openshim.ini.bak-20260101-000000" "[Player]"
     write_fixture "$root/openshim.ini.pre-reset-20260101-000000.bak" "[Player]"
     write_fixture "$root/openshim.ini.canonical" "[Shipped]"
-    write_fixture "$root/net.ini" "[Network]"
+    write_fixture "$root/net.ini" "[OpenShimNetwork]"
     write_fixture "$root/net.ini.bak-20260101-000000" "[Network]"
     write_fixture "$root/net.ini.previous" "[Network]"
     write_fixture "$root/logs/openshim.log" "log"
@@ -106,26 +129,34 @@ for relative in \
     BZ_ASSETS_CORE/common/ui/CustomWidgets/uiline.png BZ_ASSETS_CORE/common/ui/CustomWidgets/uiplate.png \
     BZ_ASSETS_CORE/common/ui/CustomWidgets/uibtn.png BZ_ASSETS_CORE/common/ui/CustomWidgets/uibtnhv.png \
     BZ_ASSETS_CORE/common/ui/CustomWidgets/odyssey.ogv BZ_ASSETS_CORE/common/ui/CustomWidgets/openshim_widgets.sha256 \
-    openshim.ini.canonical openshim_update.status; do
+    openshim.ini.canonical openshim_update.status \
+    openshim/patches.json openshim/patches.json.previous openshim/openshim.ini.canonical \
+    openshim/state openshim/cache openshim/tools openshim/stock-backup openshim/ui \
+    tools shader_cache steam_tunnel_peers.txt bzloader.log; do
     check "$(absent "$game/$relative")" "removed: $relative"
 done
 for relative in \
     battlezone98redux.exe winmm.dll.bak-20260102-000000 \
     scripts/stock_mission.lua scripts \
     BZ_ASSETS_CORE/common/ui/CustomWidgets/player_widget.png BZ_ASSETS_CORE/common/ui/CustomWidgets \
-    openshim/ui/player_widget.png openshim/ui openshim \
+    openshim openshim/openshim.ini openshim/openshim.ini.bak-20260101-000000 \
+    openshim/openshim.ini.pre-reset-20260101-000000.bak \
     openshim.ini openshim.ini.bak-20260101-000000 openshim.ini.pre-reset-20260101-000000.bak \
-    net.ini net.ini.bak-20260101-000000 net.ini.previous \
+    net.ini net.ini.bak-20260101-000000 net.ini.previous Ogre.cfg \
+    Save/slot1.sav career_stats.cfg bans.cfg flags.cfg multi.ini \
     logs/openshim.log; do
     check "$(present "$game/$relative")" "kept: $relative"
 done
+check "$([[ "$(cat "$game/net.ini")" == "[Stock]" ]] && echo 1 || echo 0)" "net.ini was restored from openshim/stock-backup"
+check "$([[ "$(cat "$game/Ogre.cfg")" == "stock ogre" ]] && echo 1 || echo 0)" "Ogre.cfg was restored from openshim/stock-backup"
+check "$([[ "$(cat "$game/career_stats.cfg")" == "stats" ]] && echo 1 || echo 0)" "player data content is untouched"
 check "$([[ "$output" == *"KEEPING"*"winmm.dll.bak-20260102-000000"* ]] && echo 1 || echo 0)" "the foreign backup is reported as kept"
 check "$([[ "$output" == *"left in place"* ]] && echo 1 || echo 0)" "the closing note says what was left"
 check "$([[ "$output" == *"WINEDLLOVERRIDES"* ]] && echo 1 || echo 0)" "the closing note reminds about the launch option"
 
-# --- UI folders holding only OpenShim's files are removed, openshim/ too ------
+# --- UI folders and an openshim/ holding no player ini are removed entirely ---
 new_game_fixture "$game"
-rm -f "$game/openshim/ui/player_widget.png" "$game/BZ_ASSETS_CORE/common/ui/CustomWidgets/player_widget.png"
+rm -f "$game"/openshim/openshim.ini* "$game/openshim/ui/player_widget.png" "$game/BZ_ASSETS_CORE/common/ui/CustomWidgets/player_widget.png"
 output="$(bash "$uninstaller" --game-path "$game" 2>&1)" && ok=1 || ok=0
 check "$ok" "owned-only UI run exits cleanly: $output"
 for relative in openshim/ui openshim BZ_ASSETS_CORE/common/ui/CustomWidgets; do
@@ -137,10 +168,12 @@ check "$(present "$game/BZ_ASSETS_CORE/common/ui")" "owned-only UI run keeps the
 new_game_fixture "$game"
 output="$(bash "$uninstaller" --game-path "$game" --purge-config 2>&1)" && ok=1 || ok=0
 check "$ok" "purge run exits cleanly: $output"
-for relative in openshim.ini openshim.ini.bak-20260101-000000 openshim.ini.pre-reset-20260101-000000.bak; do
+for relative in openshim.ini openshim.ini.bak-20260101-000000 openshim.ini.pre-reset-20260101-000000.bak \
+        openshim/openshim.ini openshim/openshim.ini.bak-20260101-000000 \
+        openshim/openshim.ini.pre-reset-20260101-000000.bak openshim; do
     check "$(absent "$game/$relative")" "purge removed: $relative"
 done
-for relative in net.ini net.ini.bak-20260101-000000 net.ini.previous logs/openshim.log; do
+for relative in net.ini net.ini.bak-20260101-000000 net.ini.previous logs/openshim.log career_stats.cfg Save/slot1.sav; do
     check "$(present "$game/$relative")" "purge kept: $relative"
 done
 

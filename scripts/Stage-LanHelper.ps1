@@ -41,7 +41,7 @@ foreach ($name in $licenses) {
         throw "LAN helper runtime license missing or hash mismatch: $name"
     }
 }
-$target = Join-Path ([IO.Path]::GetFullPath($DestinationRoot)) 'tools\lan'
+$target = Join-Path ([IO.Path]::GetFullPath($DestinationRoot)) 'openshim	ools\lan'
 if ([IO.Path]::GetFullPath($source).TrimEnd('\') -ne $target.TrimEnd('\')) {
     New-Item -ItemType Directory -Force -Path $target | Out-Null
     foreach ($name in (@('BZRServer.exe', 'manifest.json', 'LAN_DISCOVERY.md', 'LICENSE') + $licenses)) {

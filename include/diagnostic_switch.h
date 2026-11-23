@@ -17,6 +17,12 @@
 // as set variables, the same as in each copy it replaces.
 
 #include "bool_token.h"
+// A few patch files still build as C++14 (no <filesystem>); they get the
+// narrow-API path below instead of the layout header.
+#if defined(_MSVC_LANG) && _MSVC_LANG >= 201703L
+#include "openshim_layout.h"
+#define OPENSHIM_DIAGNOSTIC_SWITCH_HAS_LAYOUT 1
+#endif
 
 #include <windows.h>
 
@@ -27,21 +33,28 @@ namespace BZROpenShim
 {
 namespace DiagnosticSwitch
 {
-    // openshim.ini beside the game executable, or a bare "openshim.ini"
-    // (relative to the working directory) when the executable path is not
-    // available.
+    // openshim\openshim.ini under the game folder (see openshim_layout.h,
+    // which also moves an old root openshim.ini there on first use).
     inline std::string OpenShimIniPath()
     {
+#if defined(OPENSHIM_DIAGNOSTIC_SWITCH_HAS_LAYOUT)
+        return Layout::OpenShimIniPathA();
+#else
+        // C++14 readers: the plugin moves the old root ini at startup, so
+        // only fall back to it when openshim\openshim.ini is absent.
         char path[MAX_PATH] = {};
         const DWORD length = GetModuleFileNameA(nullptr, path, MAX_PATH);
-        if (length == 0 || length >= MAX_PATH)
-            return "openshim.ini";
-
+        if (length == 0 || length >= MAX_PATH) return "openshim\\openshim.ini";
         char* slash = std::strrchr(path, '\\');
-        if (!slash)
-            return "openshim.ini";
+        if (!slash) return "openshim\\openshim.ini";
         *(slash + 1) = '\0';
-        return std::string(path) + "openshim.ini";
+        const std::string root(path);
+        const std::string moved = root + "openshim\\openshim.ini";
+        if (GetFileAttributesA(moved.c_str()) != INVALID_FILE_ATTRIBUTES) return moved;
+        const std::string legacy = root + "openshim.ini";
+        if (GetFileAttributesA(legacy.c_str()) != INVALID_FILE_ATTRIBUTES) return legacy;
+        return moved;
+#endif
     }
 
     inline bool Requested(const char* environmentName, const char* iniSection, const char* iniKey)

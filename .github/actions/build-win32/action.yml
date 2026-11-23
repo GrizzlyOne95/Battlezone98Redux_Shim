@@ -139,7 +139,7 @@ runs:
         & $exe
         if ($LASTEXITCODE -ne 0) {
           Write-Host "--- bzloader.log ---"
-          Get-Content -LiteralPath (Join-Path $PWD "bin/Release/bzloader.log") -ErrorAction SilentlyContinue
+          Get-Content -LiteralPath (Join-Path $PWD "bin/Release/logs/bzloader.log") -ErrorAction SilentlyContinue
           throw "BZLoaderHostTest failed with exit code $LASTEXITCODE"
         }
 

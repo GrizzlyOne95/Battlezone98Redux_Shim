@@ -8,6 +8,7 @@
 #include "bzr_options_ui.h"
 #include "shell_screens.h"
 #include "hook_engine.h"
+#include "openshim_layout.h"
 #include "bool_token.h"
 #include "hud_feedback.h"
 #include "contextual_hud.h"
@@ -1159,6 +1160,8 @@ namespace BZROpenShim
 
             const std::filesystem::path inputMapPath =
                 g_InputBindingInstallDirectory / "input.map";
+            // Keep the player's untouched copy once before the first edit.
+            Layout::BackupStockFileOnce(inputMapPath);
             return WriteInputBindingDocumentAtomic(inputMapPath, edited, outError);
         }
 
@@ -1217,6 +1220,8 @@ namespace BZROpenShim
 
             const std::filesystem::path gameKeyMapPath =
                 g_InputBindingInstallDirectory / "gamekey.map";
+            // Keep the player's untouched copy once before the first edit.
+            Layout::BackupStockFileOnce(gameKeyMapPath);
             return WriteInputBindingDocumentAtomic(gameKeyMapPath, edited, outError);
         }
 

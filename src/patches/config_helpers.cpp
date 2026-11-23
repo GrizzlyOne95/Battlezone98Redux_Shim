@@ -11,6 +11,7 @@
 #include "engine_globals.h"
 #include "game_state.h"
 #include "openshim_ini.h"
+#include "openshim_layout.h"
 #include "openshim_preset_migration.h"
 #include "openshim_assets.h"
 #include "terrain_proxy.h"
@@ -178,10 +179,10 @@ namespace BZROpenShim
 
     std::filesystem::path GetUserConfigPath()
     {
-        const auto dir = GetConfigModuleDirectory();
-        if (dir.empty())
+        if (GetConfigModuleDirectory().empty())
             return {};
-        return dir / kUserConfigFileName;
+        // openshim\openshim.ini; an old root copy moves there on first use.
+        return Layout::OpenShimIniPath();
     }
 
     // Tri-state string read: returns false when the key is absent (or the

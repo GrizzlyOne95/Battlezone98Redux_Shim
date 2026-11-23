@@ -208,7 +208,7 @@ function Watch-BZRCoopRun {
             $dest = Join-Path $RunDir ("client{0}" -f $c.index)
             if ($c.dir -and -not (Test-Path -LiteralPath $dest)) {
                 $null = New-Item -ItemType Directory -Path $dest -Force
-                foreach ($f in 'BZLogger.txt', 'BZOgreLogfile.log', 'openshim.log', 'bzloader.log', 'BZChatLog.txt', 'openshim.ini', 'net.ini') {
+                foreach ($f in 'BZLogger.txt', 'BZOgreLogfile.log', 'openshim.log', 'bzloader.log', 'BZChatLog.txt', 'openshim\openshim.ini', 'openshim.ini', 'net.ini') {
                     Copy-Item -LiteralPath (Join-Path $c.dir $f) -Destination $dest -ErrorAction SilentlyContinue
                 }
                 # Text logs plus only this run's dumps (see Copy-BZRCoopClientLogs).

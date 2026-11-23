@@ -34,7 +34,8 @@ New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 $exe = Join-Path $GameRoot "battlezone98redux.exe"
 $builtDll = Join-Path $repoRoot "bin\Release\winmm.dll"
-$installedIni = Join-Path $GameRoot "openshim.ini"
+$installedIni = Join-Path $GameRoot "openshim\openshim.ini"
+if (-not (Test-Path -LiteralPath $installedIni)) { $installedIni = Join-Path $GameRoot "openshim.ini" }
 $missionLua = Join-Path $GameRoot "addon\lcbench\lcbench.lua"
 $fixture = Join-Path $repoRoot "reverse_engineering\test_missions\pilot_anim_capture\$Fixture"
 foreach ($p in @($exe, $installedIni, $missionLua, $fixture)) {

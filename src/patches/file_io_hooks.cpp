@@ -13,6 +13,7 @@
 #include "bzn_save_path.h"
 #include "patcher.h"
 #include "hook_engine.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 #include "ogre_shader_cache.h"
 #include "ui_performance.h"
@@ -476,7 +477,7 @@ namespace BZROpenShim
                 const std::filesystem::path& rootAddon = GetRootAddonPath();
                 if (rootAddon.empty())
                     return true;
-                const std::filesystem::path iniPath = rootAddon.parent_path() / L"openshim.ini";
+                const std::filesystem::path& iniPath = Layout::OpenShimIniPath();
                 // A sentinel default detects a missing key: a present key
                 // (even blank) never yields the sentinel byte.
                 constexpr wchar_t kUnsetSentinel[] = L"\x01__openshim_unset__";

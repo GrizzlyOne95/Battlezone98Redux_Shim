@@ -62,7 +62,8 @@ foreach ($name in $deployNames) {
     }
 }
 
-$shimIni = Join-Path $GameRoot "openshim.ini"
+$shimIni = Join-Path $GameRoot "openshim\openshim.ini"
+if (-not (Test-Path -LiteralPath $shimIni)) { $shimIni = Join-Path $GameRoot "openshim.ini" }
 $shimIniBackup = Join-Path $backupRoot "openshim.ini"
 $shimIniPresent = Test-Path -LiteralPath $shimIni
 if ($shimIniPresent) {
@@ -85,7 +86,8 @@ $shimHash = (Get-FileHash -LiteralPath $shimDll -Algorithm SHA256).Hash
 # repo's. A stale deployed copy silently drops every patch the working tree
 # added -- the shim only says so in one [STALE-CONFIG] line deep in its log --
 # so surface the mismatch here instead.
-$livePatchesJson = Join-Path $GameRoot "scripts\patches.json"
+$livePatchesJson = Join-Path $GameRoot "openshim\patches.json"
+if (-not (Test-Path -LiteralPath $livePatchesJson)) { $livePatchesJson = Join-Path $GameRoot "scripts\patches.json" }
 $repoPatchesJson = Join-Path (Split-Path $PSScriptRoot -Parent) "scripts\patches.json"
 $patchesHash = $null
 $patchesMatchRepo = $null

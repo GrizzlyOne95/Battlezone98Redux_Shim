@@ -1,8 +1,8 @@
-"""Build openshim_dxbc_seed.pack from a warm shader_cache/dxbc directory.
+"""Build openshim_dxbc_seed.pack from a warm openshim/cache/shaders/dxbc directory (older installs: shader_cache/dxbc).
 
-Usage: python tools/build_dxbc_seed.py <game root>/shader_cache/dxbc resources/renderer/enhanced/openshim_dxbc_seed.pack
+Usage: python tools/build_dxbc_seed.py <game root>/openshim/cache/shaders/dxbc resources/renderer/enhanced/openshim_dxbc_seed.pack
 
-Warm the cache first: a clean shader_cache, then main menu, an MP game room
+Warm the cache first: a clean openshim/cache/shaders, then main menu, an MP game room
 and a mission on the settings players use. Layout: include/dxbc_cache_policy.h.
 """
 import struct

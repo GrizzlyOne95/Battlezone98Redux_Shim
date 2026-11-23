@@ -44,7 +44,8 @@ New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 
 $gameExe = Join-Path $GameRoot "battlezone98redux.exe"
 $ogreConfig = Join-Path $GameRoot "Ogre.cfg"
-$shimIni = Join-Path $GameRoot "openshim.ini"
+$shimIni = Join-Path $GameRoot "openshim\openshim.ini"
+if (-not (Test-Path -LiteralPath $shimIni)) { $shimIni = Join-Path $GameRoot "openshim.ini" }
 $missionSourceRoot = Join-Path $PSScriptRoot "test_missions\live_combat_scaling"
 $missionRoot = Join-Path $GameRoot "addon\lcbench"
 $missionConfig = Join-Path $missionRoot "lcbcfg.odf"

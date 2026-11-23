@@ -156,7 +156,8 @@ $gameExe = Join-Path $GameRoot "battlezone98redux.exe"
 if (-not (Test-Path $gameExe)) { throw "Game executable not found: $gameExe" }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$iniPath = Join-Path $GameRoot "openshim.ini"
+$iniPath = Join-Path $GameRoot "openshim\openshim.ini"
+if (-not (Test-Path -LiteralPath $iniPath)) { $iniPath = Join-Path $GameRoot "openshim.ini" }
 $iniBackup = "$iniPath.parity-backup"
 $shimSource = Join-Path $repoRoot "bin\Release\winmm.dll"
 $bzLogger = Join-Path $GameRoot "logs\BZLogger.txt"

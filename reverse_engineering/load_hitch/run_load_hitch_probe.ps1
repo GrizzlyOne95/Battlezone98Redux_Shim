@@ -32,7 +32,8 @@ $originalConfig=[IO.File]::ReadAllBytes($config)
 [IO.File]::WriteAllBytes((Join-Path $evidence 'modEnabled.before.dat'),$originalSelection)
 [IO.File]::WriteAllBytes((Join-Path $evidence 'ogre.before.cfg'),$originalConfig)
 $hashesBefore=Get-ModuleHashes
-$cacheDir=Join-Path $gameRoot 'shader_cache'
+$cacheDir=Join-Path $gameRoot 'openshim\cache\shaders'
+if(-not (Test-Path -LiteralPath $cacheDir)){$oldCacheDir=Join-Path $gameRoot 'shader_cache'; if(Test-Path -LiteralPath $oldCacheDir){$cacheDir=$oldCacheDir}}
 $cacheBackup=Join-Path $evidence 'shader_cache.backup'
 $cacheMoved=$false
 $launchUtc=$null

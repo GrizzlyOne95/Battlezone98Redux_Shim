@@ -28,7 +28,7 @@ A vtable-slot hook only runs for objects whose class uses that vtable, and subcl
 
 ## Deploying a test build
 
-Deploy the complete current load chain and configuration with `scripts/Deploy-OpenShim.ps1`; do not hand-copy only `winmm.dll`. At minimum, `scripts/patches.json` must match the DLL because the binary does not embed patch addresses.
+Deploy the complete current load chain and configuration with `scripts/Deploy-OpenShim.ps1`; do not hand-copy only `winmm.dll`. At minimum, the deployed `openshim\patches.json` (older installs: `scripts\patches.json`) must match the DLL because the binary does not embed patch addresses.
 
 Build `BZROpenShim.sln` (Release | Win32) before deploying. Patch code lives in `Plugin_OpenShim.vcxproj` (`bin\Release\plugins\openshim.dll`); building `BZROpenShim.vcxproj` alone produces only `winmm.dll` (not the plugin or `bzloader.dll`). The deploy script refuses a DLL older than any file its project compiles, but it does not check headers, so after a header-only edit confirm that the run's `openshim.log` contains a log line your change adds.
 

@@ -70,10 +70,11 @@
                 return;
 
             const std::string iniPath = GetOpenShimIniPath();
-            const size_t slash = iniPath.find_last_of("\\/");
+            // The CSV is a log: it lives in logs\ with the other diagnostics.
+            const std::string csvPath = GetGameLogPath("openshim_ogre_profile.csv");
+            const size_t slash = csvPath.find_last_of("\\/");
             const std::string csvDirectory =
-                (slash == std::string::npos) ? std::string() : iniPath.substr(0, slash + 1);
-            const std::string csvPath = csvDirectory + "openshim_ogre_profile.csv";
+                (slash == std::string::npos) ? std::string() : csvPath.substr(0, slash + 1);
 
             static const uint64_t s_csvCapBytes = ResolveOgreCsvCapBytes(iniPath);
             if (!s_csvCapLogged)

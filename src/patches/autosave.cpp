@@ -10,6 +10,7 @@
 
 #include "autosave.h"
 #include "hook_engine.h"
+#include "openshim_layout.h"
 #include "engine_globals.h"
 #include "autosave_gate.h"
 #include "autosave_notice.h"
@@ -321,8 +322,8 @@ namespace BZROpenShim
         void LoadConfig()
         {
             g_config = {};
-            const std::filesystem::path iniPath = g_gameDirectory / "openshim.ini";
-            const std::string ini = iniPath.string();
+            const std::filesystem::path& iniPath = Layout::OpenShimIniPath();
+            const std::string ini = Layout::OpenShimIniPathA();
 
             g_config.enabled = GetPrivateProfileIntA("AutoSave", "Enabled", 0, ini.c_str()) != 0;
             g_config.backupExisting = GetPrivateProfileIntA("AutoSave", "BackupExisting", 1, ini.c_str()) != 0;

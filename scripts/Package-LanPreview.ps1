@@ -29,7 +29,7 @@ Copy-Item -LiteralPath (Join-Path $repo 'Docs\LAN_MULTIPLAYER.md') -Destination 
 @'
 OpenShim Local host tools development preview
 
-Back up your current OpenShim DLLs and scripts/patches.json before trying this
+Back up your current OpenShim DLLs and openshim/patches.json before trying this
 overlay. Extract its complete folder layout into a Battlezone 98 Redux install;
 keep your existing openshim.ini and net.ini. This archive includes only the
 example INI, so it does not replace active preferences.
@@ -54,7 +54,7 @@ Get-ChildItem -LiteralPath $payload -File -Recurse | ForEach-Object {
     $relative = [IO.Path]::GetRelativePath($payload, $_.FullName).Replace('\', '/')
     $files[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
 }
-$helper = Get-Content -LiteralPath (Join-Path $payload 'tools\lan\manifest.json') -Raw | ConvertFrom-Json
+$helper = Get-Content -LiteralPath (Join-Path $payload 'openshim	ools\lan\manifest.json') -Raw | ConvertFrom-Json
 [ordered]@{
     format = 1; sourceRevision = $revision; helperRevision = $helper.revision
     status = 'development-preview'; nativeGameplayValidated = $false; sha256 = $files

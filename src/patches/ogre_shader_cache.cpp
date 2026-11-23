@@ -37,6 +37,7 @@
 #include "d3d_compile_cache.h"
 #include "ogre_shader_cache.h"
 #include "shader_source_fingerprint.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 #include "ui_file_scan_hooks.h"
 
@@ -127,12 +128,12 @@ namespace BZROpenShim
 
         static std::filesystem::path GetCacheFilePath()
         {
-            return GetGameRootDirectory() / L"shader_cache" / L"ogre_microcode.cache";
+            return Layout::ShaderCacheDirectory() / L"ogre_microcode.cache";
         }
 
         static std::filesystem::path GetFingerprintFilePath()
         {
-            return GetGameRootDirectory() / L"shader_cache" / L"ogre_microcode.fp";
+            return Layout::ShaderCacheDirectory() / L"ogre_microcode.fp";
         }
 
         // Fingerprint of the mod shader sources (see shader_source_fingerprint.h

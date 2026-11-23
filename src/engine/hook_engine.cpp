@@ -1,6 +1,7 @@
 #include "hook_engine.h"
 #include "build_overlay.h"
 #include "resolve_table.h"
+#include "openshim_layout.h"
 #include "shim_log.h"
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -687,23 +688,21 @@ namespace HookEngine
 
     std::string FindPatchesJsonPath()
     {
+        // <game root>\openshim\patches.json, beside the exe whatever the
+        // working directory; an old scripts\patches.json moves there on first
+        // use (the old path comes back only if that move failed).
+        const std::string path = BZROpenShim::Layout::AnsiPath(BZROpenShim::Layout::PatchesJsonPath());
         {
-            std::ifstream f("scripts/patches.json");
-            if (f.is_open()) return "scripts/patches.json";
+            std::ifstream f(path);
+            if (f.is_open()) return path;
         }
-
-        // The game may be launched with a working directory other than the
-        // install root; fall back to the exe's own directory.
-        char path[MAX_PATH] = {};
-        if (GetModuleFileNameA(nullptr, path, MAX_PATH) != 0)
+        // A game path the ANSI code page cannot spell: the working directory
+        // is normally the game root, so try the relative form.
+        for (const char* relative : { "openshim/patches.json", "scripts/patches.json" })
         {
-            char* slash = strrchr(path, '\\');
-            if (slash) *slash = '\0';
-            std::string exeRelative = std::string(path) + "\\scripts\\patches.json";
-            std::ifstream f(exeRelative);
-            if (f.is_open()) return exeRelative;
+            std::ifstream f(relative);
+            if (f.is_open()) return relative;
         }
-
         return {};
     }
 
@@ -837,7 +836,7 @@ namespace HookEngine
             if (path.empty())
             {
                 BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
-                    "[RESOLVE] scripts/patches.json not found; every resolve falls back");
+                    "[RESOLVE] openshim\\patches.json not found; every resolve falls back");
                 return;
             }
 
@@ -944,7 +943,7 @@ namespace HookEngine
         if (!target)
         {
             BZROpenShim::LogShimA(BZROpenShim::LogLevel::Warn, "resolve",
-                "[RESOLVE] name=\"%s\" has no entry in scripts/patches.json", name);
+                "[RESOLVE] name=\"%s\" has no entry in openshim\\patches.json", name);
             return 0;
         }
 

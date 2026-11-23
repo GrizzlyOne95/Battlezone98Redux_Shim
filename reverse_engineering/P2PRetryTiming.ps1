@@ -33,12 +33,19 @@ function Set-P2PRetryTimingText([string]$Text, [string]$Timers) {
     $head + $body + $keys + $Text.Substring($end)
 }
 
+function Get-P2PRetryIniPath([string]$Instance) {
+    # openshim\openshim.ini since the footprint move; an older install keeps it in the root.
+    $new = Join-Path $Instance 'openshim\openshim.ini'
+    $old = Join-Path $Instance 'openshim.ini'
+    if (-not (Test-Path -LiteralPath $new) -and (Test-Path -LiteralPath $old)) { $old } else { $new }
+}
+
 function Set-P2PRetryTiming([string[]]$InstanceDirs, [string]$Timers, [string]$BackupDir) {
     if (Get-Process battlezone98redux -ErrorAction SilentlyContinue) { throw 'Cannot change retry timers while a game is alive.' }
     $records = @()
     # Validate every file before changing any, retaining the original bytes.
     foreach ($instance in $InstanceDirs) {
-        $path = Join-Path $instance 'openshim.ini'
+        $path = Get-P2PRetryIniPath $instance
         $bytes = [IO.File]::ReadAllBytes($path)
         $encoding = [Text.Encoding]::GetEncoding(28591)
         $text = Set-P2PRetryTimingText ($encoding.GetString($bytes)) $Timers

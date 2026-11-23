@@ -189,7 +189,7 @@ seen; a server bound to `[::]` alone does not start the bridge.
 It borrows the game's Steam session, so Steam sees no second "game" process
 and BZR starts from Steam normally. Friends can join only while the host's
 game runs; an always-on server keeps the standalone bridge. The peer map is
-`steam_tunnel_peers.txt` beside the game exe. The bridge never runs with
+`openshim/state/steam_tunnel_peers.txt` in the game folder. The bridge never runs with
 either agent key set or while Join Game has switched this game onto another
 host's tunnel (one Steam tunnel transport per process); while the bridge is
 running, Join Game toward another host is refused. The host uses 127.0.0.2
@@ -282,7 +282,7 @@ find a server that runs a Steam bridge, with no VPS and no friend invite.
   it. That is a loopback server with a listener, so `SteamTunnelBridge=auto`
   starts the bridge and the listing follows; no INI edit or second program is
   needed. The Steam host always runs inside this game (`EmbeddedLan::Host`);
-  it never needs `tools/lan/BZRServer.exe`, which releases do not ship.
+  it never needs `openshim/tools/lan/BZRServer.exe`, which releases do not ship.
   Identity is tied to the bridge: a bridged peer connects from its durable
   `127.0.1.<slot>` source and may log in only as the Steam id the bridge
   authenticated for that slot (authtype `steam`; its ticket is ignored and
@@ -299,11 +299,11 @@ find a server that runs a Steam bridge, with no VPS and no friend invite.
   control. Verified live 2026-11-08: a Steam friend found the
   `[Steam]` row, joined, and the loopback LAN host's server authorized it.
   UNVERIFIED: both players in the same game room. Without in-game LAN
-  NoAuth, Start host needs `tools/lan/BZRServer.exe` (a build that accepts
+  NoAuth, Start host needs `openshim/tools/lan/BZRServer.exe` (a build that accepts
   `--lan-discovery --lan-managed`) beside the game.
 
 - Host: opt in with **Steam list: On** on the LAN screen (saved as
-  `openshim.ini [Network] SteamPublicListing=1`; default off). While a bridge
+  `openshim\openshim.ini [Network] SteamPublicListing=1`; default off). While a bridge
   is announced on this PC, the game owns a public Steam lobby (appid 301650,
   250 slots so searches never treat it as full) whose data is
   `bridge=<SteamID>`, `name=<persona name>`, then `openshim=tunnel1`. The

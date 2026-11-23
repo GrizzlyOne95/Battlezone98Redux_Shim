@@ -452,7 +452,17 @@ extern "C" __declspec(dllexport) int32_t __cdecl BZLoader_Initialize()
         ReleaseSRWLockExclusive(&g_StateLock);
         return 0;
     }
-    g_LogPath = g_LoaderDirectory + L"\\bzloader.log";
+    // The log lives in logs\ with the shim's logs; a root bzloader.log from
+    // an older build is deleted (it is only a log). Self-contained on purpose:
+    // the loader must not depend on OpenShim code.
+    const std::wstring logsDirectory = g_LoaderDirectory + L"\\logs";
+    CreateDirectoryW(logsDirectory.c_str(), nullptr);
+    const DWORD logsAttributes = GetFileAttributesW(logsDirectory.c_str());
+    const bool haveLogsDirectory = logsAttributes != INVALID_FILE_ATTRIBUTES &&
+                                   (logsAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+    const std::wstring legacyLogPath = g_LoaderDirectory + L"\\bzloader.log";
+    g_LogPath = haveLogsDirectory ? logsDirectory + L"\\bzloader.log" : legacyLogPath;
+    const bool removedLegacyLog = haveLogsDirectory && DeleteFileW(legacyLogPath.c_str()) != FALSE;
     BuildSessionId();
     BuildExecutableHint();
     g_Host = {sizeof(g_Host), BZLOADER_ABI_VERSION, BZLOADER_VERSION,
@@ -464,6 +474,10 @@ extern "C" __declspec(dllexport) int32_t __cdecl BZLoader_Initialize()
     Logf(BZ_HOST_LOG_INFO, "host",
          "BZLoader %u starting; ABI=%u buildHint=%s game=%u",
          BZLOADER_VERSION, BZLOADER_ABI_VERSION, g_ExecutableBuildHint, g_Host.gameId);
+    if (removedLegacyLog)
+        Logf(BZ_HOST_LOG_INFO, "host", "Deleted the old root bzloader.log; the log is now logs\\bzloader.log");
+    else if (!haveLogsDirectory)
+        Logf(BZ_HOST_LOG_WARNING, "host", "Could not create logs\\; logging to the root bzloader.log");
     if (g_Host.gameId == BZ_GAME_UNKNOWN)
         Logf(BZ_HOST_LOG_WARNING, "host",
              "Host executable %ls was not recognised; only plugins declaring "

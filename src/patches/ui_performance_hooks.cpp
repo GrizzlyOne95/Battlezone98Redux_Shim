@@ -15,6 +15,7 @@
 #include "iat_patch.h"
 #include "bool_token.h"
 #include "ui_performance.h"
+#include "openshim_layout.h"
 #include "ui_file_scan_hooks.h"
 #include "hook_engine.h"
 #include "patcher.h"
@@ -1883,7 +1884,7 @@ namespace BZROpenShim::UiPerfHooks
             if (GetModuleFileNameA(nullptr, gameDir, MAX_PATH))
             {
                 char* slash = strrchr(gameDir, '\\');
-                if (slash) { *(slash+1) = '\0'; std::string ini = std::string(gameDir) + "openshim.ini"; char val[16] = {}; GetPrivateProfileStringA("Diagnostics", "UiPerformanceAutoMatrix", "__unset__", val, sizeof(val), ini.c_str());
+                if (slash) { std::string ini = BZROpenShim::Layout::OpenShimIniPathA(); char val[16] = {}; GetPrivateProfileStringA("Diagnostics", "UiPerformanceAutoMatrix", "__unset__", val, sizeof(val), ini.c_str());
                     if (strcmp(val, "__unset__") != 0) {
                         bool parsed = false;
                         autoMat = BZROpenShim::BoolToken::TryParse(val, parsed) && parsed;
