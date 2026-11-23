@@ -121,6 +121,7 @@ namespace BZROpenShim
             ForgetProducerRallyMeshes(L"clearScene");
             ForgetLaserSightSceneResources(L"clearScene");
             ForgetRtsMarkersSceneResources(L"clearScene");
+            ForgetFogWakeSceneResources(L"clearScene");
             ForgetPilotFlashlight(L"clearScene");
             SceneMutationDrainSceneTeardown();
             ForgetMultiplayerFlagSceneResources(L"clearScene");
@@ -144,6 +145,7 @@ namespace BZROpenShim
             ForgetProducerRallyMeshes(L"destroyAllMovableObjects");
             ForgetLaserSightSceneResources(L"destroyAllMovableObjects");
             ForgetRtsMarkersSceneResources(L"destroyAllMovableObjects");
+            ForgetFogWakeSceneResources(L"destroyAllMovableObjects");
             ForgetPilotFlashlight(L"destroyAllMovableObjects");
             SceneMutationDrainSceneTeardown();
             ForgetMultiplayerFlagSceneResources(L"destroyAllMovableObjects");
@@ -220,6 +222,7 @@ namespace BZROpenShim
             DestroyProducerRallySceneObjects(sceneManager, L"destroyAllEntities");
             DestroyLaserSightSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyRtsPlacementSceneObjects(sceneManager, L"destroyAllEntities");
+            DestroyFogWakeSceneObjects(sceneManager, L"destroyAllEntities");
             DestroyChunkProxySceneObjects(sceneManager, L"destroyAllEntities");
             SceneMutationDrainSceneTeardown();
             OrdnanceEntityLeakOnSceneEntitiesDestroyed();

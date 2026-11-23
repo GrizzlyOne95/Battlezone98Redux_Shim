@@ -309,6 +309,7 @@
     <ClCompile Include="src\patches\dx11_scene_depth.cpp" />
     <ClCompile Include="src\patches\file_io_hooks.cpp" />
     <ClCompile Include="src\patches\fog_wake_feature.cpp" />
+    <ClCompile Include="src\patches\fog_wake_render.cpp" />
     <ClCompile Include="src\patches\gpu_instancing.cpp" />
     <ClCompile Include="src\patches\gpu_skinning.cpp" />
     <ClCompile Include="src\patches\local_damage.cpp" />
@@ -456,6 +457,7 @@
     <ClInclude Include="include\fog_wake.h" />
     <ClInclude Include="include\fog_wake_runtime.h" />
     <ClInclude Include="include\fog_wake_feature.h" />
+    <ClInclude Include="include\fog_wake_render_assets.h" />
     <ClInclude Include="include\gpu_instancing.h" />
     <ClInclude Include="include\gpu_skinning.h" />
     <ClInclude Include="include\gpu_skinning_hlsl.h" />

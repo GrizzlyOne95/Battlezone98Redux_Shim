@@ -187,6 +187,8 @@ namespace BZROpenShim
                 EnsureLaserSightAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
                 // RtsMarkers' ring shader and material.
                 EnsureRtsMarkerAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
+                // InteractiveFogWakes render spike layer shader and material.
+                EnsureFogWakeRenderAssets(nativeRoot, g_ChunkPayloadResourceDirectories);
             }
         }
 

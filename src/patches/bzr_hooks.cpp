@@ -2049,6 +2049,8 @@ namespace BZROpenShim
         TickProducerRallyMeshes();
         // RTS markers (order pings, artillery range), same thread and point.
         TickRtsMarkers(dt);
+        // InteractiveFogWakes render spike: same thread and point.
+        TickFogWakeRender();
     }
 
 }

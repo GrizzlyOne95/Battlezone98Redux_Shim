@@ -32,6 +32,7 @@ namespace BZROpenShim
         Runtime g_Runtime;
         bool g_BankPlaced = false;
         bool g_Running = false;
+        std::uint32_t g_BankGeneration = 0;
 
         bool ReadEnabledSetting()
         {
@@ -50,7 +51,7 @@ namespace BZROpenShim
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 LogShimA(LogLevel::Info, kComponent,
-                    "[FOGWAKE] simulation enabled; no rendering in this build");
+                    "[FOGWAKE] enabled (render spike: DX11 ground-fog layers)");
             }
         }
 
@@ -82,6 +83,7 @@ namespace BZROpenShim
             }
 
             g_Runtime.BeginSession(NowSeconds());
+            ++g_BankGeneration;
             LogShimA(LogLevel::Info, kComponent,
                 "[FOGWAKE] bank placed origin=(%.1f, %.1f) size=%.0fm cell=%.1fm",
                 config.field.origin.x, config.field.origin.z,
@@ -131,6 +133,16 @@ namespace BZROpenShim
         g_Runtime.Observe(emitter, position, NowSeconds());
     }
 
+    void FogWakePlaceBankIfAbsent(float worldX, float worldZ)
+    {
+        if (!FogWakeFeatureEnabled() || g_BankPlaced)
+            return;
+        if (!std::isfinite(worldX) || !std::isfinite(worldZ))
+            return;
+        if (PlaceBank(Point{ static_cast<double>(worldX), static_cast<double>(worldZ) }))
+            g_BankPlaced = true;
+    }
+
     void FogWakeRenderFrameTick()
     {
         if (!FogWakeFeatureEnabled() || !g_BankPlaced)
@@ -140,5 +152,26 @@ namespace BZROpenShim
         // clock, so the extra calls are no-ops rather than extra simulation.
         // No wind source is wired yet; transport is deliberately still.
         g_Runtime.AdvanceTo(NowSeconds(), Point{});
+    }
+
+    bool FogWakeGetRenderView(FogWakeRenderView& out)
+    {
+        out = FogWakeRenderView{};
+        if (!FogWakeFeatureEnabled() || !g_BankPlaced || !g_Runtime.Enabled())
+            return false;
+        const FogWake::Field& field = g_Runtime.GetField();
+        const FogWake::Config& settings = field.Settings();
+        const auto& cells = field.Clearance();
+        if (cells.size() != settings.width * settings.height || cells.empty())
+            return false;
+        out.clearance = cells.data();
+        out.width = settings.width;
+        out.height = settings.height;
+        out.originX = settings.origin.x;
+        out.originZ = settings.origin.z;
+        out.cellSize = settings.cellSize;
+        out.steps = g_Runtime.GetStats().steps;
+        out.bankGeneration = g_BankGeneration;
+        return true;
     }
 }

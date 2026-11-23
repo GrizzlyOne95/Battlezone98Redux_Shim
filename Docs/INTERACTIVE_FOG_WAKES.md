@@ -82,6 +82,70 @@ which satisfies "one fixed fog bank" but is not a considered placement. And no
 wind source is wired, so transport is still: `AdvanceTo` is passed a zero wind
 vector.
 
+## Render spike
+
+A throwaway spike (`src/patches/fog_wake_render.cpp`,
+`include/fog_wake_render_assets.h`) to judge look and cost before designing the
+real renderer. It is behind the same toggle, works on DX11 only, and fails
+closed. Colour, density and heights are hard-coded. There is no EXU API, no
+wind and no new config.
+
+- **Clearance:** a manual Ogre texture (256x256 `PF_L8`, created once per
+  process). Its D3D11 texture is fetched again on every upload, because
+  device-loss recovery replaces it. It is refreshed with `UpdateSubresource`
+  after each simulation step (64 KB).
+- **Layers:** one `ManualObject` with four sections at 0.5, 1.5, 3.0 and 4.5 m
+  above the terrain. Each section is a 129x129 grid at a 4 m step over the
+  whole bank, sampled once per bank from `Terrain::HeightAt`. The shader draws
+  `density x (1 - clearance)` with two octaves of drifting value noise, a
+  grazing-angle path term, and fades at the bank edge, near the camera, and
+  against stock fog.
+- **Driver and lifecycle:** it is driven from `ChunkEffect::Simulate` after
+  RtsMarkers, never inside render-queue traversal. `destroyAllEntities`
+  destroys the layers; `clearScene` and `destroyAllMovableObjects` forget
+  them.
+- **Bank placement:** if no engine-flame emitter has been seen, the bank is
+  placed around the local player, so fog exists before anything moves.
+- **Toggle precedence:** an ini value (even `0`) wins over
+  `OPENSHIM_INTERACTIVE_FOG_WAKES`. The shipped ini has the key at 0, so live
+  tests must set the ini key.
+
+Live result (lcbench, DX11, 1600x900 windowed, background run, 2026-11-23):
+
+| Arm | FPS (mean of 5 s heartbeats after warm-up) |
+|-----|------|
+| quiet, toggle off | 236.9 |
+| quiet, toggle on | 224.3 (-5.3%, about 0.24 ms/frame) |
+| 20 hover tanks moving, toggle off | 203.6 |
+| 20 hover tanks moving, toggle on | 175.9 (-13.6%, about 0.77 ms/frame) |
+
+One earlier movement-on run stalled for about 10 s, at 0.8 fps for two
+heartbeats. A repeat of that arm did not reproduce it, and no fog log line
+coincided with it, so it is treated as a one-off. If it recurs, look at it
+first.
+
+Verdict: **bad as tuned**. The mechanism works: the texture, the layers and
+the clearance all behave as designed. The look does not.
+
+- **Density:** the fog is far too dense at a distance. The grazing path term
+  turns the 512 m sheet into a white-out over the hills and horizon.
+- **Terrain clipping:** the layers follow the terrain on a 4 m grid. On slopes
+  the upper sheets cut through the hill and show hard, faceted patches.
+- **Sorting:** the whole bank sorts at one depth (the bank centre), so it draws
+  entirely before or entirely after other transparents (smoke, explosions).
+- **Wake visibility:** wakes barely read. At about 50 m a passed column leaves
+  at most a faint darker patch near the ground, not a trail, because the
+  distant white-out dominates the frame.
+- **Cost:** the cost grows with what is on screen (full-screen translucent
+  overdraw of four sheets), not with the simulation.
+
+What a real renderer would need:
+
+- a camera-local mesh, or a screen-space ray-march against the depth buffer,
+  instead of world sheets
+- far lower density with distance fade
+- per-pixel height relative to the terrain, not sheet geometry
+
 ## Planned runtime contract
 
 1. OpenShim owns a capability-gated runtime and all GPU resources. EXU will
