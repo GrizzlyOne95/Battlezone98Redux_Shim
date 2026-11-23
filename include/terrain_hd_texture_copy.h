@@ -1,6 +1,7 @@
 #pragma once
 #include <d3d11.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <vector>
 
 namespace BZROpenShim::TerrainHd
@@ -28,17 +29,34 @@ inline std::vector<UINT> PaintControlSlices(UINT sliceCount)
     return {};
 }
 
+// Bytes a texture array occupies: 16 per 4x4 block for BC formats (8 for
+// BC1/BC4), otherwise 4 per texel. An estimate for logs, not wider formats.
+inline unsigned long long ArrayBytes(DXGI_FORMAT format, UINT width, UINT height, UINT mips, UINT slices)
+{
+    const bool eightByteBlocks = (format >= DXGI_FORMAT_BC1_TYPELESS && format <= DXGI_FORMAT_BC1_UNORM_SRGB) ||
+        (format >= DXGI_FORMAT_BC4_TYPELESS && format <= DXGI_FORMAT_BC4_SNORM);
+    unsigned long long bytes = 0;
+    for (UINT mip = 0; mip < mips; ++mip)
+    {
+        const unsigned long long w = (std::max)(1u, width >> mip), h = (std::max)(1u, height >> mip);
+        bytes += BlockCompressed(format) ? ((w + 3) / 4) * ((h + 3) / 4) * (eightByteBlocks ? 8 : 16) : w * h * 4;
+    }
+    return bytes * slices;
+}
+
 // Copy explicit 2D mip subresources to one array slice. Ogre's pixel-buffer
 // blit may invoke mip generation and is not a safe array upload primitive in
 // the released DX11 backend. This path never rescales or generates mipmaps.
+// The array may keep fewer levels than the source (arrayMipmaps <= mipmaps):
+// only its top levels are copied. Paint control arrays keep level 0 only.
 inline bool CopyTextureSlice(ID3D11Texture2D* destination, ID3D11Texture2D* source,
-    UINT slice, UINT width, UINT height, UINT mipmaps)
+    UINT slice, UINT width, UINT height, UINT mipmaps, UINT arrayMipmaps)
 {
-    if (!destination || !source || !width || !height || mipmaps >= 15) return false;
+    if (!destination || !source || !width || !height || mipmaps >= 15 || arrayMipmaps > mipmaps) return false;
     D3D11_TEXTURE2D_DESC src = {}, dst = {};
     source->GetDesc(&src); destination->GetDesc(&dst);
     if (src.Width != width || dst.Width != width || src.Height != height || dst.Height != height ||
-        src.MipLevels != mipmaps + 1 || dst.MipLevels != src.MipLevels ||
+        src.MipLevels != mipmaps + 1 || dst.MipLevels != arrayMipmaps + 1 ||
         src.ArraySize != 1 || slice >= dst.ArraySize || src.Format != dst.Format ||
         src.SampleDesc.Count != 1 || dst.SampleDesc.Count != 1 ||
         src.SampleDesc.Quality != 0 || dst.SampleDesc.Quality != 0 ||
@@ -49,9 +67,15 @@ inline bool CopyTextureSlice(ID3D11Texture2D* destination, ID3D11Texture2D* sour
     Microsoft::WRL::ComPtr<ID3D11DeviceContext> context;
     srcDevice->GetImmediateContext(&context);
     if (!context) return false;
-    for (UINT mip = 0; mip < src.MipLevels; ++mip)
+    for (UINT mip = 0; mip < dst.MipLevels; ++mip)
         context->CopySubresourceRegion(destination, D3D11CalcSubresource(mip, slice, dst.MipLevels),
             0, 0, 0, source, D3D11CalcSubresource(mip, 0, src.MipLevels), nullptr);
     return SUCCEEDED(srcDevice->GetDeviceRemovedReason());
+}
+
+inline bool CopyTextureSlice(ID3D11Texture2D* destination, ID3D11Texture2D* source,
+    UINT slice, UINT width, UINT height, UINT mipmaps)
+{
+    return CopyTextureSlice(destination, source, slice, width, height, mipmaps, mipmaps);
 }
 }

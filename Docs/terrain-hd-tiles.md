@@ -40,7 +40,8 @@ upload inputs. OpenShim removes manager references only for input resources it
 created, unloading each override after copying it and keeping the fallback
 until all slices are populated. Resources already present before the upload
 are preserved. Default is
-false for shared-resource packs. This is ownership cleanup, not a guarantee
+false for v2 compact material packs and true for paint materials, whose
+tiles are OpenShim-only upload inputs. This is ownership cleanup, not a guarantee
 that a graphics driver's caches immediately return their memory.
 
 Optional `normal`, `specular`, and `emissive` objects each contain an exact
