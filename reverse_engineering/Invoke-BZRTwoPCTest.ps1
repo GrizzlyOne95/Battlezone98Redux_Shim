@@ -260,7 +260,7 @@ try {
         $p = Join-Path $GameRoot $d
         $hashes0[$d] = (Get-FileHash $p -Algorithm SHA256).Hash
         Say ("PC1 {0} {1} v{2}" -f $d, $hashes0[$d].Substring(0, 8), (Get-Item $p).VersionInfo.FileVersion)
-        Copy-Item -LiteralPath $p -Destination (Join-Path $buildBak ($d -replace '\', '_')) -Force
+        Copy-Item -LiteralPath $p -Destination (Join-Path $buildBak ($d -replace '\\', '_')) -Force
     }
 
     if ($Map) {
