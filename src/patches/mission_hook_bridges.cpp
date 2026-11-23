@@ -273,6 +273,8 @@ namespace BZROpenShim
         RefreshLegacyTankAiState();
         ResetAiNativeOrders();
         ResetTurretAttackOrders();
+        // HowitzerAttackApproach is ini-only (nothing scripted to revert) and
+        // its mid-mission tracks own live GotoTasks, so it is not reset here.
         ResetDaywreckerDefence();
         ResetProducerRallyPoints();
         ResetUnitLoadouts();

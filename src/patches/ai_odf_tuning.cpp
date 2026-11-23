@@ -2296,8 +2296,12 @@ namespace BZROpenShim
 			return false;
 		}
 
+		// approach: HowitzerAttackApproach is driving this process toward its
+		// ordered target, so the SNIP input is hidden whatever the deploy state
+		// and whether or not HowitzerUndeployedRetaliation is on.
 		static bool SuppressUndeployedHowitzerSniperRetaliation(
 			void* processPtr,
+			bool approach,
 			void** outCraft,
 			void** outDamageOrdnance)
 		{
@@ -2305,7 +2309,7 @@ namespace BZROpenShim
 				*outCraft = nullptr;
 			if (outDamageOrdnance)
 				*outDamageOrdnance = nullptr;
-			if (!g_HowitzerUndeployedRetaliationFixActive || !processPtr ||
+			if ((!g_HowitzerUndeployedRetaliationFixActive && !approach) || !processPtr ||
 				!outCraft || !outDamageOrdnance)
 				return false;
 
@@ -2337,7 +2341,8 @@ namespace BZROpenShim
 					craftVtable != kHowitzerSecondaryVtable)
 					return false;
 
-				if (*reinterpret_cast<const int32_t*>(craft + kCraftDeployState) ==
+				if (!approach &&
+					*reinterpret_cast<const int32_t*>(craft + kCraftDeployState) ==
 					kDeployed)
 					return false;
 
@@ -2391,8 +2396,14 @@ namespace BZROpenShim
 
 			void* suppressedCraft = nullptr;
 			void* suppressedDamageOrdnance = nullptr;
+			// In the attack state (7) the only stock re-target is the recent-SNIP
+			// override; ArtilleryFriend's ShouldSwitch (vt+0xE8, 0x00476F90)
+			// refuses state 7 for ordinary acquisition.
+			const bool approach = IsHowitzerApproachProcess(thisPtr);
 			const bool suppressed = SuppressUndeployedHowitzerSniperRetaliation(
-				thisPtr, &suppressedCraft, &suppressedDamageOrdnance);
+				thisPtr, approach, &suppressedCraft, &suppressedDamageOrdnance);
+			if (suppressed && approach)
+				NoteHowitzerApproachRetargetSuppressed(thisPtr);
 
 			bool result = false;
 			__try
@@ -2840,6 +2851,7 @@ namespace BZROpenShim
         {
             InstallAiNativeOrdersHooksIfPossible();
             InstallTurretAttackOrdersHooksIfPossible();
+            InstallHowitzerAttackApproachHooksIfPossible();
             // After TurretAttackOrders: chains onto its TurretTank slot-13 wrapper.
             InstallDaywreckerDefenceIfPossible();
             InstallProducerRallyPointsIfPossible();
