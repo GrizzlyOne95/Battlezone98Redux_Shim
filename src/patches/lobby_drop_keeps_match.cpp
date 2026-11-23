@@ -103,7 +103,8 @@ namespace BZROpenShim
             PingCheckFn g_PingCheck = nullptr;
 
             // Remote leaves held back while the player still answered pings.
-            // Game thread only (lobby update and Net::Execute).
+            // Game thread only: the Remote site is where stock itself runs
+            // PlayerLeft on the player map, and Net::Execute owns that map.
             constexpr size_t kNetIdSize = 16;
             constexpr int kHeldSlots = 16;
             constexpr uint32_t kHoldMinChecks = 3;   // ping checks after the leave before judging
@@ -238,7 +239,6 @@ namespace BZROpenShim
                     ClearHeld();
                     return;
                 }
-                bool any = false;
                 for (HeldLeave& h : g_Held)
                 {
                     if (!h.used) continue;
@@ -267,8 +267,11 @@ namespace BZROpenShim
                         h = HeldLeave{};
                         continue;
                     }
-                    any = true;
                 }
+                // Rescanned rather than tracked in the loop: the stock
+                // player-left above may hold another leave in a visited slot.
+                bool any = false;
+                for (const HeldLeave& h : g_Held) any = any || h.used;
                 g_AnyHeld = any;
             }
 
@@ -297,7 +300,9 @@ namespace BZROpenShim
                                 static_cast<unsigned>(shortId), replies & 0x3FF, n);
                             return;
                         }
-                        Log(L"[LOBBYDROP] player %u left the lobby mid-match and missed the last two P2P pings (replies=0x%03X); stock drop\n",
+                        Log((replies & kRecentPings)
+                                ? L"[LOBBYDROP] player %u left the lobby mid-match and answers P2P pings (replies=0x%03X), but the leave cannot be held for a re-check; stock drop\n"
+                                : L"[LOBBYDROP] player %u left the lobby mid-match and missed the last two P2P pings (replies=0x%03X); stock drop\n",
                             static_cast<unsigned>(shortId), replies & 0x3FF);
                     }
                 }

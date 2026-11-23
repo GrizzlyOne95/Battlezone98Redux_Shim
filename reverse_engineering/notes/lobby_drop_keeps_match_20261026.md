@@ -101,3 +101,34 @@ redirecting, and log `[LOBBYDROP]` at each decision.
   leave is never replayed.
 - If the host's websocket drops, the server may migrate lobby ownership. That
   case is out of scope here.
+
+## Ping re-check for held leaves (2026-11-23)
+
+Player report: the host quit through the menu, and the guest kept the host in
+its player count for the rest of the match (units gone, player still listed).
+The guest's log showed three `[LOBBYDROP] ... kept in the match` lines with
+`replies=0x3FF`. A deliberate quitter answered the last pings before leaving,
+so the Remote site skipped `PlayerLeft` and nothing ever replayed it. The
+ping check's own auto-kick only runs on the host (gate `FUN_00572a60`), and
+here the leaver was the host.
+
+Citations (GOG exe, Ghidra `/battlezone98redux.exe-007c64`):
+
+- `Net::Execute` `0x005715D0` calls the ping check `0x00576B70` at
+  `0x005718C7` (only caller, `list_cross_references`). The call sits inside
+  the `NetManager+0x430` ms interval block, behind `local id != 0`, so it runs
+  on every peer, not just the host. Bytes at `0x005718A8`:
+  `55b0898a30040000 8b45b08b4dac898828040000 0fb715d4809100 85d27405 e8a4520000`.
+- Ping send `0x00576480` shifts `Player+0x1B0` left one bit per ping. A reply
+  sets bit 0, so `replies & 3` = "answered one of the last two pings".
+- NetId is 16 bytes: compare `0x0056F780` reads dwords 0, 2 and 3, and
+  FindPlayer's `0x00577200` map node holds the value at `+0x10`.
+- `PlayerLeft` `0x00578640` removes through `0x00576710` -> `0x005715A0`.
+
+Fix: the new REL32 site "Lobby Drop Keeps Match Ping" wraps that call. A
+Remote leave that is held back is recorded (NetId copy) and looked at again
+before each stock ping check. After 3 checks with `replies & 3 == 0`, the
+stock `PlayerLeft(id, 0)` runs and logs `stopped answering ... dropping it
+now`. A player still answering after 20 checks is released from the table
+and stays, which is the old lobby-only-drop behaviour. With no Ping hook,
+nothing is held and the leave takes the stock drop.
