@@ -1391,7 +1391,8 @@ namespace BZROpenShim
                     // The block defaults to text scale 0.75. Its page reflow applies that scale
                     // and the stride probe applies it again, so at 0.75 the probe overestimates
                     // the lines a page shows and each page break skips lines (Docs/DATABASE_SCREEN.md
-                    // "Briefing scrolling"). 1.0 makes them agree, as the mission-failed screen does.
+                    // "Briefing scrolling"). 1.0 makes them agree; stock sets 1.0 on its own blocks
+                    // only when FUN_004344A0() == 2 (FUN_00792000 lines 212-213).
                     reinterpret_cast<FnSetTextScale>(static_cast<uintptr_t>(g_SetTextScaleAddr))(
                         block, kTextScale);
                     g_BzrFn_AddChild(panel, block, 0);

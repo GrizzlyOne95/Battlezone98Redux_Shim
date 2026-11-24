@@ -141,11 +141,17 @@ as tall as the page trim, so the stride is about 4/3 of the lines a page
 shows, and each Next-arrow press skips lines (seen live on `tran02`: page 1
 ended at "...using the system." and page 2 began at "Use the 'O' key", losing
 the paragraph between). The screen sets the block scale to 1.0 right after
-building it (`ScrollingTextBlockSetTextScale` 0x007CCE50, as the
-mission-failed screen does, `FUN_00792000` line 213), so the probe and the
-page agree. Text is drawn at the larger scale, so fewer lines fit per page.
-The stock briefing and the lobby Briefing overlay build the same block at
-0.75 and are not changed here.
+building it (`ScrollingTextBlockSetTextScale` 0x007CCE50), so the probe and
+the page agree. Stock sets 1.0 on its own blocks only when `FUN_004344A0()`
+is 2 (`FUN_00792000` lines 212-213; cUI_Mission and the archive likewise,
+`FUN_0078F030` 289-291/308-310, `FUN_00790FE0` 197-199), which is why other
+cases keep 0.75. Text is drawn at the larger scale, so fewer lines fit per
+page. The same fix covers every scrolling block: the stock mission briefing
+and the archive get it from a ctor detour (`[Fixes] BriefingPageStride`,
+`[BRIEFSTRIDE]` log), and the lobby Briefing overlay sets it itself. Only
+those four callers build a `cUI_ScrollingTextBlock` (ctor 0x007CD8D0 callers:
+`FUN_0078F030` line 303, `FUN_00790FE0` line 193); the other 0x007CCB70
+callers are non-scrolling text blocks and are untouched.
 
 ## 3D unit preview
 

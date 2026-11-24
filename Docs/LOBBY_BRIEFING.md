@@ -121,6 +121,7 @@ named function.
   rebuilds the lobby (which would remove the panel) or adds the alert to the
   live one.
 - Chat Enter while the panel is open is swallowed.
+- The text block is set to text scale 1.0 after it is built (`ScrollingTextBlockSetTextScale` 0x007CCE50). At the default 0.75 the stride probe and the page both apply the scale and each scroll step skips lines; see `Docs/DATABASE_SCREEN.md`, "Briefing scrolling". UNVERIFIED live in the lobby (the Database screen and the stock briefing were verified live).
 - Names over 15 characters are not looked up; pages 2+ need `<m>` of 8
   characters or fewer.
 - Placement, z order and the greyed look are UNVERIFIED live.
