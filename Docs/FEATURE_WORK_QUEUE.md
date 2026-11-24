@@ -36,6 +36,16 @@ Scoping notes are first impressions only; each needs its own research pass befor
 17. **Custom tank skins.** Assign camo patterns to the player's tank. *Scope:* renderer/material work; check the enhanced material ownership rules (`Docs/ENHANCED_RENDERER_MATERIAL_OWNERSHIP.md`) and how a per-entity material clone would replicate (local-only first).
 18. **Unit loadout presets: native UI.** For example, offered when selecting the Recycler/Factory or the Armory. *Scope:* follows item 9's research (`Docs/LOADOUT_PRESETS_RESEARCH.md`): Lua can own the preset table, the native part adds the UI.
 
+## Fixes found in the 1.0.0.81 release (added 2026-11-23)
+
+Do these before the "Waiting (in order)" list.
+
+19. **Find what writes a default root `openshim.ini`.** On GOG, a complete 410-key file holding only default values appeared in the game root at 21:37 on 2026-11-23. That was after 1.0.0.81 had moved the real file to `openshim\openshim.ini`. Suspects: the release stress harness (before the fix in CR #590), or a game code path that still writes the root file (EnvConfig fallback, the updater, the options writer). Find the writer from the `[LAYOUT]` log lines and a clean upgrade from 1.0.0.80. If it is the game, make it write only `Layout::OpenShimIniPath()`.
+20. **Merge, don't ignore, a root ini when both files exist** (`include/openshim_layout.h`). Today the root file is ignored: `MigrateEntry` logs a `[LAYOUT] WARNING` only when the sizes differ, else a plain `kept` line. Put the merge in the `OpenShimIniPath()` path or a new helper, not in `MigrateEntry`, which also moves `patches.json` and other files. Copy into `openshim\openshim.ini` only the keys it lacks (never overwrite an existing value), then move the root file to `openshim\openshim.ini.root-merged` so it is merged once and nothing is left in the root. Log each copied key. Unit-test both-exist, sub-only and root-only.
+21. **`/bzrserver` + Continue saves `Server=Custom` to the ini.** A one-off launch option becomes permanent. Decide whether that is intended. If not, keep the launch value for that session only.
+22. **Community-server live fixture.** It must set `[Network] Server=Custom` before launch (the Steam Custom arm first contacted Rebellion's server because of a saved `Server=Rebellion`), and refuse to run unless the platform is signed in (Steam, or Galaxy for GOG).
+23. **Re-run the GOG community-server arms** (Custom and `/bzrserver`) with Galaxy signed in. Only the Steam arms passed for 1.0.0.81.
+
 ## Cleanup still owed
 - Worktree folders:
   - `GIT\BZR-OpenShim-orderqueue`: its branch is deleted, but the folder was locked by an open handle. Unlink `third_party\ogre-1.10.0-bzr\_work` first.
