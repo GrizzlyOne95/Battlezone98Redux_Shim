@@ -136,7 +136,35 @@ namespace
             "stock chunk1 mesh was not classified");
         Require(IsNativeTransientChunkMeshName("CHUNK2/CHUNK2.MESH"),
             "stock chunk2 mesh classification was not case-insensitive");
-        Require(!IsNativeTransientChunkMeshName("chunk3/chunk3.mesh") &&
+        Require(IsNativeTransientChunkMeshName("chunk3/chunk3.mesh") &&
+                IsNativeTransientChunkMeshName("chunk6/chunk6.mesh") &&
+                IsNativeTransientChunkMeshName("Chunk12/CHUNK12.Mesh"),
+            "mod chunklet mesh chunk<N>/chunk<N>.mesh was not classified");
+        std::uint32_t number = 0;
+        Require(TryParseNativeTransientChunkMeshName("chunk12/chunk12.mesh", &number) &&
+                number == 12,
+            "chunk mesh number was not parsed");
+        Require(TryParseNativeTransientChunkMeshName(
+                    "chunk99999999999/chunk99999999999.mesh", &number) &&
+                number == UINT32_MAX,
+            "oversized chunk mesh number did not saturate");
+        Require(TryParseNativeTransientChunkMeshName("chunk01/chunk01.mesh", &number) &&
+                number == 1 &&
+                !IsNativeTransientChunkMeshName("chunk01/chunk1.mesh"),
+            "leading-zero chunk mesh digits were not compared verbatim");
+        number = 77;
+        Require(!TryParseNativeTransientChunkMeshName("chunk/chunk1.mesh", &number) &&
+                number == 77,
+            "failed chunk mesh parse changed the out number");
+        Require(!IsNativeTransientChunkMeshName("chunk3/chunk4.mesh") &&
+                !IsNativeTransientChunkMeshName("chunk1/chunk12.mesh") &&
+                !IsNativeTransientChunkMeshName("chunk12/chunk1.mesh") &&
+                !IsNativeTransientChunkMeshName("chunk/chunk.mesh") &&
+                !IsNativeTransientChunkMeshName("chunkx/chunkx.mesh") &&
+                !IsNativeTransientChunkMeshName("chunk3/chunk3.mesh.bak") &&
+                !IsNativeTransientChunkMeshName("chunk3\\chunk3.mesh") &&
+                !IsNativeTransientChunkMeshName("foo/chunk3/chunk3.mesh") &&
+                !IsNativeTransientChunkMeshName("") &&
                 !IsNativeTransientChunkMeshName("vehicles/chunk1/chunk1.mesh") &&
                 !IsNativeTransientChunkMeshName("iechunk1.mesh") &&
                 !IsNativeTransientChunkMeshName(nullptr),

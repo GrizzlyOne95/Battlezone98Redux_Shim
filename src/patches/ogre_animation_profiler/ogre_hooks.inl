@@ -232,25 +232,43 @@
             }
 
             g_ChunkShadowQueries.fetch_add(1, std::memory_order_relaxed);
+            uint32_t chunkNumber = 0;
+            bool suppressed = false;
             __try
             {
                 const void* meshSharedPtr = g_OgreEntityGetMesh(self);
                 const void* mesh = meshSharedPtr
                     ? *reinterpret_cast<void* const*>(meshSharedPtr)
                     : nullptr;
-                if (mesh && OgreProfilerAlgorithms::IsNativeTransientChunkMeshName(
-                                g_OgreGetResourceName(mesh).c_str()))
+                if (mesh && OgreProfilerAlgorithms::TryParseNativeTransientChunkMeshName(
+                                g_OgreGetResourceName(mesh).c_str(), &chunkNumber))
                 {
                     g_OgreSetCastShadows(const_cast<void*>(self), false);
                     g_ChunkShadowSuppressions.fetch_add(1, std::memory_order_relaxed);
-                    return false;
+                    suppressed = true;
                 }
             }
             __except (EXCEPTION_EXECUTE_HANDLER)
             {
                 // Preserve the engine result if retail Ogre metadata is unavailable.
             }
-            return stockResult;
+            if (!suppressed)
+                return stockResult;
+
+            // Change-only decision log: once per chunk mesh number.
+            const uint64_t bit = 1ull << (chunkNumber < 63u ? chunkNumber : 63u);
+            if ((g_ChunkShadowLoggedMeshes.fetch_or(bit, std::memory_order_relaxed) & bit) == 0)
+            {
+                LogShimA(
+                    LogLevel::Info,
+                    kComponent,
+                    chunkNumber < 63u
+                        ? "[OgreProfile][ChunkShadowPolicy] suppressing shadows for chunk%u/chunk%u.mesh"
+                        : "[OgreProfile][ChunkShadowPolicy] suppressing shadows for chunk%u/chunk%u.mesh (further chunk63+ meshes not logged)",
+                    static_cast<unsigned>(chunkNumber),
+                    static_cast<unsigned>(chunkNumber));
+            }
+            return false;
         }
 
         void __fastcall HookEntityUpdateAnimationCore(void* self, void*)
