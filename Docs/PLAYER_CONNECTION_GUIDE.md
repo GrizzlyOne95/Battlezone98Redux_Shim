@@ -102,10 +102,13 @@ Multiplayer > **Custom**, then type the server's host name or IP address
 friend's server over Tailscale or another VPN, or a port-forwarded host.
 Custom is pre-filled with the community server `bzr.battlezonecommunity.com`;
 type over it to use another. A pasted lobby URL such as
-`ws://bzr.battlezonecommunity.com:1337/` also works. Custom servers never receive your Steam or GOG
+`ws://bzr.battlezonecommunity.com:1337/` also works. With OpenShim, custom servers never receive your Steam or GOG
 sign-in ticket.
 
 The same thing as a Steam or GOG launch option: `/bzrserver=ws://IP:1337/`.
+Withholding the ticket needs OpenShim. A stock client started with
+`/bzrserver=` still sends its real ticket to that server, so ask stock players
+to install OpenShim before joining community servers.
 
 A server reached from the internet needs TCP 1337 and UDP 1338 (or the
 server's own ports) open on the host's router. A VPN such as Tailscale avoids that.
