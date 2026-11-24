@@ -364,10 +364,12 @@ namespace MatchmakingServer
         if (name.empty())
             return false;
 
-        if (hasPort)
+        // "host:" with nothing after the colon keeps the scheme default
+        // (RFC 3986 3.2.3), as a browser or websocketpp would.
+        if (hasPort && !portPart.empty())
         {
             unsigned portValue = 0;
-            bool ok = !portPart.empty() && portPart.size() <= 5;
+            bool ok = portPart.size() <= 5;
             for (char c : portPart)
             {
                 if (c < '0' || c > '9')
@@ -411,6 +413,7 @@ namespace MatchmakingServer
     // /bzrserver= host, else the official host) on the launch port. Host
     // alone is not enough: a different service on the same host (GOG Galaxy's
     // peer on 127.0.0.1:9977 while /bzrserver=ws://127.0.0.1:1337) is not ours.
+    // A lookup with no service names no port, so the host decides (as before).
     inline bool IsGameServerLookup(const char* node,
                                    const char* service,
                                    std::string_view officialHost,
@@ -419,8 +422,9 @@ namespace MatchmakingServer
     {
         if (!node)
             return false;
-        return (EqualsNoCase(node, officialHost) && ServiceMatchesPort(service, kPort)) ||
-               (EqualsNoCase(node, launchHost) && ServiceMatchesPort(service, launchPort));
+        const bool noService = !service || !*service;
+        return (EqualsNoCase(node, officialHost) && (noService || ServiceMatchesPort(service, kPort))) ||
+               (EqualsNoCase(node, launchHost) && (noService || ServiceMatchesPort(service, launchPort)));
     }
 }
 }

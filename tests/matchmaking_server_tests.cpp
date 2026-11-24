@@ -152,6 +152,19 @@ namespace
         CHECK(LaunchPort(L"bz.exe /bzrserver=ws://[::1]:1444/") == 1444);
         CHECK(LaunchPort(L"bz.exe /bzrserver=ws://h.example:99999/") == 0);
         CHECK(LaunchPort(L"bz.exe /nosplash") == 99999);
+        // "host:" with no digits keeps the scheme default; schemes ignore case.
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://community.example:/") == 80);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=wss://community.example:/") == 443);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=WS://127.0.0.1/") == 80);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=WSS://h.example/") == 443);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://h.example?x=1") == 80);
+        // Not a websocket scheme: the official port stays the default.
+        CHECK(LaunchPort(L"bz.exe /bzrserver=http://h.example/") == MS::kPort);
+        std::string host;
+        unsigned port = 0;
+        CHECK(MS::ExtractLaunchServer(L"bz.exe /bzrserver=ws://h.example?x=1", host, port) && host == "h.example");
+        CHECK(MS::ExtractLaunchServer(L"bz.exe /bzrserver=WS://h.example:/", host, port) && host == "h.example" && port == 80);
+        CHECK(MS::ExtractLaunchServer(L"bz.exe /bzrserver=http://h.example:2000/", host, port) && host == "h.example" && port == 2000);
     }
 
     // The game's own lookup is (host, service); host alone is not enough.
@@ -163,8 +176,11 @@ namespace
         // lookup on the same host is not BZRNet; the game's lookup is.
         CHECK(!MS::IsGameServerLookup("127.0.0.1", "9977", official, "127.0.0.1", 1337));
         CHECK(MS::IsGameServerLookup("127.0.0.1", "1337", official, "127.0.0.1", 1337));
-        CHECK(!MS::IsGameServerLookup("127.0.0.1", nullptr, official, "127.0.0.1", 1337));
-        CHECK(!MS::IsGameServerLookup("127.0.0.1", "", official, "127.0.0.1", 1337));
+        // No service names no port: the host decides, as before.
+        CHECK(MS::IsGameServerLookup("127.0.0.1", nullptr, official, "127.0.0.1", 1337));
+        CHECK(MS::IsGameServerLookup("127.0.0.1", "", official, "127.0.0.1", 1337));
+        CHECK(MS::IsGameServerLookup(official, nullptr, official, "127.0.0.1", 1337));
+        CHECK(!MS::IsGameServerLookup("127.0.0.2", nullptr, official, "127.0.0.1", 1337));
 
         // Custom /bzrserver= port: BZRNet only on that port.
         CHECK(MS::IsGameServerLookup("127.0.0.1", "2000", official, "127.0.0.1", 2000));

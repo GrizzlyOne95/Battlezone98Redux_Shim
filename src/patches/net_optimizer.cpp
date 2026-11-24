@@ -3951,11 +3951,23 @@ namespace
             nodeName, serviceName, kBzrNetMatchmakingHost, launch.host, launch.port);
     }
 
-    // Called with the result of a BZRNet-endpoint lookup. `effectiveHost` is
-    // the name actually resolved after any override.
-    void RecordLookupAddresses(PCSTR nodeName, PCSTR serviceName, PCSTR effectiveHost, const ADDRINFOA* result)
+    // Host-only match (official or /bzrserver= host, any service). Used only
+    // to record withhold addresses: withholding also needs a BZRNet port
+    // (1337 or a selected one), so recording Galaxy's 127.0.0.1 is harmless,
+    // while a launch URL whose port no lookup matches still fails closed.
+    bool IsBzrNetLookupHost(PCSTR nodeName)
     {
-        if (!effectiveHost || !result || !IsBzrNetLookup(nodeName, serviceName))
+        return nodeName &&
+               (MatchmakingServer::EqualsNoCase(nodeName, kBzrNetMatchmakingHost) ||
+                MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()));
+    }
+
+    // Called with the result of a lookup of the official or launch host, or
+    // of any tunnelled lookup. `effectiveHost` is the name actually resolved
+    // after any override.
+    void RecordLookupAddresses(PCSTR nodeName, PCSTR effectiveHost, const ADDRINFOA* result, bool tunnelled)
+    {
+        if (!effectiveHost || !result || !(tunnelled || IsBzrNetLookupHost(nodeName)))
             return;
 
         const bool official = MatchmakingServer::EqualsNoCase(effectiveHost, kBzrNetMatchmakingHost);
@@ -4234,6 +4246,8 @@ namespace
     SRWLOCK g_LookupLogLock = SRWLOCK_INIT;
     DnsFamilyPolicy::LookupLogBudget g_LookupLogBudget;
     std::string g_LastLookupVerdict;   // under g_LookupLogLock
+    unsigned g_LookupVerdictLines = 0; // under g_LookupLogLock
+    constexpr unsigned kMaxLookupVerdictLines = 32;
 
     // Change-only decision line for lookups of the official or launch host:
     // which (host, service) pairs count as the game's own BZRNet lookup.
@@ -4244,11 +4258,19 @@ namespace
         verdict += serviceName ? serviceName : "-";
         verdict += bzrNet ? " yes" : " no";
         AcquireSRWLockExclusive(&g_LookupLogLock);
-        const bool changed = verdict != g_LastLookupVerdict;
+        const bool changed = verdict != g_LastLookupVerdict &&
+                             g_LookupVerdictLines <= kMaxLookupVerdictLines;
+        unsigned line = 0;
         if (changed)
+        {
             g_LastLookupVerdict = verdict;
+            line = ++g_LookupVerdictLines;
+        }
         ReleaseSRWLockExclusive(&g_LookupLogLock);
-        if (changed)
+        if (changed && line > kMaxLookupVerdictLines)
+            Logf("[OpenShimNet] lookup verdict lines capped at %u; further changes not logged",
+                kMaxLookupVerdictLines);
+        else if (changed)
             Logf("[OpenShimNet] lookup %s:%s bzrnet=%s (launch server %s:%u)",
                 nodeName ? nodeName : "-",
                 serviceName ? serviceName : "-",
@@ -4277,8 +4299,10 @@ namespace
         if (bzrNetLookup)
             ApplyReconnectDelayOnce();
         // The tunnel keeps failing closed for any lookup of the official name.
+        bool tunnelled = false;
         if (nodeName && SocketTunnel::Requested() && (bzrNetLookup || officialName))
         {
+            tunnelled = true;
             // Wins over environment/test redirects, saved server choices and
             // /bzrserver=. Bind/route qualification failure never reaches an
             // unrelated local service or falls back to official matchmaking.
@@ -4435,8 +4459,8 @@ namespace
         }
 
         if (rc == 0 && result)
-            RecordLookupAddresses(nodeName, serviceName, resolvedNode, *result);
-        if (bzrNetLookup)
+            RecordLookupAddresses(nodeName, resolvedNode, *result, tunnelled);
+        if (bzrNetLookup || tunnelled)
             RecordEffectiveEndpoint(nodeName, resolvedNode, resolvedService, rc == 0 && result ? *result : nullptr);
         return rc;
     }
