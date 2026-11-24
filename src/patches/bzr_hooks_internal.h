@@ -22,6 +22,7 @@
 #include "stable_id_list.h"
 #include "bzr_object_layout.h"
 #include "bzr_options_ui.h"
+#include "faction_vfx_setting.h"
 #include "shield_push_mode.h"
 
 namespace BZROpenShim
@@ -859,6 +860,20 @@ namespace BZROpenShim
         // (first char of the ODF label) for any team an EXU script has NOT already
         // colored. Purely visual/local, so it applies everywhere including MP.
         inline constexpr bool kJetFlamesEnabledDefault = false;
+        // "Faction-Specific VFX" (openshim.ini [Display] FactionVfx): one key
+        // for faction engine flames and faction construction/portal blobs.
+        // Absent, it falls back to the legacy JetFlames / FactionConstructionBlobs
+        // keys (on if either is on). Merge rules: include/faction_vfx_setting.h.
+        inline bool ReadFactionVfxEnabled()
+        {
+            const auto read = [](const char* key) {
+                FactionVfx::Tri t;
+                t.present = TryGetUserConfigBool("Display", key, t.value);
+                return t;
+            };
+            return FactionVfx::Resolve(read("FactionVfx"), read("JetFlames"),
+                                       read("FactionConstructionBlobs"));
+        }
         void TickChunkProxyDebug(
             void* currentCamera = nullptr,
             bool allowManualSubmit = true);

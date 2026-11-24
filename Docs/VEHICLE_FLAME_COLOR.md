@@ -38,12 +38,15 @@ Selection priority:
 
 1. Explicit EXU per-team blue/red/green setting.
 2. `[HoverCraftClass] flameColor` in the vehicle ODF.
-3. Faction color when `openshim.ini [Display] JetFlames` is enabled.
+3. Faction color when `openshim.ini [Display] FactionVfx` is enabled (options row "Faction-Specific VFX",
+   which also controls the faction construction blobs, see `Docs/FACTION_CONSTRUCTION_BLOBS.md`). If
+   `FactionVfx` is absent, the legacy `JetFlames` or `FactionConstructionBlobs` keys enable it when either is `1`.
+   The row applies flames live; blobs need a restart.
 4. Stock flames.
 
 An explicit `default` selects stock flames even with faction coloring enabled.
 A missing or invalid key leaves the faction fallback intact. The ODF override
-also applies when `JetFlames` is disabled. Keys in other sections are ignored.
+also applies when faction coloring is disabled. Keys in other sections are ignored.
 
 OpenShim reads the ODF through the game's verified item-loader interface,
 including archive content, and caches results by ODF name until the mission
