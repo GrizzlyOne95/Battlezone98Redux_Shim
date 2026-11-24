@@ -41,6 +41,7 @@
 #include "player_kill_trace.h"
 #include "net_optimizer.h"
 #include "pond_class_label.h"
+#include "text_entry_input_filter.h"
 #include <Windows.h>
 #include <objidl.h>
 #include <gdiplus.h>
@@ -79,6 +80,72 @@ namespace BZROpenShim
 
         static volatile long g_NicknameInputTraceBudget = 16;
 
+        // Change-only: one line per new (kind, value), never clipboard text.
+        // kind 'd' = dropped control char (value = char), 'p' = paste
+        // (value = characters fed).
+        static void LogEntryInputEvent(char kind, size_t value)
+        {
+            static char s_lastKind = 0;
+            static size_t s_lastValue = 0;
+            if (kind == s_lastKind && value == s_lastValue)
+                return;
+            s_lastKind = kind;
+            s_lastValue = value;
+            if (kind == 'd')
+                Log(L"[BZRNET] Text entry dropped control char 0x%02X\n",
+                    static_cast<unsigned>(value));
+            else
+                Log(L"[BZRNET] Text entry pasted %u char(s) from the clipboard\n",
+                    static_cast<unsigned>(value));
+        }
+
+        // CF_UNICODETEXT (synthesized from CF_TEXT when only that exists),
+        // CF_TEXT as a fallback; printable ASCII up to the first line break.
+        static std::string ReadPastableClipboardText()
+        {
+            std::string text;
+            if (!OpenClipboard(nullptr))
+                return text;
+            if (HANDLE data = GetClipboardData(CF_UNICODETEXT))
+            {
+                if (const auto* wide = static_cast<const wchar_t*>(GlobalLock(data)))
+                {
+                    text = TextEntryInput::PastableText(wide);
+                    GlobalUnlock(data);
+                }
+            }
+            else if (HANDLE ansi = GetClipboardData(CF_TEXT))
+            {
+                if (const auto* narrow = static_cast<const char*>(GlobalLock(ansi)))
+                {
+                    text = TextEntryInput::PastableText(narrow);
+                    GlobalUnlock(ansi);
+                }
+            }
+            CloseClipboard();
+            return text;
+        }
+
+        // Ctrl+V into our live entry: each character goes through stock
+        // AppendChar, so the input limit and rendering stay stock.
+        static uint8_t PasteClipboardIntoEntry(void* entry)
+        {
+            const std::string text = ReadPastableClipboardText();
+            LogEntryInputEvent('p', text.size());
+            if (text.empty() || !g_BzrFn_TextEntryAppendCharOriginal)
+                return 1;
+            if (g_ReplaceNicknameOnNextInput)
+            {
+                if (g_BzrFn_TextEntryClear)
+                    g_BzrFn_TextEntryClear(entry);
+                g_ReplaceNicknameOnNextInput = false;
+            }
+            uint8_t result = 1;
+            for (const char c : text)
+                result = g_BzrFn_TextEntryAppendCharOriginal(entry, static_cast<uint8_t>(c));
+            return result;
+        }
+
         // Lobby screens route keyboard characters to their own stock chat
         // entries through cUI_TextEntry::AppendChar (0x007CFA70), but they do
         // not share one reliable screen-level OnChar target. Intercept the
@@ -103,6 +170,19 @@ namespace BZROpenShim
             if (entry && parent && g_BzrFn_TextEntryAppendChar &&
                 IsWidgetLiveChildOfParent(parent, entry))
             {
+                const TextEntryInput::CharAction action = TextEntryInput::Classify(character);
+                if (action == TextEntryInput::CharAction::Drop)
+                {
+                    // Stock would store the control code in the entry text,
+                    // invisible but enough to make a server host invalid.
+                    // Stock AppendChar returns nothing meaningful (void in
+                    // the decompile); 1 matches the map search swallow.
+                    LogEntryInputEvent('d', character);
+                    return 1;
+                }
+                if (action == TextEntryInput::CharAction::Paste)
+                    return PasteClipboardIntoEntry(entry);
+
                 // A click means "replace" when a configured nickname is
                 // already displayed. Keep it visible until the first actual
                 // edit so clicking and pressing Enter remains a no-op update.
