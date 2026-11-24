@@ -98,10 +98,19 @@ namespace BZROpenShim
             const Shell::Rect kPageRect{ kPadX + 300.0f, 915.0f, 300.0f, 40.0f };
             const Shell::Rect kNextRect{ kPadX + 610.0f, 910.0f, 180.0f, 50.0f };
             const Shell::Rect kCloseRect{ kPadX + 1150.0f, 910.0f, 180.0f, 50.0f };
-            // The free fourth-column, third-row slot of the lobby's settings
-            // grid (columns x 760/1060, rows y 470/525/580, 300x60; ctor
-            // FUN_00796880 lines 221-349 place nothing at 1060,580).
-            const Shell::Rect kButtonRect{ 1060.0f, 580.0f, 300.0f, 60.0f };
+            // Left-column slot below Sync Join: ctor FUN_00796880 builds the
+            // stock TeamButton here (:221) and hides it at once (:228); no other
+            // lobby code touches that widget, so the slot is empty on screen and
+            // does not claim clicks. The right-hand column (x 760/1060) is not
+            // usable: its third row is the Any Nation control, whose value text
+            // runs past its own box into the neighbouring slot, and that widget
+            // sits earlier in the child order, so it also took the clicks.
+            const Shell::Rect kButtonRect{ 50.0f, 575.0f, 300.0f, 60.0f };
+            // The lobby button wears the stock settings buttons' label cell
+            // (cUI_Multiplayer_SettingButton 0x007C3E30 loads sync_join_off /
+            // _over / _on for each label), so it matches Sync Join and its
+            // neighbours instead of the brighter mode-button art the overlay uses.
+            const Shell::ButtonSkin kLobbySkin{ "sync_join_off.png", "sync_join_over.png", "sync_join_on.png" };
             const Shell::ButtonSkin kSkin{ "MultiplayerModeButton_off.png", "MultiplayerModeButton_over.png",
                                            "MultiplayerModeButton_on.png" };
 
@@ -728,7 +737,7 @@ namespace BZROpenShim
                 s.screen = screen;
                 g_State = s;
                 g_State.button = Shell::AddButton(middle, middle, "OpenShimLobbyBrief_Button", kButtonRect,
-                    ShimText("openshim_ui:lobbybrief_button", "Briefing"), kSkin, 1.0f, 0.0f, &OnBriefingClicked);
+                    ShimText("openshim_ui:lobbybrief_button", "Briefing"), kLobbySkin, 1.0f, 0.0f, &OnBriefingClicked);
                 if (!g_State.button)
                 {
                     g_State = State();

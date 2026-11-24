@@ -36,8 +36,11 @@ single-player briefing pages (`Docs/BRIEFING_PAGES.md`, `briefing_pages_policy.h
 
 ## Controls
 
-- Briefing button: in the lobby settings grid, the free slot right of
-  AnyNation (design 1060,580, 300x60).
+- Briefing button: in the lobby settings grid, the free left-column slot
+  below Sync Join and beside Barracks (design 50,575, 300x60, stock label-cell
+  skin). It was first
+  put at 1060,580, right of Team / Any Nation, but that control's value text
+  ("Any Nation: On") is wider than its box and overdrew the button.
 - Prev / Next buttons, Left/Right, PgUp/PgDn (the `StepForKey` keys): page.
 - Up / Down: scroll the text within a page; the block's own arrows work too.
 - Close button or Esc: close. While the panel is open every key and typed
@@ -69,8 +72,13 @@ named function.
   component +0x1C8, chat entry +0x1D0 (ctor body, the stores after each
   sub-widget ctor).
 - The ctor places the settings buttons (FUN_007C3E30, 300x60) at x 50/400
-  (rows 510/575) and x 760/1060 (rows 470/525/580). Nothing sits at 1060,580,
-  which is where the Briefing button goes. UNVERIFIED live: that nothing a
+  (rows 510/575) and x 760/1060 (rows 470/525/580). The stock TeamButton is
+  built at 50,575 (:221) and hidden at once (:228) and nothing else shows it,
+  which is where the Briefing button goes. 1060,580 is empty too, but the
+  Any Nation control at 760,580 (stock, relabelled by `mp_any_nation.cpp`)
+  draws its text past its box and, being an earlier child, probably takes the clicks
+  there (click theft UNVERIFIED): a Briefing button at 1060,580 was overdrawn and did not open, while at 50,575 it opens.
+  The button uses the stock label-cell skin (`sync_join_*.png`). UNVERIFIED live: that nothing a
   later refresh shows (Splinter / KillLimit variants) lands there.
 - The click walk `cUI_View::MousePressed` 0x007D2570 visits children that
   have children first, in vector order (+0x12C..+0x130), then leaves. A view
@@ -138,7 +146,7 @@ faults or the closed overlay was found shown.
 Host and client each on an OpenShim build. Use a map with `<m>.des`,
 `<m>_2.des` and `<m>_1.png`, and a map with no `.des`.
 
-1. Host: lobby shows Briefing in the 1060,580 slot, not overlapping
+1. Host: lobby shows Briefing in the 50,575 slot (16:9 and 4:3), not overlapping
    AnyNation or KillLimit; log `[LOBBYBRIEF] installed` and `built`.
 2. Host: pick the map without a `.des`: button greyed, reads "No Briefing",
    clicks do nothing. Pick the map with one: button live again (log line each
