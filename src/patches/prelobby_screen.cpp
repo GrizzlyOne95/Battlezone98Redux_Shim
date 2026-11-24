@@ -208,6 +208,8 @@ namespace BZROpenShim
             {
                 choice = IsLocalHost(current) ? ServerChoice::Local : ServerChoice::Rebellion;
                 customText = TrimAsciiCopy(saved);
+                if (customText.empty())
+                    customText = MS::kCommunityServerHost;
             }
             else
             {

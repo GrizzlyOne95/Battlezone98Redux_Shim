@@ -100,7 +100,10 @@ you don't want strangers.
 Multiplayer > **Custom**, then type the server's host name or IP address
 (optionally `:port`; the default is 1337). Use this for a dedicated server, a
 friend's server over Tailscale or another VPN, or a port-forwarded host.
-Custom servers never receive your Steam or GOG sign-in ticket.
+Custom is pre-filled with the community server `bzr.battlezonecommunity.com`;
+type over it to use another. A pasted lobby URL such as
+`ws://bzr.battlezonecommunity.com:1337/` also works. Custom servers never receive your Steam or GOG
+sign-in ticket.
 
 The same thing as a Steam or GOG launch option: `/bzrserver=ws://IP:1337/`.
 

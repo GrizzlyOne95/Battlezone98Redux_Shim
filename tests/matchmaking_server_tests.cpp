@@ -31,7 +31,7 @@ namespace
         CHECK(MS::ParseMode(" LAN ", mode) && mode == MS::Mode::Lan);
         CHECK(std::string(MS::ModeName(mode)) == "LAN");
         CHECK(MS::ResolveSavedHost(mode, "192.168.1.7:1437") == "192.168.1.7:1437");
-        CHECK(MS::ResolveSavedHost(mode, "ws://bad") == "");
+        CHECK(MS::ResolveSavedHost(mode, "http://bad") == "");
         CHECK(!MS::ParseMode("official", mode) && mode == MS::Mode::None);
     }
 
@@ -48,12 +48,28 @@ namespace
         CHECK(Validate("x.example:65534", host) == MS::HostStatus::Ok && host == "x.example:65534");
     }
 
+    void TestCustomHostUrl()
+    {
+        std::string host;
+        CHECK(Validate("ws://bzr.battlezonecommunity.com:1337/", host) == MS::HostStatus::Ok &&
+              host == "bzr.battlezonecommunity.com");
+        CHECK(Validate("  WS://Play.Example.org/ ", host) == MS::HostStatus::Ok && host == "Play.Example.org");
+        CHECK(Validate("ws://example.org:8080", host) == MS::HostStatus::Ok && host == "example.org:8080");
+        CHECK(Validate("wss://example.org/", host) == MS::HostStatus::Invalid && host.empty());
+        CHECK(Validate("ws://example.org//", host) == MS::HostStatus::Invalid);
+        CHECK(Validate("ws://example.org/lobby", host) == MS::HostStatus::Invalid);
+        CHECK(Validate("ws://example.org/?a=1", host) == MS::HostStatus::Invalid);
+        CHECK(Validate("ws://", host) == MS::HostStatus::Invalid);
+        CHECK(Validate("ws:///", host) == MS::HostStatus::Invalid);
+        CHECK(Validate("http://example.org", host) == MS::HostStatus::Invalid);
+    }
+
     void TestCustomHostRejected()
     {
         std::string host = "stale";
         CHECK(Validate("", host) == MS::HostStatus::Empty && host.empty());
         CHECK(Validate("   ", host) == MS::HostStatus::Empty);
-        CHECK(Validate("ws://example.org", host) == MS::HostStatus::Invalid);
+        CHECK(Validate("ftp://example.org", host) == MS::HostStatus::Invalid);
         CHECK(Validate("example.org/path", host) == MS::HostStatus::Invalid);
         CHECK(Validate("exa mple.org", host) == MS::HostStatus::Invalid);
         CHECK(Validate("user@example.org", host) == MS::HostStatus::Invalid);
@@ -90,8 +106,12 @@ namespace
         CHECK(MS::ResolveSavedHost(MS::Mode::Local, "x.example") == MS::kLocalHost);
         CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "x.example:1337") == "x.example");
         CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "x.example:1437") == "x.example:1437");
-        CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "ws://x.example") == "");
+        CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "http://x.example") == "");
         CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "") == "");
+        CHECK(MS::ResolveSavedHost(MS::Mode::Custom, "x.example") == "x.example");
+        std::string community;
+        CHECK(MS::ValidateCustomHost(MS::kCommunityServerHost, community) == MS::HostStatus::Ok &&
+              community == MS::kCommunityServerHost);
     }
 
     void TestLaunchHost()
@@ -115,6 +135,7 @@ int main()
 {
     TestModeParsing();
     TestCustomHostAccepted();
+    TestCustomHostUrl();
     TestCustomHostRejected();
     TestSplitServer();
     TestResolveSavedHost();
