@@ -11,6 +11,10 @@ A render spike (2026-11-23, see **Render spike** below) was judged bad as
 tuned and not merged. Rendering is parked until a screen-space or camera-local
 approach is designed.
 
+## In-game option
+
+The toggle is also in the OpenShim options menu as **Fog Wakes** (Experimental group), default Off. It writes `[Experimental] InteractiveFogWakes`, which is read once at startup, so a restart is required. It is visual only and not gated in multiplayer.
+
 ## First milestone
 
 `include/fog_wake.h` and `src/engine/fog_wake.cpp` implement a platform-neutral
