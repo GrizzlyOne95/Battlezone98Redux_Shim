@@ -76,9 +76,9 @@ named function.
   built at 50,575 (:221) and hidden at once (:228) and nothing else shows it,
   which is where the Briefing button goes. 1060,580 is empty too, but the
   Any Nation control at 760,580 (stock, relabelled by `mp_any_nation.cpp`)
-  draws its text past its box and, being an earlier child, probably takes the clicks
+  drew its text past its box and, being an earlier child, probably takes the clicks
   there (click theft UNVERIFIED): a Briefing button at 1060,580 was overdrawn and did not open, while at 50,575 it opens.
-  The button uses the stock label-cell skin (`sync_join_*.png`). UNVERIFIED live: that nothing a
+  The button uses the stock label-cell skin (`sync_join_*.png`). Checked live on the host only (co-op, strategy-team and deathmatch maps, 16:9 and 4:3; the hidden TeamButton never reappeared); the client side is UNTESTED. The Any Nation row now reads "Any Nation" in its label cell and "On"/"Off" in the value cell (`mp_any_nation.cpp`), so its text fits. UNVERIFIED live: that nothing a
   later refresh shows (Splinter / KillLimit variants) lands there.
 - The click walk `cUI_View::MousePressed` 0x007D2570 visits children that
   have children first, in vector order (+0x12C..+0x130), then leaves. A view

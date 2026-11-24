@@ -99,9 +99,10 @@ namespace BZROpenShim
             const Shell::Rect kNextRect{ kPadX + 610.0f, 910.0f, 180.0f, 50.0f };
             const Shell::Rect kCloseRect{ kPadX + 1150.0f, 910.0f, 180.0f, 50.0f };
             // Left-column slot below Sync Join: ctor FUN_00796880 builds the
-            // stock TeamButton here (:221) and hides it at once (:228); no other
-            // lobby code touches that widget, so the slot is empty on screen and
-            // does not claim clicks. The right-hand column (x 760/1060) is not
+            // stock TeamButton here (:221) and hides it at once (:228). Searching
+            // the decompile found no other lobby code that touches that widget,
+            // and the slot showed empty live (co-op and team maps, host side).
+            // The right-hand column (x 760/1060) is not
             // usable: its third row is the Any Nation control, whose value text
             // runs past its own box into the neighbouring slot, and that widget
             // sits earlier in the child order, so it also took the clicks.

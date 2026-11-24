@@ -92,6 +92,8 @@ using FnSetVisible   = void(__fastcall*)(void* widget, void* edx, int visible);
 constexpr uint32_t kVtLobbyWrite    = 0x20;
 constexpr uint32_t kVtLobbyRead     = 0x2C;
 constexpr uint32_t kVtWidgetVisible = 0x24;
+constexpr uint32_t kWidgetValueCell = 0x148;  // SettingButton value text (FUN_007C3E30 param_1[0x52]; FUN_007C44A0 target)
+constexpr uint32_t kWidgetLabelCell = 0x14C;  // SettingButton left text label (param_1[0x53])
 constexpr uint32_t kLobbyIdOffset   = 0x10;   // record+0x10 (FUN_0073D020:46)
 constexpr uint32_t kScreenSvcOffset = 0x1BC;  // cUI_Multiplayer_Create+0x1BC (FUN_0079B880 disasm 0x79b8b8)
 constexpr uint32_t kScreenAnyNationWidget = 0x1A0; // param_1[0x68] (FUN_00796880:308)
@@ -217,6 +219,20 @@ __declspec(noinline) bool SafeWidgetCalls(void* widget, bool show, const char* l
     __try
     {
         void** vt = *reinterpret_cast<void***>(widget);
+        // The row's left label cell (SettingButton +0x14C, FUN_007C3E30
+        // param_1[0x53]) reads "Any Nation" so the value cell only has to hold
+        // "On" / "Off". The stock SetText wrapper only reaches the value child
+        // at +0x148, so point that slot at the label cell for one call, then put
+        // it back (restored even if the call faults).
+        uint8_t* bytes = static_cast<uint8_t*>(widget);
+        void* valueCell = *reinterpret_cast<void**>(bytes + kWidgetValueCell);
+        void* labelCell = *reinterpret_cast<void**>(bytes + kWidgetLabelCell);
+        if (labelCell)
+        {
+            *reinterpret_cast<void**>(bytes + kWidgetValueCell) = labelCell;
+            __try { reinterpret_cast<FnSetText>(g_AddrSetText)(widget, nullptr, MakeRaw("Any Nation")); }
+            __finally { *reinterpret_cast<void**>(bytes + kWidgetValueCell) = valueCell; }
+        }
         reinterpret_cast<FnSetText>(g_AddrSetText)(widget, nullptr, MakeRaw(label));
         reinterpret_cast<FnSetVisible>(vt[kVtWidgetVisible / 4])(widget, nullptr, show ? 1 : 0);
         return true;
@@ -224,7 +240,8 @@ __declspec(noinline) bool SafeWidgetCalls(void* widget, bool show, const char* l
     __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 }
 
-const char* LabelFor(bool on) { return on ? "Any Nation: On" : "Any Nation: Off"; }
+// Value cell only: the row's label cell carries "Any Nation".
+const char* LabelFor(bool on) { return on ? "On" : "Off"; }
 
 void ApplyToList(bool on, const char* why)
 {
