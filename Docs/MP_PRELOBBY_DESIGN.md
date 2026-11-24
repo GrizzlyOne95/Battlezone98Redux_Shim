@@ -283,7 +283,10 @@ line repeats after a recycle).
 2. The saved choice: `[Network] Server = Rebellion | Custom | Local` with
    `CustomServer = <host or IP>[:port]`, loaded at startup into the live
    override (so the first connection and invites use it) and updated by
-   Continue. Absent or blank means no override.
+   Continue. Absent or blank means no override (`Server = Custom` with a blank
+   `CustomServer` included). The pre-lobby's Custom entry is pre-filled with
+   the community server `bzr.battlezonecommunity.com` (`kCommunityServerHost`)
+   when no `CustomServer` is saved; a saved value always wins.
 3. The `/bzrserver=` launch switch.
 4. The official host.
 

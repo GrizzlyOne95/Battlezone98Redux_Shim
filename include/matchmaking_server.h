@@ -23,6 +23,10 @@ namespace BZROpenShim
 namespace MatchmakingServer
 {
     inline constexpr const char kRebellionHost[] = "battlezone98mp.webdev.rebellion.co.uk";
+    // The community lobby server: what the pre-lobby's Custom entry shows until
+    // the player saves a CustomServer of their own. Default port; never sent the
+    // platform ticket. A blank saved CustomServer still means no override.
+    inline constexpr const char kCommunityServerHost[] = "bzr.battlezonecommunity.com";
     inline constexpr const char kLocalHost[] = "127.0.0.1";
     inline constexpr unsigned kPort = 1337;
     inline constexpr unsigned kMaxPort = 65534;  // the probe goes to port + 1
@@ -137,6 +141,19 @@ namespace MatchmakingServer
         input = Detail::Trim(input);
         if (input.empty())
             return HostStatus::Empty;
+
+        // A pasted lobby URL: drop "ws://" and one trailing "/". "wss://" is
+        // refused, not stripped: the client only speaks plain ws, so accepting
+        // it would silently downgrade the connection.
+        if (input.size() >= 6 && Detail::Lower(input[0]) == 'w' && Detail::Lower(input[1]) == 's' &&
+            input[2] == ':' && input[3] == '/' && input[4] == '/')
+        {
+            input.remove_prefix(5);
+            if (!input.empty() && input.back() == '/')
+                input.remove_suffix(1);
+            if (input.empty())
+                return HostStatus::Invalid;
+        }
 
         for (char c : input)
         {
