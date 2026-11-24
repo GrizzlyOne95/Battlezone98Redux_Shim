@@ -330,6 +330,17 @@ namespace BZROpenShim
             TryGetUserConfigString("Network", "Server", savedMode);
             if (MS::EqualsNoCase(desired, CurrentServerHost()) && MS::EqualsNoCase(savedMode, MS::ModeName(mode)))
                 return true;
+            // Continuing with the /bzrserver= launch host keeps it for this
+            // session only; picking anything else is saved as usual.
+            std::string launchHost;
+            char overrideHost[MatchmakingServer::kMaxHostLength + 8] = {};
+            if (MS::ExtractLaunchHost(GetCommandLineW(), launchHost) &&
+                !GetMatchmakingServerOverride(overrideHost, sizeof(overrideHost)) &&
+                MS::EqualsNoCase(desired, CurrentServerHost()))
+            {
+                Log(L"[PRELOBBY] launch server %hs kept for this session, not saved\n", desired.c_str());
+                return true;
+            }
             if (!WriteShimUserConfigValue("Network", "Server", MS::ModeName(mode)) ||
                 (custom && !WriteShimUserConfigValue("Network", "CustomServer", desired.c_str())))
             {

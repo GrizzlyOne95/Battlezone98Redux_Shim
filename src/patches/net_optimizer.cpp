@@ -3827,7 +3827,10 @@ namespace
     }
 
     // Seeds the override from the saved [Network] Server / CustomServer so the
-    // first connection (and invites) already use the saved choice.
+    // first connection (and invites) already use the saved choice. A
+    // /bzrserver= launch switch is a one-session choice and wins: the saved
+    // selection is left unapplied (and unchanged) for that session, except a
+    // saved LAN entry for the same host, which still selects no-auth LAN.
     void LoadSavedServerOverride()
     {
         std::string modeText;
@@ -3850,6 +3853,14 @@ namespace
         }
         if (host.empty())
             return;
+        std::string launchHost;
+        if (MatchmakingServer::ExtractLaunchHost(GetCommandLineW(), launchHost) &&
+            !(mode == MatchmakingServer::Mode::Lan && MatchmakingServer::EqualsNoCase(host, launchHost)))
+        {
+            Logf("[OpenShimNet] /bzrserver=%s given: saved [Network] Server not applied this session",
+                launchHost.c_str());
+            return;
+        }
         AcquireSRWLockExclusive(&g_ServerOverrideLock);
         g_ServerOverrideHost = host;
         g_OverrideAllowOfficialFallback.store(mode != MatchmakingServer::Mode::Lan);
