@@ -186,7 +186,16 @@ namespace BZROpenShim
             case 1: return "Defense";
             case 2: return "Utility";
             }
-            return "none";
+            return "no slot range";
+        }
+
+        // Class signatures (GameObjectClass +0x14) the producer constructors
+        // set: RecyclerClass FUN_005b2fd0 'RCYC', FactoryClass FUN_004cbce0
+        // 'FACT', ArmoryClass FUN_00473330 'ARMR', ConstructionRigClass
+        // FUN_0049d850 'CNST'.
+        inline bool IsProducerClassSig(uint32_t sig)
+        {
+            return sig == 0x52435943u || sig == 0x46414354u || sig == 0x41524D52u || sig == 0x434E5354u;
         }
 
         // The sort key works while one of the three category lists is on
@@ -212,6 +221,12 @@ namespace BZROpenShim
             bool handleValid = false; // GetObj(GetHandle(unit)) == unit
             bool odfKnown = false;    // its ODF name could be read
             int category = -1;        // CommandCategory of its class range
+            // The class range is -1/-1: classes whose constructor sets no
+            // range (HoverCraftClass "hover", SAVClass "sav") never get a team
+            // slot. Those are grouped as before the category rule, unless
+            // the class is a producer.
+            bool noSlotRange = false;
+            bool isProducer = false;
         };
 
         enum class BuiltUnitVerdict
@@ -246,7 +261,7 @@ namespace BZROpenShim
                 return BuiltUnitVerdict::Building;
             if (!unit.isCraft)
                 return BuiltUnitVerdict::NotCraft;
-            if (unit.category < 0)
+            if (unit.category < 0 && (!unit.noSlotRange || unit.isProducer))
                 return BuiltUnitVerdict::NotCommandCategory;
             if (!unit.canCommand)
                 return BuiltUnitVerdict::NotCommandable;

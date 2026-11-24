@@ -58,6 +58,9 @@ namespace BZROpenShim::Hooks
         // the class constructor FUN_004c12f0 lines 53-54).
         constexpr size_t kClassMinSlotOffset = 0x13C;
         constexpr size_t kClassMaxSlotOffset = 0x140;
+        // GameObjectClass sig ('RCYC', 'FACT', ...; param_1[5] in each class
+        // constructor, e.g. RecyclerClass FUN_005b2fd0).
+        constexpr size_t kClassSigOffset = 0x14;
         // MENU_ITEM {const char* name; int minSlot; int maxSlot;} (0x008E7990).
         constexpr size_t kMenuItemStride = 0xC;
         // Team slots are Team +0 (TeamGetSlot 0x005E0F70); MENU_ITEM ends at 44.
@@ -390,10 +393,17 @@ namespace BZROpenShim::Hooks
             out.unit.isPerson = IsPersonObject(obj);
             out.unit.isBuilding = IsBuildingClass(ClassOf(obj));
             const uintptr_t cls = SafeGetClass(obj);
-            if (cls == 0 || !ReadInt(cls + kClassMinSlotOffset, out.minSlot) ||
-                !ReadInt(cls + kClassMaxSlotOffset, out.maxSlot))
+            const bool slotsRead = cls != 0 && ReadInt(cls + kClassMinSlotOffset, out.minSlot) &&
+                                   ReadInt(cls + kClassMaxSlotOffset, out.maxSlot);
+            if (!slotsRead)
                 out.minSlot = out.maxSlot = -1;
             out.unit.category = Policy::CommandCategory(out.minSlot, out.maxSlot);
+            // Only a range the class really holds as -1/-1 takes the old path;
+            // an unreadable class stays not grouped.
+            out.unit.noSlotRange = slotsRead && out.minSlot == -1 && out.maxSlot == -1;
+            int sig = 0;
+            out.unit.isProducer = cls != 0 && ReadInt(cls + kClassSigOffset, sig) &&
+                                  Policy::IsProducerClassSig(static_cast<uint32_t>(sig));
             out.unit.canCommand = SafeCanCommand(obj);
             out.handle = SafeGetHandle(obj);
             out.unit.handleValid = out.handle != 0 && SafeGetObj(out.handle) == obj;

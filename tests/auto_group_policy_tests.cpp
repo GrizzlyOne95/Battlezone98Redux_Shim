@@ -243,7 +243,7 @@ namespace
         Check(CommandCategory(14, 5) == -1, "an inverted range");
         Check(CommandCategory(14, 15) == -1 && CommandCategory(34, 35) == -1, "ranges across a category edge");
         Check(CommandCategory(14, 14) == 0 && CommandCategory(25, 25) == 2, "single slots at the edges");
-        Check(std::strcmp(CategoryName(1), "Defense") == 0 && std::strcmp(CategoryName(5), "none") == 0,
+        Check(std::strcmp(CategoryName(1), "Defense") == 0 && std::strcmp(CategoryName(5), "no slot range") == 0,
               "category names");
 
         Check(SortKeyApplies(true, 0, 0, -1) && SortKeyApplies(true, 2, 0, -1), "offense and utility lists");
@@ -284,6 +284,16 @@ namespace
         Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::NotCommandCategory, "producer craft skipped");
         u.canCommand = false;
         Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::NotCommandCategory, "category is checked before commandable");
+        u = Eligible();
+        u.category = -1;
+        u.noSlotRange = true; // a CR "hover" or "sav" craft: no class range
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Group, "a craft with no slot range is grouped as before");
+        u.isProducer = true;
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::NotCommandCategory, "a producer with no slot range is skipped");
+        Check(IsProducerClassSig(0x52435943u) && IsProducerClassSig(0x46414354u) &&
+              IsProducerClassSig(0x41524D52u) && IsProducerClassSig(0x434E5354u), "producer class sigs");
+        Check(!IsProducerClassSig(0x57494E47u) && !IsProducerClassSig(0x53415600u), "wingman and sav are not producers");
+        Check(std::strcmp(CategoryName(-1), "no slot range") == 0, "no-range category name");
         u = Eligible();
         u.category = 1;
         Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Group, "a defense unit is grouped");

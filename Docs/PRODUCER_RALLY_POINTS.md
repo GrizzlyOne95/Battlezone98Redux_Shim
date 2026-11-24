@@ -466,10 +466,22 @@ category is the engine's own: a class's team-slot range (GameObjectClass
 one of the MENU_ITEM ranges 5-14, 15-24 or 25-34. A deployable Factory,
 Recycler or Armory in vehicle form is a Craft, so before this rule it was
 grouped (`F1 1xFactory`); its range is its single producer slot (1-4), so it
-is skipped now. Nav beacons (35-44) and classes with no range (-1) are
-skipped too. Scavengers stay excluded by their own rule even though their
-slots are Utility. **UNVERIFIED** which range each stock producer ODF
-carries; the skip line logs `class slots <min>-<max>`.
+is skipped now. Nav beacons (35-44) are skipped too. Scavengers stay
+excluded by their own rule even though their slots are Utility.
+
+The range comes from the classLabel, not the ODF: each class constructor
+hardcodes it (`param_1[0x4f]`/`[0x50]`). wingman FUN_006136f0, walker
+FUN_00610030 and apc FUN_00470fd0 set 5-14; turrettank FUN_005f66c0,
+howitzer FUN_004f1310 and minelayer FUN_00511c50 set 15-24; scavenger
+FUN_005c2c70 and tug FUN_005ed790 set 25-34; recycler FUN_005b2fd0 1,
+factory FUN_004cbce0 2, armory FUN_00473330 3, constructionrig
+FUN_0049d850 4. HoverCraftClass ("hover", FUN_004efca0) and SAVClass
+("sav", FUN_005bf5d0) set none, so they keep -1/-1 and get no team slot.
+Campaign Reimagined uses both (`cvfighc` is "hover"; `avsav`, `avpsav`,
+`avrsav`, `svsav`, `savfury` are "sav"). A craft with -1/-1 is therefore
+grouped as before the category rule, unless its class sig (GameObjectClass
+`+0x14`) is a producer's ('RCYC', 'FACT', 'ARMR', 'CNST'). The sort key
+cannot reach those units: they hold no slot in any list.
 
 ### Sort key (Y)
 
