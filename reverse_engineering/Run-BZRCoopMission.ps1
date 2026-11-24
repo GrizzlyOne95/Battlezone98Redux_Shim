@@ -101,8 +101,9 @@ else {
 if (-not (Test-Path -LiteralPath $scenarioPath)) { throw "Scenario not found: $scenarioPath" }
 if ($MapListScroll -lt 0) { $MapListScroll = if ($KnownMapScroll.ContainsKey($Mission)) { $KnownMapScroll[$Mission] } else { 0 } }
 if (-not $MapListY) {
-    if (-not $KnownMapRows.ContainsKey($Mission)) { throw "No known map row for $Mission; pass -MapListY." }
-    $MapListY = $KnownMapRows[$Mission]
+    # Unknown maps (e.g. the renamed misn03cr) start at the first row; the lobby
+    # then scrolls the list until gameSettings names the map.
+    $MapListY = if ($KnownMapRows.ContainsKey($Mission)) { $KnownMapRows[$Mission] } else { 99 }
 }
 if (-not $RunName) { $RunName = 'cr-{0}-{1}-{2}' -f $Mission, [IO.Path]::GetFileNameWithoutExtension($scenarioPath).Replace("$Mission-", ''), (Get-Date -Format 'yyyyMMdd-HHmmss') }
 

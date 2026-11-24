@@ -20,6 +20,8 @@ param(
     [int]$MapListY = 0,
     # Clicks on the map list's scroll-down arrow before the row pick (a map past the 11 visible rows).
     [int]$MapListScroll = 0,
+    # Upper bound on scroll-down steps when the map is not in the visible rows.
+    [int]$MapScrollCap = 40,
     [string]$MapBzn = '',
     [switch]$SyncJoin,
     # Optional script dot-sourced after every guest has joined and before they
@@ -224,16 +226,37 @@ if ($MapListY) {
     for ($i = 0; $i -lt $MapListScroll; $i++) { Click $hostClient $UI.MapListDown; Start-Sleep -Milliseconds 400 }
     # Row height follows the client size (12 px at 1280 wide, ~8.5 px at 584),
     # so try the 1280 row first, then walk the list until the map is selected.
-    $tries = @($MapListY) + @(for ($y = 88; $y -le 230; $y += 8) { $y })
-    foreach ($y in $tries) {
+    # Each pick is confirmed from the server's gameSettings, never assumed.
+    function Select-MapRow([int]$RowY) {
         $before = Get-GameSettings
-        if ($before -and $before[1] -eq $MapBzn) { break }
-        Click $hostClient @($UI.MapList[0], $y, $UI.MapList[2])
+        if ($before -and $before[1] -eq $MapBzn) { return $before[1] }
+        Click $hostClient @($UI.MapList[0], $RowY, $UI.MapList[2])
         $s = Wait-NewSettings $(if ($before) { $before[0] } else { '' })
         if (-not $s) { $s = Get-GameSettings }
-        if ($s -and $s[1] -eq $MapBzn) { break }
+        if ($s) { $s[1] } else { '' }
     }
-    $null = Wait-Until 'host-map' { $s = Get-GameSettings; if ($s -and $s[1] -eq $MapBzn) { "$MapBzn (row y=$y)" } }
+    $seen = New-Object System.Collections.Generic.List[string]
+    $found = $false
+    $tries = @($MapListY) + @(for ($y = 88; $y -le 230; $y += 8) { $y })
+    foreach ($y in $tries) {
+        $bzn = Select-MapRow $y; $seen.Add("y$y=$bzn")
+        if ($bzn -eq $MapBzn) { $found = $true; break }
+    }
+    # Not in the visible rows (fixed rows go stale as maps are added or
+    # renamed): step the list down one row at a time and pick the second-last
+    # visible row, which every row passes through. Stop at the cap or when
+    # three steps in a row land on the same map (the end of the list).
+    $stuck = 0; $last = ''
+    for ($n = 0; -not $found -and $n -lt $MapScrollCap; $n++) {
+        Click $hostClient $UI.MapListDown; Start-Sleep -Milliseconds 350
+        $bzn = Select-MapRow 205; $seen.Add("down$($n + 1)=$bzn")
+        if ($bzn -eq $MapBzn) { $found = $true; break }
+        if ($bzn -eq $last) { if (++$stuck -ge 3) { break } } else { $stuck = 0 }
+        $last = $bzn
+    }
+    Write-Step 'host-map-walk' $(if ($found) { 'ok' } else { 'not-found' }) @{ target = $MapBzn; seen = @($seen) }
+    if (-not $found) { throw "Map $MapBzn not found in the host list (picks: $($seen -join ', '))" }
+    $null = Wait-Until 'host-map' { $s = Get-GameSettings; if ($s -and $s[1] -eq $MapBzn) { "$MapBzn" } }
     Start-Sleep -Milliseconds 500
 }
 if ($SyncJoin) {
