@@ -478,10 +478,6 @@ namespace BZROpenShim::Hooks
                 if (verdict != Policy::BuiltUnitVerdict::Group)
                 {
                     ++skipped;
-                    Log(L"[AUTOGROUP] sort %hs: slot %d 0x%08X odf=%hs %hs; left alone\n",
-                                Policy::CategoryName(item), slot,
-                                static_cast<uint32_t>(reinterpret_cast<uintptr_t>(obj)), u.odf,
-                                Policy::DescribeVerdict(verdict));
                     continue;
                 }
                 bool added = false;
@@ -498,8 +494,9 @@ namespace BZROpenShim::Hooks
                 else
                     ++noGroup;
             }
-            // Not budgeted: a press is the player's own, at most 11 lines,
-            // and must not use up the FinishBuild lines' budget.
+            // Not budgeted: a press is the player's own, logs only the units
+            // it grouped plus this summary, and must not use up the
+            // FinishBuild lines' budget.
             Log(L"[AUTOGROUP] sort %hs: grouped %d, already grouped %d, skipped %d, no group %d\n",
                         Policy::CategoryName(item), grouped, already, skipped, noGroup);
         }

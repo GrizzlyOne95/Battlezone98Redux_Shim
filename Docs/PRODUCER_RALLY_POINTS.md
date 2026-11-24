@@ -495,8 +495,8 @@ MENU_ITEM range, the list the stock menu shows. Log:
 `[AUTOGROUP] sort <Category>: grouped N, already grouped M, skipped K, no group L`.
 
 Y is unbound in the stock `input.map` and in OpenShim's default keys
-(RallyKey V, RTS keys T/B/X/Z/J/C, numpad, Ctrl+Home/End); `RallyKey = Y`
-is refused. It is on the
+(RallyKey V, RTS keys T/B/X/Z/J/C, numpad, Ctrl+Home/End). A player who
+sets `RallyKey = Y` keeps it, and the sort key then does nothing. It is on the
 left hand next to the number row, so `1` then `Y` is one motion. The press
 is swallowed only when it sorted, and is ignored with Shift, Ctrl or Alt
 held, with the editor open or with a chat line focused. It is seen by the

@@ -636,11 +636,14 @@ namespace BZROpenShim::Hooks
 
         // The auto-group sort key (auto_group_new_units.cpp). A fresh,
         // unmodified keydown is swallowed only when it sorted; Y has no
-        // binding in the stock input.map or in OpenShim's key settings.
+        // binding in the stock input.map or in OpenShim's default keys. A
+        // player who bound RallyKey = Y keeps it: the sort key steps aside.
         bool AutoGroupSortKeyPressed(UINT msg, WPARAM w, LPARAM l)
         {
             if (msg != Policy::kWmKeyDown || w != kAutoGroupSortVk ||
                 (static_cast<uint32_t>(l) & Policy::kLParamPreviousStateBit) != 0)
+                return false;
+            if (CurrentRallyKey().vk == kAutoGroupSortVk)
                 return false;
             if ((GetKeyState(VK_SHIFT) & 0x8000) != 0 || (GetKeyState(VK_CONTROL) & 0x8000) != 0 ||
                 (GetKeyState(VK_MENU) & 0x8000) != 0)
@@ -2262,16 +2265,16 @@ namespace BZROpenShim::Hooks
         return g_Table.Clear(reinterpret_cast<uintptr_t>(producer));
     }
 
-    // The FinishBuild slot hook on its own, for a consumer other than the
-    // rally (AutoGroupNewUnits). It binds its own copy of the shared rows, so
-    // it does not depend on the rally's key path or rally-only rows, and it
-    // leaves the rally's state alone; the rally's install accepts a slot that
-    // already holds the hook. True once both slots hold the hook.
     bool ProducerWindowSubclassed()
     {
         return g_Window.load(std::memory_order_acquire) != nullptr;
     }
 
+    // The FinishBuild slot hook on its own, for a consumer other than the
+    // rally (AutoGroupNewUnits). It binds its own copy of the shared rows, so
+    // it does not depend on the rally's key path or rally-only rows, and it
+    // leaves the rally's state alone; the rally's install accepts a slot that
+    // already holds the hook. True once both slots hold the hook.
     bool EnsureProducerFinishBuildHook()
     {
         static std::atomic<bool> s_installed{ false };
