@@ -119,9 +119,6 @@
     },
     {
       "name": "GameObject Handle Stale Slot Guard",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 51 8B 45 08 50 E8 ?? ?? ?? ?? 83 C4 04 89 45 FC 83 7D FC 00 75 04 33 C0 EB 16 8B 4D FC E8 ?? ?? ?? ?? 25 00 02 00 00 74 04 33 C0 EB 03 8B 45 FC 8B E5 5D C3",
       "offset": 0,
       "expected_size": 5,
@@ -253,9 +250,6 @@
     },
     {
       "name": "LensFlare MaterialManager Guard 1/2",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "FF 15 C0 9E 86 00 89 45 B4 8D 4D D8 51 8B 55 B4 8B 02 8B 4D B4 8B 50 38 FF D2 C6 45 FC 02 8D 4D D8",
       "offset": 13,
       "expected_size": 5,
@@ -265,9 +259,6 @@
     },
     {
       "name": "LensFlare MaterialManager Guard 2/2",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "FF 15 C0 9E 86 00 89 45 B0 8D 4D C0 51 8B 55 B0 8B 02 8B 4D B0 8B 50 38 FF D2 C6 45 FC 02 8D 4D C0",
       "offset": 13,
       "expected_size": 5,
@@ -277,9 +268,6 @@
     },
     {
       "name": "LensFlare Exit Destructor Skip",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC B9 28 7C 9B 00 E8 ?? ?? ?? ?? 5D C3",
       "offset": 8,
       "expected_size": 5,
@@ -298,9 +286,6 @@
     },
     {
       "name": "Scavenger Process Scrap Position Guard",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "8B 4D DC E8 ?? ?? ?? ?? 8B 10 89 55 F0 8B 48 04 89 4D F4 8B 50 08 89 55 F8",
       "offset": 4,
       "expected_size": 4,
@@ -583,9 +568,6 @@
     },
     {
       "name": "TRO Banner Mode Refresh 1/2",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "E8 92 01 00 00 5D C3 55 8B EC 8B 0D E0 55 94 00 E8 A2 01 00 00 5D C3",
       "offset": 17,
       "expected_size": 4,
@@ -595,9 +577,6 @@
     },
     {
       "name": "TRO Banner Mode Refresh 2/2",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "85 D2 74 0D 8B 8D EC FB FF FF E8 ?? ?? ?? ?? EB 17 6A 00 6A 1D 6A 00",
       "offset": 11,
       "expected_size": 4,
@@ -949,9 +928,6 @@
     },
     {
       "name": "CollisionTest::GetProperties",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 81 EC 98 00 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 57 8B 45 0C 8B 88 84 00 00 00 51 E8 CC FE FF FF 83 C4 04 89 45 B0 6B 55 B0 34 83 BA",
       "mode": "address",
       "offset": 0,
@@ -961,9 +937,6 @@
     },
     {
       "name": "CollisionTest::CarEntityCheck",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 83 EC 08 C7 45 FC 00 00 00 00 8B 45 0C 8B 48 24 89 4D F8 83 7D F8 01 74 0E 83 7D F8 02 74 30 83 7D F8 03 74 52 EB 78 8B 55 18 52 8B 45",
       "mode": "address",
       "offset": 0,
@@ -973,9 +946,6 @@
     },
     {
       "name": "CollisionTest::CarHierarchyCheck",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 81 EC AC 00 00 00 A1 00 70 8E 00 33 C5 89 45 FC 56 57 8B 45 08 50 8D 8D 54 FF FF FF 51 E8 6B 42 00 00 83 C4 08 8B 10 89 55 84 8B 48 04",
       "mode": "address",
       "offset": 0,
@@ -985,9 +955,6 @@
     },
     {
       "name": "CollisionTest::CgeomCreate",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 83 EC 48 A1 00 70 8E 00 33 C5 89 45 FC 56 8B 45 08 8B 48 64 89 4D DC 8B 55 DC 6B 42 04 0C E8 5A 01 40 00 89 65 C4 8B 45 C4 89 45 D4 8B",
       "mode": "address",
       "offset": 0,
@@ -997,9 +964,6 @@
     },
     {
       "name": "CollisionTest::CgeomDelete",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 51 8B 45 08 83 B8 9C 00 00 00 00 75 02 EB 26 8B 4D 08 8B 91 9C 00 00 00 89 55 FC 8B 45 FC 50 FF 15 A8 94 86 00 83 C4 04 8B 4D 08 C7 81",
       "mode": "address",
       "offset": 0,
@@ -1009,9 +973,6 @@
     },
     {
       "name": "CollisionTest::SelectLOD",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "55 8B EC 83 EC 14 8B 45 08 83 C0 68 89 45 FC 8D 4D EC 51 8D 55 F8 52 8B 45 FC 8B 48 08 51 E8 DD FB FF FF 83 C4 0C 8B 55 0C 52 8B 45 F8 50 E8 BD",
       "mode": "address",
       "offset": 0,
@@ -1676,7 +1637,6 @@
     },
     {
       "name": "Craft::EffectiveDamageResistanceSite",
-      "platforms": ["gog"],
       "pattern": "D9 9D 04 FF FF FF F3 0F 10 05 98 24 8A 00 0F 2F 85 04 FF FF FF 72 07 32 C0 E9 D1 07 00 00",
       "offset": 6,
       "mode": "address",
@@ -8352,9 +8312,6 @@
     },
     {
       "name": "TRO Banner Movie Name",
-      "platforms": [
-        "gog"
-      ],
       "pattern": "89 91 5C 01 00 00 6A 00 68 ?? ?? ?? ?? 8B 45 F0 8B 88 5C 01 00 00 E8",
       "offset": 9,
       "expected_size": 4,
