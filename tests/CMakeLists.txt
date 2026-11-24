@@ -221,6 +221,7 @@ openshim_add_test(hud_color_policy_tests STD 17 SOURCES hud_color_policy_tests.c
 openshim_add_test(hud_palette_policy_tests STD 17 SOURCES hud_palette_policy_tests.cpp)
 openshim_add_test(engine_flame_color_tests STD 17 SOURCES engine_flame_color_tests.cpp)
 openshim_add_test(construction_blob_faction_tests STD 17 SOURCES construction_blob_faction_tests.cpp)
+openshim_add_test(faction_vfx_setting_tests STD 17 SOURCES faction_vfx_setting_tests.cpp)
 openshim_add_test(ui_screen_fit_tests STD 17 SOURCES ui_screen_fit_tests.cpp)
 openshim_add_test(shader_source_fingerprint_tests STD 17 SOURCES shader_source_fingerprint_tests.cpp)
 openshim_add_test(dxbc_cache_policy_tests STD 17 SOURCES dxbc_cache_policy_tests.cpp)

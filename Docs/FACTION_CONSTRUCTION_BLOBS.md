@@ -1,12 +1,19 @@
 # Per-faction construction blobs
 
-Setting `openshim.ini` `[Display] FactionConstructionBlobs = 1` (default `0`) lets a mod replace
+Setting `openshim.ini` `[Display] FactionVfx = 1` (default `0`) lets a mod replace
 the stock construction puff with a render effect, chosen per faction. The puff is drawn over a
 build in progress.
 
 With the setting off, nothing is installed. The patch rows are dropped before the batch, so the
 exe stays byte-identical. The feature is display only, because the blob list and renders are
 local render state, so it also runs in multiplayer. A restart is required.
+
+`FactionVfx` is the options-menu row "Faction-Specific VFX", shared with the faction engine
+flames (`Docs/VEHICLE_FLAME_COLOR.md`). If `FactionVfx` is absent, the blobs are on when the
+legacy `[Display] FactionConstructionBlobs = 1` (or `JetFlames = 1`) is set, so hand-edited inis
+keep working. The menu writes only `FactionVfx`, and a present `FactionVfx` wins over both legacy
+keys. The blob hooks are installed at startup, so toggling the row in game applies the flames at
+once but the blobs only after a restart. The merge logic is `include/faction_vfx_setting.h`.
 
 ## Mod side
 

@@ -446,10 +446,10 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsSatelliteValues, kShimSettingsSatelliteLabels, 4, 0,
       ShimSettingApplyGroup::GlobalImprovement,
       "Satellite view pan speed, as a multiple of stock. Single player only." },
-    { "Faction Color Jets", "Display", "JetFlames", nullptr, 0,
+    { "Faction-Specific VFX", "Display", "FactionVfx", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::JetFlames,
-      "Faction-colored engine flames on jets and thrusters." },
+      "Faction-colored engine flames, and per-faction construction and portal blobs. Flames apply now; blobs need a restart." },
     { "Unit Voices", "Display", "UnitVoFeedback", nullptr, 0,
       kShimSettingsUnitVoValues, kShimSettingsUnitVoValues, 3, 0,
       ShimSettingApplyGroup::UnitVo,
@@ -1208,7 +1208,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "SunFlashbang", "1" }, { "PlayerPaint", "stock" }, { "ExplosionFlash", "Stock" }, { "DamageFlash", "Stock" },
     { "UnderAttackAlert", "Normal" }, { "SuppressHopOutAttackAlert", "0" },
     { "TargetPolicy", "Default" }, { "ScrapPilotHud", "Stock" }, { "RadarSizeScale", "1.0" },
-    { "SatelliteZoomOut", "1.0" }, { "SatellitePanSpeed", "1.0" }, { "JetFlames", "0" },
+    { "SatelliteZoomOut", "1.0" }, { "SatellitePanSpeed", "1.0" }, { "FactionVfx", "0" },
 
     { "UnitVoFeedback", "Normal" }, { "MultiplayerFlags", "0" },
 

@@ -546,7 +546,7 @@ namespace BZROpenShim::ConstructionBlobFaction
             if (decision == last)
                 return;
             last = decision;
-            LogShimA(LogLevel::Info, e.tag, "FactionConstructionBlobs=%d -> %s", enabled ? 1 : 0,
+            LogShimA(LogLevel::Info, e.tag, "FactionVfx=%d -> %s", enabled ? 1 : 0,
                      decision == 1 ? "hooks queued" : decision == 2 ? "engine rows unbound; stock" : "off (stock)");
         }
     }
@@ -562,8 +562,7 @@ namespace BZROpenShim::ConstructionBlobFaction
         static int s_lastPort = -1;
         g_Cnst.backend = { BackendCreate, BackendUpdate, BackendDetach, &g_Cnst };
         g_Port.backend = { BackendCreate, BackendUpdate, BackendDetach, &g_Port };
-        bool enabled = false;
-        TryGetUserConfigBool(Hooks::kUserConfigDisplaySection, "FactionConstructionBlobs", enabled);
+        const bool enabled = Hooks::ReadFactionVfxEnabled();
         bool cnst = false, port = false;
         if (enabled)
         {

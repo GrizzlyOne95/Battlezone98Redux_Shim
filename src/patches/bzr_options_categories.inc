@@ -28,7 +28,7 @@ static const char* const kShimCategoryVideo[] = {
     "Primary Monitor Fix", "Resolution Filter", "Resolution List",
     kShimRowEffects, kShimRowMenuTheme, kShimRowPerformance };
 static const char* const kShimCategoryEffects[] = {
-    "Faction Color Jets", "Destruction Chunks",
+    "Faction-Specific VFX", "Destruction Chunks",
     "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs", "Paint", "Live Terrain Paint", "Fog Wakes" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",

@@ -585,13 +585,10 @@ namespace
         if (Equals(name, "OPENSHIM_TERRAIN_HD_MANIFEST"))
             return ini(IniFile::Main, "Terrain", "TerrainHdManifest", out);
 
-        if (Equals(name, "OPENSHIM_FACTION_JET_FLAMES") || Equals(name, "BZR_FACTION_JET_FLAMES"))
-            return TryReadMappedBool(ini, "Display", "JetFlames", false, out);
-        if (Equals(name, "OPENSHIM_DISABLE_FACTION_JET_FLAMES") ||
-            Equals(name, "BZR_DISABLE_FACTION_JET_FLAMES"))
-        {
-            return TryReadMappedBool(ini, "Display", "JetFlames", true, out);
-        }
+        // OPENSHIM_FACTION_JET_FLAMES / OPENSHIM_DISABLE_FACTION_JET_FLAMES (and
+        // BZR_ aliases) are deliberately NOT mapped: the INI answer is the
+        // merged [Display] FactionVfx setting (ReadFactionVfxEnabled), so only a
+        // real environment variable may override it.
         // Route tracing for the flames above. Env-only diagnostics are a trap
         // here: the game is launched by a storefront that inherited its
         // environment long before anyone typed setx, so the flag silently never

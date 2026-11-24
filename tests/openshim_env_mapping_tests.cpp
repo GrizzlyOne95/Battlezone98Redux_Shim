@@ -104,6 +104,27 @@ namespace
         }
     }
 
+    // The faction flame env names must not read [Display] JetFlames: the INI
+    // answer is the merged FactionVfx setting, so a legacy JetFlames = 0 (old
+    // shipped INI) must not invert into DISABLE=1, and JetFlames = 1 must not
+    // force ENABLE=1 when FactionVfx is off.
+    void TestFactionFlameNamesIgnoreLegacyIniKey()
+    {
+        FakeIni ini;
+        ini.Set("Display", "JetFlames", "0");
+        ini.Set("Display", "FactionVfx", "1");
+        for (const char* name : {"OPENSHIM_DISABLE_FACTION_JET_FLAMES", "BZR_DISABLE_FACTION_JET_FLAMES",
+                                 "OPENSHIM_FACTION_JET_FLAMES", "BZR_FACTION_JET_FLAMES"})
+            Check(Mapped(ini, name) == "<none>", std::string(name) + " ignores JetFlames=0 with FactionVfx=1");
+        ini.Set("Display", "JetFlames", "1");
+        ini.Set("Display", "FactionVfx", "0");
+        for (const char* name : {"OPENSHIM_DISABLE_FACTION_JET_FLAMES", "OPENSHIM_FACTION_JET_FLAMES"})
+            Check(Mapped(ini, name) == "<none>", std::string(name) + " ignores JetFlames=1 with FactionVfx=0");
+        FakeEnv env;
+        env.values["OPENSHIM_FACTION_JET_FLAMES"] = "1";
+        Check(Lookup("OPENSHIM_FACTION_JET_FLAMES", &ini, env) == "1", "a real env var still counts");
+    }
+
     void TestDisableNamesInvertPositiveKeys()
     {
         FakeIni ini;
@@ -494,6 +515,7 @@ namespace
 int main()
 {
     TestBooleanKeysNormalise();
+    TestFactionFlameNamesIgnoreLegacyIniKey();
     TestDisableNamesInvertPositiveKeys();
     TestRunInBackgroundMapping();
     TestNamesMatchWithoutCase();

@@ -1782,7 +1782,10 @@ EmissivePulse = 0
 ; Accepted: boolean. Default: OFF.
 StarTwinkle = 0
 
-; Faction-colored jet/thruster flames.
+; Faction-Specific VFX: faction-colored jet/thruster flames AND per-faction
+; construction/portal blobs (see FactionConstructionBlobs). The options menu
+; writes this key. If absent, both are on when either legacy key (JetFlames,
+; FactionConstructionBlobs) is 1. Flames apply live; blobs need a restart.
 ; Accepted: boolean. Default: OFF.
 ;   a / NSDF      = stock blue
 ;   s / CCA       = red
@@ -1792,7 +1795,7 @@ StarTwinkle = 0
 ;   enable  OPENSHIM_FACTION_JET_FLAMES, BZR_FACTION_JET_FLAMES
 ;   disable OPENSHIM_DISABLE_FACTION_JET_FLAMES,
 ;           BZR_DISABLE_FACTION_JET_FLAMES
-JetFlames = 0
+FactionVfx = 0
 
 ; Fullscreen white "flashbang" when you look toward the sun.
 ; Accepted: boolean. Default: 1 (stock).

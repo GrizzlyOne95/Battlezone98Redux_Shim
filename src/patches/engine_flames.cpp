@@ -827,10 +827,7 @@ namespace BZROpenShim
                 return;
             g_JetFlamesConfigInitialized = true;
 
-            bool enabled = kJetFlamesEnabledDefault;
-            bool cfg = false;
-            if (TryGetUserConfigBool(kUserConfigDisplaySection, "JetFlames", cfg))
-                enabled = cfg;
+            bool enabled = ReadFactionVfxEnabled();
 
             if (EnvFlagEnabled("OPENSHIM_FACTION_JET_FLAMES") ||
                 EnvFlagEnabled("BZR_FACTION_JET_FLAMES"))
