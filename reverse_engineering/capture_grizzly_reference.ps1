@@ -4,7 +4,8 @@
    missions only load through the mod's crsetup.bzn, so the map's
    bzn/trn/hg2/mat/lgt are copied over the crsetup slot of mods\3686673790 and
    the fixture replaces <map>.lua (the Lua named inside the bzn). All of them are
-   restored afterwards. #>
+   restored afterwards. The trn/hg2/mat/lgt come from the bzn's TerrainName, which
+   can differ from the mission name (bd07cr uses bdmisn07). #>
 param(
     [string]$GameRoot = "C:\Program Files (x86)\GOG Galaxy\Games\Battlezone 98 Redux",
     [string]$Mission = "lcbmars",
@@ -27,9 +28,14 @@ if ($CRMission) {
     $Mission = $CRMission
     $lua = Join-Path $crMod "$CRMission.lua"
     $launchArgs = "crsetup.bzn /nointro /renderer:dx11"
+    $terrainLine = Select-String -LiteralPath (Join-Path $crMod "$CRMission.bzn") -Pattern '^\s*TerrainName\s*=\s*(\S+)' | Select-Object -First 1
+    $terrain = if ($terrainLine) { $terrainLine.Matches[0].Groups[1].Value } else { $CRMission }
+    Write-Host "[grz] $CRMission.bzn terrain=$terrain"
     foreach ($x in "bzn","trn","hg2","mat","lgt") {
-        $crSlot += [pscustomobject]@{ Src = Join-Path $crMod "$CRMission.$x"; Dst = Join-Path $crMod "crsetup.$x"; Bak = Join-Path $ArtifactDir "crsetup.$x.orig" }
+        $stem = if ($x -eq "bzn") { $CRMission } else { $terrain }
+        $crSlot += [pscustomobject]@{ Src = Join-Path $crMod "$stem.$x"; Dst = Join-Path $crMod "crsetup.$x"; Bak = Join-Path $ArtifactDir "crsetup.$x.orig" }
     }
+    foreach ($f in $crSlot) { if (-not (Test-Path -LiteralPath $f.Src)) { throw "CR mission file missing: $($f.Src)" } }
     foreach ($f in $crSlot) { Copy-Item -LiteralPath $f.Dst -Destination $f.Bak -Force }
 }
 $fix = Join-Path $PSScriptRoot "test_missions\grizzly_shading\grizzly_cam.lua"
