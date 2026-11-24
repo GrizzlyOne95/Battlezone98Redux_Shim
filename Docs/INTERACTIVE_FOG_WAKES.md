@@ -153,82 +153,104 @@ What a real renderer would need:
 
 ## In-shader spike
 
-Draft branch `agent/fog-wake-inshader-spike`. It replaces the world sheets with
-a short ray-march inside the DX11 Enhanced per-pixel fog. It is a spike, not a
-shipping feature.
+Draft branch `agent/fog-wake-inshader-spike`. It draws low-lying fog pools in
+the world's own fog colour inside the DX11 Enhanced per-pixel fog. Vehicles
+thin the pools as they pass, and the pools then refill. The aim is subtle,
+dynamic pooled fog on worlds such as Venus, Achilles and Io, not extra haze.
+It is a spike, not a shipping feature.
 
 How it works:
 
-- Both `openshim_enhanced_terrain-sm4.hlsl` and `openshim_enhanced_base-sm4.hlsl`
-  get the same block. It marches 6 samples along the eye ray, clipped to the
-  bank box and to the scene depth.
-- Density is `base * exp(-(y - terrainY) / H) * (1 - clearance) * noise`, with
-  edge and near fades. `H` is 1.4 m, the top is 6 m and the far limit is 220 m.
-- The mist colour mixes the atmosphere colour with a lit colour (ambient plus
-  sun, mix 0.7). The atmosphere colour alone is near black on moon maps, which
-  hid the mist in the first live run.
-- `src/patches/fog_wake_shader.cpp` binds two textures with
+- Pool model. When the bank is placed, the CPU builds a pool surface
+  (`BuildPoolSurface` in `src/patches/fog_wake_shader.cpp`): a local minimum of
+  the terrain over a 24 m window, box-blurred twice, plus a 2 m fill depth.
+  Mist exists only below that surface. It fills hollows and flats with a
+  flat top and leaves slopes and ridges clear. The bake logs coverage and the
+  largest pools (`[FOGWAKE] pools ...`), so a fixture can aim at one.
+- Single tap, no ray march. Both `openshim_enhanced_terrain-sm4.hlsl` and
+  `openshim_enhanced_base-sm4.hlsl` get the same block. It reads the pool
+  surface once at the pixel. The path through the layer is the depth below the
+  surface over the sine of the view angle, clamped at 0.12 for grazing views.
+  The wake clearance is read once, halfway along that path, with a
+  noise-swirled offset so its edge curls.
+- Colour. The mist uses the world's fog hue, lifted to the lit brightness
+  (ambient plus sun), with `litMix` 0.6. Fog that is near black (moon maps)
+  takes the lit hue instead. With the plain fog colour (`litMix` 0) the pools
+  were invisible on Venus and Io.
+- Noise drifts with time. The value noise repeats every 256 lattice cells and
+  the CPU wraps the drift by the same period, so the old `fmod` jump is gone.
+- Edges. The pools fade in over 0.6 m at the top, fade out near the camera
+  (4 m) and towards 220 m, and fade with a smoothstep over 64 m at the bank
+  edge.
+- Binding. `src/patches/fog_wake_shader.cpp` binds two textures with
   `PSSetShaderResources(32, 2)`. Slot t32 is a 5x1 RGBA32F parameter strip.
-  Slot t33 is the 256x256 R16G16 bank: R holds clearance and G holds normalized
-  terrain height. A magic value in texel 0 gates the effect, so an unbound slot
+  Slot t33 is the 256x256 R16G16 bank: R holds clearance and G holds the pool
+  surface height. A magic value in texel 0 gates the effect, so an unbound slot
   reads 0 and the effect is off.
-- It is off unless `[Experimental] InteractiveFogWakes` is on, and it runs on
-  DX11 Enhanced only. Any other renderer fails closed.
-- The texture upload, device-loss handling and bank placement come from the
-  old spike. The ManualObject sheets are gone.
-- When no mission start has been seen (for example on a command-line `lcbench`
-  launch), the bank is placed around the player. It is not placed after a
-  mission stop.
-- Tuning comes from environment variables: `OPENSHIM_FOGWAKE_DENSITY`,
-  `_SCALE_HEIGHT`, `_FAR` and `_LIT_MIX`. `OPENSHIM_FOGWAKE_DEBUG=1` paints the
-  mist magenta.
+- Gate. It is off unless `[Experimental] InteractiveFogWakes` is on, and it
+  runs on DX11 Enhanced only. Any other renderer fails closed. The INI wins
+  over `OPENSHIM_INTERACTIVE_FOG_WAKES`: with `InteractiveFogWakes = 0` in
+  `openshim.ini`, the environment variable has no effect, because the
+  environment mapping returns the INI value for that key.
+- Placement. When no mission start has been seen (for example on a
+  command-line `lcbench` launch), the bank is placed around the player.
+- Tuning comes from environment variables: `OPENSHIM_FOGWAKE_DENSITY` (0.10
+  per metre), `_FILL` (2 m), `_POOL_RADIUS` (24 m), `_SOFT_TOP` (0.6 m),
+  `_FAR` (220 m), `_LIT_MIX` (0.6), `_RADIUS` (wake radius, 7 m) and
+  `_RECOVERY` (refill, 6 s). `OPENSHIM_FOGWAKE_DEBUG=1` paints the mist
+  magenta.
 
-FPS on `lcbench` (DX11, 1600x900 windowed, background launch). Each figure is
-the mean of the `[SOAK]` 5 s heartbeats after skipping the first three
-(n=14).
+Live runs used `lcbench` on the stock Venus, Achilles and Io worlds (DX11,
+1600x900 windowed, background launch). With the bank placed around
+(2560, 2560), the pools cover 28% of the bank.
+
+FPS on Venus. Each figure is the mean of the `[SOAK]` 5 s heartbeats after
+skipping the first three.
 
 | Arm | Off | On | Change |
 |-----|----:|---:|-------:|
-| Quiet | 236.4 | 205.5 | -13% (~0.6 ms) |
-| 20 hover tanks moving | 177.1 | 163.1 | -8% (~0.5 ms) |
+| Quiet | 234.6 | 217.0 | -7.5% (~0.35 ms) |
+| 20 hover tanks moving | 161.6 | 143.7 | -11% (~0.8 ms) |
 
-The quiet-off figure looks capped near 237-238. The movement-off run was
-noisy, with dips to 122 and 97, so both moving figures are rough. The
-movement-on run used the build from before the placement fix, but its log
-shows the bank was placed.
+The moving arms were noisy (off 122-186, on 117-161, both rising over the
+run), so the moving cost is rough.
 
-Frames (640x360):
+Off and on, one frame per world:
 
-| | Off | On |
-|-|-----|----|
-| Quiet | ![quiet off](images/fog_wakes/inshader_quiet_off.png) | ![quiet on](images/fog_wakes/inshader_quiet_on.png) |
-| Tanks | ![tanks off](images/fog_wakes/inshader_tanks_off.png) | ![tanks on](images/fog_wakes/inshader_tanks_on.png) |
+![Venus, Achilles and Io, off and on](images/fog_wakes/pools_worlds_onoff.jpg)
 
-Debug colour, with tanks: ![debug](images/fog_wakes/inshader_tanks_debug.png)
+One tank crossing a pool on Achilles, camera above and outside the pool. The
+logged closest approach to the pool centre was 7.8 m. Times are from the
+first frame:
+
+![Achilles crossing](images/fog_wakes/pools_crossing_achilles.jpg)
+
+The same crossing on Venus (closest approach 9.5 m):
+
+![Venus crossing](images/fog_wakes/pools_crossing_venus.jpg)
 
 Verdict:
 
-- The render path works. There is no horizon white-out, terrain clipping or
-  sorting issue, and the mist follows the slopes.
-- It does not read as a low ground layer. Because the layer hugs the terrain
-  everywhere, every hillside in view is milky. The scene reads as a general
-  haze, and contrast drops.
-- Wakes do not read. The debug view shows only faint holes near the tanks, not
-  a trail at 30-80 m. The camera sits about 2.4 m up, inside the layer, so the
-  mist in the foreground swamps the cleared cells further out.
+- The pools read as ground fog in each world's hue. Venus is a subtle yellow,
+  Io is grey smoke over the lava valleys, and Achilles shows bold pale pools
+  that may be too strong. The rest of the scene matches stock.
+- The wake reads. The tank leaves a dark cleared patch that refills over about
+  10 s.
+- The cost is near the 0.5 ms budget: about 0.35 ms quiet, and a rough 0.8 ms
+  with 20 tanks moving.
 
 Open problems before this could ship:
 
-- A trail needs either a thinner layer, so the camera sits above it, or a
-  clearance-weighted contrast term. Density tuning alone will not fix it.
-- Density should fall off with slope or local relief, so hills are not hazed.
-- There is no temporal accumulation, so 6-sample noise can crawl.
-- The `fmod` time wrap makes the noise jump.
+- A camera inside the layer gets no mist on pixels above the surface, because
+  of the single tap. Low pilot views over a pool can look thin.
+- The 0.12 grazing clamp caps the path length, so far pools at grazing angles
+  are uniform.
+- Pools are cut at the bank edge (512 m), and the player-fallback placement
+  decides where the bank sits.
+- Achilles likely needs a lower per-world density.
 - The main-camera check uses `getCurrentViewport`. Its behaviour with other
   viewports has not been verified.
 - The `ClearState` interaction with the t32/t33 bind has not been verified.
-- A command-line `lcbench` launch never raises the mission-start edge. The
-  player placement path works around this.
 - The DXBC seed pack (`tools/build_dxbc_seed.py`) must be rebuilt before any
   merge. Without it, Enhanced players get cold shader compiles.
 

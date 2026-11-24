@@ -778,18 +778,21 @@ void compute_enhanced_atmosphere(
 // src/patches/fog_wake_shader.cpp binds both textures directly at t32/t33
 // once per camera, only while [Experimental] InteractiveFogWakes is on under
 // DX11. Unbound slots read zero, so the magic check keeps the term off.
-//   params texel 0: magic, density per metre, time (s), mist top (m)
-//   params texel 1: camera in bank space (x, y above height min, z), scale height
+//   params texel 0: magic, density per metre, soft top (m), top ripple (m)
+//   params texel 1: camera in bank space (x, y above height min, z), fill depth (m)
 //   params texel 2: bank size x, size z (m), height range (m), edge fade (m)
 //   params texel 3: cells x, cells z, near fade (m), far distance (m)
-//   params texel 4: debug flag, lit-colour mix, 0, 0
-//   bank: R = clearance (0 fog, 1 cleared), G = terrain height / range
-// Bank space is sim world: x right, y up, z = -render z.
+//   params texel 4: debug flag, lit-colour mix, noise drift x, noise drift z
+//   bank: R = clearance (0 fog, 1 cleared), G = pool surface height / range
+// The pool surface is built on the CPU when the bank is placed: a smoothed
+// local minimum of the terrain plus a fill depth. Mist exists only below it,
+// so it fills hollows and flats as a flat-topped layer and leaves slopes and
+// ridges clear. Bank space is sim world: x right, y up, z = -render z.
 // ---------------------------------------------------------------------------
 #if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
 #define OSE_FOG_WAKES_DECLARED 1
 #define OSE_FOG_WAKE_MAGIC 4096.25
-#define OSE_FOG_WAKE_STEPS 8
+#define OSE_FOG_WAKE_NOISE_PERIOD 256.0
 Texture2D<float4> oseFogWakeParams : register(t32);
 Texture2D<float4> oseFogWakeBank : register(t33);
 
@@ -813,19 +816,32 @@ float ose_fog_wake_hash(float2 p)
     return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
 }
 
+float2 ose_fog_wake_wrap(float2 i)
+{
+    return i - OSE_FOG_WAKE_NOISE_PERIOD * floor(i / OSE_FOG_WAKE_NOISE_PERIOD);
+}
+
+// Value noise that repeats every OSE_FOG_WAKE_NOISE_PERIOD lattice cells. The
+// CPU wraps the drift offset by the same period, so the wrap never jumps.
 float ose_fog_wake_noise(float2 p)
 {
     float2 i = floor(p);
     float2 f = p - i;
     f = f * f * (3.0 - 2.0 * f);
-    float a = ose_fog_wake_hash(i);
-    float b = ose_fog_wake_hash(i + float2(1.0, 0.0));
-    float c = ose_fog_wake_hash(i + float2(0.0, 1.0));
-    float d = ose_fog_wake_hash(i + float2(1.0, 1.0));
+    float2 i0 = ose_fog_wake_wrap(i);
+    float2 i1 = ose_fog_wake_wrap(i + 1.0);
+    float a = ose_fog_wake_hash(i0);
+    float b = ose_fog_wake_hash(float2(i1.x, i0.y));
+    float c = ose_fog_wake_hash(float2(i0.x, i1.y));
+    float d = ose_fog_wake_hash(i1);
     return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
 }
 
-// Transmittance of the ground mist between the camera and this pixel.
+// Transmittance of the pooled mist in front of this pixel. No ray march: the
+// pool surface is read once at the pixel, and the path through the layer is
+// the depth below that surface over the sine of the view angle. The wake is
+// read once, halfway along that path, with a noise-swirled offset so its edge
+// curls instead of tracing the trail cell by cell.
 float ose_fog_wake_transmittance(float3 viewPos, float4x4 invView)
 {
     float4 p0 = oseFogWakeParams.Load(int3(0, 0, 0));
@@ -834,62 +850,46 @@ float ose_fog_wake_transmittance(float3 viewPos, float4x4 invView)
     float4 p1 = oseFogWakeParams.Load(int3(1, 0, 0));
     float4 p2 = oseFogWakeParams.Load(int3(2, 0, 0));
     float4 p3 = oseFogWakeParams.Load(int3(3, 0, 0));
+    float4 p4 = oseFogWakeParams.Load(int3(4, 0, 0));
 
     float3 ray = mul(invView, float4(viewPos, 0.0)).xyz;
     ray.z = -ray.z;
-    float3 cam = p1.xyz;
     float rayLength = length(ray);
-    if (rayLength < 1.0e-3)
+    if (rayLength < 1.0e-3 || rayLength >= p3.w)
         return 1.0;
 
-    // Clip the camera-to-pixel segment (t in [0,1]) to the bank box and to
-    // the far distance.
-    float3 boxMax = float3(p2.x, p2.z + p0.w, p2.y);
-    float3 safeRay = float3(
-        abs(ray.x) < 1.0e-5 ? 1.0e-5 : ray.x,
-        abs(ray.y) < 1.0e-5 ? 1.0e-5 : ray.y,
-        abs(ray.z) < 1.0e-5 ? 1.0e-5 : ray.z);
-    float3 invRay = 1.0 / safeRay;
-    float3 tA = (float3(0.0, 0.0, 0.0) - cam) * invRay;
-    float3 tB = (boxMax - cam) * invRay;
-    float3 tNear = min(tA, tB);
-    float3 tFar = max(tA, tB);
-    float tMin = max(max(max(tNear.x, tNear.y), tNear.z), 0.0);
-    float tMax = min(min(min(tFar.x, tFar.y), tFar.z), 1.0);
-    tMax = min(tMax, p3.w / rayLength);
-    if (tMax <= tMin)
+    // The pixel in bank space.
+    float3 p = p1.xyz + ray;
+    float edge = smoothstep(0.0, 1.0, min(min(p.x, p2.x - p.x), min(p.z, p2.y - p.z)) / max(p2.w, 1.0));
+    if (edge <= 0.0)
         return 1.0;
 
-    // Samples bunch towards the surface end, where the mist that hugs this
-    // pixel's ground (and the wake carved through it) lives.
-    float span = tMax - tMin;
-    float jitter = ose_fog_wake_hash(viewPos.xy * 0.37 + viewPos.z);
-    float opticalDepth = 0.0;
-    [unroll]
-    for (int i = 0; i < OSE_FOG_WAKE_STEPS; ++i)
-    {
-        float s0 = (float)i / OSE_FOG_WAKE_STEPS;
-        float s1 = (float)(i + 1) / OSE_FOG_WAKE_STEPS;
-        float s = lerp(s0, s1, jitter);
-        float t = tMax - span * s * s;
-        float dt = span * (s1 * s1 - s0 * s0);
-        float3 p = cam + ray * t;
+    float2 cellScale = p3.xy / p2.xy;
+    float swirl = ose_fog_wake_noise(p.xz * 0.06 + p4.zw);
+    float surface = ose_fog_wake_bank(p.xz * cellScale, p3.xy).y * p2.z
+        + (swirl - 0.5) * 2.0 * p0.w;
+    float below = surface - p.y;
+    if (below <= 0.0)
+        return 1.0;
 
-        float2 bank = ose_fog_wake_bank(p.xz / p2.xy * p3.xy, p3.xy);
-        float height = p.y - bank.y * p2.z;
-        float above = max(height, 0.0);
-        float profile = exp(-above / max(p1.w, 0.1)) * saturate((p0.w - above) / (0.35 * p0.w));
-        profile *= saturate(height * 2.0 + 1.0);
-        float edge = saturate(min(min(p.x, p2.x - p.x), min(p.z, p2.y - p.z)) / max(p2.w, 1.0));
-        float distanceAlong = t * rayLength;
-        float nearFade = saturate(distanceAlong / max(p3.z, 0.1));
-        float farFade = saturate((p3.w - distanceAlong) / (0.35 * p3.w));
-        float drift = ose_fog_wake_noise(p.xz * 0.045 + float2(p0.z * 0.021, p0.z * 0.013));
-        float body = 0.55 + 0.45 * drift;
-        float density = p0.y * profile * (1.0 - bank.x) * body * edge * nearFade * farFade;
-        opticalDepth += density * dt * rayLength;
-    }
-    return exp(-opticalDepth);
+    // Path through the layer, capped so grazing views do not white out and
+    // never longer than the camera-to-pixel distance.
+    float down = max(abs(ray.y) / rayLength, 0.12);
+    float path = min(below / down, rayLength);
+    float3 mid = p - ray * (0.5 * path / rayLength);
+    float swirl2 = ose_fog_wake_noise(mid.xz * 0.11 + p4.zw + 37.0);
+    float2 curl = (float2(swirl, swirl2) - 0.5) * 3.0;
+    float clearance = ose_fog_wake_bank((mid.xz + curl) * cellScale, p3.xy).x;
+    // The wake removes the whole column, not just the noise.
+    float open = 1.0 - saturate(clearance * 1.25);
+
+    float profile = saturate(below / max(p0.z, 0.05));
+    profile *= 0.7 + 0.3 * saturate(below / max(p1.w, 0.1));
+    float nearFade = saturate(rayLength / max(p3.z, 0.1));
+    float farFade = saturate((p3.w - rayLength) / (0.35 * p3.w));
+    float body = 0.55 + 0.45 * swirl2;
+    float density = p0.y * profile * open * body * edge * nearFade * farFade;
+    return exp(-density * path);
 }
 
 // Mist colour: lit by ambient and sun so it still reads on dark-sky maps where
@@ -900,8 +900,17 @@ float3 ose_fog_wake_colour(float3 atmosphereColour, float3 ambient, float3 sun)
     float4 p4 = oseFogWakeParams.Load(int3(4, 0, 0));
     if (p4.x > 0.5)
         return float3(1.0, 0.0, 1.0);
+    // The world's own fog hue, lifted to the lit brightness so a pool reads
+    // against ground the distance fog has already tinted. A near-black fog
+    // (moon, Io) has no usable hue, so it takes the lit colour's hue instead.
     float3 lit = saturate(ambient + sun * 0.45) * 0.85;
-    return lerp(atmosphereColour, max(lit, atmosphereColour), saturate(p4.y));
+    const float3 lumaWeights = float3(0.30, 0.59, 0.11);
+    float fogLuma = dot(atmosphereColour, lumaWeights);
+    float litLuma = dot(lit, lumaWeights);
+    float3 hue = lerp(lit / max(litLuma, 1.0e-3), atmosphereColour / max(fogLuma, 1.0e-3),
+        saturate(fogLuma * 8.0));
+    float3 lifted = saturate(hue * max(litLuma, fogLuma));
+    return lerp(atmosphereColour, lifted, saturate(p4.y));
 }
 #endif
 

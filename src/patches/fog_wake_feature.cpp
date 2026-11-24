@@ -7,6 +7,9 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+
+#include <Windows.h>
 
 namespace BZROpenShim
 {
@@ -24,6 +27,10 @@ namespace BZROpenShim
         // nowhere near where a Battlezone mission is actually played.
         constexpr double kBankCells = 256;
         constexpr double kBankCellSize = 2;   // 512 m square.
+        // Wake look: a trail wider than a hover tank (half-width 7 m), and a
+        // refill slow enough that it lingers for several seconds.
+        constexpr double kWakeRadius = 7;
+        constexpr double kRecoverySeconds = 6;
 
         std::atomic<bool> g_Enabled{false};
         std::atomic<bool> g_ConfigLoaded{false};
@@ -56,6 +63,19 @@ namespace BZROpenShim
             }
         }
 
+        double EnvDouble(const char* name, double fallback, double lo, double hi)
+        {
+            char buffer[64] = {};
+            const DWORD length = GetEnvironmentVariableA(name, buffer, sizeof(buffer));
+            if (length == 0 || length >= sizeof(buffer))
+                return fallback;
+            char* end = nullptr;
+            const double value = std::strtod(buffer, &end);
+            if (end == buffer || !std::isfinite(value) || value < lo || value > hi)
+                return fallback;
+            return value;
+        }
+
         double NowSeconds()
         {
             using namespace std::chrono;
@@ -74,6 +94,8 @@ namespace BZROpenShim
             config.field.cellSize = kBankCellSize;
             const double half = kBankCells * kBankCellSize * 0.5;
             config.field.origin = { around.x - half, around.z - half };
+            config.radius = EnvDouble("OPENSHIM_FOGWAKE_RADIUS", kWakeRadius, 1.0, 40.0);
+            config.field.recoverySeconds = EnvDouble("OPENSHIM_FOGWAKE_RECOVERY", kRecoverySeconds, 0.5, 120.0);
 
             if (!g_Runtime.Configure(config))
             {
@@ -86,9 +108,9 @@ namespace BZROpenShim
             g_Runtime.BeginSession(NowSeconds());
             ++g_BankGeneration;
             LogShimA(LogLevel::Info, kComponent,
-                "[FOGWAKE] bank placed origin=(%.1f, %.1f) size=%.0fm cell=%.1fm",
+                "[FOGWAKE] bank placed origin=(%.1f, %.1f) size=%.0fm cell=%.1fm wakeRadius=%.1fm recovery=%.1fs",
                 config.field.origin.x, config.field.origin.z,
-                kBankCells * kBankCellSize, kBankCellSize);
+                kBankCells * kBankCellSize, kBankCellSize, config.radius, config.field.recoverySeconds);
             return true;
         }
     }
