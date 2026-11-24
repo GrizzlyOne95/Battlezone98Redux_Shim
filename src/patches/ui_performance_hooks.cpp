@@ -490,6 +490,14 @@ namespace BZROpenShim::UiPerfHooks
         // each overwritten prologue, so a match also says SteamStub has
         // finished with the page: bound only when the hooks are about to go
         // in, on the same settle gate.
+        //
+        // setModableNone (row UiPerfSetModableNone, 0x0076A600) is left out:
+        // it is the same function as BuildSingleIAResource, which the walk
+        // stat cache detours on every default run ([WALKSTAT] installed at
+        // 0x0076A600, before this bind). Its E9 then failed this row's guard
+        // and, the rows being all or nothing, took every drilldown and
+        // modable hook down with it. Whichever hook went in second would
+        // lose, so this diagnostic leaves that site to the walk stat cache.
         bool BindCode()
         {
             const HookEngine::EngineRow rows[] = {
@@ -501,7 +509,6 @@ namespace BZROpenShim::UiPerfHooks
                 { "UiPerfMultiplayerLobbyCtor", &g_Code.mpCtor },
                 { "UiPerfMultiplayerLobbyDtor", &g_Code.mpDtor },
                 { "UiPerfInstantActionCtor", &g_Code.iaCtor },
-                { "UiPerfSetModableNone", &g_Code.modable[0] },
                 { "UiPerfSetModableCustomCampaignList", &g_Code.modable[1] },
                 { "UiPerfSetModableCampaign", &g_Code.modable[2] },
                 { "UiPerfSetModableContentB", &g_Code.modable[3] },
@@ -1478,7 +1485,7 @@ namespace BZROpenShim::UiPerfHooks
         // are reported from those detours instead of being hooked twice. The
         // addresses are filled from g_Code.modable[] at install.
         ModableSetterSite g_ModableSetters[] = {
-            { 0, 0, "setModableNone", {} },
+            { 0, 0, "setModableNone", {} },   // never bound; see BindCode()
             { 0, 3, "setModableCustomCampaignList", {} },
             { 0, 0, "setModableCampaign", {} },
             { 0, 0, "setModableContentB", {} },
@@ -1640,7 +1647,7 @@ namespace BZROpenShim::UiPerfHooks
         void InstallModableModeHooks()
         {
             if (!UiPerf::IsEnabled()) return;
-            if (!g_Code.modable[0]) return; // BindCode() failed; it already said why
+            if (!g_Code.modable[1]) return; // BindCode() failed; it already said why
             if (g_ModableHooksInstalled.exchange(true)) return;
 
             // Every one of these bodies begins with the same MSVC SEH prologue,
@@ -1659,6 +1666,13 @@ namespace BZROpenShim::UiPerfHooks
             {
                 ModableSetterSite& site = g_ModableSetters[i];
                 site.addr = g_Code.modable[i];
+                if (!site.addr)
+                {
+                    LogShimA(LogLevel::Info, "uiperf-hooks",
+                        "Modable setter hook %s not installed: the walk stat cache owns that function",
+                        site.label);
+                    continue;
+                }
                 if (InstallInlineHook(site.hook, site.addr, detours[i], 5, kSehPrologue))
                 {
                     ++installed;
@@ -1689,7 +1703,7 @@ namespace BZROpenShim::UiPerfHooks
                     ++installed;
             }
             LogShimA(LogLevel::Info, "uiperf-hooks",
-                "Modable mount instrumentation installed=%d/6", installed);
+                "Modable mount instrumentation installed=%d/5", installed);
         }
 
         void InstallResolvedShellHooks(bool installGogDrilldown)
