@@ -95,6 +95,10 @@ In the worker run the array was ready at 09:00.735, the worker finished at
 02.210, and the upload landed at the first world frame at 03.271. In between,
 the rest of the load ran (`terrain-tess` setup at 03.230).
 
+With CR's own recipes (8 layers, two control images) turned on by the ini key
+alone, `multdm05` logged `live paint generated fileZones=4x4 size=2048 images=2
+ms=4811` on the worker.
+
 ## Live result
 
 Stock Titan `multdm05` (no baked entry), CR's pack with the Titan recipe added
