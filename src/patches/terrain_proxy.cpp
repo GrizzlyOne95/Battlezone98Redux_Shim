@@ -5470,6 +5470,10 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                 return false;
             }
 
+            // Past the early deferrals: forget the last reason so a later
+            // return to the same one is logged again.
+            g_selectionDeferReason = nullptr;
+
             ClusterCandidate best;
             bool haveBest = false;
             int evaluated = 0;
