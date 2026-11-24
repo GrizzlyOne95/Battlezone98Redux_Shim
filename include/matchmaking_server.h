@@ -248,12 +248,17 @@ namespace MatchmakingServer
         return std::string();
     }
 
-    // The host of a /bzrserver=<url> launch switch (ws://host[:port]/...),
-    // matched case-insensitively. False when the switch is absent or carries
-    // no usable host. A bare "host" or "host:port" is accepted too.
-    inline bool ExtractLaunchHost(std::wstring_view commandLine, std::string& host)
+    // The host and port of a /bzrserver=<url> launch switch
+    // (ws://host[:port]/...), matched case-insensitively. False when the switch
+    // is absent or carries no usable host. A bare "host" or "host:port" is
+    // accepted too. The port is the one the game's resolver is asked for: the
+    // URL's own port, else the scheme default (ws 80, wss 443), else kPort for
+    // a bare host. 0 when the URL's port is not a number in 1..65535, which no
+    // lookup service matches.
+    inline bool ExtractLaunchServer(std::wstring_view commandLine, std::string& host, unsigned& port)
     {
         host.clear();
+        port = kPort;
 
         static constexpr char kSwitch[] = "bzrserver=";
         constexpr size_t kSwitchLen = sizeof(kSwitch) - 1;
@@ -316,7 +321,14 @@ namespace MatchmakingServer
         std::string_view rest = url;
         const size_t scheme = rest.find("://");
         if (scheme != std::string_view::npos)
+        {
+            const std::string_view schemeName = rest.substr(0, scheme);
+            if (EqualsNoCase(schemeName, "ws"))
+                port = 80;
+            else if (EqualsNoCase(schemeName, "wss"))
+                port = 443;
             rest.remove_prefix(scheme + 3);
+        }
         const size_t pathAt = rest.find_first_of("/?#");
         if (pathAt != std::string_view::npos)
             rest = rest.substr(0, pathAt);
@@ -325,22 +337,90 @@ namespace MatchmakingServer
             rest.remove_prefix(userAt + 1);
 
         std::string_view name;
+        std::string_view portPart;
+        bool hasPort = false;
         if (!rest.empty() && rest.front() == '[')
         {
             const size_t close = rest.find(']');
             if (close == std::string_view::npos)
                 return false;
             name = rest.substr(1, close - 1);
+            if (close + 1 < rest.size() && rest[close + 1] == ':')
+            {
+                hasPort = true;
+                portPart = rest.substr(close + 2);
+            }
         }
         else
         {
-            name = rest.substr(0, rest.find(':'));
+            const size_t colon = rest.find(':');
+            name = rest.substr(0, colon);
+            if (colon != std::string_view::npos)
+            {
+                hasPort = true;
+                portPart = rest.substr(colon + 1);
+            }
         }
         if (name.empty())
             return false;
 
+        if (hasPort)
+        {
+            unsigned portValue = 0;
+            bool ok = !portPart.empty() && portPart.size() <= 5;
+            for (char c : portPart)
+            {
+                if (c < '0' || c > '9')
+                {
+                    ok = false;
+                    break;
+                }
+                portValue = portValue * 10 + static_cast<unsigned>(c - '0');
+            }
+            port = ok && portValue >= 1 && portValue <= 65535 ? portValue : 0;
+        }
+
         host.assign(name.data(), name.size());
         return true;
+    }
+
+    inline bool ExtractLaunchHost(std::wstring_view commandLine, std::string& host)
+    {
+        unsigned port = 0;
+        return ExtractLaunchServer(commandLine, host, port);
+    }
+
+    // True when a resolver service string is the decimal `port` (1..65535).
+    inline bool ServiceMatchesPort(const char* service, unsigned port)
+    {
+        if (!service || !*service || port == 0)
+            return false;
+        unsigned value = 0;
+        size_t digits = 0;
+        for (const char* p = service; *p; ++p)
+        {
+            if (*p < '0' || *p > '9' || ++digits > 5)
+                return false;
+            value = value * 10 + static_cast<unsigned>(*p - '0');
+        }
+        return value == port;
+    }
+
+    // True when getaddrinfo(node, service) is the game's own matchmaking
+    // lookup: the official host on kPort, or the launch server (the
+    // /bzrserver= host, else the official host) on the launch port. Host
+    // alone is not enough: a different service on the same host (GOG Galaxy's
+    // peer on 127.0.0.1:9977 while /bzrserver=ws://127.0.0.1:1337) is not ours.
+    inline bool IsGameServerLookup(const char* node,
+                                   const char* service,
+                                   std::string_view officialHost,
+                                   std::string_view launchHost,
+                                   unsigned launchPort)
+    {
+        if (!node)
+            return false;
+        return (EqualsNoCase(node, officialHost) && ServiceMatchesPort(service, kPort)) ||
+               (EqualsNoCase(node, launchHost) && ServiceMatchesPort(service, launchPort));
     }
 }
 }

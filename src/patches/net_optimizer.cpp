@@ -3806,16 +3806,30 @@ namespace
 
     // The host the client connects to without an override: the /bzrserver=
     // launch switch if present, else the official host.
+    struct LaunchServer
+    {
+        std::string host;
+        unsigned port = MatchmakingServer::kPort;  // the service the game resolves it on
+    };
+
+    const LaunchServer& GetLaunchServerCached()
+    {
+        static const LaunchServer launchServerCache = []
+        {
+            LaunchServer server;
+            if (!MatchmakingServer::ExtractLaunchServer(GetCommandLineW(), server.host, server.port))
+            {
+                server.host = MatchmakingServer::kRebellionHost;
+                server.port = MatchmakingServer::kPort;
+            }
+            return server;
+        }();
+        return launchServerCache;
+    }
+
     const std::string& GetLaunchServerHostCached()
     {
-        static const std::string launchHostCache = []
-        {
-            std::string host;
-            if (!MatchmakingServer::ExtractLaunchHost(GetCommandLineW(), host))
-                host = MatchmakingServer::kRebellionHost;
-            return host;
-        }();
-        return launchHostCache;
+        return GetLaunchServerCached().host;
     }
 
     bool CopyServerOverrideHost(std::string& out)
@@ -3924,20 +3938,24 @@ namespace
         return false;
     }
 
-    // A lookup for the endpoint the game itself would use: the official name,
-    // or the /bzrserver= host.
-    bool IsBzrNetLookupName(PCSTR nodeName)
+    // A lookup for the endpoint the game itself would use, judged on the
+    // original (pre-override) name AND service: the official host on 1337, or
+    // the /bzrserver= host on its URL port. Another service on the same host
+    // is not ours: GOG Galaxy resolves its peer as 127.0.0.1:9977, which
+    // matched by host alone under /bzrserver=ws://127.0.0.1 and got its port
+    // selected, its socket ticket-withheld and closed (preinit hang).
+    bool IsBzrNetLookup(PCSTR nodeName, PCSTR serviceName)
     {
-        return nodeName &&
-               (MatchmakingServer::EqualsNoCase(nodeName, kBzrNetMatchmakingHost) ||
-                MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()));
+        const LaunchServer& launch = GetLaunchServerCached();
+        return MatchmakingServer::IsGameServerLookup(
+            nodeName, serviceName, kBzrNetMatchmakingHost, launch.host, launch.port);
     }
 
     // Called with the result of a BZRNet-endpoint lookup. `effectiveHost` is
     // the name actually resolved after any override.
-    void RecordLookupAddresses(PCSTR nodeName, PCSTR effectiveHost, const ADDRINFOA* result)
+    void RecordLookupAddresses(PCSTR nodeName, PCSTR serviceName, PCSTR effectiveHost, const ADDRINFOA* result)
     {
-        if (!effectiveHost || !result || !IsBzrNetLookupName(nodeName))
+        if (!effectiveHost || !result || !IsBzrNetLookup(nodeName, serviceName))
             return;
 
         const bool official = MatchmakingServer::EqualsNoCase(effectiveHost, kBzrNetMatchmakingHost);
@@ -4215,6 +4233,29 @@ namespace
     // Change-only budget for the per-lookup [OpenShimNet] lookup line.
     SRWLOCK g_LookupLogLock = SRWLOCK_INIT;
     DnsFamilyPolicy::LookupLogBudget g_LookupLogBudget;
+    std::string g_LastLookupVerdict;   // under g_LookupLogLock
+
+    // Change-only decision line for lookups of the official or launch host:
+    // which (host, service) pairs count as the game's own BZRNet lookup.
+    void LogBzrNetLookupVerdict(PCSTR nodeName, PCSTR serviceName, bool bzrNet)
+    {
+        std::string verdict(nodeName ? nodeName : "-");
+        verdict += ':';
+        verdict += serviceName ? serviceName : "-";
+        verdict += bzrNet ? " yes" : " no";
+        AcquireSRWLockExclusive(&g_LookupLogLock);
+        const bool changed = verdict != g_LastLookupVerdict;
+        if (changed)
+            g_LastLookupVerdict = verdict;
+        ReleaseSRWLockExclusive(&g_LookupLogLock);
+        if (changed)
+            Logf("[OpenShimNet] lookup %s:%s bzrnet=%s (launch server %s:%u)",
+                nodeName ? nodeName : "-",
+                serviceName ? serviceName : "-",
+                bzrNet ? "yes" : "no",
+                GetLaunchServerHostCached().c_str(),
+                GetLaunchServerCached().port);
+    }
 
     INT WSAAPI Hook_getaddrinfo(
         PCSTR nodeName,
@@ -4228,9 +4269,15 @@ namespace
         std::string overrideHost;
         unsigned overridePort = MatchmakingServer::kPort;
         char overridePortText[8] = {};
-        if (nodeName && MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+        // Judged on the caller's own name and service, before any override.
+        const bool bzrNetLookup = IsBzrNetLookup(nodeName, serviceName);
+        const bool officialName = nodeName && MatchmakingServer::EqualsNoCase(nodeName, kBzrNetMatchmakingHost);
+        if (nodeName && (officialName || MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached())))
+            LogBzrNetLookupVerdict(nodeName, serviceName, bzrNetLookup);
+        if (bzrNetLookup)
             ApplyReconnectDelayOnce();
-        if (nodeName && SocketTunnel::Requested() && IsBzrNetLookupName(nodeName))
+        // The tunnel keeps failing closed for any lookup of the official name.
+        if (nodeName && SocketTunnel::Requested() && (bzrNetLookup || officialName))
         {
             // Wins over environment/test redirects, saved server choices and
             // /bzrserver=. Bind/route qualification failure never reaches an
@@ -4253,11 +4300,11 @@ namespace
                 nodeName,
                 resolvedNode);
         }
-        else if (nodeName &&
+        else if (bzrNetLookup &&
                  g_Config.matchmakingRedirectAddress.empty() &&
+                 MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()) &&
                  CopyServerOverrideHost(overrideServer) &&
-                 MatchmakingServer::SplitServer(overrideServer, overrideHost, overridePort) &&
-                 MatchmakingServer::EqualsNoCase(nodeName, GetLaunchServerHostCached()))
+                 MatchmakingServer::SplitServer(overrideServer, overrideHost, overridePort))
         {
             const bool custom =
                 !MatchmakingServer::EqualsNoCase(overrideHost, kBzrNetMatchmakingHost) &&
@@ -4301,7 +4348,7 @@ namespace
         // /bzrserver= one), ticket withholding and the recycle must know it.
         unsigned lookupPort = 0;
         std::string scratchHost;
-        if (IsBzrNetLookupName(nodeName) && resolvedService &&
+        if (bzrNetLookup && resolvedService &&
             MatchmakingServer::SplitServer(std::string("x:") + resolvedService, scratchHost, lookupPort) &&
             lookupPort != MatchmakingServer::kPort)
         {
@@ -4314,7 +4361,6 @@ namespace
         // only an A record. A BZRNet lookup that would ask for AF_UNSPEC asks
         // for AF_INET instead, and falls back once to the caller's hints when
         // that finds nothing.
-        const bool bzrNetLookup = IsBzrNetLookupName(nodeName);
         // No freeaddrinfo means no safe fallback, so no force either.
         const bool forceIPv4 = g_RealFreeAddrInfoA != nullptr && DnsFamilyPolicy::ShouldForceIPv4(
             g_Config.forceIPv4Matchmaking,
@@ -4389,8 +4435,8 @@ namespace
         }
 
         if (rc == 0 && result)
-            RecordLookupAddresses(nodeName, resolvedNode, *result);
-        if (IsBzrNetLookupName(nodeName))
+            RecordLookupAddresses(nodeName, serviceName, resolvedNode, *result);
+        if (bzrNetLookup)
             RecordEffectiveEndpoint(nodeName, resolvedNode, resolvedService, rc == 0 && result ? *result : nullptr);
         return rc;
     }
