@@ -6,9 +6,13 @@ and keeps the stock atlas. Live paint generates the control images at load
 from the map's own heights and MAT words, with the same recipe the offline
 builder uses. It is a **fallback only**: a baked entry always wins.
 
-Off by default. Two things turn it on:
+Off by default. Turn it on with `[Terrain] TerrainPaintLive = 1` (Options >
+OpenShim > Visual Effects > Live Terrain Paint; restart required). The environment variable
+`OPENSHIM_TERRAIN_PAINT_LIVE`, when set, overrides the key: `1` is on and any
+other value is off. It also needs HD Terrain Tiles on and a pack that carries a
+live recipe:
 
-1. The material's `paint` block carries a `live` autopaint recipe. The recipe
+The material's `paint` block carries a `live` autopaint recipe. The recipe
    must have one layer per paint layer, and the pack must use the multi-map
    form. `scripts/Add-LivePaintRecipe.py <manifest> <output>` adds them to a
    copy of a manifest, matching worlds by `diffuseResource` and preferring
@@ -20,7 +24,6 @@ Off by default. Two things turn it on:
    indices, bad JSON shape) logs
    `[TERRAIN-PAINT] live paint recipe ignored for <material>: ...` and is
    dropped. The material's baked entries still load.
-2. The environment variable `OPENSHIM_TERRAIN_PAINT_LIVE=1`.
 
 `OPENSHIM_TERRAIN_PAINT_LIVE_DUMP=<dir>` also writes `live_<fingerprint>.bin`
 (the generator's input) and `.rgba` (its output) for the offline check below.
@@ -119,13 +122,13 @@ Mars: `mars-autopaint-4layer.json` against `Build-TerrainAutoPaint.py`, no
 noise: `mult01` max 2, mean 0.0003; `misn04` max 0. With variation, layer
 shares agree within 0.001.
 
-Stock `mult01` resolves to the Venus material, not Mars. Live paint selected
-it and the map was accepted, but the install then declined with
-`native paint shader specialization declined`. Venus's pack enables liquid
-glow, and `TerrainPaint::Specialize` declines a terrain program without the
-liquid anchor line. That step uses only the program source and the material's
-paint settings, not live data. The baked Venus mission `misn07` loads with the
-same DLL and does not decline.
+Stock `mult01` resolves to the Venus material, not Mars. Venus's pack enables
+liquid glow. Since #760, `TerrainPaint::Specialize` skips liquid glow (logging
+`liquid skipped: no emissive anchor or entry point`) when the terrain program
+lacks the anchor, instead of declining the map. An earlier build declined
+`mult01` with `native paint shader specialization declined`; the baked Venus
+mission `misn07` never did. `mult01` with live paint on the post-#760 build is
+**live test pending**.
 
 ## Known gaps
 
@@ -136,7 +139,7 @@ same DLL and does not decline.
   one map.
 - For about 1.4 s after the first world frame, a map shows the flat
   placeholder paint until the worker finishes.
-- Stock `mult01` (Venus material) declines in the shared paint shader step,
-  not in live paint (above).
+- Stock `mult01` (Venus material) with live paint is untested since liquid glow
+  became skippable (above): live test pending.
 - Memory caps for the 32-bit process: maps over 64 file zones and arrays wider
   than 2048 px decline (the slope fields and the upscale grow with both).
