@@ -1,3 +1,4 @@
+#include "fog_wake_feature.h"
 #include "fog_wake_runtime.h"
 
 #include <cmath>
@@ -40,6 +41,11 @@ namespace {
 
 int main()
 {
+    // --- multiplayer gate ----------------------------------------------------
+    Check(BZROpenShim::FogWakeGateAllows(true, true), "fog wakes run when configured in single player");
+    Check(!BZROpenShim::FogWakeGateAllows(true, false), "fog wakes are off in a network session");
+    Check(!BZROpenShim::FogWakeGateAllows(false, true), "fog wakes stay off when not configured");
+
     // --- fails closed -------------------------------------------------------
     {
         Runtime runtime;
@@ -152,6 +158,29 @@ int main()
             Check(runtime.GetField().Sample({x, 0.5}) > 0.9,
                 "the corridor is continuous between observations");
         Check(runtime.GetField().Sample({-10.5, 8.5}) == 0, "fog beside the corridor is untouched");
+    }
+
+    // --- sparse observations still carve a continuous corridor --------------
+    // The emitter hook follows flame emission, so a craft can go unobserved
+    // for a few ticks. 9 m per three ticks is 24 m/s, under the 40 m/s limit,
+    // even though it is more than one tick's 5 m.
+    {
+        Runtime runtime;
+        Check(runtime.Configure(MakeConfig()), "configure the runtime");
+        runtime.BeginSession(0);
+
+        double t = 0;
+        for (int i = 0; i <= 3; ++i) {
+            runtime.Observe(CraftA(), {-13.5 + 9.0 * i, 0.5}, t);
+            for (int k = 0; k < 3; ++k) {
+                t += 0.125;
+                runtime.AdvanceTo(t, {});
+            }
+        }
+        Check(runtime.GetStats().teleports == 0, "a sparse but plausible move is not a teleport");
+        for (double x = -13.5; x <= 13.5; x += 1.0)
+            Check(runtime.GetField().Sample({x, 0.5}) > 0.5,
+                "the corridor has no gaps between sparse observations");
     }
 
     // --- a teleport is rejected but still reseeds ---------------------------

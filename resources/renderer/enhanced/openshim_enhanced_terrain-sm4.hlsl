@@ -772,6 +772,153 @@ void compute_enhanced_atmosphere(
         OSE_ATMOS_EMISSIVE_TRANSMISSION);
 }
 
+// ---------------------------------------------------------------------------
+// Interactive fog wakes: in-shader ground mist (spike; keep identical in
+// openshim_enhanced_terrain-sm4.hlsl and openshim_enhanced_base-sm4.hlsl).
+// src/patches/fog_wake_shader.cpp binds both textures directly at t32/t33
+// once per camera, only while [Experimental] InteractiveFogWakes is on under
+// DX11. Unbound slots read zero, so the magic check keeps the term off.
+//   params texel 0: magic, density per metre, soft top (m), top ripple (m)
+//   params texel 1: camera in bank space (x, y above height min, z), fill depth (m)
+//   params texel 2: bank size x, size z (m), height range (m), edge fade (m)
+//   params texel 3: cells x, cells z, near fade (m), far distance (m)
+//   params texel 4: debug flag, lit-colour mix, noise drift x, noise drift z
+//   bank: R = clearance (0 fog, 1 cleared), G = pool surface height / range
+// The pool surface is built on the CPU when the bank is placed: a smoothed
+// local minimum of the terrain plus a fill depth. Mist exists only below it,
+// so it fills hollows and flats as a flat-topped layer and leaves slopes and
+// ridges clear. Bank space is sim world: x right, y up, z = -render z.
+// ---------------------------------------------------------------------------
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+#define OSE_FOG_WAKES_DECLARED 1
+#define OSE_FOG_WAKE_MAGIC 4096.25
+#define OSE_FOG_WAKE_NOISE_PERIOD 256.0
+Texture2D<float4> oseFogWakeParams : register(t32);
+Texture2D<float4> oseFogWakeBank : register(t33);
+
+float2 ose_fog_wake_bank(float2 cellCoord, float2 cells)
+{
+    float2 c = cellCoord - 0.5;
+    float2 base = floor(c);
+    float2 f = c - base;
+    int2 maxCell = int2(cells) - 1;
+    int2 i0 = clamp(int2(base), int2(0, 0), maxCell);
+    int2 i1 = clamp(int2(base) + 1, int2(0, 0), maxCell);
+    float2 a = oseFogWakeBank.Load(int3(i0.x, i0.y, 0)).rg;
+    float2 b = oseFogWakeBank.Load(int3(i1.x, i0.y, 0)).rg;
+    float2 d = oseFogWakeBank.Load(int3(i0.x, i1.y, 0)).rg;
+    float2 e = oseFogWakeBank.Load(int3(i1.x, i1.y, 0)).rg;
+    return lerp(lerp(a, b, f.x), lerp(d, e, f.x), f.y);
+}
+
+float ose_fog_wake_hash(float2 p)
+{
+    return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+}
+
+float2 ose_fog_wake_wrap(float2 i)
+{
+    return i - OSE_FOG_WAKE_NOISE_PERIOD * floor(i / OSE_FOG_WAKE_NOISE_PERIOD);
+}
+
+// Value noise that repeats every OSE_FOG_WAKE_NOISE_PERIOD lattice cells. The
+// CPU wraps the drift offset by the same period, so the wrap never jumps.
+float ose_fog_wake_noise(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = p - i;
+    f = f * f * (3.0 - 2.0 * f);
+    float2 i0 = ose_fog_wake_wrap(i);
+    float2 i1 = ose_fog_wake_wrap(i + 1.0);
+    float a = ose_fog_wake_hash(i0);
+    float b = ose_fog_wake_hash(float2(i1.x, i0.y));
+    float c = ose_fog_wake_hash(float2(i0.x, i1.y));
+    float d = ose_fog_wake_hash(i1);
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+
+// Transmittance of the pooled mist in front of this pixel. No ray march: the
+// pool surface is read once at the pixel, and the path through the layer is
+// the depth below that surface over the sine of the view angle. The wake is
+// read once at the pixel's own ground point, so a trail keeps its width and
+// place whatever the pool depth; a small noise offset only roughens its edge.
+// Debug 2 shows the wake field alone, without the pools.
+float ose_fog_wake_transmittance(float3 viewPos, float4x4 invView)
+{
+    float4 p0 = oseFogWakeParams.Load(int3(0, 0, 0));
+    if (abs(p0.x - OSE_FOG_WAKE_MAGIC) > 0.01 || p0.y <= 0.0)
+        return 1.0;
+    float4 p1 = oseFogWakeParams.Load(int3(1, 0, 0));
+    float4 p2 = oseFogWakeParams.Load(int3(2, 0, 0));
+    float4 p3 = oseFogWakeParams.Load(int3(3, 0, 0));
+    float4 p4 = oseFogWakeParams.Load(int3(4, 0, 0));
+
+    float3 ray = mul(invView, float4(viewPos, 0.0)).xyz;
+    ray.z = -ray.z;
+    float rayLength = length(ray);
+    if (rayLength < 1.0e-3 || rayLength >= p3.w)
+        return 1.0;
+
+    // The pixel in bank space.
+    float3 p = p1.xyz + ray;
+    float edge = smoothstep(0.0, 1.0, min(min(p.x, p2.x - p.x), min(p.z, p2.y - p.z)) / max(p2.w, 1.0));
+    if (edge <= 0.0)
+        return 1.0;
+
+    float2 cellScale = p3.xy / p2.xy;
+    if (p4.x > 1.5)
+    {
+        float wake = ose_fog_wake_bank(p.xz * cellScale, p3.xy).x;
+        return 1.0 - 0.85 * wake * edge;
+    }
+    float swirl = ose_fog_wake_noise(p.xz * 0.06 + p4.zw);
+    float surface = ose_fog_wake_bank(p.xz * cellScale, p3.xy).y * p2.z
+        + (swirl - 0.5) * 2.0 * p0.w;
+    float below = surface - p.y;
+    if (below <= 0.0)
+        return 1.0;
+
+    // Path through the layer, capped so grazing views do not white out and
+    // never longer than the camera-to-pixel distance.
+    float down = max(abs(ray.y) / rayLength, 0.12);
+    float path = min(below / down, rayLength);
+    float swirl2 = ose_fog_wake_noise(p.xz * 0.11 + p4.zw + 37.0);
+    float2 curl = (float2(swirl, swirl2) - 0.5) * 1.0;
+    float clearance = ose_fog_wake_bank((p.xz + curl) * cellScale, p3.xy).x;
+    // The wake removes the whole column, not just the noise.
+    float open = 1.0 - saturate(clearance * 1.25);
+
+    float profile = saturate(below / max(p0.z, 0.05));
+    profile *= 0.7 + 0.3 * saturate(below / max(p1.w, 0.1));
+    float nearFade = saturate(rayLength / max(p3.z, 0.1));
+    float farFade = saturate((p3.w - rayLength) / (0.35 * p3.w));
+    float body = 0.55 + 0.45 * swirl2;
+    float density = p0.y * profile * open * body * edge * nearFade * farFade;
+    return exp(-density * path);
+}
+
+// Mist colour: lit by ambient and sun so it still reads on dark-sky maps where
+// the atmosphere colour is near black. Texel 4: x = debug (paint magenta),
+// y = how much of the lit grey to mix in over the atmosphere colour.
+float3 ose_fog_wake_colour(float3 atmosphereColour, float3 ambient, float3 sun)
+{
+    float4 p4 = oseFogWakeParams.Load(int3(4, 0, 0));
+    if (p4.x > 0.5)
+        return float3(1.0, 0.0, 1.0);
+    // The world's own fog hue, lifted to the lit brightness so a pool reads
+    // against ground the distance fog has already tinted. A near-black fog
+    // (moon, Io) has no usable hue, so it takes the lit colour's hue instead.
+    float3 lit = saturate(ambient + sun * 0.45) * 0.85;
+    const float3 lumaWeights = float3(0.30, 0.59, 0.11);
+    float fogLuma = dot(atmosphereColour, lumaWeights);
+    float litLuma = dot(lit, lumaWeights);
+    float3 hue = lerp(lit / max(litLuma, 1.0e-3), atmosphereColour / max(fogLuma, 1.0e-3),
+        saturate(fogLuma * 8.0));
+    float3 lifted = saturate(hue * max(litLuma, fogLuma));
+    return lerp(atmosphereColour, lifted, saturate(p4.y));
+}
+#endif
+
 // Terrain-specific legacy calibration. Vehicle/building materials keep the
 // broader object ranges in openshim_enhanced_base-sm4.hlsl; terrain is predominantly dusty
 // rock/soil and should remain a rough dielectric rather than reading as wet.
@@ -2059,6 +2206,18 @@ void terrain_fragment(
         atmosphereColour,
         surfaceTransmission,
         emissiveTransmission);
+
+#if defined(OSE_FOG_WAKES_DECLARED)
+    // Interactive fog wakes: ground mist sits inside the existing atmosphere,
+    // so distant mist is attenuated by it like any other surface colour.
+    float fogWakeTransmittance = ose_fog_wake_transmittance(viewPos, inverseViewMatrix);
+    if (fogWakeTransmittance < 1.0)
+    {
+        float3 fogWakeColour = ose_fog_wake_colour(atmosphereColour, sceneAmbient.xyz, lightDiffuse[0].xyz);
+        oColor.xyz = lerp(fogWakeColour, oColor.xyz, fogWakeTransmittance);
+        emissiveContribution *= fogWakeTransmittance;
+    }
+#endif
 
     float surfaceLuminance = luminance_legacy(oColor.xyz);
     float3 aerialSurface = lerp(
