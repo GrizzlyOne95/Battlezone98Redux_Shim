@@ -132,6 +132,78 @@ namespace
         // Not a switch of its own: embedded in another argument.
         CHECK(Launch(L"bz.exe /xbzrserver=ws://a.example/") == "<none>");
     }
+
+    unsigned LaunchPort(const wchar_t* commandLine)
+    {
+        std::string host;
+        unsigned port = 12345;
+        if (!MS::ExtractLaunchServer(commandLine, host, port))
+            return 99999;
+        return port;
+    }
+
+    void TestLaunchPort()
+    {
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://127.0.0.1:1337/") == 1337);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://127.0.0.1:2000/") == 2000);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://127.0.0.1/") == 80);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=wss://h.example/") == 443);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=bare.example") == MS::kPort);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://[::1]:1444/") == 1444);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://h.example:99999/") == 0);
+        CHECK(LaunchPort(L"bz.exe /nosplash") == 99999);
+        // "host:" with no digits keeps the scheme default; schemes ignore case.
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://community.example:/") == 80);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=wss://community.example:/") == 443);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=WS://127.0.0.1/") == 80);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=WSS://h.example/") == 443);
+        CHECK(LaunchPort(L"bz.exe /bzrserver=ws://h.example?x=1") == 80);
+        // Not a websocket scheme: the official port stays the default.
+        CHECK(LaunchPort(L"bz.exe /bzrserver=http://h.example/") == MS::kPort);
+        std::string host;
+        unsigned port = 0;
+        CHECK(MS::ExtractLaunchServer(L"bz.exe /bzrserver=ws://h.example?x=1", host, port) && host == "h.example");
+        CHECK(MS::ExtractLaunchServer(L"bz.exe /bzrserver=WS://h.example:/", host, port) && host == "h.example" && port == 80);
+        CHECK(MS::ExtractLaunchServer(L"bz.exe /bzrserver=http://h.example:2000/", host, port) && host == "h.example" && port == 2000);
+    }
+
+    // The game's own lookup is (host, service); host alone is not enough.
+    void TestGameServerLookup()
+    {
+        const char* official = MS::kRebellionHost;
+
+        // Loopback /bzrserver=ws://127.0.0.1:1337/: GOG Galaxy's own peer
+        // lookup on the same host is not BZRNet; the game's lookup is.
+        CHECK(!MS::IsGameServerLookup("127.0.0.1", "9977", official, "127.0.0.1", 1337));
+        CHECK(MS::IsGameServerLookup("127.0.0.1", "1337", official, "127.0.0.1", 1337));
+        // No service names no port: the host decides, as before.
+        CHECK(MS::IsGameServerLookup("127.0.0.1", nullptr, official, "127.0.0.1", 1337));
+        CHECK(MS::IsGameServerLookup("127.0.0.1", "", official, "127.0.0.1", 1337));
+        CHECK(MS::IsGameServerLookup(official, nullptr, official, "127.0.0.1", 1337));
+        CHECK(!MS::IsGameServerLookup("127.0.0.2", nullptr, official, "127.0.0.1", 1337));
+
+        // Custom /bzrserver= port: BZRNet only on that port.
+        CHECK(MS::IsGameServerLookup("127.0.0.1", "2000", official, "127.0.0.1", 2000));
+        CHECK(!MS::IsGameServerLookup("127.0.0.1", "1337", official, "127.0.0.1", 2000));
+        CHECK(!MS::IsGameServerLookup("127.0.0.1", "9977", official, "127.0.0.1", 2000));
+        CHECK(!MS::IsGameServerLookup("127.0.0.1", "20000", official, "127.0.0.1", 2000));
+
+        // LAN IP server: unchanged for the game's lookup; other hosts never match.
+        CHECK(MS::IsGameServerLookup("192.168.0.44", "1337", official, "192.168.0.44", 1337));
+        CHECK(!MS::IsGameServerLookup("127.0.0.1", "9977", official, "192.168.0.44", 1337));
+        CHECK(!MS::IsGameServerLookup("192.168.0.45", "1337", official, "192.168.0.44", 1337));
+
+        // The official host stays BZRNet on 1337 whatever the launch server.
+        CHECK(MS::IsGameServerLookup(official, "1337", official, official, 1337));
+        CHECK(MS::IsGameServerLookup("BATTLEZONE98MP.webdev.rebellion.co.uk", "1337", official, "127.0.0.1", 1337));
+        CHECK(!MS::IsGameServerLookup(official, "443", official, official, 1337));
+        CHECK(!MS::IsGameServerLookup(nullptr, "1337", official, official, 1337));
+
+        CHECK(MS::ServiceMatchesPort("01337", 1337));
+        CHECK(!MS::ServiceMatchesPort("1337x", 1337));
+        CHECK(!MS::ServiceMatchesPort("http", 80));
+        CHECK(!MS::ServiceMatchesPort("1337", 0));
+    }
 }
 
 int main()
@@ -143,6 +215,8 @@ int main()
     TestSplitServer();
     TestResolveSavedHost();
     TestLaunchHost();
+    TestLaunchPort();
+    TestGameServerLookup();
     if (OpenShimTest::FailureCount() == 0)
         std::printf("matchmaking_server_tests: all passed\n");
     return OpenShimTest::ExitCode();
