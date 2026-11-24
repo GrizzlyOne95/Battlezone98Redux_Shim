@@ -1637,7 +1637,6 @@
     },
     {
       "name": "Craft::EffectiveDamageResistanceSite",
-      "platforms": ["gog"],
       "pattern": "D9 9D 04 FF FF FF F3 0F 10 05 98 24 8A 00 0F 2F 85 04 FF FF FF 72 07 32 C0 E9 D1 07 00 00",
       "offset": 6,
       "mode": "address",
