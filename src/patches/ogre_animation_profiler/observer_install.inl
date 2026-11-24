@@ -251,7 +251,7 @@
                 LogShimA(
                     shadowVtables ? LogLevel::Info : LogLevel::Warn,
                     kComponent,
-                    "[OgreProfile][ChunkShadowPolicy] %s exactMeshes=chunk1/chunk1.mesh,chunk2/chunk2.mesh patchedVtables=%u",
+                    "[OgreProfile][ChunkShadowPolicy] %s meshes=chunk<N>/chunk<N>.mesh patchedVtables=%u",
                     shadowVtables ? "active" : "unavailable",
                     static_cast<unsigned>(shadowVtables));
             }

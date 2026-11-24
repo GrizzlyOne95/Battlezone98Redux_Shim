@@ -732,6 +732,8 @@ namespace BZROpenShim
         std::atomic<uint64_t> g_DynamicGeometryIndexTotal{ 0 };
         std::atomic<uint64_t> g_ChunkShadowQueries{ 0 };
         std::atomic<uint64_t> g_ChunkShadowSuppressions{ 0 };
+        // Bit N set once chunkN/chunkN.mesh has been logged as suppressed (N >= 63 share bit 63).
+        std::atomic<uint64_t> g_ChunkShadowLoggedMeshes{ 0 };
         std::atomic<uint64_t> g_Dx11SkinSourceShadowQueries{ 0 };
         std::atomic<uint64_t> g_Dx11SkinSourceShadowRepairs{ 0 };
         std::atomic<uint64_t> g_Dx11SkinSourceShadowRepairBytes{ 0 };

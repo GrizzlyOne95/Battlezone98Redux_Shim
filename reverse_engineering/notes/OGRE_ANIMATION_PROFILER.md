@@ -161,8 +161,9 @@ three seconds, and leaves the camera/load unchanged afterward.
 These policies are separate from collection and default on in the validated GOG
 2.2.301 build for both DX9 and DX11:
 
-- exact `chunk1/chunk1.mesh` and `chunk2/chunk2.mesh` Entities have their real
-  Ogre shadow flag cleared once; opt out with
+- `chunk<N>/chunk<N>.mesh` Entities (same digits both sides; stock ships
+  chunk1/chunk2, mods with a higher `chunkletCount` add chunk3 and up) have
+  their real Ogre shadow flag cleared once; opt out with
   `OPENSHIM_DISABLE_NATIVE_CHUNK_SHADOW_FIX=1`;
 - blended world-effect logarithmic depth keys use stride 8 to permit compatible
   `DynamicGeometry` batches to merge; opt out with

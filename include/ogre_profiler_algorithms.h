@@ -84,10 +84,66 @@ namespace OgreProfilerAlgorithms
         return *left == '\0' && *right == '\0';
     }
 
+    // Matches transient chunklet debris meshes: "chunk<N>/chunk<N>.mesh" with the
+    // same decimal digits on both sides, compared verbatim so leading zeros must
+    // agree (case-insensitive, whole name only). Stock
+    // ships chunk1/chunk2; mods such as Campaign Reimagined raise chunkletCount and
+    // add chunk3..chunkN. outNumber receives N, saturated at UINT32_MAX.
+    inline bool TryParseNativeTransientChunkMeshName(
+        const char* meshName,
+        std::uint32_t* outNumber = nullptr)
+    {
+        if (!meshName)
+            return false;
+
+        auto matchPrefix = [](const char*& cursor, const char* literal) {
+            const char* scan = cursor;
+            while (*literal)
+            {
+                if (std::tolower(static_cast<unsigned char>(*scan)) !=
+                    static_cast<unsigned char>(*literal))
+                {
+                    return false;
+                }
+                ++scan;
+                ++literal;
+            }
+            cursor = scan;
+            return true;
+        };
+
+        const char* cursor = meshName;
+        if (!matchPrefix(cursor, "chunk"))
+            return false;
+
+        const char* digits = cursor;
+        std::uint32_t number = 0;
+        while (*cursor >= '0' && *cursor <= '9')
+        {
+            const std::uint32_t digit = static_cast<std::uint32_t>(*cursor - '0');
+            number = number > (UINT32_MAX - digit) / 10u ? UINT32_MAX : number * 10u + digit;
+            ++cursor;
+        }
+        const std::size_t digitCount = static_cast<std::size_t>(cursor - digits);
+        if (digitCount == 0)
+            return false;
+
+        if (!matchPrefix(cursor, "/chunk"))
+            return false;
+        if (std::strncmp(cursor, digits, digitCount) != 0)
+            return false;
+        cursor += digitCount;
+        if (!matchPrefix(cursor, ".mesh") || *cursor != '\0')
+            return false;
+
+        if (outNumber)
+            *outNumber = number;
+        return true;
+    }
+
     inline bool IsNativeTransientChunkMeshName(const char* meshName)
     {
-        return EqualsAsciiCaseInsensitive(meshName, "chunk1/chunk1.mesh") ||
-            EqualsAsciiCaseInsensitive(meshName, "chunk2/chunk2.mesh");
+        return TryParseNativeTransientChunkMeshName(meshName);
     }
 
     inline float QuantizeDynamicAlphaDepthKey(float key, std::uint32_t stride)
