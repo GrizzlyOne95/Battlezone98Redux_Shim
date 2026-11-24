@@ -75,8 +75,8 @@ called on the mission simulation thread, as the EXU bindings do.
 matches the private Ghidra corpus. Fresh Rizin disassembly and settled live entry
 reads qualified each of the six named resolves. All patterns have a single match
 and zero fallback. The hook copies six whole prologue bytes without relative
-operands. Steam explicitly stands down; other distribution/platform lanes are
-unverified.
+operands. Steam resolves the same signatures (its settled image matches GOG
+2.2.301); other distribution/platform lanes are unverified.
 
 | Native function | GOG VA | Calling convention/evidence |
 |---|---|---|
