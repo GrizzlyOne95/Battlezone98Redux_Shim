@@ -23,7 +23,7 @@ $Repo = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 if (-not $Tag) { $Tag = "$Install-$Arm" }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $report = Join-Path $OutDir "$Tag.txt"
-function Note([string]$t) { try { $l = "[{0:HH:mm:ss}] $t" -f (Get-Date); Write-Host $l; Add-Content -LiteralPath $report -Value $l } catch { } }
+function Note([string]$t) { try { $l = '[' + (Get-Date).ToString('HH:mm:ss') + '] ' + $t; Write-Host $l; Add-Content -LiteralPath $report -Value $l } catch { } }
 
 # Sets key=value in [section], adding the key (or the section) when absent.
 function Set-IniKey([string]$Text, [string]$Section, [string]$Key, [string]$Value) {
@@ -106,7 +106,7 @@ try {
         $rel = $rf.FullName.Substring($ReleaseDir.TrimEnd('\').Length + 1)
         $deploy += @{ rel = $rel; src = $rf.FullName }
     }
-    $trackRels = @($deploy | ForEach-Object { $_.rel }) + @($iniRel, 'openshim\openshim.ini', 'openshim.ini', 'career_stats.cfg', 'flags.cfg') | Select-Object -Unique
+    $trackRels = @($deploy | ForEach-Object { $_.rel }) + @($iniRel, 'openshim\openshim.ini', 'openshim.ini', 'career_stats.cfg', 'flags.cfg', 'openshim_community.key') | Select-Object -Unique
     foreach ($rel in $trackRels) {
         $live = Join-Path $GameRoot $rel
         $f = @{ rel = $rel; live = $live; existed = (Test-Path -LiteralPath $live) }
@@ -188,13 +188,23 @@ sRGB Gamma Conversion=No
 
     $shimLog = Join-Path $logDir 'openshim.log'
     $bzLog = Join-Path $logDir 'BZLogger.txt'
-    $script:off = @{}
-    foreach ($l in @($shimLog, $bzLog, (Join-Path $GameRoot 'BZLogger.txt'))) { $script:off[$l] = if (Test-Path -LiteralPath $l) { (Get-Item -LiteralPath $l).Length } else { 0 } }
+    # The game starts fresh logs each launch: keep an offset only while the file's head is unchanged.
+    function Read-Head([string]$p) {
+        if (-not (Test-Path -LiteralPath $p)) { return '' }
+        $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite')
+        try { $b = New-Object byte[] 256; $n = $fs.Read($b, 0, 256); return [BitConverter]::ToString($b, 0, $n) } finally { $fs.Dispose() }
+    }
+    $script:off = @{}; $script:head = @{}
+    foreach ($l in @($shimLog, $bzLog, (Join-Path $GameRoot 'BZLogger.txt'))) { $script:off[$l] = if (Test-Path -LiteralPath $l) { (Get-Item -LiteralPath $l).Length } else { 0 }; $script:head[$l] = Read-Head $l }
     function Read-New([string]$p) {
         if (-not (Test-Path -LiteralPath $p)) { return '' }
         $fs = [IO.File]::Open($p, 'Open', 'Read', 'ReadWrite')
         try {
             $o = $script:off[$p]; if ($fs.Length -lt $o) { $o = 0 }
+            if ($o -gt 0) {
+                $b = New-Object byte[] 256; $n = $fs.Read($b, 0, 256)
+                if ([BitConverter]::ToString($b, 0, $n) -ne $script:head[$p]) { $o = 0 }
+            }
             $null = $fs.Seek($o, 'Begin')
             return (New-Object IO.StreamReader($fs)).ReadToEnd()
         } finally { $fs.Dispose() }
@@ -239,8 +249,6 @@ sRGB Gamma Conversion=No
 
     $hook = Wait-Log 'Click_MultiPlayer hook installed[^\r\n]*' 90
     if (-not $hook) { throw 'fixture: no Click_MultiPlayer hook line' }
-    $verLine = [regex]::Match((Read-New $shimLog), '[^\r\n]*(1\.0\.0\.\d+)[^\r\n]*').Value
-    Note "shim version line: $verLine"
     $opened = $null
     for ($i = 0; $i -lt 30 -and -not $opened; $i++) {
         try { Measure-Client; Design 1062 243 } catch { }
