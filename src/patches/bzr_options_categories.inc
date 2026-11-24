@@ -17,12 +17,16 @@ constexpr const char* kShimRowMenuTheme = "Menu Colors";
 constexpr const char* kShimRowEffects = "Visual Effects";
 constexpr const char* kShimRowBans = "Banned Players";
 constexpr const char* kShimRowRtsCommands = "RTS Commands";
+constexpr const char* kShimRowRtsOverlays = "RTS Overlays";
+constexpr const char* kShimRowExperimental = "Experimental";
+constexpr const char* kShimRowPerformance = "Performance";
+constexpr const char* kShimRowAiBehavior = "AI Behavior";
 
 static const char* const kShimCategoryVideo[] = {
-    "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights", "DX11 Flip Model",
-    "Shadow Distance", "HD Terrain Tiles", "Terrain Tessellation", "Hull Scorch", "GPU Skinning",
+    "Renderer", "Render Profile", "Field of View", "DX11 FXAA", "DX11 Local Lights",
+    "Shadow Distance", "HD Terrain Tiles", "Hull Scorch",
     "Primary Monitor Fix", "Resolution Filter", "Resolution List",
-    kShimRowEffects, kShimRowMenuTheme };
+    kShimRowEffects, kShimRowMenuTheme, kShimRowPerformance };
 static const char* const kShimCategoryEffects[] = {
     "Faction Color Jets", "Destruction Chunks",
     "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs", "Paint", "Live Terrain Paint", "Fog Wakes" };
@@ -58,32 +62,42 @@ static const char* const kShimCategoryPalette[] = {
     "Hull Healthy", "Hull Damaged", "Hull Critical", "Cockpit Ammo", "Unit Healthy", "Unit Damaged",
     "Unit Critical", "Unit Ammo", "Empty Bars" };
 static const char* const kShimCategoryControls[] = {
-    kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Input Smoothing", "Per-Frame Mouse",
+    kShimRowKeyBindings, "Custom Keybinds", "Raw Mouse Input", "Input Smoothing",
     "Satellite Zoom", "Satellite Pan", "Editor Placement", "Background Mouse",
-    "Run in Background", "Rally Points", "Auto Group", "Extended Unit Cap", "Group Member Menu", "Group Strip",
+    "Auto Group", "Group Member Menu", "Group Strip",
     kShimRowRtsCommands };
 static const char* const kShimCategoryRtsCommands[] = {
-    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold", "Howitzer Approach", "Quick Commands",
-    "Build at Nav", "Build Ghost", "Pending Build Ghost", "Power Range", "Waypoint Lines",
-    "Producer Badges", "Idle Unit Alert", "Ammo Alert", "Scrap Full Alert", "Satellite Follow", "Attack Marks", "Weapon Range", "Radar Range", "Mine Range", "Range Labels",
-    "Queue Orders", "Build Queue", "Unit Loadouts" };
+    "Remote Target", "Smart Command Menu", "Smart Repair/Reload", "Area Select", "Hold", "Howitzer Approach",
+    "Quick Commands", "Build at Nav", "Queue Orders", "Build Queue", "Unit Loadouts",
+    kShimRowRtsOverlays };
+static const char* const kShimCategoryRtsOverlays[] = {
+    "Build Ghost", "Pending Build Ghost", "Power Range", "Waypoint Lines", "Producer Badges",
+    "Idle Unit Alert", "Ammo Alert", "Scrap Full Alert", "Satellite Follow", "Attack Marks",
+    "Weapon Range", "Radar Range", "Mine Range", "Range Labels" };
 static const char* const kShimCategoryGameplay[] = {
     "Target Convergence", "Reticle Convergence", "Reticle Range", "Ordnance Velocity",
     "Jump-Snipe Crouch", "Global Turbo", "No Damage Slowdown", "Satellite Fog", "Attack Neutrals",
+    "Rally Points", "Extended Unit Cap", kShimRowAiBehavior };
+static const char* const kShimCategoryAiBehavior[] = {
     "Smart Scavengers", "Turret AA Pitch", "Legacy Tank AI", "Howitzer Volley",
-    "AI Mine Volley", "AI ODF Tuning", "Vehicle Geometry" };
+    "AI Mine Volley", "AI ODF Tuning" };
 static const char* const kShimCategoryFixes[] = {
     "AI Multi-Producer", "APC Allied Deploy", "Splinter Fix", "Howitzer Fix",
     "Tug Cargo Deploy", "Recycle Fix", "Builder Cleanup", "Material Guard", "Sniper Eject Aim",
-    "Thread Scheduling", "Precise Timestep", "Music Track Start", "Craft Culling", "Effect Batching",
-    "Effect Sort", "Map List Fixes" };
+    "Precise Timestep", "Music Track Start", "Map List Fixes" };
+static const char* const kShimCategoryPerformance[] = {
+    "Thread Scheduling", "Craft Culling", "Effect Batching", "Effect Sort" };
 static const char* const kShimCategoryNetwork[] = {
     "Net Route", "UDP Port", "Net Improvements", "Net Tuning", "Remote Smoothing", "Ping-Aware Retry", "Stock Factions",
     "Map Filters+", "Lobby Ban Button", "Lobby Readouts", "Lobby Briefing", "Persistent Mutes",
     "MP Setup Screen", "Map Letter Jump", "Block Free Camera", kShimRowBans };
 static const char* const kShimCategorySystem[] = {
-    kShimRowUpdateCheck, "Auto-Install", "Skip Launcher", "Career Stats", "Reset Career", "Reset to Stock", "Bug Report Zip",
-    "Crash Dumps", "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching", "Briefing Pages", "Database" };
+    kShimRowUpdateCheck, "Auto-Install", "Skip Launcher", "Career Stats", "Reset Career", "Reset to Stock",
+    "AutoSave", "AutoSave Interval", "AutoSave Backups", "QuickSave Keys", "Menu Caching", "Briefing Pages", "Database",
+    kShimRowExperimental };
+static const char* const kShimCategoryExperimental[] = {
+    "Per-Frame Mouse", "GPU Skinning", "Run in Background", "Vehicle Geometry", "DX11 Flip Model",
+    "Terrain Tessellation", "Crash Dumps", "Bug Report Zip" };
 
 struct ShimSettingsCategory
 {
@@ -110,7 +124,7 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
         "Key bindings, raw mouse input, input smoothing and the satellite view.",
         kShimCategoryControls),
     BZR_SHIM_CATEGORY("Gameplay", "GAMEPLAY",
-        "Single-player aiming, AI behaviour and turbo.", kShimCategoryGameplay),
+        "Single-player aiming, rally points, turbo and more; AI behaviour opens from here.", kShimCategoryGameplay),
     BZR_SHIM_CATEGORY("Fixes", "FIXES",
         "Switches for confirmed Redux engine defects. Leave these on unless "
         "you are chasing a regression.", kShimCategoryFixes),
@@ -138,7 +152,22 @@ static const ShimSettingsCategory kShimSettingsCategories[] =
     // Subpage reached from Controls.
     BZR_SHIM_CATEGORY("RTS Commands", "RTS COMMANDS",
         "Unit command extras: target your own units and buildings, mixed-selection menus, area select, Hold, "
-        "building at navs, build ghosts, power range and waypoint lines.",
+        "building at navs and queues; overlays open from here.",
         kShimCategoryRtsCommands),
+    BZR_SHIM_CATEGORY("RTS Overlays", "RTS OVERLAYS",
+        "Build ghosts, power range, waypoint lines, producer badges, alerts, attack marks and weapon, radar and mine range rings.",
+        kShimCategoryRtsOverlays),
+    // Subpage reached from System.
+    BZR_SHIM_CATEGORY("Experimental", "EXPERIMENTAL & DIAGNOSTICS",
+        "Features still being tested, plus crash dumps and the bug report zip. Check the notes before turning one on.",
+        kShimCategoryExperimental),
+    // Subpage reached from Video.
+    BZR_SHIM_CATEGORY("Performance", "PERFORMANCE",
+        "CPU and scheduling tunables for busy scenes. Rendering and timing only; the picture is unchanged.",
+        kShimCategoryPerformance),
+    // Subpage reached from Gameplay.
+    BZR_SHIM_CATEGORY("AI Behavior", "AI BEHAVIOR",
+        "Single-player scavenger, turret, tank and artillery AI behaviour.",
+        kShimCategoryAiBehavior),
 };
 #undef BZR_SHIM_CATEGORY

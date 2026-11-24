@@ -110,7 +110,8 @@ static void CheckShippedTable()
         Registry::kShimRowUpdateCheck, Registry::kShimRowKeyBindings, Registry::kShimRowReticle,
         Registry::kShimRowPalette, Registry::kShimRowDamage, Registry::kShimRowFading,
         Registry::kShimRowMeters, Registry::kShimRowRadar, Registry::kShimRowMenuTheme, Registry::kShimRowEffects,
-        Registry::kShimRowBans, Registry::kShimRowRtsCommands,
+        Registry::kShimRowBans, Registry::kShimRowRtsCommands, Registry::kShimRowRtsOverlays,
+        Registry::kShimRowExperimental, Registry::kShimRowPerformance, Registry::kShimRowAiBehavior,
     };
     for (const char* row : pseudoRows)
     {
@@ -220,15 +221,21 @@ static void CheckCategoryCoverage()
         Registry::kShimRowUpdateCheck, Registry::kShimRowKeyBindings, Registry::kShimRowReticle,
         Registry::kShimRowPalette, Registry::kShimRowDamage, Registry::kShimRowFading,
         Registry::kShimRowMeters, Registry::kShimRowRadar, Registry::kShimRowMenuTheme, Registry::kShimRowEffects,
-        Registry::kShimRowBans, Registry::kShimRowRtsCommands,
+        Registry::kShimRowBans, Registry::kShimRowRtsCommands, Registry::kShimRowRtsOverlays,
+        Registry::kShimRowExperimental, Registry::kShimRowPerformance, Registry::kShimRowAiBehavior,
     };
     std::set<std::string> registryLabels;
     for (const auto& setting : Registry::g_ShimSettingsRegistry)
         registryLabels.insert(setting.label);
 
     std::set<std::string> listed;
+    // A category screen has 2 columns of 8 slots (kShimCategoryMaxRows in bzr_options_ui.cpp); the
+    // row loop drops anything past the 16th silently, link rows included.
+    constexpr size_t kMaxRowsPerPage = 16;
     for (const auto& category : Registry::kShimSettingsCategories)
     {
+        Check(category.rowCount <= kMaxRowsPerPage,
+              std::string(category.name) + " fits the 16 slots of a category page");
         for (size_t r = 0; r < category.rowCount; ++r)
         {
             const std::string row = category.rows[r];
