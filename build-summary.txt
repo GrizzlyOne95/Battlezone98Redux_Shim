@@ -1,0 +1,6 @@
+winmm.dll size: 173056 bytes
+winmm.pdb size: 2617344 bytes
+bzloader.dll size: 47104 bytes
+bzloader.pdb size: 1036288 bytes
+plugins/openshim.dll size: 7572480 bytes
+plugins/openshim.pdb size: 57602048 bytes

@@ -2825,6 +2825,13 @@ namespace BZROpenShim
             bool found = TryGetUserConfigString(setting.section, setting.key, value);
             for (size_t alt = 0; !found && alt < setting.altKeyCount; ++alt)
                 found = TryGetUserConfigString(setting.section, setting.altKeys[alt], value);
+            if (!found && setting.key && std::strcmp(setting.key, "FactionVfx") == 0)
+            {
+                // No FactionVfx yet: show what the legacy JetFlames /
+                // FactionConstructionBlobs keys already give.
+                value = BZROpenShim::Hooks::ReadFactionVfxEnabled() ? "1" : "0";
+                found = true;
+            }
             const size_t index = found ? ShimSettingIndexFromText(setting, value) : setting.defaultIndex;
             if (!setting.pairedKey)
                 return index;
