@@ -20,7 +20,10 @@
 // lazily, the first time its path is asked for, so a config read can never
 // beat the openshim.ini move. Rules: an old file moves only when the new one
 // does not exist (never overwritten); if the move fails the old location is
-// read as a fallback; old caches are deleted instead of moved. Each step is
+// read as a fallback; old caches are deleted instead of moved. The one
+// exception is openshim.ini: when both copies exist, MergeRootIni copies the
+// keys the new file lacks into it and retires the root file as
+// openshim.ini.root-merged. Each step is
 // recorded as one line; the module drains them into its log with
 // DrainMigrationLog once its logger is up, because the first ini read can
 // happen before that (even under the loader lock, where only kernel32 file
@@ -198,6 +201,309 @@ namespace Layout
             Detail::Note("[LAYOUT] removed the empty folder %s", directory);
     }
 
+    namespace Detail
+    {
+        inline void NoteText(const std::string& text)
+        {
+            MigrationLogState& state = LogState();
+            AcquireSRWLockExclusive(&state.lock);
+            state.lines.push_back(text.size() > 1000 ? text.substr(0, 1000) : text);
+            ReleaseSRWLockExclusive(&state.lock);
+        }
+
+        inline bool ReadAll(const std::filesystem::path& path, std::string& out)
+        {
+            HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+                return false;
+            out.clear();
+            char buffer[16384];
+            bool ok = true;
+            for (;;)
+            {
+                DWORD got = 0;
+                if (!ReadFile(file, buffer, sizeof(buffer), &got, nullptr)) { ok = false; break; }
+                if (got == 0)
+                    break;
+                out.append(buffer, got);
+            }
+            CloseHandle(file);
+            return ok;
+        }
+
+        // Replaces `path` via a temp file in the same folder.
+        // The temp name carries the process id and this module's address, so
+        // winmm.dll and openshim.dll (same process) and other processes never
+        // share one. `error` receives the failing call's GetLastError.
+        inline bool WriteAllReplace(const std::filesystem::path& path, const std::string& data,
+                                    DWORD* error = nullptr)
+        {
+            std::filesystem::path temp = path;
+            temp += L".merge-tmp-" + std::to_wstring(GetCurrentProcessId()) + L"-" +
+                    std::to_wstring(reinterpret_cast<uintptr_t>(&LogState));
+            DWORD err = 0;
+            HANDLE file = CreateFileW(temp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                      FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE)
+            {
+                if (error) *error = GetLastError();
+                return false;
+            }
+            DWORD written = 0;
+            bool ok = WriteFile(file, data.data(), static_cast<DWORD>(data.size()), &written, nullptr) &&
+                      written == data.size();
+            if (!ok)
+                err = GetLastError();
+            CloseHandle(file);
+            if (ok && !MoveFileExW(temp.c_str(), path.c_str(),
+                                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            {
+                err = GetLastError();
+                ok = false;
+            }
+            if (!ok)
+                DeleteFileW(temp.c_str());
+            if (error) *error = err;
+            return ok;
+        }
+
+        inline std::string Trim(const std::string& text)
+        {
+            size_t b = 0, e = text.size();
+            while (b < e && (text[b] == ' ' || text[b] == '\t')) ++b;
+            while (e > b && (text[e - 1] == ' ' || text[e - 1] == '\t' || text[e - 1] == '\r')) --e;
+            return text.substr(b, e - b);
+        }
+
+        inline std::string Lower(std::string text)
+        {
+            for (char& c : text)
+                if (c >= 'A' && c <= 'Z')
+                    c = static_cast<char>(c - 'A' + 'a');
+            return text;
+        }
+
+        // Splits on '\n', dropping a trailing '\r' per line and the empty piece
+        // after a final newline.
+        inline std::vector<std::string> SplitLines(const std::string& text)
+        {
+            std::vector<std::string> lines;
+            size_t start = 0;
+            while (start < text.size())
+            {
+                size_t end = text.find('\n', start);
+                const size_t next = end == std::string::npos ? text.size() : end + 1;
+                if (end == std::string::npos)
+                    end = text.size();
+                if (end > start && text[end - 1] == '\r')
+                    --end;
+                lines.emplace_back(text.substr(start, end - start));
+                start = next;
+            }
+            return lines;
+        }
+
+        // Classifies one ini line: section header, "key = value" (comments
+        // starting with ; or # are not keys), or neither.
+        inline int ClassifyIniLine(const std::string& line, std::string& name)
+        {
+            const std::string t = Trim(line);
+            if (t.empty() || t[0] == ';' || t[0] == '#')
+                return 0;
+            if (t[0] == '[')
+            {
+                const size_t close = t.find(']');
+                if (close == std::string::npos)
+                    return 0;
+                name = Trim(t.substr(1, close - 1));
+                return 1;
+            }
+            const size_t eq = t.find('=');
+            if (eq == std::string::npos || eq == 0)
+                return 0;
+            name = Trim(t.substr(0, eq));
+            return name.empty() ? 0 : 2;
+        }
+    }
+
+    // Both a root openshim.ini (oldIni) and openshim\openshim.ini (newIni)
+    // exist: copies into newIni only the section+key pairs it lacks (names
+    // compared case-insensitively; existing values, comments and line endings
+    // are untouched), then moves oldIni to <newIni>.root-merged (or
+    // .root-merged.N when taken) so the merge runs once. Returns true when the
+    // root file is gone. On any failure both files are left as they were.
+    inline bool MergeRootIni(const std::filesystem::path& oldIni, const std::filesystem::path& newIni)
+    {
+        using namespace Detail;
+        if (!Exists(oldIni) || !Exists(newIni) || IsDirectory(oldIni) || IsDirectory(newIni))
+            return false;
+        std::string rootText, subText;
+        if (!ReadAll(oldIni, rootText) || !ReadAll(newIni, subText))
+        {
+            Note("[LAYOUT] could not read %s or %s for the root ini merge; both left as they were",
+                 oldIni, newIni);
+            return false;
+        }
+        for (const std::string* text : {&rootText, &subText})
+        {
+            const bool utf16 = text->size() >= 2 &&
+                ((static_cast<unsigned char>((*text)[0]) == 0xFF && static_cast<unsigned char>((*text)[1]) == 0xFE) ||
+                 (static_cast<unsigned char>((*text)[0]) == 0xFE && static_cast<unsigned char>((*text)[1]) == 0xFF));
+            if (utf16 || text->find('\0') != std::string::npos)
+            {
+                Note("[LAYOUT] not merging %s into %s: UTF-16 or binary content; both left as they were",
+                     oldIni, newIni);
+                return false;
+            }
+        }
+        const std::string subRaw = subText;  // exact bytes, for rollback
+        std::string subBom;
+        if (subText.compare(0, 3, "﻿") == 0)
+        {
+            subBom = "﻿";
+            subText.erase(0, 3);
+        }
+        if (rootText.compare(0, 3, "﻿") == 0)
+            rootText.erase(0, 3);
+
+        std::vector<std::string> sub = SplitLines(subText);
+        const bool subEndsWithNewline = subText.empty() || subText.back() == '\n';
+        const size_t firstLf = subText.find('\n');
+        const std::string eol = (firstLf == std::string::npos || firstLf == 0 || subText[firstLf - 1] != '\r')
+            ? (firstLf == std::string::npos ? "\r\n" : "\n") : "\r\n";
+
+        // Destination: existing keys, and where each section's body ends.
+        struct SectionInfo { size_t insertAt = 0; };
+        std::vector<std::pair<std::string, std::string>> have;      // lower section, lower key
+        std::vector<std::pair<std::string, SectionInfo>> sections;  // lower section (first occurrence)
+        {
+            std::string section;
+            bool inFirstOfSection = false;
+            for (size_t i = 0; i < sub.size(); ++i)
+            {
+                std::string name;
+                const int kind = ClassifyIniLine(sub[i], name);
+                if (kind == 1)
+                {
+                    section = Lower(name);
+                    inFirstOfSection = true;
+                    for (const auto& s : sections)
+                        if (s.first == section) { inFirstOfSection = false; break; }
+                    if (inFirstOfSection)
+                        sections.push_back({section, SectionInfo{i + 1}});
+                }
+                else
+                {
+                    if (kind == 2)
+                        have.emplace_back(section, Lower(name));
+                    if (inFirstOfSection && !Trim(sub[i]).empty())
+                        sections.back().second.insertAt = i + 1;
+                }
+            }
+        }
+
+        // Root keys the destination lacks, in file order (first occurrence wins).
+        struct Missing { std::string section, sectionLower, key, keyLower, line; };
+        std::vector<Missing> missing;
+        {
+            std::string section;
+            for (const std::string& line : SplitLines(rootText))
+            {
+                std::string name;
+                const int kind = ClassifyIniLine(line, name);
+                if (kind == 1) { section = name; continue; }
+                if (kind != 2 || section.empty())
+                    continue;
+                const std::string sl = Lower(section), kl = Lower(name);
+                bool known = false;
+                for (const auto& h : have)
+                    if (h.first == sl && h.second == kl) { known = true; break; }
+                for (const auto& m : missing)
+                    if (m.sectionLower == sl && m.keyLower == kl) { known = true; break; }
+                if (!known)
+                    missing.push_back({section, sl, name, kl, Trim(line)});
+            }
+        }
+
+        if (!missing.empty())
+        {
+            std::vector<std::string> out;
+            std::vector<std::vector<std::string>> inserts(sub.size() + 1);
+            std::vector<std::pair<std::string, std::vector<std::string>>> newSections;
+            for (const Missing& m : missing)
+            {
+                bool placed = false;
+                for (const auto& s : sections)
+                    if (s.first == m.sectionLower) { inserts[s.second.insertAt].push_back(m.line); placed = true; break; }
+                if (!placed)
+                {
+                    bool found = false;
+                    for (auto& ns : newSections)
+                        if (Lower(ns.first) == m.sectionLower) { ns.second.push_back(m.line); found = true; break; }
+                    if (!found)
+                        newSections.push_back({m.section, {m.line}});
+                }
+            }
+            for (size_t i = 0; i <= sub.size(); ++i)
+            {
+                for (const auto& l : inserts[i])
+                    out.push_back(l);
+                if (i < sub.size())
+                    out.push_back(sub[i]);
+            }
+            for (const auto& ns : newSections)
+            {
+                if (!out.empty() && !Trim(out.back()).empty())
+                    out.emplace_back();
+                out.push_back("[" + ns.first + "]");
+                for (const auto& l : ns.second)
+                    out.push_back(l);
+            }
+            std::string merged = subBom;
+            for (size_t i = 0; i < out.size(); ++i)
+            {
+                merged += out[i];
+                if (i + 1 < out.size() || subEndsWithNewline)
+                    merged += eol;
+            }
+            DWORD writeError = 0;
+            if (!WriteAllReplace(newIni, merged, &writeError))
+            {
+                Note("[LAYOUT] could not write the merged %s; %s left in place (error %lu)",
+                     newIni, oldIni, writeError);
+                return false;
+            }
+            for (const Missing& m : missing)
+                NoteText("[LAYOUT] merged [" + m.section + "] " + m.key + " from the root openshim.ini");
+        }
+
+        std::filesystem::path target = newIni;
+        target += L".root-merged";
+        for (int n = 1; Exists(target) && n < 1000; ++n)
+        {
+            target = newIni;
+            target += L".root-merged." + std::to_wstring(n);
+        }
+        if (!MoveFileExW(oldIni.c_str(), target.c_str(), MOVEFILE_WRITE_THROUGH))
+        {
+            const DWORD error = GetLastError();
+            if (!Exists(oldIni))
+            {
+                // Another module (winmm.dll / openshim.dll) retired it first.
+                Note("[LAYOUT] root openshim.ini already retired by another module; merge into %s kept", newIni);
+                return true;
+            }
+            if (!missing.empty())
+                WriteAllReplace(newIni, subRaw);  // put the destination back as it was
+            Note("[LAYOUT] could not move %s to %s (error %lu); both left as they were",
+                 oldIni, target, error);
+            return false;
+        }
+        Note("[LAYOUT] merged the root openshim.ini into %s and moved it to %s", newIni, target);
+        return true;
+    }
+
     // openshim\openshim.ini, or the root copy when moving it failed. The
     // openshim.ini family (canonical preset and backups) migrates on the
     // first call, before any caller can read config.
@@ -212,6 +518,7 @@ namespace Layout
             Detail::EnsureDirectory(directory);
             const std::filesystem::path oldIni = root / L"openshim.ini";
             const std::filesystem::path newIni = directory / L"openshim.ini";
+            (void)MergeRootIni(oldIni, newIni);  // both exist: merge once; else falls through
             const bool moved = MigrateEntry(oldIni, newIni);
             MigrateEntry(root / L"openshim.ini.canonical", directory / L"openshim.ini.canonical");
             MigrateEntry(root / L"openshim.ini.new", directory / L"openshim.ini.new");
