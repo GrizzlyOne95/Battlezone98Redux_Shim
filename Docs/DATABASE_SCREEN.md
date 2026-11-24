@@ -130,6 +130,29 @@ One row per mission, `<campaign> - <stem>`. Pages are `<stem>.des` then
 Briefing overlay reads them (`des_reader.cpp`, `LobbyBriefingPolicy`). Prev /
 Next page through them. A mission with no `.des` reads "No briefing found".
 
+### Briefing scrolling
+
+The text block is a stock `cUI_ScrollingTextBlock` and starts at text scale
+0.75 (`+0x2944`, base ctor 0x007CCB70). Its reflow 0x007CCFC0 multiplies the
+font scale by it before building the page (0x007CDD50, `FUN_007ccfc0` lines
+112-113), and the stride probe 0x007CCE90 that page build calls multiplies by
+it again (`FUN_007cce90` lines 24-25). At 0.75 the probe measures lines 0.75x
+as tall as the page trim, so the stride is about 4/3 of the lines a page
+shows, and each Next-arrow press skips lines (seen live on `tran02`: page 1
+ended at "...using the system." and page 2 began at "Use the 'O' key", losing
+the paragraph between). The screen sets the block scale to 1.0 right after
+building it (`ScrollingTextBlockSetTextScale` 0x007CCE50), so the probe and
+the page agree. Stock sets 1.0 on its own blocks only when `FUN_004344A0()`
+is 2 (`FUN_00792000` lines 212-213; cUI_Mission and the archive likewise,
+`FUN_0078F030` 289-291/308-310, `FUN_00790FE0` 197-199), which is why other
+cases keep 0.75. Text is drawn at the larger scale, so fewer lines fit per
+page. The same fix covers every scrolling block: the stock mission briefing
+and the archive get it from a ctor detour (`[Fixes] BriefingPageStride`,
+`[BRIEFSTRIDE]` log), and the lobby Briefing overlay sets it itself. Only
+those four callers build a `cUI_ScrollingTextBlock` (ctor 0x007CD8D0 callers:
+`FUN_0078F030` line 303, `FUN_00790FE0` line 193); the other 0x007CCB70
+callers are non-scrolling text blocks and are untouched.
+
 ## 3D unit preview
 
 Unit entries show their model spinning in the 260x260 square. It is the

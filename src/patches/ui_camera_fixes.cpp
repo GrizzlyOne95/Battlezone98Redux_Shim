@@ -273,9 +273,91 @@ namespace BZROpenShim
             return WritePatchBytes(site, cur, sizeof(cur));
         }
 
+        // cUI_ScrollingTextBlock ctor 0x007CD8D0 leaves the block at text scale
+        // 0.75 (+0x2944). Its reflow applies that scale and the stride probe applies
+        // it again, so the stride overshoots the lines a page shows and each scroll
+        // step skips lines. Only two stock screens build the block (cUI_Mission
+        // 0x0078F030 line 303, the archive 0x00790FE0 line 193) and each sets its own
+        // scale afterwards only when FUN_004344A0() == 2 (lines 289-291, 308-310,
+        // 197-199), so every other case keeps 0.75. Entry-detour the ctor and, when
+        // the block still holds the 0.75 default, store 1.0 so probe and page agree.
+        // A scale the stock code sets later still wins. The Database screen and the
+        // lobby Briefing overlay also set 1.0 themselves.
+        static InlineDetour32 g_ScrollTextCtorDetour = {};
+        static void* volatile g_ScrollTextCtorOriginal = nullptr;
+        static uint32_t g_ScrollTextCtorAddr = 0;
+        static constexpr size_t kScrollTextScaleOffset = 0x2944;
+        static constexpr uint32_t kScrollTextDefaultScaleBits = 0x3F400000; // 0.75f
+
+        using FnScrollTextCtor = void*(__thiscall*)(void* self, char flag, const char* name,
+                                                    float x, float y, float w, float h,
+                                                    void(__cdecl* onPageUp)(), void(__cdecl* onPageDown)(),
+                                                    uint32_t flags, void* parent);
+
+        static bool ResetDefaultScrollTextScale(void* block)
+        {
+            __try
+            {
+                uint32_t* scale = reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(block) + kScrollTextScaleOffset);
+                if (*scale != kScrollTextDefaultScaleBits)
+                    return false;
+                const float one = 1.0f;
+                std::memcpy(scale, &one, sizeof(one));
+                return true;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return false;
+            }
+        }
+
+        // thiscall with ten stack arguments and RET 0x28 is __fastcall with the
+        // (unused) EDX slot: the callee pops its stack arguments in both.
+        static void* __fastcall ScrollTextCtorHook(void* self, void* /*edx*/, char flag, const char* name,
+                                                   float x, float y, float w, float h,
+                                                   void(__cdecl* onPageUp)(), void(__cdecl* onPageDown)(),
+                                                   uint32_t flags, void* parent)
+        {
+            void* result = reinterpret_cast<FnScrollTextCtor>(g_ScrollTextCtorOriginal)(
+                self, flag, name, x, y, w, h, onPageUp, onPageDown, flags, parent);
+            ResetDefaultScrollTextScale(self);
+            return result;
+        }
+
+        static void InstallScrollTextScaleFixIfPossible()
+        {
+            static int s_state = 0; // 0 untried, 1 installed, -1 failed
+            if (s_state != 0)
+                return;
+            static int s_bound = 0;
+            const HookEngine::EngineRow rows[] = {
+                { "ScrollingTextBlockCtor", &g_ScrollTextCtorAddr },
+            };
+            if (!BindUiCameraRows("Scrolling text block default scale", rows, s_bound))
+            {
+                s_state = -1;
+                return;
+            }
+            static const uint8_t kCtorBytes[] = { 0x55, 0x8B, 0xEC, 0x6A, 0xFF, 0x68, 0xF8, 0x26, 0x86, 0x00 };
+            if (!InstallInlineDetour32(g_ScrollTextCtorDetour, g_ScrollTextCtorAddr,
+                                       reinterpret_cast<void*>(&ScrollTextCtorHook), sizeof(kCtorBytes),
+                                       kCtorBytes, sizeof(kCtorBytes), &g_ScrollTextCtorOriginal))
+            {
+                s_state = -1;
+                Log(L"[BRIEFSTRIDE] scrolling text block ctor detour failed at 0x%08X; default scale stays 0.75\n",
+                    g_ScrollTextCtorAddr);
+                return;
+            }
+            s_state = 1;
+            Log(L"[BRIEFSTRIDE] scrolling text blocks now start at text scale 1.0 (stride probe matches the page)\n");
+        }
+
         void InstallBriefingPageStrideFixIfPossible()
         {
-            if (!g_BriefingPageStrideFixEnabled || g_BriefingPageStrideFixInstalled)
+            if (!g_BriefingPageStrideFixEnabled)
+                return;
+            InstallScrollTextScaleFixIfPossible();
+            if (g_BriefingPageStrideFixInstalled)
                 return;
             static int s_bound = 0;
             const HookEngine::EngineRow rows[] = {

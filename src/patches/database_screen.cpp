@@ -127,6 +127,7 @@ namespace BZROpenShim
             constexpr size_t kScrollingTextBlockSize = 0x295C;
             constexpr size_t kScrollDownArrow = 0x2954;
             constexpr size_t kScrollPosition = 0x2958;
+            constexpr float kTextScale = 1.0f;
             constexpr int kTextColour = 3;  // green, the stock briefing text colour
 
             constexpr int kFileReadMax = 1024 * 1024;
@@ -137,12 +138,13 @@ namespace BZROpenShim
                                                                uint32_t flags, void* parent);
             using FnSetText = void(__thiscall*)(void* block, const char* text, int colourIndex);
             using FnScroll = void(__thiscall*)(void* block);
+            using FnSetTextScale = void(__thiscall*)(void* block, float scale);
             using FnGameNew = void*(__cdecl*)(size_t size);
             using FnReadFile = int(__cdecl*)(const char* name, int* size, void* buffer, int capacity);
 
             bool g_Active = false;
             bool g_GaveUp = false;
-            uint32_t g_TextCtorAddr = 0, g_SetTextAddr = 0, g_ScrollUpAddr = 0, g_ScrollDownAddr = 0;
+            uint32_t g_TextCtorAddr = 0, g_SetTextAddr = 0, g_SetTextScaleAddr = 0, g_ScrollUpAddr = 0, g_ScrollDownAddr = 0;
             FnGameNew g_GameNew = nullptr;
             FnReadFile g_ReadFile = nullptr;
 
@@ -1385,7 +1387,16 @@ namespace BZROpenShim
                     memory, 0, "OpenShimDatabase_Text", kTextRect.x, kTextRect.y, kTextRect.w, kTextRect.h,
                     &OnScrollUp, &OnScrollDown, Shell::kControlFlags, panel);
                 if (block)
+                {
+                    // The block defaults to text scale 0.75. Its page reflow applies that scale
+                    // and the stride probe applies it again, so at 0.75 the probe overestimates
+                    // the lines a page shows and each page break skips lines (Docs/DATABASE_SCREEN.md
+                    // "Briefing scrolling"). 1.0 makes them agree; stock sets 1.0 on its own blocks
+                    // only when FUN_004344A0() == 2 (FUN_00792000 lines 212-213).
+                    reinterpret_cast<FnSetTextScale>(static_cast<uintptr_t>(g_SetTextScaleAddr))(
+                        block, kTextScale);
                     g_BzrFn_AddChild(panel, block, 0);
+                }
                 return block;
             }
 
@@ -1550,6 +1561,7 @@ namespace BZROpenShim
             const HookEngine::EngineRow rows[] = {
                 { "ScrollingTextBlockCtor", &g_TextCtorAddr },
                 { "ScrollingTextBlockSetText", &g_SetTextAddr },
+                { "ScrollingTextBlockSetTextScale", &g_SetTextScaleAddr },
                 { "ScrollingTextBlockScrollUp", &g_ScrollUpAddr },
                 { "ScrollingTextBlockScrollDown", &g_ScrollDownAddr },
             };

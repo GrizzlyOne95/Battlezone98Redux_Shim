@@ -6150,6 +6150,12 @@
       "identity": "cUI_ScrollingTextBlock scroll down, thiscall(), plain RET: ++[this+0x2958] then reflow (no clamp). cUI_Mission's page-down thunk 0x0078ED30 calls it."
     },
     {
+      "name": "ScrollingTextBlockSetTextScale",
+      "address": "0x007CCE50",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC F3 0F 10 80 44 29 00 00 0F 2E 45 08",
+      "identity": "cUI_TextBlock set text scale, thiscall(float scale), RET 4: when different, stores it at +0x2944 (ctor default 0.75, 0x007CCB70 line 9) and reflows 0x007CCFC0. The reflow multiplies the font scale by +0x2944 (0x007CCFC0 lines 112-113) before building the page 0x007CDD50, which calls the stride probe 0x007CCE90; the probe multiplies by +0x2944 again (0x007CCE90 lines 24-25), so at 0.75 it measures lines 0.75x as tall as the page trim and overestimates the stride (page k skips k*stride lines but shows fewer). At 1.0 the two agree. cUI_Mission (0x0078FD25/0x0078FE12), the archive and the mission-failed screen (0x00792000 lines 212-213, 1.0f) call it only when FUN_004344A0() == 2. The Database screen and the lobby Briefing overlay set 1.0 on their blocks; the ScrollingTextBlockCtor detour covers the stock ones."
+    },
+    {
       "name": "UiViewSetZOrder",
       "address": "0x007D3F20",
       "expected": "55 8B EC 83 EC 14 89 4D FC 8B 45 FC 8A 4D 08 88",
