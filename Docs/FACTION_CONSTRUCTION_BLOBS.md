@@ -144,15 +144,50 @@ a valid ODF and that faction lookup returns stock.
   end pointer in a `__finally` block.
 - **Memory.** No per-frame allocation and no layout change.
 
-## Reusing it for the portal blob
+## Portal blob
 
-The portal blob is `portblob.odf`. Redux PreLoad `FUN_006607f0` loads the `rpuff`/`bpuff`
-sprites, and the portal blob is a sibling emitter with the same shape. To reuse this feature
-for it:
+The same option also covers the portal blob, the puff a portal (`cbport`) draws while an object
+goes in or out. Optional keys in `portblob.odf`, section `[PortalBlob]`, mirror the stock
+in/out textures:
 
-1. Find the portal blob's vtable and its Control/Submit slots.
-2. Find its add site(s).
-3. Instantiate a second `BlobRenderPool`, with its own effect table read from `portblob.odf`.
+```ini
+[PortalBlob]
+blobInTexture  = "rpuff.0"         ; stock sprites: the fallback
+blobOutTexture = "bpuff.0"
+blobFrames     = 14
+blobVariance   = 3
+blobRender     = "portbl.render"   ; default for in and out (optional)
+blobInRender   = "portbli.render"  ; drawn where the stock uses blobInTexture
+blobOutRender  = ""                ; empty forces the stock out sprite
+```
 
-The parser, the pool and the backend (`CreateNative` / `UpdateNative` / `DetachNative`) are
-generic. This feature does not implement it.
+- The fallbacks match the construction keys: `blobInRender` / `blobOutRender` win even when
+  empty, otherwise `blobRender` applies, and an absent, empty, invalid or unresolvable name keeps
+  the stock sprite.
+- The slot is chosen from the in flag the stock code stored in the entry, so a render always
+  replaces the sprite Submit would have drawn there.
+- A build is one owner and call site: the object handle for the two Lua-driven portal effects,
+  or the portal itself for its own state-2 blob. Release, looping and logging work as above,
+  with `[PORTBLOB]` lines (`portal blob renders odf=... in=... out=...`).
+- Each emitter binds its engine rows on its own: if only one emitter's rows match the exe, only
+  that one is patched.
+
+### Portal engine side (GOG 2.2.301)
+
+| What | Address | Source |
+| --- | --- | --- |
+| PortalBlob vtable | `0x00891F04` | Decomp `FUN_006607c0` line 6 sets it; `scripts/audit_vtable_hooks.py` finds one copy of each hooked slot |
+| PreLoad, slot +0x08 | `0x006607F0` | Decomp `FUN_006607f0` lines 19-30: reads `portblob.odf` blobInTexture into `this+0x1AC`, blobOutTexture into `+0x1B0`, resets the end pointer `this+0x1A8` |
+| Control, slot +0x18 | `0x00660910` | Decomp `FUN_00660910` lines 5-9: index `+0x1B4` modulo `+0x1BC`, resets the end pointer to `this+0x28` |
+| Submit, slot +0x20 | `0x00660A80` | Decomp `FUN_00660a80` lines 28-61: draws 0x18-byte entries `this+0x28` up to `[this+0x1A8]`; in sprite when entry byte `+0x14` is set |
+| AddBlob | `0x00660960` | Decomp `FUN_00660960` lines 9-27: appends `{x,y,z,r,scale,in}` while the end pointer is below `this+0x1A8` (16 entries); `ret 0xC` |
+| Out effect call | `0x005CDC27` in `FUN_005CDBB0` | in=0; owner = handle at `[ebp+8]` (read by `8B 45 08 50` at +0x10, never written) |
+| In effect call | `0x005CDCB7` in `FUN_005CDC40` | in=1; owner = handle at `[ebp+8]` |
+| Portal update call | `0x00660265` in `FUN_00660080` | Decomp lines 74-125, state 2; in = `portal+0x248` (set by `FUN_00660570` line 16); owner = `this` stored at `[ebp-0x1C]` (`89 4D E4` at +0x10, reloaded by `8B 55 E4` at `0x00660246`) |
+
+These three are the only calls to AddBlob (Ghidra xrefs), each with `ecx` = the static
+PortalBlob `0x025F89E8`. Each call is REL32-wrapped through a small thunk that loads the owner
+from the caller's frame into `edx` and jumps to a `__fastcall` hook with the same stack
+arguments. The hook checks that the call targets the `PortalBlobAddBlob` row and sits at the
+checked offset inside its guarded caller row (+0x77, +0x77, +0x1E5); otherwise the stock call
+stays. The caller rows' `expected` bytes cover the frame accesses the thunks rely on.

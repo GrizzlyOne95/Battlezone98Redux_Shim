@@ -10,6 +10,10 @@
 // render (the muzzleRender kind, file.section) follows the blob instead.
 // Absent, empty or unresolved keys keep the stock sprite.
 //
+// The same option also drives the portal blob (portblob.odf [PortalBlob]):
+// blobRender (both sprites), blobInRender (replaces blobInTexture, rpuff) and
+// blobOutRender (replaces blobOutTexture, bpuff), with a second pool.
+//
 // The pure helpers here (parser, pool) are unit tested; the hooks live in
 // src/patches/construction_blob_faction.cpp. See
 // Docs/FACTION_CONSTRUCTION_BLOBS.md.
@@ -79,30 +83,35 @@ namespace BZROpenShim::ConstructionBlobFaction
         }
     }
 
-    struct RenderKeys
+    // Parsed render keys: key 0 is the default, keys 1..N-1 are per slot.
+    template<size_t N>
+    struct RenderKeysN
     {
-        std::array<std::string, kKeyCount> value{};
-        std::array<bool, kKeyCount> present{};
+        std::array<std::string, N> value{};
+        std::array<bool, N> present{};
 
-        // Effective render name for a faction slot (-1 = not a faction):
-        // its own key when present (even empty, which forces the stock
-        // sprite), else the blobRender default. Empty = stock sprite.
+        // Effective render name for a slot (-1 = no slot of its own): its
+        // own key when present (even empty, which forces the stock sprite),
+        // else the key-0 default. Empty = stock sprite.
         const std::string& For(int slot) const
         {
-            if (slot >= 0 && slot < static_cast<int>(kFactionCount) && present[1 + slot])
+            if (slot >= 0 && slot < static_cast<int>(N) - 1 && present[1 + slot])
                 return value[1 + slot];
             return value[0];
         }
     };
+    using RenderKeys = RenderKeysN<kKeyCount>;
 
-    // Reads blobRender and blobRenderA/S/C/B from [ConstructionBlob] of
-    // cnstblob.odf text. Values may be quoted; comments (; # //) outside
-    // quotes are ignored; the first NUL ends the text. An invalid name
-    // (spaces, quotes, over 63 characters) counts as present but empty, so
-    // that faction keeps the stock sprite rather than a guess.
-    inline RenderKeys ParseOdf(std::string_view text)
+    // Reads the given lower-case keys from one ODF section (lower-case name).
+    // Values may be quoted; comments (; # //) outside quotes are ignored; the
+    // first NUL ends the text. An invalid name (spaces, quotes, over 63
+    // characters) counts as present but empty, so that slot keeps the stock
+    // sprite rather than a guess.
+    template<size_t N>
+    inline RenderKeysN<N> ParseRenderKeys(std::string_view text, std::string_view sectionLower,
+                                          const char* const (&keys)[N])
     {
-        RenderKeys out;
+        RenderKeysN<N> out;
         text = text.substr(0, text.find('\0'));
         bool inSection = false;
         while (!text.empty())
@@ -134,7 +143,7 @@ namespace BZROpenShim::ConstructionBlobFaction
             if (line.front() == '[')
             {
                 inSection = line.back() == ']' &&
-                    Detail::EqualLower(Detail::Trim(line.substr(1, line.size() - 2)), "constructionblob");
+                    Detail::EqualLower(Detail::Trim(line.substr(1, line.size() - 2)), sectionLower);
                 continue;
             }
             const auto equals = line.find('=');
@@ -145,9 +154,9 @@ namespace BZROpenShim::ConstructionBlobFaction
             if (value.size() >= 2 && (value.front() == '"' || value.front() == '\'') &&
                 value.back() == value.front())
                 value = Detail::Trim(value.substr(1, value.size() - 2));
-            for (size_t k = 0; k < kKeyCount; ++k)
+            for (size_t k = 0; k < N; ++k)
             {
-                if (!Detail::EqualLower(key, kRenderKeys[k]))
+                if (!Detail::EqualLower(key, keys[k]))
                     continue;
                 out.present[k] = true;
                 if (Detail::ValidName(value))
@@ -159,9 +168,32 @@ namespace BZROpenShim::ConstructionBlobFaction
         return out;
     }
 
+    // blobRender and blobRenderA/S/C/B from [ConstructionBlob] of cnstblob.odf.
+    inline RenderKeys ParseOdf(std::string_view text)
+    {
+        return ParseRenderKeys(text, "constructionblob", kRenderKeys);
+    }
+
+    // Portal blob (portblob.odf [PortalBlob]): the stock emitter draws
+    // blobInTexture (rpuff) for an inward blob and blobOutTexture (bpuff)
+    // for an outward one. blobRender is the default for both;
+    // blobInRender / blobOutRender replace one sprite each.
+    inline constexpr size_t kPortalKeyCount = 3;
+    inline constexpr const char* kPortalRenderKeys[kPortalKeyCount] = {
+        "blobrender", "blobinrender", "bloboutrender" };
+    using PortalRenderKeys = RenderKeysN<kPortalKeyCount>;
+
+    // Slot for a portal blob entry's in flag (entry+0x14): 0 = in, 1 = out.
+    inline int PortalSlot(bool in) { return in ? 0 : 1; }
+
+    inline PortalRenderKeys ParsePortalOdf(std::string_view text)
+    {
+        return ParseRenderKeys(text, "portalblob", kPortalRenderKeys);
+    }
+
     // Pooled render instances, one per active build (owner + target). Pure
     // bookkeeping over a backend, so it is unit tested and reusable by other
-    // blob-like emitters (the portal blob). Storage slots live inside the
+    // blob-like emitters (the portal blob uses a second pool). Storage slots live inside the
     // pool, which is a static object in the runtime: the engine keeps a
     // back-reference to each slot and nulls it when a render dies, so the
     // slot address must stay valid for the life of the process.
@@ -313,17 +345,23 @@ namespace BZROpenShim::ConstructionBlobFaction
 
     // --- runtime (src/patches/construction_blob_faction.cpp) ---
 
-    // True for the five "Construction Blob Faction ..." patch rows.
+    // True for the "Construction Blob Faction ..." and "Portal Blob Render ..."
+    // patch rows.
     bool IsPatchName(const char* name);
     // Reads [Display] FactionConstructionBlobs (default off) and binds the
-    // engine rows and render helpers. False keeps every row out of the
-    // batch: stock bytes stay. Logs the decision once per change.
+    // engine rows and render helpers of each emitter (construction blob,
+    // portal blob) on its own. False for a row keeps it out of the batch:
+    // stock bytes stay. Logs each emitter's decision once per change.
     bool ShouldInstall();
+    // True when the row's emitter was bound by the last ShouldInstall().
+    bool ShouldInstallRow(const char* name);
     // Hook address for a DWORD vtable row, 0 for an unknown name.
     uint32_t DwordTarget(const char* name);
     // Hook address for a REL32 row once `original` (the call's current
-    // target) matches the expected engine routine; 0 leaves the stock call.
-    uint32_t Rel32Target(const char* name, void* original);
+    // target) matches the expected engine routine and `callSite` (address of
+    // the E8) sits where its caller's frame contract was checked; 0 leaves
+    // the stock call.
+    uint32_t Rel32Target(const char* name, void* original, uint32_t callSite);
     // Scene teardown seam: detach every pooled render while the world exists.
     void SceneTeardown() noexcept;
 }
