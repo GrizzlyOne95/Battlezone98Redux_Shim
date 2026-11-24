@@ -531,6 +531,25 @@ namespace BZROpenShim
             return selectNum > 0 && memberGroup < 0;
         }
 
+        // Which hint line the strip shows. Sort: an Offense/Defense/Utility
+        // list is open and the auto-group sort key works (the caller knows),
+        // so the strip lists every keyed group with "Y: group unassigned".
+        enum class HintKind
+        {
+            None,
+            Assign,
+            Sort,
+        };
+
+        inline HintKind ChooseHint(int selectNum, int memberGroup, bool sortKeyApplies)
+        {
+            if (HintMode(selectNum, memberGroup))
+                return HintKind::Assign;
+            if (sortKeyApplies && selectNum == 0 && memberGroup < 0)
+                return HintKind::Sort;
+            return HintKind::None;
+        }
+
         // Copies the entries the strip shows from all seven keyed groups (in
         // key order): every one in hint mode, else those with live members.
         // Returns the count.

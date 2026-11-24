@@ -58,6 +58,7 @@ namespace BZROpenShim
             case 0x12: return "Alt is a modifier";
             case 0x0D: return "Enter is a game key";
             case 0x1B: return "Esc is a game key";
+            case 0x59: return "Y is the auto-group sort key";
             default: return nullptr;
             }
         }

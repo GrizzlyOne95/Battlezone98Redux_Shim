@@ -741,6 +741,7 @@ openshim_ui:database_notes~Notes~~~~~~
 openshim_ui:database_no_briefing~No briefing found (%s).~~~~~~
 openshim_ui:database_title~DATABASE~~~~~~
 openshim_ui:database_button~DATABASE~~~~~~
+openshim_ui:groupstrip_sort_hint~Y: group unassigned~Y : grouper les non assignйs~Y: Unzugewiesene gruppieren~Y: agrupar sin asignar~Y: raggruppa non assegnati~Y: сгруппировать свободные~Y: agrupar nгo atribuнdos
 openshim_ui:groupstrip_assign_hint~Ctrl+F1-F7: assign~Ctrl+F1-F7 : assigner~Strg+F1-F7: zuweisen~Ctrl+F1-F7: asignar~Ctrl+F1-F7: assegna~Ctrl+F1-F7: назначить~Ctrl+F1-F7: atribuir
 openshim_ui:lan_err_redirect~A test redirect owns the server address.~Une redirection de test dйtient l'adresse du serveur.~Eine Testumleitung belegt die Serveradresse.~Una redirecciуn de prueba controla la direcciуn del servidor.~Un reindirizzamento di test occupa l'indirizzo del server.~Адрес сервера занят тестовым перенаправлением.~Um redirecionamento de teste controla o endereзo do servidor.
 openshim_ui:lan_err_private_ip~Enter a private numeric LAN IPv4 address (optional :port).~Saisissez une adresse IPv4 LAN privйe numйrique (:port facultatif).~Gib eine numerische private LAN-IPv4-Adresse ein (optional :Port).~Introduce una direcciуn IPv4 LAN privada numйrica (:puerto opcional).~Inserisci un indirizzo IPv4 LAN privato numerico (:porta facoltativa).~Введите числовой частный LAN-адрес IPv4 (порт :port необязателен).~Digite um endereзo IPv4 LAN privado numйrico (:porta opcional).

@@ -154,7 +154,51 @@ namespace BZROpenShim
             return ChoosePlacement(groups);
         }
 
-        // The unit a Recycler or Factory has just finished.
+        // The stock command-interface categories: MENU_ITEM {name, minSlot,
+        // maxSlot} at 0x008E7990 (ControlPanelMenuItems row). SelectType
+        // (FUN_004a6a50 lines 10-21) lists team slots min..max of an item,
+        // and a unit's slot comes from its class range (FUN_004db650 lines
+        // 14-23: GameObjectClass +0x13C/+0x140, -1/-1 = no slot). Only the
+        // first three items are auto-grouped; 3 is Nav Beacons and 4-7 are
+        // the single Recycler/Factory/Armory/Constructor slots 1-4.
+        constexpr int kCategoryCount = 3;
+        constexpr int kCategoryMinSlot[kCategoryCount] = { 5, 15, 25 };
+        constexpr int kCategoryMaxSlot[kCategoryCount] = { 14, 24, 34 };
+
+        // The menu item (0 Offense, 1 Defense, 2 Utility) whose slots hold a
+        // class range, or -1 when the range is outside all three (a
+        // producer's single slot, a nav beacon, no slot at all).
+        inline int CommandCategory(int minSlot, int maxSlot)
+        {
+            if (minSlot < 0 || maxSlot < minSlot)
+                return -1;
+            for (int c = 0; c < kCategoryCount; ++c)
+                if (minSlot >= kCategoryMinSlot[c] && maxSlot <= kCategoryMaxSlot[c])
+                    return c;
+            return -1;
+        }
+
+        inline const char* CategoryName(int category)
+        {
+            switch (category)
+            {
+            case 0: return "Offense";
+            case 1: return "Defense";
+            case 2: return "Utility";
+            }
+            return "none";
+        }
+
+        // The sort key works while one of the three category lists is on
+        // screen: ControlPanel currentItem 0-2, nothing selected (a selection
+        // shows the command menu instead) and no group member list open.
+        inline bool SortKeyApplies(bool active, int currentItem, int selectNum, int memberGroup)
+        {
+            return active && currentItem >= 0 && currentItem < kCategoryCount && selectNum == 0 && memberGroup < 0;
+        }
+
+        // The unit a Recycler or Factory has just finished (or one the sort
+        // key looks at).
         struct BuiltUnit
         {
             bool present = false;
@@ -167,6 +211,7 @@ namespace BZROpenShim
             bool canCommand = false;
             bool handleValid = false; // GetObj(GetHandle(unit)) == unit
             bool odfKnown = false;    // its ODF name could be read
+            int category = -1;        // CommandCategory of its class range
         };
 
         enum class BuiltUnitVerdict
@@ -179,6 +224,7 @@ namespace BZROpenShim
             Pilot,
             NotCraft,
             Building,
+            NotCommandCategory,
             NotCommandable,
             NoHandle,
             NoOdf,
@@ -200,6 +246,8 @@ namespace BZROpenShim
                 return BuiltUnitVerdict::Building;
             if (!unit.isCraft)
                 return BuiltUnitVerdict::NotCraft;
+            if (unit.category < 0)
+                return BuiltUnitVerdict::NotCommandCategory;
             if (!unit.canCommand)
                 return BuiltUnitVerdict::NotCommandable;
             if (!unit.handleValid)
@@ -221,6 +269,7 @@ namespace BZROpenShim
             case BuiltUnitVerdict::Pilot: return "pilot";
             case BuiltUnitVerdict::NotCraft: return "not a vehicle";
             case BuiltUnitVerdict::Building: return "building";
+            case BuiltUnitVerdict::NotCommandCategory: return "not an Offense/Defense/Utility unit";
             case BuiltUnitVerdict::NotCommandable: return "not commandable";
             case BuiltUnitVerdict::NoHandle: return "no handle";
             case BuiltUnitVerdict::NoOdf: return "ODF name unreadable";

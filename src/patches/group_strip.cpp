@@ -298,12 +298,14 @@ namespace BZROpenShim::Hooks
         }
 
         // ShimText may allocate on first use; nothing may throw out of here.
-        void CopyHintText(char (&out)[kHintChars])
+        void CopyHintText(Policy::HintKind kind, char (&out)[kHintChars])
         {
             out[0] = '\0';
             try
             {
-                const char* const text = ShimText("openshim_ui:groupstrip_assign_hint", "Ctrl+F1-F7: assign");
+                const char* const text = kind == Policy::HintKind::Sort
+                    ? ShimText("openshim_ui:groupstrip_sort_hint", "Y: group unassigned")
+                    : ShimText("openshim_ui:groupstrip_assign_hint", "Ctrl+F1-F7: assign");
                 if (text)
                     strncpy_s(out, text, _TRUNCATE);
             }
@@ -363,10 +365,13 @@ namespace BZROpenShim::Hooks
             int selectNum = 0;
             if (!ReadBytes(g_ControlPanelAddr + kSelectNumOffset, &selectNum, sizeof(selectNum)))
                 selectNum = 0;
-            snap.hint = Policy::HintMode(selectNum, memberGroup);
+            // The sort key lives in the rally window subclass (AutoGroupSortKeyApplies).
+            const Policy::HintKind hint = Policy::ChooseHint(
+                selectNum, memberGroup, selectNum == 0 && ProducerWindowSubclassed() && AutoGroupSortKeyApplies());
+            snap.hint = hint != Policy::HintKind::None;
             snap.count = Policy::SelectShown(all, snap.hint, snap.groups);
             if (snap.hint)
-                CopyHintText(snap.hintText);
+                CopyHintText(hint, snap.hintText);
             if (g_GaugePointsBound)
             {
                 bool ok = true;

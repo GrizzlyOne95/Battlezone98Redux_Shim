@@ -459,6 +459,38 @@ Only objects whose RTTI derives from `Craft` (`.?AVCraft@@`) are grouped, so
 powerups, camera pods and mines a producer builds are skipped ("not a
 vehicle").
 
+Only units of the stock command-interface categories Offense, Defense and
+Utility are grouped ("not an Offense/Defense/Utility unit" otherwise). The
+category is the engine's own: a class's team-slot range (GameObjectClass
+`+0x13C` min, `+0x140` max, read through the GetClass path) must lie inside
+one of the MENU_ITEM ranges 5-14, 15-24 or 25-34. A deployable Factory,
+Recycler or Armory in vehicle form is a Craft, so before this rule it was
+grouped (`F1 1xFactory`); its range is its single producer slot (1-4), so it
+is skipped now. Nav beacons (35-44) and classes with no range (-1) are
+skipped too. Scavengers stay excluded by their own rule even though their
+slots are Utility. **UNVERIFIED** which range each stock producer ODF
+carries; the skip line logs `class slots <min>-<max>`.
+
+### Sort key (Y)
+
+While auto-group is active (`AutoGroupNewUnits`, or `ExtendedUnitCap`), in
+single player, an Offense, Defense or Utility list is open (ControlPanel
+currentItem `+0x117C` is 0-2), nothing is selected (`+0x188` is 0) and no
+group member list is open, an unmodified **Y** groups every unit in that
+category the same way a newly built one would be. Units already in any of
+the ten groups stay where they are. The units are the team's slots in that
+MENU_ITEM range, the list the stock menu shows. Log:
+`[AUTOGROUP] sort <Category>: grouped N, already grouped M, skipped K, no group L`.
+
+Y is unbound in the stock `input.map` and in OpenShim's default keys
+(RallyKey V, RTS keys T/B/X/Z/J/C, numpad, Ctrl+Home/End); `RallyKey = Y`
+is refused. It is on the
+left hand next to the number row, so `1` then `Y` is one motion. The press
+is swallowed only when it sorted, and is ignored with Shift, Ctrl or Alt
+held, with the editor open or with a chat line focused. It is seen by the
+rally window subclass (`RallyWndProc`), which is installed whenever the
+rally hooks install, whatever `RallyPoints` says; no hook of its own.
+
 Skipped: other teams, a null unit, scavengers, constructors, pilots
 (RTTI name contains `Person`), buildings (class id 2), non-Craft objects, units that cannot be
 commanded, units whose ODF name cannot be read, and units already in any of
@@ -488,6 +520,7 @@ MP for v1.
 | Groups are saved | Mission save `FUN_005c7b90` line 118 calls `FUN_004a7440` (0x005C7E5D `mov ecx,0x978E20`), which writes `groupNum` (0x28 bytes) and `groupList` (0xE38 bytes) (lines 8-10). Load `FUN_005c7510` line 204 calls `FUN_004a73a0`; post-load `FUN_004a0160` lines 63-67 remaps the handles. |
 | Dead objects leave groups | GameObject cleanup `FUN_004db780` line 14 calls `FUN_004a0710`, which removes the handle from every group (lines 27-37). |
 | GameObjectClass at object `+0xF8` | `FUN_005ae660` lines 51-53 read the producer build list through `[this+0xF8]+0x608`. |
+| Command category = class team-slot range | MENU_ITEM table 0x008E7990 (row `ControlPanelMenuItems`): {name, min, max} for Offense 5-14, Defense 15-24, Utility 25-34, Nav 35-44, then single slots 1-4. SelectType `FUN_004a6a50` lines 10-21 lists slots min..max of an item. Slot assignment `FUN_004db650` lines 14-23: class `+0x13C`/`+0x140`, negative = slot -1, else FirstEmptySlot(min, max) `FUN_005e0f90`. The class ctor `FUN_004c12f0` lines 53-54 sets both to -1 (BZ 1.5 `GameObjectClass::categoryMin/categoryMax`). Read through the GetClass path, as `FUN_00464140` lines 15-18 do. |
 | Class id 2 = building | IsBuilding 0x006A0810 (`AI IsBuilding` row) opens with `cmp dword [class+0x1C], 2`. **UNVERIFIED** for craft: `odf_helpers.cpp` notes the `+0xF8` chain names a different class record for Craft. A misread only skips the unit (fails safe). |
 | ODF name | `TryGetCraftOdfName` (`engine_flames.cpp`), GetClass vtable path, class `+0x30` char[8]; same reader for the unit and each live member. |
 
@@ -502,7 +535,9 @@ Decompile paths are relative to the corpus directory named above.
   next empty group; a different ODF starts its own group; a hand-made mixed
   group is left alone; nothing ever lands in groups 8-10.
 - A scavenger, a constructor and a unit already bound to a group are not
-  added.
+  added. A deployable Factory or Armory built by the Recycler is not added
+  (log: `not an Offense/Defense/Utility unit`, class slots 2-2 or 3-3).
+- `1` then `Y` groups the ungrouped tanks; units already grouped stay.
 - Save and load keep the group.
 - The HUD group display (if any) shows the new member without a reselect.
 - Nothing happens in multiplayer or with the setting off.
@@ -544,6 +579,9 @@ row next to the scrap/pilot gauge, for example
   (`openshim_ui:groupstrip_assign_hint`) is drawn right of the strip, else
   under it, else not at all. Selection count: ControlPanel `+0x188`
   (`FUN_004a6a50.c` line 21).
+- While the auto-group sort key works (an Offense, Defense or Utility list
+  open, nothing selected; see "Sort key (Y)"), the same layout shows
+  `Y: group unassigned` (`openshim_ui:groupstrip_sort_hint`) instead.
 
 Threads: the world render tick (`LegacyWorldUpdateRenderQueueHook`, frame and
 game thread) takes a snapshot at 4 Hz: group counts, names, mixed flags and

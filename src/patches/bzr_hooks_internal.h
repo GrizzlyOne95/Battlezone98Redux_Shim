@@ -1465,6 +1465,9 @@ namespace BZROpenShim
         // Installs only the shared Recycler/Factory FinishBuild slot hook,
         // independent of the rally (used by AutoGroupNewUnits).
         bool EnsureProducerFinishBuildHook();
+        // True once the rally window subclass is in place (it carries the
+        // auto-group sort key), so the strip only hints a key that works.
+        bool ProducerWindowSubclassed();
 
         // --- Auto-group new units (auto_group_new_units.cpp) -------------------
         void InstallAutoGroupNewUnitsIfPossible();
@@ -1479,6 +1482,14 @@ namespace BZROpenShim
         bool AutoGroupCanPlace(const char* odf);
         // True once auto-group's hooks are installed (ExtendedUnitCap needs it).
         bool AutoGroupNewUnitsReady();
+        // The sort key (kAutoGroupSortVk, unmodified): while auto-group is
+        // active and an Offense/Defense/Utility list is open with nothing
+        // selected, every ungrouped unit in it is placed by the
+        // AutoGroupOnUnitBuilt rule. Game thread (the rally WndProc).
+        constexpr unsigned kAutoGroupSortVk = 'Y';
+        bool AutoGroupSortKeyApplies();
+        // Sorts the open category; false when the key does not apply.
+        bool AutoGroupSortOpenCategory();
 
         // --- Extended unit cap / group member list (offense_overflow.cpp) -------
         void InstallOffenseOverflowIfPossible();
