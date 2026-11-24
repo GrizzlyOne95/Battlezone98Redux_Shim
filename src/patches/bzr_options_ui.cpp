@@ -3033,6 +3033,10 @@ namespace BZROpenShim
         constexpr size_t kShimPseudoRowEffects = kShimSettingsRegistryCount + 9;
         constexpr size_t kShimPseudoRowBans = kShimSettingsRegistryCount + 10;
         constexpr size_t kShimPseudoRowRtsCommands = kShimSettingsRegistryCount + 11;
+        constexpr size_t kShimPseudoRowRtsOverlays = kShimSettingsRegistryCount + 12;
+        constexpr size_t kShimPseudoRowExperimental = kShimSettingsRegistryCount + 13;
+        constexpr size_t kShimPseudoRowPerformance = kShimSettingsRegistryCount + 14;
+        constexpr size_t kShimPseudoRowAiBehavior = kShimSettingsRegistryCount + 15;
         constexpr size_t kShimNoRow = static_cast<size_t>(-1);
         // Stock cUI_OptionsInput (key bindings), as the stock Input button uses.
         constexpr uint32_t kStockOptionsInputScreenId = 0x15;
@@ -3042,15 +3046,22 @@ namespace BZROpenShim
 
         constexpr size_t kShimSettingsCategoryCount =
             sizeof(kShimSettingsCategories) / sizeof(kShimSettingsCategories[0]);
-        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - 8;
-        constexpr size_t kShimReticleCategory = kShimSettingsCategoryCount - 8;
-        constexpr size_t kShimPaletteCategory = kShimSettingsCategoryCount - 7;
-        constexpr size_t kShimDamageCategory = kShimSettingsCategoryCount - 6;
-        constexpr size_t kShimFadingCategory = kShimSettingsCategoryCount - 5;
-        constexpr size_t kShimMetersCategory = kShimSettingsCategoryCount - 4;
-        constexpr size_t kShimRadarCategory = kShimSettingsCategoryCount - 3;
-        constexpr size_t kShimEffectsCategory = kShimSettingsCategoryCount - 2;
-        constexpr size_t kShimRtsCommandsCategory = kShimSettingsCategoryCount - 1;
+        // The nine hub categories come first; every subpage after them is reached from a link row.
+        constexpr size_t kShimSubpageCount = 12;
+        constexpr size_t kShimHubCategoryCount = kShimSettingsCategoryCount - kShimSubpageCount;
+        constexpr size_t kShimReticleCategory = kShimHubCategoryCount + 0;
+        constexpr size_t kShimPaletteCategory = kShimHubCategoryCount + 1;
+        constexpr size_t kShimDamageCategory = kShimHubCategoryCount + 2;
+        constexpr size_t kShimFadingCategory = kShimHubCategoryCount + 3;
+        constexpr size_t kShimMetersCategory = kShimHubCategoryCount + 4;
+        constexpr size_t kShimRadarCategory = kShimHubCategoryCount + 5;
+        constexpr size_t kShimEffectsCategory = kShimHubCategoryCount + 6;
+        constexpr size_t kShimRtsCommandsCategory = kShimHubCategoryCount + 7;
+        constexpr size_t kShimRtsOverlaysCategory = kShimHubCategoryCount + 8;
+        constexpr size_t kShimExperimentalCategory = kShimHubCategoryCount + 9;
+        constexpr size_t kShimPerformanceCategory = kShimHubCategoryCount + 10;
+        constexpr size_t kShimAiBehaviorCategory = kShimHubCategoryCount + 11;
+        static_assert(kShimHubCategoryCount == 9, "the hub is a 3x3 grid of nine tiles");
         // Category screen ids are kOptionsCategoryScreenIdBase + index, and src/engine/shell_screens.cpp
         // only treats kOptionsCategoryScreenIdCount consecutive ids as category screens.
         static_assert(kShimSettingsCategoryCount <= Shell::kOptionsCategoryScreenIdCount,
@@ -3077,6 +3088,11 @@ namespace BZROpenShim
         static_assert(std::size(kShimCategoryFixes) <= kShimCategoryMaxRows, "fix rows must fit the page");
         static_assert(std::size(kShimCategoryNetwork) <= kShimCategoryMaxRows, "network rows must fit the page");
         static_assert(std::size(kShimCategorySystem) <= kShimCategoryMaxRows, "system rows must fit the page");
+        static_assert(std::size(kShimCategoryRtsCommands) <= kShimCategoryMaxRows, "RTS command rows must fit the page");
+        static_assert(std::size(kShimCategoryRtsOverlays) <= kShimCategoryMaxRows, "RTS overlay rows must fit the page");
+        static_assert(std::size(kShimCategoryExperimental) <= kShimCategoryMaxRows, "experimental rows must fit the page");
+        static_assert(std::size(kShimCategoryPerformance) <= kShimCategoryMaxRows, "performance rows must fit the page");
+        static_assert(std::size(kShimCategoryAiBehavior) <= kShimCategoryMaxRows, "AI behavior rows must fit the page");
 
         // Hub geometry (HUB_LAYOUT).
         constexpr Shell::Rect kShimTitleRect = { 470.0f, 132.0f, 500.0f, 56.0f };
@@ -3171,6 +3187,14 @@ namespace BZROpenShim
                 return kShimPseudoRowBans;
             if (std::strcmp(label, kShimRowRtsCommands) == 0)
                 return kShimPseudoRowRtsCommands;
+            if (std::strcmp(label, kShimRowRtsOverlays) == 0)
+                return kShimPseudoRowRtsOverlays;
+            if (std::strcmp(label, kShimRowExperimental) == 0)
+                return kShimPseudoRowExperimental;
+            if (std::strcmp(label, kShimRowPerformance) == 0)
+                return kShimPseudoRowPerformance;
+            if (std::strcmp(label, kShimRowAiBehavior) == 0)
+                return kShimPseudoRowAiBehavior;
             for (size_t index = 0; index < kShimSettingsRegistryCount; ++index)
             {
                 if (std::strcmp(g_ShimSettingsRegistry[index].label, label) == 0)
@@ -3431,7 +3455,8 @@ namespace BZROpenShim
             if (row == kShimPseudoRowKeyBindings)
                 return ShimText("openshim_ui:value_edit", "Edit");
             if (row == kShimPseudoRowReticle || row == kShimPseudoRowPalette || row == kShimPseudoRowDamage || row == kShimPseudoRowFading || row == kShimPseudoRowMeters || row == kShimPseudoRowRadar || row == kShimPseudoRowMenuTheme || row == kShimPseudoRowEffects || row == kShimPseudoRowBans ||
-                row == kShimPseudoRowRtsCommands)
+                row == kShimPseudoRowRtsCommands || row == kShimPseudoRowRtsOverlays || row == kShimPseudoRowExperimental ||
+                row == kShimPseudoRowPerformance || row == kShimPseudoRowAiBehavior)
                 return ShimText("openshim_ui:value_open", "Open");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (ShimSettingUnavailableReason(setting))
@@ -3510,6 +3535,14 @@ namespace BZROpenShim
                 return ShimPseudoRowLabel(kShimRowBans);
             if (row == kShimPseudoRowRtsCommands)
                 return ShimPseudoRowLabel(kShimRowRtsCommands);
+            if (row == kShimPseudoRowRtsOverlays)
+                return ShimPseudoRowLabel(kShimRowRtsOverlays);
+            if (row == kShimPseudoRowExperimental)
+                return ShimPseudoRowLabel(kShimRowExperimental);
+            if (row == kShimPseudoRowPerformance)
+                return ShimPseudoRowLabel(kShimRowPerformance);
+            if (row == kShimPseudoRowAiBehavior)
+                return ShimPseudoRowLabel(kShimRowAiBehavior);
             return ShimSettingLabel(g_ShimSettingsRegistry[row]);
         }
 
@@ -3539,6 +3572,14 @@ namespace BZROpenShim
                 return ShimText("openshim_ui:row:BannedPlayers:desc", "Lists the players you have banned as host; Unban removes one immediately.");
             if (row == kShimPseudoRowRtsCommands)
                 return ShimText("openshim_ui:row:RTSCommands:desc", "Target your own units and buildings, mixed-selection command menus, area select, Hold and Build at Nav.");
+            if (row == kShimPseudoRowRtsOverlays)
+                return ShimText("openshim_ui:row:RTSOverlays:desc", "Build ghosts, power range, waypoint lines, producer badges, alerts, attack marks and range rings.");
+            if (row == kShimPseudoRowExperimental)
+                return ShimText("openshim_ui:row:Experimental:desc", "Features still being tested, plus crash dumps and the bug report zip.");
+            if (row == kShimPseudoRowPerformance)
+                return ShimText("openshim_ui:row:Performance:desc", "CPU and scheduling tunables for busy scenes. Rendering and timing only.");
+            if (row == kShimPseudoRowAiBehavior)
+                return ShimText("openshim_ui:row:AIBehavior:desc", "Single-player scavenger, turret, tank and artillery AI behaviour.");
             const ShimSettingDescriptor& setting = g_ShimSettingsRegistry[row];
             if (const char* reason = ShimSettingUnavailableReason(setting))
                 return reason;
@@ -3829,6 +3870,30 @@ namespace BZROpenShim
             {
                 DisarmShimSettingsAction();
                 Shell::RequestScreen(ui.screen, Shell::kBansScreenId);
+                return;
+            }
+            if (row == kShimPseudoRowRtsOverlays)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimRtsOverlaysCategory));
+                return;
+            }
+            if (row == kShimPseudoRowExperimental)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimExperimentalCategory));
+                return;
+            }
+            if (row == kShimPseudoRowPerformance)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimPerformanceCategory));
+                return;
+            }
+            if (row == kShimPseudoRowAiBehavior)
+            {
+                DisarmShimSettingsAction();
+                Shell::RequestScreen(ui.screen, Shell::kOptionsCategoryScreenIdBase + static_cast<uint32_t>(kShimAiBehaviorCategory));
                 return;
             }
             if (row == kShimPseudoRowRtsCommands)

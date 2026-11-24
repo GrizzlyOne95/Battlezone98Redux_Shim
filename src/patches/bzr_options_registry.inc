@@ -642,10 +642,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Legacy Tank AI", "SinglePlayer", "LegacyTankAi", nullptr, 0,
       kShimSettingsLegacyTankAiValues, kShimSettingsLegacyTankAiLabels, 3, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "1.4/TRO attack AI: units strafe around their target, and a unit shot while holding "
-      "position retreats. For older missions balanced around the less aggressive AI. "
-      "Choose all teams or only AI teams. Rocket tanks and turrets are unchanged. "
-      "An ODF can opt out with legacyAI = 0. Single player only." },
+      "1.4/TRO attack AI: units strafe their target; a unit shot while holding position "
+      "retreats. All teams or AI only. Rocket tanks and turrets are unchanged. "
+      "ODF legacyAI = 0 opts out. Single player only." },
     { "Howitzer Volley", "SinglePlayer", "AiWeaponMaskArtillery", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -654,9 +653,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Howitzer Approach", "SinglePlayer", "HowitzerAttackApproach", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "A howitzer you order to attack a target out of reach packs up, drives toward it, "
-      "and deploys and fires once in reach, instead of replying out of range. Your team "
-      "only. Single player only. Restart required." },
+      "An out-of-reach attack order makes your howitzer pack up, drive toward the target, "
+      "then deploy and fire once in reach. Your team only. Single player only. Restart "
+      "required." },
     { "AI Mine Volley", "SinglePlayer", "AiWeaponMaskMinelayer", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -666,9 +665,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
       "Honours the AI ODF keys engageRangeAI, weaponRangeMinAI, retargetPeriodAI and the "
-      "scrap pathing weights, gives bombers their weapon's range, and refreshes turret "
-      "range when weapons or charge change. Stock ODFs do not set these keys. "
-      "Single player only." },
+      "scrap pathing weights; bombers get their weapon's range. Stock ODFs set none of "
+      "these. Single player only." },
     // [Fixes] rather than [SinglePlayer], and it ships ON, so the
     // default index is "On" (0).
     { "AI Multi-Producer", "Fixes", "AiMultiProducerMakers", nullptr, 0,
@@ -681,51 +679,48 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::GlobalImprovement,
       "Allow explicit player attack orders against team-0 neutral objects. "
       "Diplomacy and autonomous targeting remain stock." },
-    // [Gameplay] like Attack Neutrals, but listed on the Controls page (the
-    // Gameplay page is full) because it is a key. Ships ON: default "On" (0).
+    // [Gameplay], listed on the Gameplay page. Ships ON: default "On" (0).
     { "Rally Points", "Gameplay", "ProducerRallyPoints", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "With a Recycler or Factory selected, V enters rally mode: aim like a Go order and "
-      "press the Reticle Command key (Space) to set its rally point; V again cancels, "
-      "Shift+V clears it. The key is rebindable in Input > RTS Actions (Rally Point). New "
-      "units from it drive there; scavengers and constructors do not. Single player, and co-op missions that allow it." },
-    // [Gameplay], Controls page next to Rally Points. Ships OFF: default "Off" (1).
+      "Pick a Recycler or Factory, press V, aim, press Space to set its rally point (V "
+      "cancels, Shift+V clears). Units drive there (not scavengers or constructors). "
+      "Single player; co-op if allowed." },
+    // [Gameplay], Controls page. Ships OFF: default "Off" (1).
     { "Auto Group", "Gameplay", "AutoGroupNewUnits", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Units your Recycler or Factory builds join a group on F1-F7: the first group where "
-      "every unit is the same type and there are fewer than 10, else the first empty group. "
-      "Scavengers, constructors and pilots are left out. Single player only." },
+      "New Recycler or Factory units join an F1-F7 group: the first same-type group under "
+      "10, else the first empty one. Scavengers, constructors and pilots are skipped. "
+      "Single player only." },
     // [Gameplay], Controls page next to Auto Group. Ships OFF: default "Off" (1).
     { "Extended Unit Cap", "Gameplay", "ExtendedUnitCap", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Build more than 10 offensive units. Past the 10 slots of the Offense menu, a new "
-      "unit is built only when it can join an F1-F7 group of its type with fewer than 10, "
-      "or an empty group; turns Auto Group on as well. Single player only." },
+      "Build more than 10 offensive units: past the 10 Offense slots, a unit builds only if "
+      "it can join a same-type F1-F7 group under 10, or an empty one. Turns Auto Group on "
+      "too. Single player only." },
     // [Gameplay], Controls page next to Extended Unit Cap. Ships ON: default "On" (0).
     { "Group Member Menu", "Gameplay", "GroupMemberMenu", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Press a group's F-key a second time to list its units on keys 1-0 in the unit menu. "
-      "With Ctrl held, the Offense, Defense and Utility labels read \"All ...\"; with "
-      "Extended Unit Cap on, Ctrl+Offense also selects grouped units past the 10 slots. "
-      "Single player only." },
+      "Press a group's F-key twice to list its units on keys 1-0. Ctrl turns Offense, "
+      "Defense and Utility into \"All ...\"; with Extended Unit Cap, Ctrl+Offense selects "
+      "grouped units. Single player only." },
     // [Gameplay], Controls page next to Auto Group. Ships ON: default "On" (0).
     { "Group Strip", "Gameplay", "GroupStrip", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
       "Shows each F1-F7 group that has units in a strip beside the scrap and pilot gauge: "
-      "the key, how many units are alive and the first unit's name, with + when the group "
-      "mixes types. Read only, so it also works in multiplayer." },
+      "key, live unit count and first unit's name (+ if types are mixed). Read only, so it "
+      "works in multiplayer too." },
     // [Gameplay], Controls page next to Group Strip. Ships OFF: default "Off" (1).
     { "Command Pings", "Gameplay", "RtsCommandPings", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Each order you give draws a short ring on the ground: green where units go, red "
-      "around an attack target (it follows the target), yellow for other orders. Only you "
-      "see it, so it also works in multiplayer." },
+      "Each order draws a short ground ring: green where units go, red around an attack "
+      "target (it follows), yellow for other orders. Only you see it, so it also works in "
+      "multiplayer." },
     // [Gameplay], HUD page next to Command Pings. Ships OFF: default "Off" (0).
     { "Radar Pings", "Gameplay", "RtsRadarPings", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
@@ -737,9 +732,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Artillery Range", "Gameplay", "RtsArtilleryRange", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Draws the maximum range on the ground around selected howitzers (not your own "
-      "vehicle), and a ring at the aim point: green when one of them "
-      "can reach it, red when none can. Only you see it, so it also works in multiplayer." },
+      "Draws the maximum range around selected howitzers (not your own vehicle) and a ring "
+      "at the aim point: green if one can reach it, red if none can. Only you see it, so it "
+      "works in multiplayer too." },
     // Native range rings for the selected own units (rts_markers.cpp,
     // Docs/RTS_RANGE_RINGS.md). Local draw only. All rings ship OFF; the label row switches the ring names for every kind.
     { "Weapon Range", "Gameplay", "RtsWeaponRange", nullptr, 0,
@@ -794,9 +789,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Quick Commands", "Gameplay", "RtsQuickCommands", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Numpad 1, 2, 3 and 5 order the selected units: Follow Me, Defend Me, Attack My Target (the "
-      "target you have locked) and Stop. Rebind them under Input > RTS Actions. Needs NumLock on. "
-      "Single player only." },
+      "Numpad 1, 2, 3 and 5 order the selected units: Follow Me, Defend Me, Attack My "
+      "Target (your locked target) and Stop. Rebind under Input > RTS Actions. Needs "
+      "NumLock. Single player only." },
     { "Build at Nav", "Gameplay", "RtsBuildAtNav", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -808,9 +803,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Build Ghost", "Gameplay", "RtsBuildGhost", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "While you place a building, a see-through copy of it shows where it will stand: green "
-      "when the spot is good, yellow without power, red when blocked. With Build at Nav, the Go "
-      "To Nav list also shows it at every nav. Only you see it." },
+      "Placing a building shows a see-through copy where it will stand: green if good, "
+      "yellow without power, red if blocked. With Build at Nav, the Go To Nav list shows it "
+      "at every nav. Only you see it." },
     { "Pending Build Ghost", "Gameplay", "RtsPendingBuildGhost", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -855,9 +850,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Satellite Follow", "Gameplay", "RtsFollowCamera", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::GlobalImprovement,
-      "In the satellite view, Shift+C keeps the view centred on your first selected unit (or "
-      "your own vehicle when none is selected) as it moves. Shift+C again, or leaving the "
-      "satellite view, stops it. Only your camera moves." },
+      "In satellite view, Shift+C keeps the view centred on your first selected unit (or "
+      "your vehicle) as it moves; Shift+C again or leaving satellite view stops it. Only "
+      "your camera moves." },
     { "Attack Marks", "Gameplay", "RtsAttackMarks", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
@@ -866,21 +861,21 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Queue Orders", "Gameplay", "RtsOrderQueue", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Hold Shift: the Space and Alt command labels read "
-      "Queue plus the order, and pressing the key adds the order to the end of each selected unit's "
-      "queue (8 deep) instead of replacing its orders. Single player only." },
+      "Hold Shift: the Space and Alt command labels read Queue plus the order, and the key "
+      "adds it to the end of each selected unit's queue (8 deep) instead of replacing its "
+      "orders. Single player only." },
     { "Build Queue", "Gameplay", "RtsBuildQueue", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Picking an item while your Recycler or a Factory is busy adds it to a queue (10 deep) "
-      "that builds one after another. Shift+pick removes the last queued copy of that item. "
-      "Scrap is charged when each item starts. Single player only." },
+      "Picking an item while your Recycler or Factory is busy queues it (10 deep) to build "
+      "in order. Shift+pick removes the last queued copy. Scrap is charged as each item "
+      "starts. Single player only." },
     { "Unit Loadouts", "Gameplay", "UnitLoadouts", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::GlobalImprovement,
-      "Alt+pick a unit in your Recycler or Factory menu to choose its weapons from what your Armory "
-      "offers. Each changed slot adds that weapon's full Armory price to the build cost. Kept for the "
-      "mission only. Needs [ProducerBuildMenus] Enabled = 1. Single player only." },
+      "Alt+pick a unit in a Recycler or Factory menu to choose Armory weapons; "
+      "each changed slot adds its Armory price. This mission only. Needs [ProducerBuildMenus] "
+      "Enabled = 1. Single player only." },
     { "Global Turbo", "SinglePlayer", "Turbo", nullptr, 0,
       kShimSettingsTurboValues, kShimSettingsTurboLabels, 4, 0,
       ShimSettingApplyGroup::GlobalTurbo,
@@ -964,7 +959,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "APC Allied Deploy", "Fixes", "ApcAlliedTargetDeploy", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
-      "With an allied unit targeted, an APC still deploys its soldiers near valid enemies instead of ignoring the order. Stock only deploys on an enemy target, where the soldiers attack it. Single player only. Restart required." },
+      "With an allied unit targeted, an APC still deploys its soldiers near valid enemies "
+      "instead of ignoring the order. Stock deploys only on an enemy target. Single player "
+      "only. Restart required." },
     { "Splinter Fix", "Fixes", "SplinterUndead", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -1163,9 +1160,9 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Bug Report Zip", nullptr, nullptr, nullptr, 0,
       kShimSettingsBuildValues, kShimSettingsBuildValues, 2, 0,
       ShimSettingApplyGroup::TroubleshootingBundle,
-      "Pack the logs, settings and newest crash dump into one zip in the game's logs folder "
-      "for a bug report. Traces and the dump can hold player names, addresses and session "
-      "data, so send it privately. It is built in the background and named here when ready." },
+      "Pack the logs, settings and newest crash dump into one zip in the logs folder. They "
+      "can hold player names and addresses, so send it privately. Built in the background; "
+      "named here when ready." },
     { "Crash Dumps", "Diagnostics", "CrashMinidumps", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
