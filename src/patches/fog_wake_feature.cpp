@@ -32,6 +32,8 @@ namespace BZROpenShim
         Runtime g_Runtime;
         bool g_BankPlaced = false;
         bool g_Running = false;
+        bool g_StoppedSinceStart = false;
+        unsigned g_BankGeneration = 0;
 
         bool ReadEnabledSetting()
         {
@@ -50,7 +52,7 @@ namespace BZROpenShim
             if (g_Enabled.load(std::memory_order_relaxed))
             {
                 LogShimA(LogLevel::Info, kComponent,
-                    "[FOGWAKE] simulation enabled; no rendering in this build");
+                    "[FOGWAKE] simulation enabled; in-shader ground fog on DX11 Enhanced only");
             }
         }
 
@@ -82,6 +84,7 @@ namespace BZROpenShim
             }
 
             g_Runtime.BeginSession(NowSeconds());
+            ++g_BankGeneration;
             LogShimA(LogLevel::Info, kComponent,
                 "[FOGWAKE] bank placed origin=(%.1f, %.1f) size=%.0fm cell=%.1fm",
                 config.field.origin.x, config.field.origin.z,
@@ -102,6 +105,7 @@ namespace BZROpenShim
             return;
 
         g_Running = running;
+        g_StoppedSinceStart = !running;
         if (running)
         {
             // The next emitter re-places the bank: a new mission is a new world.
@@ -131,14 +135,55 @@ namespace BZROpenShim
         g_Runtime.Observe(emitter, position, NowSeconds());
     }
 
+    bool FogWakePlaceBankIfAbsent(float worldX, float worldZ)
+    {
+        // Not gated on g_Running: a command-line mission launch (lcbench)
+        // never sees the RUN_STARTED edge, so that gate kept quiet scenes
+        // fog-free. Only a seen stop blocks it, until the next start, so a
+        // transition never latches the bank to the old world's player.
+        if (!FogWakeFeatureEnabled() || g_BankPlaced || g_StoppedSinceStart)
+            return false;
+        if (!std::isfinite(worldX) || !std::isfinite(worldZ))
+            return false;
+        if (PlaceBank(Point{ static_cast<double>(worldX), static_cast<double>(worldZ) }))
+            g_BankPlaced = true;
+        return g_BankPlaced;
+    }
+
+    bool FogWakeGetRenderView(FogWakeRenderView& out)
+    {
+        if (!FogWakeFeatureEnabled() || !g_BankPlaced || !g_Runtime.Enabled())
+            return false;
+        const auto& field = g_Runtime.GetField();
+        const auto& settings = field.Settings();
+        const auto& cells = field.Clearance();
+        if (cells.size() != settings.width * settings.height || cells.empty())
+            return false;
+        out.clearance = cells.data();
+        out.width = static_cast<unsigned>(settings.width);
+        out.height = static_cast<unsigned>(settings.height);
+        out.originX = settings.origin.x;
+        out.originZ = settings.origin.z;
+        out.cellSize = settings.cellSize;
+        out.steps = g_Runtime.GetStats().steps;
+        out.bankGeneration = g_BankGeneration;
+        return true;
+    }
+
     void FogWakeRenderFrameTick()
     {
-        if (!FogWakeFeatureEnabled() || !g_BankPlaced)
+        if (!FogWakeFeatureEnabled())
             return;
+        if (!g_BankPlaced)
+        {
+            FogWakeShaderFrameTick(false);
+            return;
+        }
 
         // Called once per camera. The runtime steps a fixed cadence off this
         // clock, so the extra calls are no-ops rather than extra simulation.
         // No wind source is wired yet; transport is deliberately still.
         g_Runtime.AdvanceTo(NowSeconds(), Point{});
+        FogWakeShaderFrameTick(true);
     }
 }

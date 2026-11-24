@@ -732,6 +732,139 @@ void compute_enhanced_atmosphere(
         OSE_ATMOS_EMISSIVE_TRANSMISSION);
 }
 
+// ---------------------------------------------------------------------------
+// Interactive fog wakes: in-shader ground mist (spike; keep identical in
+// openshim_enhanced_terrain-sm4.hlsl and openshim_enhanced_base-sm4.hlsl).
+// src/patches/fog_wake_shader.cpp binds both textures directly at t32/t33
+// once per camera, only while [Experimental] InteractiveFogWakes is on under
+// DX11. Unbound slots read zero, so the magic check keeps the term off.
+//   params texel 0: magic, density per metre, time (s), mist top (m)
+//   params texel 1: camera in bank space (x, y above height min, z), scale height
+//   params texel 2: bank size x, size z (m), height range (m), edge fade (m)
+//   params texel 3: cells x, cells z, near fade (m), far distance (m)
+//   params texel 4: debug flag, lit-colour mix, 0, 0
+//   bank: R = clearance (0 fog, 1 cleared), G = terrain height / range
+// Bank space is sim world: x right, y up, z = -render z.
+// ---------------------------------------------------------------------------
+#if defined(ENHANCED_MODE) && !defined(VERTEX_LIGHTING)
+#define OSE_FOG_WAKES_DECLARED 1
+#define OSE_FOG_WAKE_MAGIC 4096.25
+#define OSE_FOG_WAKE_STEPS 8
+Texture2D<float4> oseFogWakeParams : register(t32);
+Texture2D<float4> oseFogWakeBank : register(t33);
+
+float2 ose_fog_wake_bank(float2 cellCoord, float2 cells)
+{
+    float2 c = cellCoord - 0.5;
+    float2 base = floor(c);
+    float2 f = c - base;
+    int2 maxCell = int2(cells) - 1;
+    int2 i0 = clamp(int2(base), int2(0, 0), maxCell);
+    int2 i1 = clamp(int2(base) + 1, int2(0, 0), maxCell);
+    float2 a = oseFogWakeBank.Load(int3(i0.x, i0.y, 0)).rg;
+    float2 b = oseFogWakeBank.Load(int3(i1.x, i0.y, 0)).rg;
+    float2 d = oseFogWakeBank.Load(int3(i0.x, i1.y, 0)).rg;
+    float2 e = oseFogWakeBank.Load(int3(i1.x, i1.y, 0)).rg;
+    return lerp(lerp(a, b, f.x), lerp(d, e, f.x), f.y);
+}
+
+float ose_fog_wake_hash(float2 p)
+{
+    return frac(sin(dot(p, float2(127.1, 311.7))) * 43758.5453);
+}
+
+float ose_fog_wake_noise(float2 p)
+{
+    float2 i = floor(p);
+    float2 f = p - i;
+    f = f * f * (3.0 - 2.0 * f);
+    float a = ose_fog_wake_hash(i);
+    float b = ose_fog_wake_hash(i + float2(1.0, 0.0));
+    float c = ose_fog_wake_hash(i + float2(0.0, 1.0));
+    float d = ose_fog_wake_hash(i + float2(1.0, 1.0));
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+
+// Transmittance of the ground mist between the camera and this pixel.
+float ose_fog_wake_transmittance(float3 viewPos, float4x4 invView)
+{
+    float4 p0 = oseFogWakeParams.Load(int3(0, 0, 0));
+    if (abs(p0.x - OSE_FOG_WAKE_MAGIC) > 0.01 || p0.y <= 0.0)
+        return 1.0;
+    float4 p1 = oseFogWakeParams.Load(int3(1, 0, 0));
+    float4 p2 = oseFogWakeParams.Load(int3(2, 0, 0));
+    float4 p3 = oseFogWakeParams.Load(int3(3, 0, 0));
+
+    float3 ray = mul(invView, float4(viewPos, 0.0)).xyz;
+    ray.z = -ray.z;
+    float3 cam = p1.xyz;
+    float rayLength = length(ray);
+    if (rayLength < 1.0e-3)
+        return 1.0;
+
+    // Clip the camera-to-pixel segment (t in [0,1]) to the bank box and to
+    // the far distance.
+    float3 boxMax = float3(p2.x, p2.z + p0.w, p2.y);
+    float3 safeRay = float3(
+        abs(ray.x) < 1.0e-5 ? 1.0e-5 : ray.x,
+        abs(ray.y) < 1.0e-5 ? 1.0e-5 : ray.y,
+        abs(ray.z) < 1.0e-5 ? 1.0e-5 : ray.z);
+    float3 invRay = 1.0 / safeRay;
+    float3 tA = (float3(0.0, 0.0, 0.0) - cam) * invRay;
+    float3 tB = (boxMax - cam) * invRay;
+    float3 tNear = min(tA, tB);
+    float3 tFar = max(tA, tB);
+    float tMin = max(max(max(tNear.x, tNear.y), tNear.z), 0.0);
+    float tMax = min(min(min(tFar.x, tFar.y), tFar.z), 1.0);
+    tMax = min(tMax, p3.w / rayLength);
+    if (tMax <= tMin)
+        return 1.0;
+
+    // Samples bunch towards the surface end, where the mist that hugs this
+    // pixel's ground (and the wake carved through it) lives.
+    float span = tMax - tMin;
+    float jitter = ose_fog_wake_hash(viewPos.xy * 0.37 + viewPos.z);
+    float opticalDepth = 0.0;
+    [unroll]
+    for (int i = 0; i < OSE_FOG_WAKE_STEPS; ++i)
+    {
+        float s0 = (float)i / OSE_FOG_WAKE_STEPS;
+        float s1 = (float)(i + 1) / OSE_FOG_WAKE_STEPS;
+        float s = lerp(s0, s1, jitter);
+        float t = tMax - span * s * s;
+        float dt = span * (s1 * s1 - s0 * s0);
+        float3 p = cam + ray * t;
+
+        float2 bank = ose_fog_wake_bank(p.xz / p2.xy * p3.xy, p3.xy);
+        float height = p.y - bank.y * p2.z;
+        float above = max(height, 0.0);
+        float profile = exp(-above / max(p1.w, 0.1)) * saturate((p0.w - above) / (0.35 * p0.w));
+        profile *= saturate(height * 2.0 + 1.0);
+        float edge = saturate(min(min(p.x, p2.x - p.x), min(p.z, p2.y - p.z)) / max(p2.w, 1.0));
+        float distanceAlong = t * rayLength;
+        float nearFade = saturate(distanceAlong / max(p3.z, 0.1));
+        float farFade = saturate((p3.w - distanceAlong) / (0.35 * p3.w));
+        float drift = ose_fog_wake_noise(p.xz * 0.045 + float2(p0.z * 0.021, p0.z * 0.013));
+        float body = 0.55 + 0.45 * drift;
+        float density = p0.y * profile * (1.0 - bank.x) * body * edge * nearFade * farFade;
+        opticalDepth += density * dt * rayLength;
+    }
+    return exp(-opticalDepth);
+}
+
+// Mist colour: lit by ambient and sun so it still reads on dark-sky maps where
+// the atmosphere colour is near black. Texel 4: x = debug (paint magenta),
+// y = how much of the lit grey to mix in over the atmosphere colour.
+float3 ose_fog_wake_colour(float3 atmosphereColour, float3 ambient, float3 sun)
+{
+    float4 p4 = oseFogWakeParams.Load(int3(4, 0, 0));
+    if (p4.x > 0.5)
+        return float3(1.0, 0.0, 1.0);
+    float3 lit = saturate(ambient + sun * 0.45) * 0.85;
+    return lerp(atmosphereColour, max(lit, atmosphereColour), saturate(p4.y));
+}
+#endif
+
 // Legacy Blinn-Phong exponent n maps to GGX alpha = sqrt(2 / (n + 2)) (Walter et al.;
 // BZCC's object shaders use exactly this). distribution_ggx squares its roughness
 // input into alpha, so return perceptual roughness = sqrt(alpha).
@@ -1769,6 +1902,18 @@ void base_fragment(
         atmosphereColour,
         surfaceTransmission,
         emissiveTransmission);
+
+#if defined(OSE_FOG_WAKES_DECLARED)
+    // Interactive fog wakes: ground mist sits inside the existing atmosphere,
+    // so distant mist is attenuated by it like any other surface colour.
+    float fogWakeTransmittance = ose_fog_wake_transmittance(viewPos, inverseViewMatrix);
+    if (fogWakeTransmittance < 1.0)
+    {
+        float3 fogWakeColour = ose_fog_wake_colour(atmosphereColour, sceneAmbient.xyz, lightDiffuse[0].xyz);
+        oColor.xyz = lerp(fogWakeColour, oColor.xyz, fogWakeTransmittance);
+        emissiveContribution *= fogWakeTransmittance;
+    }
+#endif
 
     float surfaceLuminance = luminance_legacy(oColor.xyz);
     float3 aerialSurface = lerp(

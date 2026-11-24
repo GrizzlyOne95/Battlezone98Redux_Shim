@@ -151,6 +151,87 @@ What a real renderer would need:
 - far lower density with distance fade
 - per-pixel height relative to the terrain, not sheet geometry
 
+## In-shader spike
+
+Draft branch `agent/fog-wake-inshader-spike`. It replaces the world sheets with
+a short ray-march inside the DX11 Enhanced per-pixel fog. It is a spike, not a
+shipping feature.
+
+How it works:
+
+- Both `openshim_enhanced_terrain-sm4.hlsl` and `openshim_enhanced_base-sm4.hlsl`
+  get the same block. It marches 6 samples along the eye ray, clipped to the
+  bank box and to the scene depth.
+- Density is `base * exp(-(y - terrainY) / H) * (1 - clearance) * noise`, with
+  edge and near fades. `H` is 1.4 m, the top is 6 m and the far limit is 220 m.
+- The mist colour mixes the atmosphere colour with a lit colour (ambient plus
+  sun, mix 0.7). The atmosphere colour alone is near black on moon maps, which
+  hid the mist in the first live run.
+- `src/patches/fog_wake_shader.cpp` binds two textures with
+  `PSSetShaderResources(32, 2)`. Slot t32 is a 5x1 RGBA32F parameter strip.
+  Slot t33 is the 256x256 R16G16 bank: R holds clearance and G holds normalized
+  terrain height. A magic value in texel 0 gates the effect, so an unbound slot
+  reads 0 and the effect is off.
+- It is off unless `[Experimental] InteractiveFogWakes` is on, and it runs on
+  DX11 Enhanced only. Any other renderer fails closed.
+- The texture upload, device-loss handling and bank placement come from the
+  old spike. The ManualObject sheets are gone.
+- When no mission start has been seen (for example on a command-line `lcbench`
+  launch), the bank is placed around the player. It is not placed after a
+  mission stop.
+- Tuning comes from environment variables: `OPENSHIM_FOGWAKE_DENSITY`,
+  `_SCALE_HEIGHT`, `_FAR` and `_LIT_MIX`. `OPENSHIM_FOGWAKE_DEBUG=1` paints the
+  mist magenta.
+
+FPS on `lcbench` (DX11, 1600x900 windowed, background launch). Each figure is
+the mean of the `[SOAK]` 5 s heartbeats after skipping the first three
+(n=14).
+
+| Arm | Off | On | Change |
+|-----|----:|---:|-------:|
+| Quiet | 236.4 | 205.5 | -13% (~0.6 ms) |
+| 20 hover tanks moving | 177.1 | 163.1 | -8% (~0.5 ms) |
+
+The quiet-off figure looks capped near 237-238. The movement-off run was
+noisy, with dips to 122 and 97, so both moving figures are rough. The
+movement-on run used the build from before the placement fix, but its log
+shows the bank was placed.
+
+Frames (640x360):
+
+| | Off | On |
+|-|-----|----|
+| Quiet | ![quiet off](images/fog_wakes/inshader_quiet_off.png) | ![quiet on](images/fog_wakes/inshader_quiet_on.png) |
+| Tanks | ![tanks off](images/fog_wakes/inshader_tanks_off.png) | ![tanks on](images/fog_wakes/inshader_tanks_on.png) |
+
+Debug colour, with tanks: ![debug](images/fog_wakes/inshader_tanks_debug.png)
+
+Verdict:
+
+- The render path works. There is no horizon white-out, terrain clipping or
+  sorting issue, and the mist follows the slopes.
+- It does not read as a low ground layer. Because the layer hugs the terrain
+  everywhere, every hillside in view is milky. The scene reads as a general
+  haze, and contrast drops.
+- Wakes do not read. The debug view shows only faint holes near the tanks, not
+  a trail at 30-80 m. The camera sits about 2.4 m up, inside the layer, so the
+  mist in the foreground swamps the cleared cells further out.
+
+Open problems before this could ship:
+
+- A trail needs either a thinner layer, so the camera sits above it, or a
+  clearance-weighted contrast term. Density tuning alone will not fix it.
+- Density should fall off with slope or local relief, so hills are not hazed.
+- There is no temporal accumulation, so 6-sample noise can crawl.
+- The `fmod` time wrap makes the noise jump.
+- The main-camera check uses `getCurrentViewport`. Its behaviour with other
+  viewports has not been verified.
+- The `ClearState` interaction with the t32/t33 bind has not been verified.
+- A command-line `lcbench` launch never raises the mission-start edge. The
+  player placement path works around this.
+- The DXBC seed pack (`tools/build_dxbc_seed.py`) must be rebuilt before any
+  merge. Without it, Enhanced players get cold shader compiles.
+
 ## Planned runtime contract
 
 1. OpenShim owns a capability-gated runtime and all GPU resources. EXU will
