@@ -214,6 +214,7 @@
     <ClCompile Include="src\patches\diag_jump_snipe_probe.cpp" />
     <ClCompile Include="src\patches\diag_mpauth_trace.cpp" />
     <ClCompile Include="src\patches\diag_vehicle_skinning.cpp" />
+    <ClCompile Include="src\patches\construction_blob_faction.cpp" />
     <ClCompile Include="src\patches\engine_flames.cpp" />
     <ClCompile Include="src\patches\game_object_helpers.cpp" />
     <ClCompile Include="src\patches\global_feature_config.cpp" />

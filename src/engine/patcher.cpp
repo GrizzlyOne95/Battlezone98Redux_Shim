@@ -32,6 +32,7 @@
 #include "deferred_modable_rebuild.h"
 #include "mp_lives_infinite.h"
 #include "gas_copy_pool.h"
+#include "construction_blob_faction.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -585,6 +586,9 @@ namespace BZROpenShim
         TryGetUserConfigBool("SinglePlayer", "MeshRecoil", meshRecoil);
         if (!ShouldEnableShellCasings() && !muzzleFlash && !meshRecoil) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsShellCasingPatchName(p.name.c_str()); }), patches.end());
+        }
+        if (!ConstructionBlobFaction::ShouldInstall()) {
+            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return ConstructionBlobFaction::IsPatchName(p.name.c_str()); }), patches.end());
         }
         if (!ShouldEnablePathBlockFaces()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsPathBlockFacesPatchName(p.name.c_str()); }), patches.end());
@@ -1416,6 +1420,13 @@ namespace BZROpenShim
                 SetDamageFlagsOriginal(original);
                 target = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(DamageRevealProbeHook));
             }
+            else if (ConstructionBlobFaction::IsPatchName(p.name.c_str())) {
+                void* original = isSteam
+                    ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
+                    : HookEngine::ResolveRelCallTarget(p.address - 1);
+                target = ConstructionBlobFaction::Rel32Target(p.name.c_str(), original);
+                if (!target) continue;
+            }
             else if (p.name == "Splinter Emitter Owner Propagation") {
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
@@ -1531,6 +1542,7 @@ namespace BZROpenShim
             if (p.name.find("Main Menu") != std::string::npos) val = tag;
             else if (p.name == "Engine Flame Control VTable Hook") val = flameC;
             else if (p.name == "Engine Flame Submit VTable Hook") val = flameS;
+            else if (ConstructionBlobFaction::IsPatchName(p.name.c_str())) val = ConstructionBlobFaction::DwordTarget(p.name.c_str());
             else if (p.name == "Chunk Effect Simulate VTable Hook") val = chunkE;
             else if (p.name == "Legacy World Update RenderQueue VTable Hook") val = legacyRQ;
             else if (p.name == "HUD 2D Depth Floor Margin") val = depthFloorScale;
