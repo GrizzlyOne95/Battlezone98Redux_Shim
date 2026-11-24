@@ -241,6 +241,10 @@ namespace
         Check(HintMode(2, -1), "a selection with no member list shows the hint");
         Check(!HintMode(0, -1), "nothing selected: no hint");
         Check(!HintMode(2, 1), "an open member list hides the hint");
+        Check(ChooseHint(2, -1, true) == HintKind::Assign, "a selection keeps the assign hint");
+        Check(ChooseHint(0, -1, true) == HintKind::Sort, "an open category list shows the sort hint");
+        Check(ChooseHint(0, -1, false) == HintKind::None, "no sort key: no hint");
+        Check(ChooseHint(0, 2, true) == HintKind::None, "a member list hides the sort hint");
 
         StripGroup all[kKeyedGroupCount];
         for (int i = 0; i < kKeyedGroupCount; ++i)

@@ -224,7 +224,35 @@ namespace
         u.canCommand = true;
         u.handleValid = true;
         u.odfKnown = true;
+        u.category = 0;
         return u;
+    }
+
+    void TestCategory()
+    {
+        Check(CommandCategory(5, 14) == 0, "offense class range");
+        Check(CommandCategory(15, 24) == 1, "defense class range");
+        Check(CommandCategory(25, 34) == 2, "utility class range");
+        Check(CommandCategory(7, 9) == 0, "a narrower range inside offense is offense");
+        Check(CommandCategory(2, 2) == -1, "the Factory single slot is no category");
+        Check(CommandCategory(1, 1) == -1 && CommandCategory(3, 3) == -1 && CommandCategory(4, 4) == -1,
+              "Recycler, Armory and Constructor single slots are no category");
+        Check(CommandCategory(35, 44) == -1, "nav beacons are not grouped");
+        Check(CommandCategory(-1, -1) == -1, "a class with no slot range");
+        Check(CommandCategory(10, 20) == -1, "a range spanning two categories");
+        Check(CommandCategory(14, 5) == -1, "an inverted range");
+        Check(CommandCategory(14, 15) == -1 && CommandCategory(34, 35) == -1, "ranges across a category edge");
+        Check(CommandCategory(14, 14) == 0 && CommandCategory(25, 25) == 2, "single slots at the edges");
+        Check(std::strcmp(CategoryName(1), "Defense") == 0 && std::strcmp(CategoryName(5), "no slot range") == 0,
+              "category names");
+
+        Check(SortKeyApplies(true, 0, 0, -1) && SortKeyApplies(true, 2, 0, -1), "offense and utility lists");
+        Check(!SortKeyApplies(false, 0, 0, -1), "feature off");
+        Check(!SortKeyApplies(true, -1, 0, -1), "no menu open");
+        Check(!SortKeyApplies(true, 3, 0, -1), "the nav menu");
+        Check(!SortKeyApplies(true, 4, 0, -1), "a producer item");
+        Check(!SortKeyApplies(true, 1, 2, -1), "a selection shows the command menu");
+        Check(!SortKeyApplies(true, 1, 0, 3), "a member list is open");
     }
 
     void TestBuiltUnit()
@@ -252,6 +280,26 @@ namespace
         u.isBuilding = true;
         Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Building, "building skipped");
         u = Eligible();
+        u.category = -1; // a deployable Factory or Recycler in vehicle form
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::NotCommandCategory, "producer craft skipped");
+        u.canCommand = false;
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::NotCommandCategory, "category is checked before commandable");
+        u = Eligible();
+        u.category = -1;
+        u.noSlotRange = true; // a CR "hover" or "sav" craft: no class range
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Group, "a craft with no slot range is grouped as before");
+        u.isProducer = true;
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::NotCommandCategory, "a producer with no slot range is skipped");
+        Check(IsProducerClassSig(0x52435943u) && IsProducerClassSig(0x46414354u) &&
+              IsProducerClassSig(0x41524D52u) && IsProducerClassSig(0x434E5354u), "producer class sigs");
+        Check(!IsProducerClassSig(0x57494E47u) && !IsProducerClassSig(0x53415600u), "wingman and sav are not producers");
+        Check(std::strcmp(CategoryName(-1), "no slot range") == 0, "no-range category name");
+        u = Eligible();
+        u.category = 1;
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Group, "a defense unit is grouped");
+        u.category = 2;
+        Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::Group, "a utility unit is grouped");
+        u = Eligible();
         u.canCommand = false;
         Check(ClassifyBuiltUnit(u) == BuiltUnitVerdict::NotCommandable, "not commandable skipped");
         u = Eligible();
@@ -271,6 +319,7 @@ int main()
     TestChoose();
     TestCanPlace();
     TestBuiltUnit();
+    TestCategory();
     if (OpenShimTest::FailureCount() != 0)
     {
         std::fprintf(stderr, "auto_group_policy_tests: %d check(s) failed\n", OpenShimTest::FailureCount());

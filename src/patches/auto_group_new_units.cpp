@@ -1,12 +1,16 @@
 // auto_group_new_units.cpp
 // BZR Open Shim - auto-group newly built units. [Gameplay] AutoGroupNewUnits,
 // default OFF, single player only. When the player's Recycler or Factory
-// finishes a unit, it is added to an F1-F7 group (ported from BZCC's
+// finishes an Offense, Defense or Utility unit (the stock command-interface
+// category its class's team-slot range falls in), it is added to an F1-F7
+// group (ported from BZCC's
 // SetBestGroup): the first keyed group (0-6, the ones input.map binds) whose
 // live members all have the same ODF and number fewer than 10, else the first
 // empty keyed group, else none. [Gameplay] ExtendedUnitCap (offense_overflow.cpp)
 // turns this on too and asks AutoGroupCanPlace before it opens a build. The entry is appended to the stock ControlPanel group directly, so
-// the group keys select it and the stock mission save keeps it.
+// the group keys select it and the stock mission save keeps it. While one of
+// those three category lists is open, the sort key (Y, seen by the rally
+// window subclass) groups every ungrouped unit in it by the same rule.
 // Addresses, evidence and limits: Docs/PRODUCER_RALLY_POINTS.md.
 //
 // Engine touch points:
@@ -38,12 +42,29 @@ namespace BZROpenShim::Hooks
         using FnCanCommand = bool(__thiscall*)(void* obj);
         using FnGetObj = void*(__cdecl*)(uint32_t handle);
         using FnGetHandle = uint32_t(__thiscall*)(void* obj);
+        using FnGetClass = void*(__thiscall*)(void* sub);
+        using FnGetTeam = void*(__cdecl*)();
 
         constexpr size_t kCanCommandSlot = 14;
         // ControlPanel groups (FUN_004a6f00 BindGroup lines 6-10).
         constexpr size_t kGroupNumOffset = 0xFC4;
         constexpr size_t kGroupListOffset = 0x18C;
         constexpr size_t kGroupStride = 0x16C;
+        // ControlPanel currentItem (the open MENU_ITEM, -1 none) and
+        // selectNum (FUN_004a6a50 line 21, FUN_004a08e0 lines 503-540).
+        constexpr size_t kCurrentItemOffset = 0x117C;
+        constexpr size_t kSelectNumOffset = 0x188;
+        // GameObjectClass team-slot range (FUN_004db650 lines 14-23; -1 from
+        // the class constructor FUN_004c12f0 lines 53-54).
+        constexpr size_t kClassMinSlotOffset = 0x13C;
+        constexpr size_t kClassMaxSlotOffset = 0x140;
+        // GameObjectClass sig ('RCYC', 'FACT', ...; param_1[5] in each class
+        // constructor, e.g. RecyclerClass FUN_005b2fd0).
+        constexpr size_t kClassSigOffset = 0x14;
+        // MENU_ITEM {const char* name; int minSlot; int maxSlot;} (0x008E7990).
+        constexpr size_t kMenuItemStride = 0xC;
+        // Team slots are Team +0 (TeamGetSlot 0x005E0F70); MENU_ITEM ends at 44.
+        constexpr int kTeamSlotCount = 45;
         static_assert(kGroupListOffset + Policy::kGroupCount * kGroupStride == kGroupNumOffset,
                       "groupList ends where groupNum starts");
         static_assert(Policy::kGroupCapacity * 4 == static_cast<int>(kGroupStride), "91 handles per group");
@@ -55,7 +76,11 @@ namespace BZROpenShim::Hooks
         uint32_t g_ControlPanelAddr = 0;
         uint32_t g_ControlPanelVtableAddr = 0;
         uint32_t g_GetObjAddr = 0;
+        uint32_t g_GetTeamAddr = 0;
+        uint32_t g_TeamGetSlotAddr = 0;
+        uint32_t g_MenuItemsAddr = 0;
         FnGetObj g_FnGetObj = nullptr;
+        FnGetTeam g_FnGetTeam = nullptr;
 
         bool g_ConfigRead = false;
         bool g_Enabled = false;
@@ -175,6 +200,42 @@ namespace BZROpenShim::Hooks
                        : 0;
         }
 
+        // GameObjectClass through the class sub-object's vtable[0] (GameObject
+        // +0x18), the path TryGetCraftOdfName and the stock TeamHasFreeSlot
+        // (FUN_00464140 lines 15-18, which reads +0x13C from it) use.
+        uintptr_t SafeGetClass(void* obj)
+        {
+            if (!obj)
+                return 0;
+            void* const sub = reinterpret_cast<uint8_t*>(obj) + kGameObjectClassSubObjOffset;
+            void* const vtable = ReadPtr(reinterpret_cast<uintptr_t>(sub));
+            void* const fn = vtable ? ReadPtr(reinterpret_cast<uintptr_t>(vtable)) : nullptr;
+            if (!fn)
+                return 0;
+            __try
+            {
+                return reinterpret_cast<uintptr_t>(reinterpret_cast<FnGetClass>(fn)(sub));
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return 0;
+            }
+        }
+
+        void* SafeUserTeam()
+        {
+            if (!g_FnGetTeam)
+                return nullptr;
+            __try
+            {
+                return g_FnGetTeam();
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER)
+            {
+                return nullptr;
+            }
+        }
+
         bool IsBuildingClass(uintptr_t cls)
         {
             int id = 0;
@@ -282,6 +343,10 @@ namespace BZROpenShim::Hooks
                 { "ControlPanelGlobal", &g_ControlPanelAddr },
                 { "ControlPanelVtable", &g_ControlPanelVtableAddr },
                 { "GameObjectHandleGetObj", &g_GetObjAddr },
+                { "HudFadeGetTeam", &g_GetTeamAddr },
+                // Guards: team slots at Team +0, MENU_ITEM ranges 5-14/15-24/25-34.
+                { "TeamGetSlot", &g_TeamGetSlotAddr },
+                { "ControlPanelMenuItems", &g_MenuItemsAddr },
             };
             if (!HookEngine::BindEngineRows("Auto-group new units", rows))
                 return false;
@@ -297,12 +362,143 @@ namespace BZROpenShim::Hooks
                 return false;
             }
             g_FnGetObj = reinterpret_cast<FnGetObj>(g_GetObjAddr);
+            g_FnGetTeam = reinterpret_cast<FnGetTeam>(g_GetTeamAddr);
             if (!EnsureProducerFinishBuildHook())
             {
                 LogBudgeted(L"[AUTOGROUP] FinishBuild hook not installed\n");
                 return false;
             }
             return true;
+        }
+        struct UnitRead
+        {
+            Policy::BuiltUnit unit;
+            uint32_t handle = 0;
+            int minSlot = -1;
+            int maxSlot = -1;
+            char odf[Policy::kOdfBufferSize] = {};
+        };
+
+        // Everything ClassifyBuiltUnit needs, read fault-safe from `obj`.
+        void ReadUnit(void* obj, UnitRead& out)
+        {
+            out.unit.present = obj != nullptr;
+            if (!obj)
+                return;
+            const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(obj)));
+            out.unit.playerTeam = IsPlayerTeam(obj);
+            out.unit.isCraft = VtableDerivesFrom(vtable, ".?AVCraft@@");
+            out.unit.isScavenger = VtableTypeNameMatches(vtable, ".?AVScavenger@@");
+            out.unit.isConstructor = VtableTypeNameMatches(vtable, ".?AVConstructionRig@@");
+            out.unit.isPerson = IsPersonObject(obj);
+            out.unit.isBuilding = IsBuildingClass(ClassOf(obj));
+            const uintptr_t cls = SafeGetClass(obj);
+            const bool slotsRead = cls != 0 && ReadInt(cls + kClassMinSlotOffset, out.minSlot) &&
+                                   ReadInt(cls + kClassMaxSlotOffset, out.maxSlot);
+            if (!slotsRead)
+                out.minSlot = out.maxSlot = -1;
+            out.unit.category = Policy::CommandCategory(out.minSlot, out.maxSlot);
+            // Only a range the class really holds as -1/-1 takes the old path;
+            // an unreadable class stays not grouped.
+            out.unit.noSlotRange = slotsRead && out.minSlot == -1 && out.maxSlot == -1;
+            int sig = 0;
+            out.unit.isProducer = cls != 0 && ReadInt(cls + kClassSigOffset, sig) &&
+                                  Policy::IsProducerClassSig(static_cast<uint32_t>(sig));
+            out.unit.canCommand = SafeCanCommand(obj);
+            out.handle = SafeGetHandle(obj);
+            out.unit.handleValid = out.handle != 0 && SafeGetObj(out.handle) == obj;
+            out.unit.odfKnown = TryGetCraftOdfName(obj, out.odf, sizeof(out.odf));
+        }
+
+        // Places one eligible unit by the SetBestGroup rule.
+        Policy::GroupChoice PlaceUnit(const UnitRead& u, bool& added)
+        {
+            added = false;
+            Policy::GroupSummary groups[Policy::kGroupCount];
+            if (!SummarizeGroups(u.handle, u.odf, groups))
+                return Policy::GroupChoice{};
+            const Policy::GroupChoice choice = Policy::ChooseGroup(groups);
+            if (choice.kind == Policy::ChoiceKind::Match || choice.kind == Policy::ChoiceKind::Empty)
+                added = AppendToGroup(choice.group, groups[choice.group].storedCount,
+                                      choice.kind == Policy::ChoiceKind::Empty ? 0 : groups[choice.group].storedCount,
+                                      u.handle);
+            return choice;
+        }
+
+        const char* DescribeChoice(Policy::ChoiceKind kind)
+        {
+            return kind == Policy::ChoiceKind::Match ? "joined"
+                 : kind == Policy::ChoiceKind::Empty ? "started"
+                 : kind == Policy::ChoiceKind::AlreadyGrouped ? "already in a group"
+                                                              : "no free group";
+        }
+
+        // The open category list's item (0-2), or -1 when the sort key does
+        // not apply right now.
+        int SortableMenuItem()
+        {
+            if (!g_Active.load(std::memory_order_acquire) || g_ControlPanelAddr == 0 || !ControlPanelIdentityOk())
+                return -1;
+            int currentItem = -1;
+            int selectNum = 0;
+            if (!ReadInt(g_ControlPanelAddr + kCurrentItemOffset, currentItem) ||
+                !ReadInt(g_ControlPanelAddr + kSelectNumOffset, selectNum))
+                return -1;
+            return Policy::SortKeyApplies(true, currentItem, selectNum, OffenseOverflowMemberGroup()) ? currentItem
+                                                                                                       : -1;
+        }
+
+        // Every unit in menu item `item`'s team slots, the ones the stock list
+        // shows (SelectType FUN_004a6a50 lines 10-21 walks the same MENU_ITEM
+        // range), placed unless it is already grouped.
+        void SortCategory(int item)
+        {
+            void* const team = SafeUserTeam();
+            int minSlot = -1;
+            int maxSlot = -1;
+            const uintptr_t entry = g_MenuItemsAddr + kMenuItemStride * static_cast<size_t>(item);
+            if (!team || g_MenuItemsAddr == 0 || !ReadInt(entry + 4, minSlot) || !ReadInt(entry + 8, maxSlot) ||
+                minSlot != Policy::kCategoryMinSlot[item] || maxSlot != Policy::kCategoryMaxSlot[item] ||
+                maxSlot >= kTeamSlotCount)
+            {
+                LogBudgeted(L"[AUTOGROUP] sort %hs: team or menu range unreadable; nothing done\n",
+                            Policy::CategoryName(item));
+                return;
+            }
+            int grouped = 0, already = 0, skipped = 0, noGroup = 0;
+            void* const* const slots = reinterpret_cast<void* const*>(team);
+            for (int slot = minSlot; slot <= maxSlot; ++slot)
+            {
+                void* const obj = ReadPtr(reinterpret_cast<uintptr_t>(slots + slot));
+                if (!obj)
+                    continue;
+                UnitRead u;
+                ReadUnit(obj, u);
+                const Policy::BuiltUnitVerdict verdict = Policy::ClassifyBuiltUnit(u.unit);
+                if (verdict != Policy::BuiltUnitVerdict::Group)
+                {
+                    ++skipped;
+                    continue;
+                }
+                bool added = false;
+                const Policy::GroupChoice choice = PlaceUnit(u, added);
+                if (choice.kind == Policy::ChoiceKind::AlreadyGrouped)
+                    ++already;
+                else if (added)
+                {
+                    ++grouped;
+                    Log(L"[AUTOGROUP] sort %hs: slot %d handle=0x%08X odf=%hs %hs group index %d\n",
+                                Policy::CategoryName(item), slot, u.handle, u.odf, DescribeChoice(choice.kind),
+                                choice.group);
+                }
+                else
+                    ++noGroup;
+            }
+            // Not budgeted: a press is the player's own, logs only the units
+            // it grouped plus this summary, and must not use up the
+            // FinishBuild lines' budget.
+            Log(L"[AUTOGROUP] sort %hs: grouped %d, already grouped %d, skipped %d, no group %d\n",
+                        Policy::CategoryName(item), grouped, already, skipped, noGroup);
         }
     }
 
@@ -311,55 +507,41 @@ namespace BZROpenShim::Hooks
         if (!g_Active.load(std::memory_order_acquire))
             return;
 
-        Policy::BuiltUnit unit;
-        unit.present = built != nullptr;
-        uint32_t handle = 0;
-        char unitOdf[Policy::kOdfBufferSize] = {};
-        if (unit.present)
-        {
-            const uintptr_t vtable = reinterpret_cast<uintptr_t>(ReadPtr(reinterpret_cast<uintptr_t>(built)));
-            const uintptr_t cls = ClassOf(built);
-            unit.playerTeam = IsPlayerTeam(built);
-            unit.isCraft = VtableDerivesFrom(vtable, ".?AVCraft@@");
-            unit.isScavenger = VtableTypeNameMatches(vtable, ".?AVScavenger@@");
-            unit.isConstructor = VtableTypeNameMatches(vtable, ".?AVConstructionRig@@");
-            unit.isPerson = IsPersonObject(built);
-            unit.isBuilding = IsBuildingClass(cls);
-            unit.canCommand = SafeCanCommand(built);
-            handle = SafeGetHandle(built);
-            unit.handleValid = handle != 0 && SafeGetObj(handle) == built;
-            unit.odfKnown = TryGetCraftOdfName(built, unitOdf, sizeof(unitOdf));
-        }
-        const Policy::BuiltUnitVerdict verdict = Policy::ClassifyBuiltUnit(unit);
+        UnitRead u;
+        ReadUnit(built, u);
+        const Policy::BuiltUnitVerdict verdict = Policy::ClassifyBuiltUnit(u.unit);
         if (verdict != Policy::BuiltUnitVerdict::Group)
         {
             // Other teams' builds are routine (AI producers); not worth a line.
             if (verdict != Policy::BuiltUnitVerdict::OtherTeam)
-                LogBudgeted(L"[AUTOGROUP] producer 0x%08X built 0x%08X: %hs; not grouped\n",
+                LogBudgeted(L"[AUTOGROUP] producer 0x%08X built 0x%08X odf=%hs class slots %d-%d: %hs; not grouped\n",
                             static_cast<uint32_t>(reinterpret_cast<uintptr_t>(producer)),
-                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(built)),
+                            static_cast<uint32_t>(reinterpret_cast<uintptr_t>(built)), u.odf, u.minSlot, u.maxSlot,
                             Policy::DescribeVerdict(verdict));
             return;
         }
 
-        Policy::GroupSummary groups[Policy::kGroupCount];
-        if (!SummarizeGroups(handle, unitOdf, groups))
-            return;
-
-        const Policy::GroupChoice choice = Policy::ChooseGroup(groups);
         bool added = false;
-        if (choice.kind == Policy::ChoiceKind::Match || choice.kind == Policy::ChoiceKind::Empty)
-            added = AppendToGroup(choice.group, groups[choice.group].storedCount,
-                                  choice.kind == Policy::ChoiceKind::Empty ? 0 : groups[choice.group].storedCount,
-                                  handle);
-        const char* what = choice.kind == Policy::ChoiceKind::Match ? "joined"
-                         : choice.kind == Policy::ChoiceKind::Empty ? "started"
-                         : choice.kind == Policy::ChoiceKind::AlreadyGrouped ? "already in a group"
-                                                                              : "no free group";
+        const Policy::GroupChoice choice = PlaceUnit(u, added);
         // Index n is group_select_n in the stock input.map (F1 for 0).
-        LogBudgeted(L"[AUTOGROUP] unit 0x%08X handle=0x%08X odf=%hs %hs group index %d%hs\n",
-                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(built)), handle, unitOdf, what, choice.group,
+        LogBudgeted(L"[AUTOGROUP] unit 0x%08X handle=0x%08X odf=%hs (%hs) %hs group index %d%hs\n",
+                    static_cast<uint32_t>(reinterpret_cast<uintptr_t>(built)), u.handle, u.odf,
+                    Policy::CategoryName(u.unit.category), DescribeChoice(choice.kind), choice.group,
                     (choice.group >= 0 && !added) ? " (write failed)" : "");
+    }
+
+    bool AutoGroupSortKeyApplies()
+    {
+        return SortableMenuItem() >= 0;
+    }
+
+    bool AutoGroupSortOpenCategory()
+    {
+        const int item = SortableMenuItem();
+        if (item < 0)
+            return false;
+        SortCategory(item);
+        return true;
     }
 
     // ExtendedUnitCap is only available once auto-group has hooked.
@@ -412,6 +594,7 @@ namespace BZROpenShim::Hooks
         }
         g_ControlPanelAddr = 0;
         g_FnGetObj = nullptr;
+        g_FnGetTeam = nullptr;
         MarkFailed();
         if (s_attempts >= kMaxInstallAttempts)
         {

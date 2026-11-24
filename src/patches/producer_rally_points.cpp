@@ -634,8 +634,31 @@ namespace BZROpenShim::Hooks
             g_OrigBroadcast(panel, what, where);
         }
 
+        // The auto-group sort key (auto_group_new_units.cpp). A fresh,
+        // unmodified keydown is swallowed only when it sorted; Y has no
+        // binding in the stock input.map or in OpenShim's default keys. A
+        // player who bound RallyKey = Y keeps it: the sort key steps aside.
+        bool AutoGroupSortKeyPressed(UINT msg, WPARAM w, LPARAM l)
+        {
+            if (msg != Policy::kWmKeyDown || w != kAutoGroupSortVk ||
+                (static_cast<uint32_t>(l) & Policy::kLParamPreviousStateBit) != 0)
+                return false;
+            if (CurrentRallyKey().vk == kAutoGroupSortVk)
+                return false;
+            if ((GetKeyState(VK_SHIFT) & 0x8000) != 0 || (GetKeyState(VK_CONTROL) & 0x8000) != 0 ||
+                (GetKeyState(VK_MENU) & 0x8000) != 0)
+                return false;
+            // A focused chat line or ally prompt owns the keyboard.
+            if (!AutoGroupSortKeyApplies() || EditorActive() || !WorldInteractive() ||
+                HudVisibility::TextEditorFocused())
+                return false;
+            return AutoGroupSortOpenCategory();
+        }
+
         LRESULT CALLBACK RallyWndProc(HWND h, UINT msg, WPARAM w, LPARAM l)
         {
+            if (AutoGroupSortKeyPressed(msg, w, l))
+                return 0;
             const Policy::RallyKey bound = CurrentRallyKey();
             if ((msg == Policy::kWmKeyDown || msg == Policy::kWmKeyUp) && w == bound.vk &&
                 ((static_cast<uint32_t>(l) >> 24) & 1u) == (bound.extended ? 1u : 0u))
@@ -2240,6 +2263,11 @@ namespace BZROpenShim::Hooks
     {
         TableExclusive lock;
         return g_Table.Clear(reinterpret_cast<uintptr_t>(producer));
+    }
+
+    bool ProducerWindowSubclassed()
+    {
+        return g_Window.load(std::memory_order_acquire) != nullptr;
     }
 
     // The FinishBuild slot hook on its own, for a consumer other than the
