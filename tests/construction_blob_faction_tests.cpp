@@ -79,6 +79,33 @@ int main()
         Check(keys.For(0).empty() && keys.For(1).size() == 63, "names are 1..63 characters");
     }
 
+    // Portal blob: blobRender default, blobInRender / blobOutRender per slot.
+    Check(PortalSlot(true) == 0 && PortalSlot(false) == 1, "portal slots: in, then out");
+    {
+        const auto keys = ParsePortalOdf("[PortalBlob]\r\nblobInTexture = \"rpuff.0\"\r\n"
+                                         "BLOBINRENDER = \"portin.render\" ; red\r\n");
+        Check(keys.For(PortalSlot(true)) == "portin.render" && keys.For(PortalSlot(false)).empty(),
+              "portal in key reads with case and comments; absent out stays stock");
+    }
+    {
+        const auto keys = ParsePortalOdf("[PortalBlob]\nblobRender = port.render\nblobOutRender = \"\"\n");
+        Check(keys.For(PortalSlot(true)) == "port.render", "portal blobRender is the default");
+        Check(keys.For(PortalSlot(false)).empty(), "an empty portal out key forces the stock sprite");
+    }
+    {
+        const auto keys = ParsePortalOdf("[PortalBlob]\nblobRender = \"has space\"\nblobOutRender=out.render\n");
+        Check(keys.For(PortalSlot(true)).empty() && keys.For(PortalSlot(false)) == "out.render",
+              "an invalid portal default keeps the stock in sprite");
+    }
+    {
+        const auto keys = ParsePortalOdf("[ConstructionBlob]\nblobRender=c.render\nblobInRender=x\n"
+                                         "[PortalBlob]\nblobRenderA=a.render\n");
+        Check(keys.For(PortalSlot(true)).empty() && keys.For(PortalSlot(false)).empty(),
+              "portal keys come only from the PortalBlob section and ignore faction keys");
+        const auto cnst = ParseOdf("[PortalBlob]\nblobRender=p.render\n");
+        Check(cnst.For(0).empty(), "construction keys ignore the PortalBlob section");
+    }
+
     {
         FakeEngine engine;
         const BlobRenderBackend backend = { Create, Update, Detach, &engine };

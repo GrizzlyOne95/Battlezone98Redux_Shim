@@ -298,6 +298,9 @@ namespace BZROpenShim
             // [Display] FactionConstructionBlobs (construction_blob_faction.cpp).
             { 0, HookEngine::PatchType::REL32, {}, "Construction Blob Faction Producer Build Tag", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "Construction Blob Faction Rig Unbuild Tag", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Portal Blob Render Out Effect Tag", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Portal Blob Render In Effect Tag", false, {} },
+            { 0, HookEngine::PatchType::REL32, {}, "Portal Blob Render Portal Update Tag", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 1/2", false, {} },
             { 0, HookEngine::PatchType::REL32, {}, "HoverCraft Engine Flame Emit Hook 2/2", false, {} },
             // Redirect the two AI weapon-selection call sites so artillery and
@@ -322,6 +325,9 @@ namespace BZROpenShim
             { 0, HookEngine::PatchType::DWORD, {}, "Construction Blob Faction PreLoad VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Construction Blob Faction Control VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Construction Blob Faction Submit VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Portal Blob Render PreLoad VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Portal Blob Render Control VTable Hook", false, {} },
+            { 0, HookEngine::PatchType::DWORD, {}, "Portal Blob Render Submit VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Chunk Effect Simulate VTable Hook", false, {} },
             { 0, HookEngine::PatchType::DWORD, {}, "Legacy World Update RenderQueue VTable Hook", false, {} },
             // Producer nested build menus (producer_build_menu.cpp): each

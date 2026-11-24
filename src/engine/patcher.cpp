@@ -587,9 +587,9 @@ namespace BZROpenShim
         if (!ShouldEnableShellCasings() && !muzzleFlash && !meshRecoil) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsShellCasingPatchName(p.name.c_str()); }), patches.end());
         }
-        if (!ConstructionBlobFaction::ShouldInstall()) {
-            patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return ConstructionBlobFaction::IsPatchName(p.name.c_str()); }), patches.end());
-        }
+        // Each blob emitter binds on its own; rows of an unbound emitter are dropped.
+        ConstructionBlobFaction::ShouldInstall();
+        patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return ConstructionBlobFaction::IsPatchName(p.name.c_str()) && !ConstructionBlobFaction::ShouldInstallRow(p.name.c_str()); }), patches.end());
         if (!ShouldEnablePathBlockFaces()) {
             patches.erase(std::remove_if(patches.begin(), patches.end(), [](const HookEngine::PatchDef& p) { return IsPathBlockFacesPatchName(p.name.c_str()); }), patches.end());
         }
@@ -1424,7 +1424,7 @@ namespace BZROpenShim
                 void* original = isSteam
                     ? HookEngine::ResolveRelCallTargetWithRetry(p.address - 1, 300, 10)
                     : HookEngine::ResolveRelCallTarget(p.address - 1);
-                target = ConstructionBlobFaction::Rel32Target(p.name.c_str(), original);
+                target = ConstructionBlobFaction::Rel32Target(p.name.c_str(), original, static_cast<uint32_t>(p.address - 1));
                 if (!target) continue;
             }
             else if (p.name == "Splinter Emitter Owner Propagation") {

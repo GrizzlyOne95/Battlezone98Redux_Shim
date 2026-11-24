@@ -3155,6 +3155,48 @@
       "identity": "FUN_0049CDF0 ConstructionRig::UpdateUnbuild (__thiscall this, float dt): counts down this+0x304 over class(+0x370)->buildTime(+0x54) and calls ConstructionBlob::AddBlob 0x0049C0A0; BZ 1.5 ConstructionRig::UpdateUnbuild."
     },
     {
+      "name": "PortalBlobPreLoad",
+      "address": "0x006607F0",
+      "expected": "55 8B EC 6A FF 68 08 95 84 00 64 A1 00 00 00 00",
+      "identity": "FUN_006607F0 PortalBlob::PreLoad (__fastcall this): opens portblob.odf, reads blobInTexture (default rpuff.0) into this+0x1AC and blobOutTexture (default bpuff.0) into +0x1B0, blobFrames/blobVariance into +0x1B8/+0x1BC, resets the list end pointer +0x1A8 to this+0x28. PortalBlob vtable 0x00891F04 slot 2."
+    },
+    {
+      "name": "PortalBlobControl",
+      "address": "0x00660910",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 B4 01 00 00",
+      "identity": "FUN_00660910 PortalBlob::Control (__fastcall this): advances blobIndex +0x1B4 modulo blobVariance +0x1BC and resets the list end pointer +0x1A8 to this+0x28 once per simulation pass. PortalBlob vtable 0x00891F04 slot 6 (+0x18)."
+    },
+    {
+      "name": "PortalBlobSubmit",
+      "address": "0x00660A80",
+      "expected": "55 8B EC 83 EC 58 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "FUN_00660A80 PortalBlob::Submit (__thiscall this, camera): draws each 0x18-byte entry from this+0x28 to the end pointer at +0x1A8 with blobInTexture(+0x1AC) when the entry's in byte (+0x14) is set, else blobOutTexture(+0x1B0). PortalBlob vtable 0x00891F04 slot 8."
+    },
+    {
+      "name": "PortalBlobAddBlob",
+      "address": "0x00660960",
+      "expected": "55 8B EC 83 EC 08 89 4D FC 51 F3 0F 10 45 0C F3",
+      "identity": "FUN_00660960 PortalBlob::AddBlob (__thiscall this, sphere*, float t, char in; ret 0xC): appends a 0x18-byte {x,y,z,r,scale,in} entry while the end pointer +0x1A8 is below this+0x1A8 (16 entries). Called only from 0x005CDC27, 0x005CDCB7 and 0x00660265, each with ecx = the static PortalBlob 0x025F89E8."
+    },
+    {
+      "name": "PortalBlobOutEffect",
+      "address": "0x005CDBB0",
+      "expected": "55 8B EC 83 EC 18 A1 00 70 8E 00 33 C5 89 45 FC 8B 45 08 50",
+      "identity": "FUN_005CDBB0 (__cdecl handle, float t): portal-out blob for the object handle param_1 at [ebp+8], read at +0x10 and never written; calls PortalBlob::AddBlob with in=0 at +0x77 (0x005CDC27). Callers include the Lua binding FUN_005073C0."
+    },
+    {
+      "name": "PortalBlobInEffect",
+      "address": "0x005CDC40",
+      "expected": "55 8B EC 83 EC 18 A1 00 70 8E 00 33 C5 89 45 FC 8B 45 08 50",
+      "identity": "FUN_005CDC40 (__cdecl handle, float t): portal-in blob for the object handle param_1 at [ebp+8], read at +0x10 and never written; calls PortalBlob::AddBlob with in=1 at +0x77 (0x005CDCB7). Callers include the Lua binding FUN_00507410."
+    },
+    {
+      "name": "PortalUpdateBlob",
+      "address": "0x00660080",
+      "expected": "55 8B EC 83 EC 3C A1 00 70 8E 00 33 C5 89 45 FC 89 4D E4",
+      "identity": "FUN_00660080 portal update (__thiscall portal, param): stores this at [ebp-0x1C] (+0x10), switches on portalState +0x244 and in state 2 calls PortalBlob::AddBlob with in = portal+0x248 at +0x1E5 (0x00660265), reloading this from [ebp-0x1C] at 0x00660246. Referenced from vtable entry 0x00891EC4."
+    },
+    {
       "name": "ChunkEffectSimulate",
       "address": "0x004917F0",
       "expected": "55 8B EC 81 EC DC 01 00 00 A1 00 70 8E 00 33 C5"
@@ -8195,6 +8237,51 @@
       "expected_original": "E0 E0 FF FF",
       "require_unique": true,
       "identity": "The rel32 operand of the only call to ConstructionRig::UpdateUnbuild 0x0049CDF0 (in FUN_0049EC50, call at 0x0049ED0B), on exact GOG Redux 2.2.301. The hook calls the original and tags the ConstructionBlob slot it appended with the target class's faction render."
+    },
+    {
+      "name": "Portal Blob Render PreLoad VTable Hook",
+      "fallback": "0x00891F0C",
+      "expected_original": "F0 07 66 00"
+    },
+    {
+      "name": "Portal Blob Render Control VTable Hook",
+      "fallback": "0x00891F1C",
+      "expected_original": "10 09 66 00"
+    },
+    {
+      "name": "Portal Blob Render Submit VTable Hook",
+      "fallback": "0x00891F24",
+      "expected_original": "80 0A 66 00"
+    },
+    {
+      "name": "Portal Blob Render Out Effect Tag",
+      "pattern": "6A 00 51 F3 0F 10 45 0C F3 0F 11 04 24 8D 55 EC 52 B9 E8 89 5F 02 E8 ?? ?? ?? ??",
+      "offset": 23,
+      "expected_size": 4,
+      "fallback": "0x005CDC28",
+      "expected_original": "34 2D 09 00",
+      "require_unique": true,
+      "identity": "The rel32 operand of the PortalBlob::AddBlob 0x00660960 call (in=0) at 0x005CDC27 in FUN_005CDBB0, on exact GOG Redux 2.2.301. A thunk passes the caller's handle ([ebp+8]) to the hook, which calls the original and tags the appended PortalBlob slot with the out render."
+    },
+    {
+      "name": "Portal Blob Render In Effect Tag",
+      "pattern": "6A 01 51 F3 0F 10 45 0C F3 0F 11 04 24 8D 55 EC 52 B9 E8 89 5F 02 E8 ?? ?? ?? ??",
+      "offset": 23,
+      "expected_size": 4,
+      "fallback": "0x005CDCB8",
+      "expected_original": "A4 2C 09 00",
+      "require_unique": true,
+      "identity": "The rel32 operand of the PortalBlob::AddBlob 0x00660960 call (in=1) at 0x005CDCB7 in FUN_005CDC40, on exact GOG Redux 2.2.301. A thunk passes the caller's handle ([ebp+8]) to the hook, which calls the original and tags the appended PortalBlob slot with the in render."
+    },
+    {
+      "name": "Portal Blob Render Portal Update Tag",
+      "pattern": "8B 55 E4 0F B6 82 48 02 00 00 50 51 F3 0F 10 45 E0 F3 0F 11 04 24 8D 4D EC 51 B9 E8 89 5F 02 E8 ?? ?? ?? ??",
+      "offset": 32,
+      "expected_size": 4,
+      "fallback": "0x00660266",
+      "expected_original": "F6 06 00 00",
+      "require_unique": true,
+      "identity": "The rel32 operand of the PortalBlob::AddBlob 0x00660960 call (in = portal+0x248) at 0x00660265 in FUN_00660080, on exact GOG Redux 2.2.301. A thunk passes the caller's portal ([ebp-0x1C]) to the hook, which calls the original and tags the appended PortalBlob slot with the in or out render."
     },
     {
       "name": "Chunk Effect Simulate VTable Hook",
