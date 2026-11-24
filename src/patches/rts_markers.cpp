@@ -1514,17 +1514,29 @@ namespace BZROpenShim
                 line.colour.a = c.a;
             }
 
+            // The order's target is the piloted vehicle (Follow / Defend me):
+            // the line ends on it, but no ring is drawn under the camera.
+            bool IsPlayerTarget(uint32_t who)
+            {
+                void* const player = SafeGetPlayer();
+                return player && SafeGetObj(who) == player;
+            }
+
             // The live position of the object the unit's order targets. False
-            // without one, when it is gone, when it is the unit itself or the
-            // piloted vehicle (no ring under the camera), and for another
-            // team's object the local team does not detect right now (the
-            // line must not track an enemy the player cannot see).
+            // without one, when it is gone, when it is the unit itself, and
+            // for another team's object the local team does not detect right
+            // now (the line must not track an enemy the player cannot see).
+            // The piloted vehicle counts: a unit told to follow the player
+            // must point at the player, not at the AiPath goal planned when
+            // the order was given.
             bool ReadLiveObjectPosition(void* unit, uint32_t who, float (&out)[3])
             {
                 void* target = SafeGetObj(who);
                 void* const player = SafeGetPlayer();
-                if (!target || target == unit || target == player)
+                if (!target || target == unit)
                     return false;
+                if (target == player)
+                    return TryGetGameObjectWorldPosition(target, out);
                 if (!SameTeam(target, player))
                 {
                     int playerTeam = -1, detected = 0;
@@ -1563,7 +1575,7 @@ namespace BZROpenShim
                 for (size_t i = 0; i < count; ++i)
                     if (handles[i] == who)
                         return;
-                if (count >= RM::kMaxTargetRingSlots || (g_PingsOn && PingRingsTarget(who)))
+                if (count >= RM::kMaxTargetRingSlots || (g_PingsOn && PingRingsTarget(who)) || IsPlayerTarget(who))
                     return;
                 void* target = SafeGetObj(who);
                 if (!target)
@@ -1584,6 +1596,9 @@ namespace BZROpenShim
             // when the line ends on a live target
             // (change-only log).
             int g_LineSource[RM::kMaxWaypointLineSlots] = {};
+            // Last logged end of a line on the player, per selected-unit index.
+            bool g_PlayerLineLogged[RM::kMaxWaypointLineSlots] = {};
+            float g_PlayerLineEnd[RM::kMaxWaypointLineSlots][2] = {};
 
             void BuildPlacementRequests(RingRequest (&requests)[RM::kSlotCount])
             {
@@ -1624,7 +1639,26 @@ namespace BZROpenShim
                         z = targetPos[2];
                         haveDestination = true;
                         AddTargetRing(requests, targetHandles, targetCount, who, targetPos, what);
+                        // Change-only: a line on the piloted vehicle logs its
+                        // end each time it moves 25 m (the line tracks the player).
+                        if (IsPlayerTarget(who))
+                        {
+                            const float dx = x - g_PlayerLineEnd[i][0], dz = z - g_PlayerLineEnd[i][1];
+                            if (!g_PlayerLineLogged[i] || dx * dx + dz * dz > 25.0f * 25.0f)
+                            {
+                                g_PlayerLineLogged[i] = true;
+                                g_PlayerLineEnd[i][0] = x;
+                                g_PlayerLineEnd[i][1] = z;
+                                LogShimA(LogLevel::Info, kComponent,
+                                         "[RTSMARKERS] unit line on player what=%d end=(%.0f,%.0f) unit=(%.0f,%.0f)", what, x,
+                                         z, pos[0], pos[2]);
+                            }
+                        }
+                        else
+                            g_PlayerLineLogged[i] = false;
                     }
+                    else
+                        g_PlayerLineLogged[i] = false;
                     if (haveDestination)
                     {
                         RingRequest& current = requests[RM::kFirstWaypointSlot + i];
@@ -1670,7 +1704,10 @@ namespace BZROpenShim
                         LineRequest(requests[RM::kFirstPendingSlot + i], from, x, z, what, true);
                 }
                 for (size_t i = unitCount; i < RM::kMaxWaypointLineSlots; ++i)
+                {
                     g_LineSource[i] = 0;
+                    g_PlayerLineLogged[i] = false;
+                }
             }
 
             // ---- Queued orders (RtsOrderQueue) --------------------------------
@@ -1747,7 +1784,7 @@ namespace BZROpenShim
                             bool ringed = false;
                             for (size_t r = 0; r < rings && !ringed; ++r)
                                 ringed = ringTargets[r] == legs[j].target;
-                            if (!ringed && rings < RM::kMaxQueueRingSlots)
+                            if (!ringed && rings < RM::kMaxQueueRingSlots && !IsPlayerTarget(legs[j].target))
                             {
                                 void* const target = SafeGetObj(legs[j].target);
                                 RingRequest& ring = requests[RM::kFirstQueueRingSlot + rings];
