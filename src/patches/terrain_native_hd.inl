@@ -390,9 +390,12 @@ void RefreshNativeTerrainHd(void* zone, bool dirty)
     catch (...) { RestoreNativeTerrainTessellationTest(); RestoreNativeTerrainHd(); g_HdDeclined = true; }
 }
 
-// Live paint (OPENSHIM_TERRAIN_PAINT_LIVE=1): a multi-map pack whose paint
-// carries a "live" autopaint recipe generates control images for missions
-// with no baked entry. Baked entries always win. See Docs/terrain-live-paint.md.
+// Live paint ([Terrain] TerrainPaintLive=1, or OPENSHIM_TERRAIN_PAINT_LIVE=1): a
+// multi-map pack whose paint carries a "live" autopaint recipe generates control
+// images for missions with no baked entry. Baked entries always win. The
+// redirected GetEnvironmentVariableA returns the process variable when it is set
+// (its value wins) and the ini key otherwise (openshim_env_mapping.cpp).
+// See Docs/terrain-live-paint.md.
 bool LivePaintRequested()
 {
     char value[8] = {};

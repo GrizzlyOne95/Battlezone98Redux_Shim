@@ -392,6 +392,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       ShimSettingApplyGroup::RestartRequired,
       "Experimental shallow ground relief. Visual only; collision is unchanged. "
       "DX11 only. Increases GPU cost. Restart required." },
+    { "Live Terrain Paint", "Terrain", "TerrainPaintLive", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::RestartRequired,
+      "Fills HD terrain paint for maps with no pre-built paint entry, generated at load from the map. "
+      "Needs HD Terrain Tiles and a pack with live recipes. DX11 Enhanced only. Visual only. Restart required." },
     { "Hull Scorch", "LocalDamage", "HullScorch", kShimSettingsHullScorchAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::LiveEngineToggle,
@@ -1196,7 +1201,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "UnitEmptyColor", "Default" },
     { "FieldOfView", "0" }, { "RenderProfile", "Redux" }, { "FXAA", "0" }, { "DxgiFlipModel", "0" },
     { "ShadowFarDistance", "stock" }, { "EnhancedLightSelectionV2", "0" },
-    { "TerrainHdEnabled", "0" }, { "TerrainMicroRelief", "0" }, { "HullScorch", "0" },
+    { "TerrainHdEnabled", "0" }, { "TerrainMicroRelief", "0" }, { "TerrainPaintLive", "0" }, { "HullScorch", "0" },
     // Stock draws the sun flash, so this one is On.
     { "SunFlashbang", "1" }, { "PlayerPaint", "stock" }, { "ExplosionFlash", "Stock" }, { "DamageFlash", "Stock" },
     { "UnderAttackAlert", "Normal" }, { "SuppressHopOutAttackAlert", "0" },

@@ -435,6 +435,26 @@ namespace
         Check(Lookup(name, &ini, env) == "<unset>", "invalid relief setting does not opt in");
     }
 
+    void TestTerrainPaintLivePrecedence()
+    {
+        FakeIni ini;
+        FakeEnv env;
+        constexpr const char* name = "OPENSHIM_TERRAIN_PAINT_LIVE";
+        Check(IsCaptureOverrideName(name), "live paint env is a capture override");
+        Check(Lookup(name, &ini, env) == "<unset>", "absent live paint key is not mapped (off)");
+        ini.Set("Terrain", "TerrainPaintLive", "1");
+        Check(Lookup(name, &ini, env) == "1", "saved On enables live paint without launch environment");
+        env.values[name] = "0";
+        Check(Lookup(name, &ini, env) == "0", "env 0 overrides saved On");
+        ini.Set("Terrain", "TerrainPaintLive", "0");
+        env.values[name] = "1";
+        Check(Lookup(name, &ini, env) == "1", "env 1 overrides saved Off");
+        env.values.clear();
+        Check(Lookup(name, &ini, env) == "0", "saved Off disables live paint");
+        ini.Set("Terrain", "TerrainPaintLive", "invalid");
+        Check(Lookup(name, &ini, env) == "<unset>", "invalid live paint value does not opt in");
+    }
+
     void TestEmptyNamesPassThrough()
     {
         FakeIni ini;
@@ -487,6 +507,7 @@ int main()
     TestShellCasingsDefaultOff();
     TestCaptureNamesLetTheEnvironmentWin();
     TestTerrainReliefUiAndHarnessPrecedence();
+    TestTerrainPaintLivePrecedence();
     TestEmptyNamesPassThrough();
     TestCopyContract();
 
