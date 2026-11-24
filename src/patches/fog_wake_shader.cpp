@@ -72,7 +72,7 @@ namespace BZROpenShim
             float nearFade = 4.0f;      // Metres from the camera.
             float farDistance = 220.0f; // Metres; mist fades out towards here.
             float litMix = 0.6f;        // Lift toward the lit brightness, keeping the fog hue.
-            bool debug = false;         // Paint the mist magenta (binding check).
+            float debug = 0.0f;         // 1 paints the mist magenta; 2 shows the wake field alone.
         };
 
         struct Gpu
@@ -131,11 +131,11 @@ namespace BZROpenShim
             g_Tuning.softTop = EnvFloat("OPENSHIM_FOGWAKE_SOFT_TOP", g_Tuning.softTop, 0.05f, 10.0f);
             g_Tuning.farDistance = EnvFloat("OPENSHIM_FOGWAKE_FAR", g_Tuning.farDistance, 20.0f, 2000.0f);
             g_Tuning.litMix = EnvFloat("OPENSHIM_FOGWAKE_LIT_MIX", g_Tuning.litMix, 0.0f, 1.0f);
-            g_Tuning.debug = EnvFloat("OPENSHIM_FOGWAKE_DEBUG", 0.0f, 0.0f, 1.0f) > 0.5f;
+            g_Tuning.debug = std::round(EnvFloat("OPENSHIM_FOGWAKE_DEBUG", 0.0f, 0.0f, 2.0f));
             LogShimA(LogLevel::Info, kComponent,
                      "[FOGWAKE] shader tuning density=%.4f/m fill=%.2fm poolRadius=%.0fm softTop=%.2fm far=%.0fm litMix=%.2f debug=%d",
                      g_Tuning.density, g_Tuning.fillDepth, g_Tuning.poolRadius, g_Tuning.softTop,
-                     g_Tuning.farDistance, g_Tuning.litMix, g_Tuning.debug ? 1 : 0);
+                     g_Tuning.farDistance, g_Tuning.litMix, static_cast<int>(g_Tuning.debug));
         }
 
         void Unbind();
@@ -546,7 +546,7 @@ namespace BZROpenShim
                 sizeX, sizeZ, g_HeightRange, g_Tuning.edgeFade,
                 static_cast<float>(view.width), static_cast<float>(view.height),
                 g_Tuning.nearFade, g_Tuning.farDistance,
-                g_Tuning.debug ? 1.0f : 0.0f, g_Tuning.litMix, driftX, driftZ,
+                g_Tuning.debug, g_Tuning.litMix, driftX, driftZ,
             };
             D3D11_MAPPED_SUBRESOURCE mapped = {};
             if (FAILED(g_Gpu.context->Map(g_Gpu.paramsTex, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped)) || !mapped.pData)

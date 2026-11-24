@@ -171,8 +171,8 @@ How it works:
   `openshim_enhanced_base-sm4.hlsl` get the same block. It reads the pool
   surface once at the pixel. The path through the layer is the depth below the
   surface over the sine of the view angle, clamped at 0.12 for grazing views.
-  The wake clearance is read once, halfway along that path, with a
-  noise-swirled offset so its edge curls.
+  The wake clearance is read once, at the ground point under the pixel, with
+  a noise-swirled offset so its edge curls.
 - Colour. The mist uses the world's fog hue, lifted to the lit brightness
   (ambient plus sun), with `litMix` 0.6. Fog that is near black (moon maps)
   takes the lit hue instead. With the plain fog colour (`litMix` 0) the pools
@@ -198,7 +198,38 @@ How it works:
   per metre), `_FILL` (2 m), `_POOL_RADIUS` (24 m), `_SOFT_TOP` (0.6 m),
   `_FAR` (220 m), `_LIT_MIX` (0.6), `_RADIUS` (wake radius, 7 m) and
   `_RECOVERY` (refill, 6 s). `OPENSHIM_FOGWAKE_DEBUG=1` paints the mist
-  magenta.
+  magenta. `OPENSHIM_FOGWAKE_DEBUG=2` paints the wake field alone (magenta
+  where cleared), with no pools, so trail shape can be judged on its own.
+- Clock. The wake runtime runs on engine game time (`GetGameTime`, from
+  `scripts/patches.json`), falling back to the wall clock if it does not
+  resolve. The log says which (`[FOGWAKE] clock=`).
+- Trail probe. `OPENSHIM_FOGWAKE_TRAIL_PROBE=1` logs the clearance along the
+  longest recorded craft path (`[FOGWAKE] trail probe ...`), including the
+  largest step between neighbouring samples over the trail body.
+
+Wakes as trails, not patches. Earlier captures showed a row of separate round
+cleared patches. Measured cause:
+
+- The field already writes swept capsules: each update stamps the segment from
+  the previous to the current position (distance to segment, smoothstep edge,
+  combined with max). Radius 7 m on 2 m cells; refill `exp(-dt/6 s)`.
+- The runtime rejected moves faster than 120 m/s as teleports, timed with the
+  wall clock. Frame capture (`OPENSHIM_FRAME_CAPTURE_STEP_MS=50`) advances game
+  time 50 ms per frame, however long the frame takes, and uncaptured frames run
+  far faster than real time. So game-time moves looked like 200+ m/s on the
+  wall clock, were dropped as teleports, and the trail broke into patches. The
+  debug-2 frames confirmed the gaps were in the CPU field, not the shader.
+- Fix: drive the runtime from game time. Live, the probe then logged
+  `teleports=0` and a trail body with a largest neighbour step of 4.7%.
+- The teleport limit is now `maxSpeed` times the time since the craft was last
+  seen (clamped to 1/30-0.5 s), not a fixed 4 m per tick, so sparse
+  observations still join up.
+- CTest `fog_wake_trail_tests` drives a straight 160 m pass at 5, 20 and
+  40 m/s, observed every 1, 4 and 8 ticks, and fails if any two centreline
+  samples 0.5 m apart differ by more than 10%. It passes (worst 2.3%); the
+  previous runtime fails it (34.9% at 40 m/s, observed every 8 ticks).
+
+![Wake field before and after the clock fix](images/fog_wakes/fog_wake_field_before_after.jpg)
 
 Live runs used `lcbench` on the stock Venus, Achilles and Io worlds (DX11,
 1600x900 windowed, background launch). With the bank placed around
@@ -234,8 +265,10 @@ Verdict:
 - The pools read as ground fog in each world's hue. Venus is a subtle yellow,
   Io is grey smoke over the lava valleys, and Achilles shows bold pale pools
   that may be too strong. The rest of the scene matches stock.
-- The wake reads. The tank leaves a dark cleared patch that refills over about
-  10 s.
+- The wake reads. With the game-time clock the tank leaves one continuous
+  cleared lane that refills over about 10 s; on Venus it is subtle. How deep
+  the lane looks still follows the pool depth under it, which is the pool
+  shading, not the wake field.
 - The cost is near the 0.5 ms budget: about 0.35 ms quiet, and a rough 0.8 ms
   with 20 tanks moving.
 
@@ -251,8 +284,11 @@ Open problems before this could ship:
 - The main-camera check uses `getCurrentViewport`. Its behaviour with other
   viewports has not been verified.
 - The `ClearState` interaction with the t32/t33 bind has not been verified.
-- The DXBC seed pack (`tools/build_dxbc_seed.py`) must be rebuilt before any
-  merge. Without it, Enhanced players get cold shader compiles.
+- The DXBC seed pack holds the 94 shader variants this branch compiled in the
+  live runs, added to the existing 439. It was not rebuilt from a clean warm
+  cache (no main-menu or multiplayer pass), so some cold compiles may remain,
+  and the stale pre-branch entries are dead weight until the next full
+  rebuild with `tools/build_dxbc_seed.py`.
 
 ## Planned runtime contract
 

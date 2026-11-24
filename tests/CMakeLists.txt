@@ -1006,6 +1006,12 @@ openshim_add_test(fog_wake_runtime_tests STD 20 SOURCES
     ../src/engine/fog_wake.cpp
 )
 
+openshim_add_test(fog_wake_trail_tests STD 20 SOURCES
+    fog_wake_trail_tests.cpp
+    ../src/engine/fog_wake_runtime.cpp
+    ../src/engine/fog_wake.cpp
+)
+
 openshim_add_test(odf_compat_tests STD 20 SOURCES
     odf_compat_tests.cpp
     ../src/patches/odf_compat.cpp

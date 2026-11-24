@@ -800,8 +800,9 @@ float ose_fog_wake_noise(float2 p)
 // Transmittance of the pooled mist in front of this pixel. No ray march: the
 // pool surface is read once at the pixel, and the path through the layer is
 // the depth below that surface over the sine of the view angle. The wake is
-// read once, halfway along that path, with a noise-swirled offset so its edge
-// curls instead of tracing the trail cell by cell.
+// read once at the pixel's own ground point, so a trail keeps its width and
+// place whatever the pool depth; a small noise offset only roughens its edge.
+// Debug 2 shows the wake field alone, without the pools.
 float ose_fog_wake_transmittance(float3 viewPos, float4x4 invView)
 {
     float4 p0 = oseFogWakeParams.Load(int3(0, 0, 0));
@@ -825,6 +826,11 @@ float ose_fog_wake_transmittance(float3 viewPos, float4x4 invView)
         return 1.0;
 
     float2 cellScale = p3.xy / p2.xy;
+    if (p4.x > 1.5)
+    {
+        float wake = ose_fog_wake_bank(p.xz * cellScale, p3.xy).x;
+        return 1.0 - 0.85 * wake * edge;
+    }
     float swirl = ose_fog_wake_noise(p.xz * 0.06 + p4.zw);
     float surface = ose_fog_wake_bank(p.xz * cellScale, p3.xy).y * p2.z
         + (swirl - 0.5) * 2.0 * p0.w;
@@ -836,10 +842,9 @@ float ose_fog_wake_transmittance(float3 viewPos, float4x4 invView)
     // never longer than the camera-to-pixel distance.
     float down = max(abs(ray.y) / rayLength, 0.12);
     float path = min(below / down, rayLength);
-    float3 mid = p - ray * (0.5 * path / rayLength);
-    float swirl2 = ose_fog_wake_noise(mid.xz * 0.11 + p4.zw + 37.0);
-    float2 curl = (float2(swirl, swirl2) - 0.5) * 3.0;
-    float clearance = ose_fog_wake_bank((mid.xz + curl) * cellScale, p3.xy).x;
+    float swirl2 = ose_fog_wake_noise(p.xz * 0.11 + p4.zw + 37.0);
+    float2 curl = (float2(swirl, swirl2) - 0.5) * 1.0;
+    float clearance = ose_fog_wake_bank((p.xz + curl) * cellScale, p3.xy).x;
     // The wake removes the whole column, not just the noise.
     float open = 1.0 - saturate(clearance * 1.25);
 
