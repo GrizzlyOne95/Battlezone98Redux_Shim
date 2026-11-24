@@ -1457,6 +1457,13 @@ TerrainSemanticFrameCaptureMinCoverage = 0.005
 ; pack manifest; existing tile placement, orientation and gameplay stay intact.
 TerrainHdEnabled = 1
 
+; Live Terrain Paint (Options > OpenShim > Visual Effects). Fills HD terrain paint for maps that
+; have no pre-built paint entry, generated at load from the map. Needs
+; TerrainHdEnabled and a pack with live recipes. DX11 Enhanced only; visual only.
+; Accepted: integer flag 0/1. Default: 0. Restart required.
+; Env: OPENSHIM_TERRAIN_PAINT_LIVE, when set, wins over this key (1 on, else off).
+TerrainPaintLive = 0
+
 ; HD tile manifest. Accepted: auto, or a path string.
 ; auto (or empty): find the separately installed HD terrain pack, searching the
 ; game folder, then addon\, mods\, packaged_mods\ and Steam Workshop item
