@@ -395,8 +395,8 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Live Terrain Paint", "Terrain", "TerrainPaintLive", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
-      "Fills HD terrain paint for maps with no pre-built paint entry, generated at load from the map. "
-      "Needs HD Terrain Tiles and a pack with live recipes. DX11 Enhanced only. Visual only. Single player only. Restart required." },
+      "Generates HD terrain paint at load for maps with no pre-built entry. Needs HD Terrain Tiles "
+      "and a pack with live recipes. DX11 Enhanced only. Visual only. Single player only. Restart required." },
     { "Hull Scorch", "LocalDamage", "HullScorch", kShimSettingsHullScorchAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::LiveEngineToggle,
