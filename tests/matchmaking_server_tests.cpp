@@ -78,6 +78,9 @@ namespace
         CHECK(Validate("exa$mple.org", host) == MS::HostStatus::Invalid);
         CHECK(Validate("example.org:", host) == MS::HostStatus::Invalid);
         CHECK(Validate("example.org:abc", host) == MS::HostStatus::Invalid);
+        // A control code stored by the entry (stock AppendChar keeps Ctrl+V's
+        // 0x16) stays Invalid; the entry hook filters it before it gets here.
+        CHECK(Validate("\x16host.example", host) == MS::HostStatus::Invalid && host.empty());
         CHECK(Validate(":1337", host) == MS::HostStatus::Invalid);
         CHECK(Validate("a:1:2", host) == MS::HostStatus::Invalid);
         CHECK(Validate("example.org:0", host) == MS::HostStatus::UnsupportedPort);

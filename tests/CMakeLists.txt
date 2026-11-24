@@ -585,6 +585,10 @@ openshim_add_test(matchmaking_server_tests STD 17 SOURCES
     matchmaking_server_tests.cpp
 )
 
+openshim_add_test(text_entry_input_filter_tests STD 17 SOURCES
+    text_entry_input_filter_tests.cpp
+)
+
 openshim_add_test(dns_family_policy_tests STD 17 SOURCES
     dns_family_policy_tests.cpp
 )
