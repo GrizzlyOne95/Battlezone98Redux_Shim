@@ -11,6 +11,10 @@ A render spike (2026-11-23, see **Render spike** below) was judged bad as
 tuned and not merged. Rendering is parked until a screen-space or camera-local
 approach is designed.
 
+## In-game option
+
+The toggle is also in the OpenShim options menu as **Fog Wakes** (Experimental group), default Off. It writes `[Experimental] InteractiveFogWakes`, which is read once at startup, so a restart is required. It is visual only and single player only: in a network session `FogWakeFeatureEnabled()` returns false (logged once per change as `[FOGWAKE] disabled: not a single player session`), because the trail would reveal where enemy craft went.
+
 ## First milestone
 
 `include/fog_wake.h` and `src/engine/fog_wake.cpp` implement a platform-neutral
@@ -150,6 +154,145 @@ What a real renderer would need:
   instead of world sheets
 - far lower density with distance fade
 - per-pixel height relative to the terrain, not sheet geometry
+
+## In-shader spike
+
+Draft branch `agent/fog-wake-inshader-spike`. It draws low-lying fog pools in
+the world's own fog colour inside the DX11 Enhanced per-pixel fog. Vehicles
+thin the pools as they pass, and the pools then refill. The aim is subtle,
+dynamic pooled fog on worlds such as Venus, Achilles and Io, not extra haze.
+It is a spike, not a shipping feature.
+
+How it works:
+
+- Pool model. When the bank is placed, the CPU builds a pool surface
+  (`BuildPoolSurface` in `src/patches/fog_wake_shader.cpp`): a local minimum of
+  the terrain over a 24 m window, box-blurred twice, plus a 2 m fill depth.
+  Mist exists only below that surface. It fills hollows and flats with a
+  flat top and leaves slopes and ridges clear. The bake logs coverage and the
+  largest pools (`[FOGWAKE] pools ...`), so a fixture can aim at one.
+- Single tap, no ray march. Both `openshim_enhanced_terrain-sm4.hlsl` and
+  `openshim_enhanced_base-sm4.hlsl` get the same block. It reads the pool
+  surface once at the pixel. The path through the layer is the depth below the
+  surface over the sine of the view angle, clamped at 0.12 for grazing views.
+  The wake clearance is read once, at the ground point under the pixel, with
+  a noise-swirled offset so its edge curls.
+- Colour. The mist uses the world's fog hue, lifted to the lit brightness
+  (ambient plus sun), with `litMix` 0.6. Fog that is near black (moon maps)
+  takes the lit hue instead. With the plain fog colour (`litMix` 0) the pools
+  were invisible on Venus and Io.
+- Noise drifts with time. The value noise repeats every 256 lattice cells and
+  the CPU wraps the drift by the same period, so the old `fmod` jump is gone.
+- Edges. The pools fade in over 0.6 m at the top, fade out near the camera
+  (4 m) and towards 220 m, and fade with a smoothstep over 64 m at the bank
+  edge.
+- Binding. `src/patches/fog_wake_shader.cpp` binds two textures with
+  `PSSetShaderResources(32, 2)`. Slot t32 is a 5x1 RGBA32F parameter strip.
+  Slot t33 is the 256x256 R16G16 bank: R holds clearance and G holds the pool
+  surface height. A magic value in texel 0 gates the effect, so an unbound slot
+  reads 0 and the effect is off.
+- Gate. It is off unless `[Experimental] InteractiveFogWakes` is on, and it
+  runs on DX11 Enhanced only. Any other renderer fails closed. The INI wins
+  over `OPENSHIM_INTERACTIVE_FOG_WAKES`: with `InteractiveFogWakes = 0` in
+  `openshim.ini`, the environment variable has no effect, because the
+  environment mapping returns the INI value for that key.
+- Placement. When no mission start has been seen (for example on a
+  command-line `lcbench` launch), the bank is placed around the player.
+- Tuning comes from environment variables: `OPENSHIM_FOGWAKE_DENSITY` (0.10
+  per metre), `_FILL` (2 m), `_POOL_RADIUS` (24 m), `_SOFT_TOP` (0.6 m),
+  `_FAR` (220 m), `_LIT_MIX` (0.6), `_RADIUS` (wake radius, 7 m) and
+  `_RECOVERY` (refill, 6 s). `OPENSHIM_FOGWAKE_DEBUG=1` paints the mist
+  magenta. `OPENSHIM_FOGWAKE_DEBUG=2` paints the wake field alone (magenta
+  where cleared), with no pools, so trail shape can be judged on its own.
+- Clock. The wake runtime runs on engine game time (`GetGameTime`, from
+  `scripts/patches.json`), falling back to the wall clock if it does not
+  resolve. The log says which (`[FOGWAKE] clock=`).
+- Trail probe. `OPENSHIM_FOGWAKE_TRAIL_PROBE=1` logs the clearance along the
+  longest recorded craft path (`[FOGWAKE] trail probe ...`), including the
+  largest step between neighbouring samples over the trail body.
+
+Wakes as trails, not patches. Earlier captures showed a row of separate round
+cleared patches. Measured cause:
+
+- The field already writes swept capsules: each update stamps the segment from
+  the previous to the current position (distance to segment, smoothstep edge,
+  combined with max). Radius 7 m on 2 m cells; refill `exp(-dt/6 s)`.
+- The runtime rejected moves faster than 120 m/s as teleports, timed with the
+  wall clock. Frame capture (`OPENSHIM_FRAME_CAPTURE_STEP_MS=50`) advances game
+  time 50 ms per frame, however long the frame takes, and uncaptured frames run
+  far faster than real time. So game-time moves looked like 200+ m/s on the
+  wall clock, were dropped as teleports, and the trail broke into patches. The
+  debug-2 frames confirmed the gaps were in the CPU field, not the shader.
+- Fix: drive the runtime from game time. Live, the probe then logged
+  `teleports=0` and a trail body with a largest neighbour step of 4.7%.
+- The teleport limit is now `maxSpeed` times the time since the craft was last
+  seen (clamped to 1/30-0.5 s), not a fixed 4 m per tick, so sparse
+  observations still join up.
+- CTest `fog_wake_trail_tests` drives a straight 160 m pass at 5, 20 and
+  40 m/s, observed every 1, 4 and 8 ticks, and fails if any two centreline
+  samples 0.5 m apart differ by more than 10%. It passes (worst 2.3%); the
+  previous runtime fails it (34.9% at 40 m/s, observed every 8 ticks).
+
+![Wake field before and after the clock fix](images/fog_wakes/fog_wake_field_before_after.jpg)
+
+Live runs used `lcbench` on the stock Venus, Achilles and Io worlds (DX11,
+1600x900 windowed, background launch). With the bank placed around
+(2560, 2560), the pools cover 28% of the bank.
+
+FPS on Venus. Each figure is the mean of the `[SOAK]` 5 s heartbeats after
+skipping the first three.
+
+| Arm | Off | On | Change |
+|-----|----:|---:|-------:|
+| Quiet | 234.6 | 217.0 | -7.5% (~0.35 ms) |
+| 20 hover tanks moving | 161.6 | 143.7 | -11% (~0.8 ms) |
+
+The moving arms were noisy (off 122-186, on 117-161, both rising over the
+run), so the moving cost is rough.
+
+Off and on, one frame per world:
+
+![Venus, Achilles and Io, off and on](images/fog_wakes/pools_worlds_onoff.jpg)
+
+One tank crossing a pool on Achilles, camera above and outside the pool. The
+logged closest approach to the pool centre was 7.8 m. Times are from the
+first frame:
+
+![Achilles crossing](images/fog_wakes/pools_crossing_achilles.jpg)
+
+The same crossing on Venus (closest approach 9.5 m):
+
+![Venus crossing](images/fog_wakes/pools_crossing_venus.jpg)
+
+Verdict:
+
+- The pools read as ground fog in each world's hue. Venus is a subtle yellow,
+  Io is grey smoke over the lava valleys, and Achilles shows bold pale pools
+  that may be too strong. The rest of the scene matches stock.
+- The wake reads. With the game-time clock the tank leaves one continuous
+  cleared lane that refills over about 10 s; on Venus it is subtle. How deep
+  the lane looks still follows the pool depth under it, which is the pool
+  shading, not the wake field.
+- The cost is near the 0.5 ms budget: about 0.35 ms quiet, and a rough 0.8 ms
+  with 20 tanks moving.
+
+Open problems before this could ship:
+
+- A camera inside the layer gets no mist on pixels above the surface, because
+  of the single tap. Low pilot views over a pool can look thin.
+- The 0.12 grazing clamp caps the path length, so far pools at grazing angles
+  are uniform.
+- Pools are cut at the bank edge (512 m), and the player-fallback placement
+  decides where the bank sits.
+- Achilles likely needs a lower per-world density.
+- The main-camera check uses `getCurrentViewport`. Its behaviour with other
+  viewports has not been verified.
+- The `ClearState` interaction with the t32/t33 bind has not been verified.
+- The DXBC seed pack holds the 94 shader variants this branch compiled in the
+  live runs, added to the existing 439. It was not rebuilt from a clean warm
+  cache (no main-menu or multiplayer pass), so some cold compiles may remain,
+  and the stale pre-branch entries are dead weight until the next full
+  rebuild with `tools/build_dxbc_seed.py`.
 
 ## Planned runtime contract
 

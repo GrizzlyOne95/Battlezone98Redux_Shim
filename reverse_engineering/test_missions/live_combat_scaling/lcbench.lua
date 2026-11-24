@@ -39,6 +39,9 @@ local VALID_SCENARIOS = {
     -- behaviour can be observed on non-craft classes, which the craft
     -- scenarios can never spawn.
     props = true,
+    -- Interactive fog wakes: one hover tank crosses a mist pool the shim
+    -- logged, under a fixed cinematic camera on higher ground ([FogPool]).
+    fogpool = true,
     -- Shadow-cutoff reproduction fixture (2026-08-25). Spawns one trio of
     -- idle craft per station along the player's sight line, starting at the
     -- configured distance and stepping 25 m per station, so a single capture
@@ -155,6 +158,8 @@ local function readConfig()
     count = math.max(0, math.min(200, math.floor(count or 20)))
     if scenario == "quiet" then
         count = 0
+    elseif scenario == "fogpool" then
+        count = 1
     elseif (scenario == "firing" or scenario == "flight" or
             scenario == "combat") and count < 2 then
         count = 2
@@ -1079,6 +1084,109 @@ local function maintainFiringWorkload()
     end
 end
 
+-- Fog-wake pool crossing (InteractiveFogWakes captures). [FogPool] poolX/poolZ
+-- name a pool centre from the shim's "[FOGWAKE] pool #k centre=(x, z)" line.
+-- The player is parked on the highest of 16 headings viewDistance metres from
+-- it, facing it, and a cinematic camera raised camUpCm above the player aims
+-- at a nav pod on the pool centre, so every frame shares one fixed camera.
+-- One hover tank crosses the pool perpendicular to the sight line; its
+-- position and distance to the centre are traced every half second.
+local fogPool = {
+    x = 0.0, z = 0.0, view = 45.0, half = 35.0, delay = 4.0, camUp = 600,
+    tank = nil, aim = nil, target = nil, ordered = false, camera = false,
+    nextTraceAt = 0.0,
+}
+
+local function readFogPoolConfig()
+    local config = OpenODF("lcbcfg")
+    fogPool.x = GetODFFloat(config, "FogPool", "poolX", 0.0) or 0.0
+    fogPool.z = GetODFFloat(config, "FogPool", "poolZ", 0.0) or 0.0
+    fogPool.view = math.max(15.0, math.min(150.0,
+        GetODFFloat(config, "FogPool", "viewDistance", 45.0) or 45.0))
+    fogPool.half = math.max(10.0, math.min(100.0,
+        GetODFFloat(config, "FogPool", "crossHalf", 35.0) or 35.0))
+    fogPool.delay = math.max(1.0, math.min(30.0,
+        GetODFFloat(config, "FogPool", "startDelay", 4.0) or 4.0))
+    fogPool.camUp = math.max(100, math.min(5000, math.floor(
+        GetODFInt(config, "FogPool", "camUpCm", 600) or 600)))
+end
+
+local function fogPoolGround(x, z)
+    return GetTerrainHeightAndNormal(SetVector(x, 0.0, z))
+end
+
+local function setupFogPool(player)
+    readFogPoolConfig()
+    local centreY = fogPoolGround(fogPool.x, fogPool.z)
+    local bestX, bestZ, bestY
+    for ordinal = 0, 15 do
+        local angle = ordinal * math.pi / 8.0
+        local x = fogPool.x + math.sin(angle) * fogPool.view
+        local z = fogPool.z + math.cos(angle) * fogPool.view
+        local y = fogPoolGround(x, z)
+        if not bestY or y > bestY then
+            bestX, bestZ, bestY = x, z, y
+        end
+    end
+    local dx, dz = fogPool.x - bestX, fogPool.z - bestZ
+    local length = math.sqrt(dx * dx + dz * dz)
+    dx, dz = dx / length, dz / length
+    local viewer = SetVector(bestX, bestY + 2.0, bestZ)
+    SetTransform(player, BuildDirectionalMatrix(viewer, SetVector(dx, 0.0, dz)))
+
+    local px, pz = -dz, dx
+    local startX = fogPool.x - px * fogPool.half
+    local startZ = fogPool.z - pz * fogPool.half
+    local endX = fogPool.x + px * fogPool.half
+    local endZ = fogPool.z + pz * fogPool.half
+    local start = SetVector(startX, fogPoolGround(startX, startZ) + 2.0, startZ)
+    fogPool.target = SetVector(endX, fogPoolGround(endX, endZ), endZ)
+    fogPool.tank = BuildObject(BENCH_UNIT_ODF, 1, start)
+    if IsValid(fogPool.tank) then
+        SetTransform(fogPool.tank,
+            BuildDirectionalMatrix(start, SetVector(px, 0.0, pz)))
+        Stop(fogPool.tank, 1)
+    end
+    fogPool.aim = BuildObject("apcamr", 1, SetVector(fogPool.x, centreY, fogPool.z))
+    trace(string.format(
+        "fogpool pool=(%.1f, %.1f) poolGround=%.1f viewer=(%.1f, %.1f) " ..
+        "viewerGround=%.1f rise=%.1f view=%.1f cross=(%.1f, %.1f)->(%.1f, %.1f) " ..
+        "tank=%s aim=%s",
+        fogPool.x, fogPool.z, centreY, bestX, bestZ, bestY, bestY - centreY,
+        fogPool.view, startX, startZ, endX, endZ,
+        tostring(IsValid(fogPool.tank)), tostring(IsValid(fogPool.aim))))
+end
+
+local function updateFogPool()
+    if not IsValid(playerHandle) then
+        return
+    end
+    local aim = IsValid(fogPool.aim) and fogPool.aim or fogPool.tank
+    if IsValid(aim) then
+        if not fogPool.camera then
+            CameraReady()
+            fogPool.camera = true
+        end
+        CameraObject(playerHandle, 0, fogPool.camUp, 0, aim)
+    end
+    if not fogPool.ordered and elapsed >= fogPool.delay and
+       IsValid(fogPool.tank) then
+        fogPool.ordered = true
+        Goto(fogPool.tank, fogPool.target, 1)
+        trace("fogpool cross-begin")
+    end
+    if elapsed >= fogPool.nextTraceAt then
+        fogPool.nextTraceAt = elapsed + 0.5
+        if IsValid(fogPool.tank) then
+            local p = GetPosition(fogPool.tank)
+            local dx, dz = p.x - fogPool.x, p.z - fogPool.z
+            trace(string.format(
+                "fogpool tank=(%.1f, %.1f, %.1f) poolDist=%.1f",
+                p.x, p.y, p.z, math.sqrt(dx * dx + dz * dz)))
+        end
+    end
+end
+
 function Start()
     BENCH_SCENARIO, BENCH_UNIT_ODF, BENCH_COUNT, BENCH_DISTANCE,
         BENCH_ORIENTATION, BENCH_WARMUP_SECONDS,
@@ -1115,6 +1223,12 @@ function Start()
 
     if BENCH_SCENARIO == "wingman_range" then
         spawnWingmanRangeFixture(player)
+        trace("warmup-begin")
+        return
+    end
+
+    if BENCH_SCENARIO == "fogpool" then
+        setupFogPool(player)
         trace("warmup-begin")
         return
     end
@@ -1157,6 +1271,10 @@ function Update(dt)
 
     if BENCH_SCENARIO == "wingman_range" and not benchmarkEnded then
         updateWingmanRangeFixture()
+    end
+
+    if BENCH_SCENARIO == "fogpool" then
+        updateFogPool()
     end
 
     if BENCH_SCENARIO == "firing" or BENCH_SCENARIO == "flight" or

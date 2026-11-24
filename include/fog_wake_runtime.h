@@ -82,6 +82,7 @@ namespace BZROpenShim::FogWake
             Point previous;      // Where its last stamp ended.
             Point latest;        // Most recent observation.
             double lastSeen = 0; // Observation clock, for staleness.
+            double previousSeen = 0; // Observation clock of `previous`.
             bool seeded = false; // False until the first stamp origin is known.
         };
 

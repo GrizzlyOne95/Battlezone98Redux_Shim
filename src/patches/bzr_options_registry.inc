@@ -396,7 +396,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Fills HD terrain paint for maps with no pre-built paint entry, generated at load from the map. "
-      "Needs HD Terrain Tiles and a pack with live recipes. DX11 Enhanced only. Visual only. Restart required." },
+      "Needs HD Terrain Tiles and a pack with live recipes. DX11 Enhanced only. Visual only. Single player only. Restart required." },
     { "Hull Scorch", "LocalDamage", "HullScorch", kShimSettingsHullScorchAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::LiveEngineToggle,
@@ -491,6 +491,11 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Experimental. Apply mouse steer and aim every frame instead of 60 times a second, so aim keeps up with high refresh rates. Sensitivity is unchanged. Single player only. Restart required." },
+    // Read once at startup; absent key = off, so defaultIndex 1 selects "0" (Off).
+    { "Fog Wakes", "Experimental", "InteractiveFogWakes", nullptr, 0,
+      kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
+      ShimSettingApplyGroup::RestartRequired,
+      "Experimental. Low-lying ground fog pools in hollows, and moving craft clear a trail through it that refills over about 10 s. DX11 Enhanced only. Visual only. Single player only. Restart required." },
     { "Material Guard", "General", "OgreMaterialCollisionGuard", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
@@ -1208,7 +1213,7 @@ static const ShimSettingStockValue kShimSettingsStockValues[] =
     { "UnitVoFeedback", "Normal" }, { "MultiplayerFlags", "0" },
 
     { "FastMenuTransitions", "0" }, { "SoundChannels", "0" }, { "CustomBindsUi", "0" },
-    { "RawMouseInput", "0" }, { "DisableControlSmoothing", "0" }, { "MouseEveryFrame", "0" },
+    { "RawMouseInput", "0" }, { "DisableControlSmoothing", "0" }, { "MouseEveryFrame", "0" }, { "InteractiveFogWakes", "0" },
     { "BriefingPages", "0" }, { "Database", "0" }, { "LobbyBriefing", "0" },
     { "MapFilterExtras", "0" }, { "Enabled", "0" }, { "QuickSaveEnabled", "0" }, { "WeaponConvergence", "0" },
     { "MuzzleFlash", "0" }, { "MeshRecoil", "0" }, { "ShellCasings", "0" }, { "LaserSight", "0" },

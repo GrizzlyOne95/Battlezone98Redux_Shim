@@ -29,7 +29,7 @@ static const char* const kShimCategoryVideo[] = {
     kShimRowEffects, kShimRowMenuTheme, kShimRowPerformance };
 static const char* const kShimCategoryEffects[] = {
     "Faction Color Jets", "Destruction Chunks",
-    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs", "Paint", "Live Terrain Paint" };
+    "Muzzle Flashes", "Muzzle Recoil", "Shell Casings", "Laser Sight", "Person Gibs", "Paint", "Live Terrain Paint", "Fog Wakes" };
 static const char* const kShimCategoryLighting[] = {
     "Player Headlight", "Headlight Power", "Headlight Color", "Headlight Beam", "Headlight Reach",
     "AI Headlights", "Pilot Flashlight", "Pilot Light Color", "Pilot Light Beam",

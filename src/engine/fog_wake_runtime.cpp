@@ -120,6 +120,7 @@ namespace BZROpenShim::FogWake
         fresh.previous = position;
         fresh.latest = position;
         fresh.lastSeen = nowSeconds;
+        fresh.previousSeen = nowSeconds;
         // A brand new emitter has no history, so its first step stamps a point
         // rather than a streak from wherever it happened to be created.
         fresh.seeded = true;
@@ -175,11 +176,19 @@ namespace BZROpenShim::FogWake
         // than being decayed on the tick that created it.
         field_.Advance(stepSeconds_, wind);
 
-        const double teleportDistance = config_.maxSpeed * stepSeconds_;
+        // Observations need not arrive every tick (the emitter hook follows
+        // flame emission, not the simulation), so a move is judged against the
+        // observation time it spans, not one tick. Otherwise an ordinary move
+        // after a quiet tick or two reads as a teleport and leaves a gap in the
+        // trail. The span is capped so a stale emitter cannot draw a long streak.
+        constexpr double kMaxObservationSpan = 0.5;
         for (auto& emitter : emitters_)
         {
             const Point from = emitter.previous;
             const Point to = emitter.latest;
+            const double span = std::clamp(emitter.lastSeen - emitter.previousSeen,
+                                           stepSeconds_, (std::max)(stepSeconds_, kMaxObservationSpan));
+            const double teleportDistance = config_.maxSpeed * span;
 
             if (!emitter.seeded || Distance(from, to) > teleportDistance)
             {
@@ -187,6 +196,7 @@ namespace BZROpenShim::FogWake
                 // measures from where the emitter actually is: leaving the old
                 // origin in place would draw the rejected streak one tick later.
                 emitter.previous = to;
+                emitter.previousSeen = emitter.lastSeen;
                 emitter.seeded = true;
                 ++stats_.teleports;
                 continue;
@@ -196,6 +206,7 @@ namespace BZROpenShim::FogWake
                 ++stats_.stamps;
 
             emitter.previous = to;
+            emitter.previousSeen = emitter.lastSeen;
         }
 
         ++stats_.steps;
