@@ -5369,6 +5369,21 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
         }
 
         uint32_t g_followCameraDeferrals = 0;
+        // Change-only record of why ObserveZone returned before evaluating
+        // clusters, so a map that never selects says why in the log.
+        const char* g_selectionDeferReason = nullptr;
+        uint32_t g_selectionDeferCount = 0;
+
+        void NoteSelectionDeferred(const char* reason, int zoneOrdinal)
+        {
+            ++g_selectionDeferCount;
+            if (reason == g_selectionDeferReason)
+                return;
+            g_selectionDeferReason = reason;
+            LogShimA(LogLevel::Info, "terrain-proxy",
+                "[TERRAIN-PROXY] selection deferred reason=%s zone=%d count=%u",
+                reason, zoneOrdinal, g_selectionDeferCount);
+        }
         bool g_followCameraUnavailableLogged = false;
 
         // Camera-aware selection needs the projection API. If it is missing the
@@ -5427,22 +5442,33 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             bool aimUsedPlayer = false;
             int viewportWidth = 0;
             int viewportHeight = 0;
-            if (followCamera &&
-                (!GetActiveCameraPosition(camera, cameraPosition) ||
-                 !GetActiveCamera(camera, viewportWidth, viewportHeight) ||
-                 !GetCameraAimPoint(camera, g_config.followCameraAimDistance, aim,
-                     aimUsedPlayer)))
+            if (followCamera)
             {
                 // Zone construction can precede the gameplay camera. The
                 // rebuild dispatcher calls back on later dispatches, so defer
                 // rather than settle for a cluster nobody will ever see.
-                return false;
+                if (!GetActiveCameraPosition(camera, cameraPosition) ||
+                    !GetActiveCamera(camera, viewportWidth, viewportHeight))
+                {
+                    NoteSelectionDeferred("no-camera", zoneOrdinal);
+                    return false;
+                }
+                if (!GetCameraAimPoint(camera, g_config.followCameraAimDistance, aim,
+                        aimUsedPlayer))
+                {
+                    NoteSelectionDeferred("no-aim", zoneOrdinal);
+                    return false;
+                }
             }
             // Renderer construction exposes an identity camera at the origin
             // before the mission camera is placed. Do not select that cluster.
             if (g_config.tessellationTest && (!followCamera ||
                 (cameraPosition.x == 0.0f && cameraPosition.y == 0.0f && cameraPosition.z == 0.0f)))
+            {
+                NoteSelectionDeferred(followCamera ? "origin-camera" : "tess-needs-follow-camera",
+                    zoneOrdinal);
                 return false;
+            }
 
             ClusterCandidate best;
             bool haveBest = false;
@@ -5529,6 +5555,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
                         return false;
 
                     g_proxy.selected = true;
+                    g_selectionDeferReason = nullptr;
                     g_proxy.zone = zone;
                     g_proxy.sceneManager = sceneManager;
                     g_proxy.sourceMesh = mesh;
@@ -5882,6 +5909,8 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
             {
                 ++g_missionGeneration;
                 g_discoveryArmed = true;
+                g_selectionDeferReason = nullptr;
+                g_selectionDeferCount = 0;
                 LogShimA(LogLevel::Info, "terrain-proxy",
                     "[TERRAIN-PROXY] lifecycle mission-arm missionGeneration=%u armed=1 forgets=%u forgetNoops=%u proxyLosses=%u sceneTeardownSeamsObserved=%u",
                     g_missionGeneration, g_missionForgetCount,
