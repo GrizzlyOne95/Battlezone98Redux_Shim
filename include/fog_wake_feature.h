@@ -11,6 +11,13 @@ namespace BZROpenShim
     //
     // See Docs/INTERACTIVE_FOG_WAKES.md.
 
+    // The multiplayer gate: the option only takes effect in a single player
+    // session, because the trail would reveal where enemy craft went.
+    inline bool FogWakeGateAllows(bool configured, bool singlePlayer)
+    {
+        return configured && singlePlayer;
+    }
+
     bool FogWakeFeatureEnabled();
 
     // Mission run-state transitions. Emitter identity is a raw engine pointer,

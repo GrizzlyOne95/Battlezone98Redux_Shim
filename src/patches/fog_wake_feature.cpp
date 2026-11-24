@@ -1,5 +1,6 @@
 #include "fog_wake_feature.h"
 
+#include "bzr_hooks_internal.h"
 #include "bzr_options_ui.h"
 #include "fog_wake_runtime.h"
 #include "hook_engine.h"
@@ -278,12 +279,27 @@ namespace BZROpenShim
     bool FogWakeFeatureEnabled()
     {
         EnsureConfigLoaded();
-        return g_Enabled.load(std::memory_order_relaxed);
+        if (!g_Enabled.load(std::memory_order_relaxed))
+            return false;
+        // A fading trail shows where craft went, including enemies out of
+        // sight, so it is single player only.
+        const bool allowed = FogWakeGateAllows(true, Hooks::IsSinglePlayerSession());
+        static std::atomic<int> s_lastAllowed{ -1 };
+        if (s_lastAllowed.exchange(allowed ? 1 : 0, std::memory_order_relaxed) != (allowed ? 1 : 0))
+        {
+            LogShimA(LogLevel::Info, kComponent, allowed ? "[FOGWAKE] enabled: single player session"
+                                                         : "[FOGWAKE] disabled: not a single player session");
+        }
+        return allowed;
     }
 
     void FogWakeNotifyMissionRunStateChanged(bool running)
     {
-        if (!FogWakeFeatureEnabled())
+        // Bookkeeping and teardown follow the option, not the session gate: the
+        // session type may not be readable yet at load, and a stop edge that
+        // arrives while the gate is closed must still discard the old world.
+        EnsureConfigLoaded();
+        if (!g_Enabled.load(std::memory_order_relaxed))
             return;
 
         g_Running = running;
@@ -359,8 +375,16 @@ namespace BZROpenShim
 
     void FogWakeRenderFrameTick()
     {
-        if (!FogWakeFeatureEnabled())
+        EnsureConfigLoaded();
+        if (!g_Enabled.load(std::memory_order_relaxed))
             return;
+        if (!FogWakeFeatureEnabled())
+        {
+            // Gate closed (network session): release any GPU binding left from
+            // a moment when it was open.
+            FogWakeShaderFrameTick(false);
+            return;
+        }
         if (!g_BankPlaced)
         {
             FogWakeShaderFrameTick(false);

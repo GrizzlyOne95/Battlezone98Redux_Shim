@@ -1,3 +1,4 @@
+#include "fog_wake_feature.h"
 #include "fog_wake_runtime.h"
 
 #include <cmath>
@@ -40,6 +41,11 @@ namespace {
 
 int main()
 {
+    // --- multiplayer gate ----------------------------------------------------
+    Check(BZROpenShim::FogWakeGateAllows(true, true), "fog wakes run when configured in single player");
+    Check(!BZROpenShim::FogWakeGateAllows(true, false), "fog wakes are off in a network session");
+    Check(!BZROpenShim::FogWakeGateAllows(false, true), "fog wakes stay off when not configured");
+
     // --- fails closed -------------------------------------------------------
     {
         Runtime runtime;

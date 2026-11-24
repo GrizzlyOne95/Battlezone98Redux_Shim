@@ -13,7 +13,7 @@ approach is designed.
 
 ## In-game option
 
-The toggle is also in the OpenShim options menu as **Fog Wakes** (Experimental group), default Off. It writes `[Experimental] InteractiveFogWakes`, which is read once at startup, so a restart is required. It is visual only and not gated in multiplayer.
+The toggle is also in the OpenShim options menu as **Fog Wakes** (Experimental group), default Off. It writes `[Experimental] InteractiveFogWakes`, which is read once at startup, so a restart is required. It is visual only and single player only: in a network session `FogWakeFeatureEnabled()` returns false (logged once per change as `[FOGWAKE] disabled: not a single player session`), because the trail would reveal where enemy craft went.
 
 ## First milestone
 

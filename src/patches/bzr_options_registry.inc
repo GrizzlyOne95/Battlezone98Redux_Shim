@@ -396,7 +396,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
       "Fills HD terrain paint for maps with no pre-built paint entry, generated at load from the map. "
-      "Needs HD Terrain Tiles and a pack with live recipes. DX11 Enhanced only. Visual only. Restart required." },
+      "Needs HD Terrain Tiles and a pack with live recipes. DX11 Enhanced only. Visual only. Single player only. Restart required." },
     { "Hull Scorch", "LocalDamage", "HullScorch", kShimSettingsHullScorchAltKeys, 1,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::LiveEngineToggle,
@@ -495,7 +495,7 @@ static const ShimSettingDescriptor g_ShimSettingsRegistry[] =
     { "Fog Wakes", "Experimental", "InteractiveFogWakes", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 1,
       ShimSettingApplyGroup::RestartRequired,
-      "Experimental. Low-lying ground fog pools in hollows, and moving craft clear a trail through it that refills over about 10 s. DX11 Enhanced only. Visual only. Restart required." },
+      "Experimental. Low-lying ground fog pools in hollows, and moving craft clear a trail through it that refills over about 10 s. DX11 Enhanced only. Visual only. Single player only. Restart required." },
     { "Material Guard", "General", "OgreMaterialCollisionGuard", nullptr, 0,
       kShimSettingsOnOffValues, kShimSettingsOnOffLabels, 2, 0,
       ShimSettingApplyGroup::RestartRequired,
