@@ -43,6 +43,7 @@
 #include "ogre_profiler_algorithms.h"
 #include "weapon_convergence.h"
 #include "weapon_presentation_hooks.h"
+#include "construction_blob_faction.h"
 #include "geometry_contact_test.h"
 #include "mesh_impact.h"
 #include "headlight_falloff.h"
@@ -113,7 +114,7 @@ namespace BZROpenShim
             GeometryContactTest::Clear();
             MeshImpact::Clear();
             if (g_OgreFn_ClearSceneOriginal)
-                WeaponPresentationSceneTeardownBegin();
+                { WeaponPresentationSceneTeardownBegin(); BZROpenShim::ConstructionBlobFaction::SceneTeardown(); }
             TerrainProxySceneTeardownBegin(sceneManager, true);
             ForgetAllChunkProxySceneResources(L"clearScene");
             ForgetSkinnedGibSceneResources(L"clearScene");
@@ -136,7 +137,7 @@ namespace BZROpenShim
             GeometryContactTest::Clear();
             MeshImpact::Clear();
             if (g_OgreFn_DestroyAllMovablesOriginal)
-                WeaponPresentationSceneTeardownBegin();
+                { WeaponPresentationSceneTeardownBegin(); BZROpenShim::ConstructionBlobFaction::SceneTeardown(); }
             TerrainProxySceneTeardownBegin(sceneManager, false);
             ForgetAllChunkProxySceneResources(L"destroyAllMovableObjects");
             ForgetSkinnedGibSceneResources(L"destroyAllMovableObjects");
@@ -208,7 +209,7 @@ namespace BZROpenShim
             // twins name objects of the world that is ending.
             const bool weaponTeardown = worldEnds && g_OgreFn_DestroyAllEntitiesOriginal;
             if (weaponTeardown)
-                WeaponPresentationSceneTeardownBegin();
+                { WeaponPresentationSceneTeardownBegin(); BZROpenShim::ConstructionBlobFaction::SceneTeardown(); }
             if (worldEnds)
             {
                 // destroyAllLights follows in the same call and frees the light.

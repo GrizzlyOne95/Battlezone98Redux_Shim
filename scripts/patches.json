@@ -3125,6 +3125,36 @@
       "expected": "55 8B EC 81 EC 14 03 00 00 A1 00 70 8E 00 33 C5"
     },
     {
+      "name": "ConstructionBlobPreLoad",
+      "address": "0x0049BF60",
+      "expected": "55 8B EC 6A FF 68 08 95 84 00 64 A1 00 00 00 00",
+      "identity": "FUN_0049BF60 ConstructionBlob::PreLoad (__fastcall this): opens cnstblob.odf, reads blobTexture (default bpuff.0) through GetSpriteIndex into this+0x16C, blobFrames/blobVariance into +0x174/+0x178, resets the list end pointer +0x168 to this+0x28. ConstructionBlob vtable 0x008778A0 slot 2."
+    },
+    {
+      "name": "ConstructionBlobControl",
+      "address": "0x0049C050",
+      "expected": "55 8B EC 51 89 4D FC 8B 45 FC 8B 88 70 01 00 00",
+      "identity": "FUN_0049C050 ConstructionBlob::Control (__fastcall this): advances blobIndex +0x170 modulo blobVariance +0x178 and resets the list end pointer +0x168 to this+0x28, once per simulation pass before the producers re-add their blobs. ConstructionBlob vtable 0x008778A0 slot 6 (+0x18); BZ 1.5 ConstructionBlob::Control."
+    },
+    {
+      "name": "ConstructionBlobSubmit",
+      "address": "0x0049C150",
+      "expected": "55 8B EC 83 EC 54 A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "FUN_0049C150 ConstructionBlob::Submit (__thiscall this, camera): draws each 0x14-byte entry from this+0x28 to the end pointer at +0x168 with sprite blobTexture(+0x16C)+blobIndex(+0x170)+round(blobFrames*scale). ConstructionBlob vtable 0x008778A0 slot 8."
+    },
+    {
+      "name": "ProducerUpdateBuild",
+      "address": "0x005AEE30",
+      "expected": "55 8B EC 83 EC 5C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "FUN_005AEE30 Producer::UpdateBuild (__thiscall this, float dt): counts down this+0x304 over buildClass(+0x300)->buildTime(+0x54) and calls ConstructionBlob::AddBlob 0x0049C0A0; BZ 1.5 Producer::UpdateBuild."
+    },
+    {
+      "name": "ConstructionRigUpdateUnbuild",
+      "address": "0x0049CDF0",
+      "expected": "55 8B EC 83 EC 1C A1 00 70 8E 00 33 C5 89 45 FC",
+      "identity": "FUN_0049CDF0 ConstructionRig::UpdateUnbuild (__thiscall this, float dt): counts down this+0x304 over class(+0x370)->buildTime(+0x54) and calls ConstructionBlob::AddBlob 0x0049C0A0; BZ 1.5 ConstructionRig::UpdateUnbuild."
+    },
+    {
       "name": "ChunkEffectSimulate",
       "address": "0x004917F0",
       "expected": "55 8B EC 81 EC DC 01 00 00 A1 00 70 8E 00 33 C5"
@@ -8130,6 +8160,41 @@
       "name": "Engine Flame Submit VTable Hook",
       "fallback": "0x008791AC",
       "expected_original": "C0 88 4C 00"
+    },
+    {
+      "name": "Construction Blob Faction PreLoad VTable Hook",
+      "fallback": "0x008778A8",
+      "expected_original": "60 BF 49 00"
+    },
+    {
+      "name": "Construction Blob Faction Control VTable Hook",
+      "fallback": "0x008778B8",
+      "expected_original": "50 C0 49 00"
+    },
+    {
+      "name": "Construction Blob Faction Submit VTable Hook",
+      "fallback": "0x008778C0",
+      "expected_original": "50 C1 49 00"
+    },
+    {
+      "name": "Construction Blob Faction Producer Build Tag",
+      "pattern": "0F B6 C0 85 C0 74 16 51 F3 0F 10 45 08 F3 0F 11 04 24 8B 8D ?? ?? ?? ?? E8 ?? ?? ?? ??",
+      "offset": 25,
+      "expected_size": 4,
+      "fallback": "0x005AD796",
+      "expected_original": "96 16 00 00",
+      "require_unique": true,
+      "identity": "The rel32 operand of the only call to Producer::UpdateBuild 0x005AEE30 (in FUN_005AC580, call at 0x005AD795), on exact GOG Redux 2.2.301. The hook calls the original and tags the ConstructionBlob slot it appended with the build class's faction render."
+    },
+    {
+      "name": "Construction Blob Faction Rig Unbuild Tag",
+      "pattern": "83 B8 ?? ?? ?? ?? 01 75 ?? E8 ?? ?? ?? ?? 51 D9 1C 24 8B 4D FC 8B 49 10 E8 ?? ?? ?? ??",
+      "offset": 25,
+      "expected_size": 4,
+      "fallback": "0x0049ED0C",
+      "expected_original": "E0 E0 FF FF",
+      "require_unique": true,
+      "identity": "The rel32 operand of the only call to ConstructionRig::UpdateUnbuild 0x0049CDF0 (in FUN_0049EC50, call at 0x0049ED0B), on exact GOG Redux 2.2.301. The hook calls the original and tags the ConstructionBlob slot it appended with the target class's faction render."
     },
     {
       "name": "Chunk Effect Simulate VTable Hook",

@@ -44,6 +44,9 @@ CRAFT_GETCOMMAND = ["Craft", "HoverCraft", "Minelayer", "Person", "SAV", "Walker
 HOOKS = [
     ("EngineFlameControl", "EngineFlameControl", [P("Engine Flame Control VTable Hook")]),
     ("EngineFlameSubmit", "EngineFlameSubmit", [P("Engine Flame Submit VTable Hook")]),
+    ("ConstructionBlobPreLoad", "ConstructionBlobPreLoad", [P("Construction Blob Faction PreLoad VTable Hook")]),
+    ("ConstructionBlobControl", "ConstructionBlobControl", [P("Construction Blob Faction Control VTable Hook")]),
+    ("ConstructionBlobSubmit", "ConstructionBlobSubmit", [P("Construction Blob Faction Submit VTable Hook")]),
     ("ChunkEffectSimulate", "ChunkEffectSimulate", [P("Chunk Effect Simulate VTable Hook")]),
     ("LegacyWorldUpdateRenderQueue", "LegacyWorldUpdateRenderQueue",
      [P("Legacy World Update RenderQueue VTable Hook"), VT("DynamicGeometryVtable", 32)]),
