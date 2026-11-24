@@ -111,6 +111,7 @@ namespace BZROpenShim
                                                                uint32_t flags, void* parent);
             using FnSetText = void(__thiscall*)(void* block, const char* text, int colourIndex);
             using FnScroll = void(__thiscall*)(void* block);
+            using FnSetTextScale = void(__thiscall*)(void* block, float scale);
             using FnSetByte = void(__thiscall*)(void* widget, uint8_t value);
             using FnLobbyRecord = uint8_t*(__thiscall*)(void* netLobby);
             using FnSelectedEntry = const uint8_t*(__thiscall*)(void* component);
@@ -123,7 +124,7 @@ namespace BZROpenShim
 
             uint32_t g_CreateVtable = 0, g_ScreenSlot = 0, g_UiViewVtable = 0;
             uint32_t g_KeyPressedAddr = 0, g_CharAddr = 0, g_KeyReleasedAddr = 0;
-            uint32_t g_TextCtorAddr = 0, g_SetTextAddr = 0, g_ScrollUpAddr = 0, g_ScrollDownAddr = 0;
+            uint32_t g_TextCtorAddr = 0, g_SetTextAddr = 0, g_SetTextScaleAddr = 0, g_ScrollUpAddr = 0, g_ScrollDownAddr = 0;
             uint32_t g_SetZAddr = 0, g_SetEnabledAddr = 0, g_RecordAddr = 0, g_SelectedEntryAddr = 0;
             FnGameNew g_GameNew = nullptr;
 
@@ -671,7 +672,13 @@ namespace BZROpenShim
                     memory, 0, "OpenShimLobbyBrief_Text", kTextRect.x, kTextRect.y, kTextRect.w, kTextRect.h,
                     &OnScrollUpClicked, &OnScrollDownClicked, Shell::kControlFlags, overlay);
                 if (block)
+                {
+                    // The block starts at text scale 0.75; the reflow and the stride probe
+                    // both apply it, so pages skip lines (Docs/DATABASE_SCREEN.md, "Briefing
+                    // scrolling"). 1.0 makes them agree.
+                    reinterpret_cast<FnSetTextScale>(static_cast<uintptr_t>(g_SetTextScaleAddr))(block, 1.0f);
                     g_BzrFn_AddChild(overlay, block, 0);
+                }
                 return block;
             }
 
@@ -841,6 +848,7 @@ namespace BZROpenShim
                 { "UiViewKeyReleased", &g_KeyReleasedAddr },
                 { "ScrollingTextBlockCtor", &g_TextCtorAddr },
                 { "ScrollingTextBlockSetText", &g_SetTextAddr },
+                { "ScrollingTextBlockSetTextScale", &g_SetTextScaleAddr },
                 { "ScrollingTextBlockScrollUp", &g_ScrollUpAddr },
                 { "ScrollingTextBlockScrollDown", &g_ScrollDownAddr },
                 { "UiViewSetZOrder", &g_SetZAddr },
