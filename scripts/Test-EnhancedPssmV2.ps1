@@ -29,13 +29,15 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $payload = Join-Path $repoRoot 'resources\renderer\enhanced'
 $baseShader = Join-Path $payload 'openshim_enhanced_base-sm4.hlsl'
 $terrainShader = Join-Path $payload 'openshim_enhanced_terrain-sm4.hlsl'
+$baseProgram = Join-Path $payload 'openshim_enhanced_base.program'
+$terrainProgram = Join-Path $payload 'openshim_enhanced_terrain.program'
 $baseSm3 = Join-Path $payload 'openshim_enhanced_base-sm3.hlsl'
 $terrainSm3 = Join-Path $payload 'openshim_enhanced_terrain-sm3.hlsl'
 
 # A guard that quietly skips its subject passes exactly as loudly as one that
 # checked it, which is the failure mode this port exists to fix. So a missing
 # input is fatal here rather than a skip.
-foreach ($required in @($baseShader, $terrainShader, $baseSm3, $terrainSm3)) {
+foreach ($required in @($baseShader, $terrainShader, $baseProgram, $terrainProgram, $baseSm3, $terrainSm3)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Enhanced payload shader missing: $required"
     }
@@ -69,21 +71,21 @@ $fadeStart = [Math]::Max($split2 + $blendWidth, $splitEnd - $fadeWidth)
 
 function Get-PssmState([double]$Depth) {
     if ($Depth -lt $script:split1 - $script:blendWidth) {
-        return @{ Cascades = @(0); Weight = 0.0; Fade = 0.0; ShadowTaps = 4 }
+        return @{ Cascades = @(0); Weight = 0.0; Fade = 0.0; ShadowSamples = 9 }
     }
     if ($Depth -le $script:split1 + $script:blendWidth) {
-        return @{ Cascades = @(0, 1); Weight = Smooth-Step ($script:split1 - $script:blendWidth) ($script:split1 + $script:blendWidth) $Depth; Fade = 0.0; ShadowTaps = 8 }
+        return @{ Cascades = @(0, 1); Weight = Smooth-Step ($script:split1 - $script:blendWidth) ($script:split1 + $script:blendWidth) $Depth; Fade = 0.0; ShadowSamples = 18 }
     }
     if ($Depth -lt $script:split2 - $script:blendWidth) {
-        return @{ Cascades = @(1); Weight = 0.0; Fade = 0.0; ShadowTaps = 4 }
+        return @{ Cascades = @(1); Weight = 0.0; Fade = 0.0; ShadowSamples = 9 }
     }
     if ($Depth -le $script:split2 + $script:blendWidth) {
-        return @{ Cascades = @(1, 2); Weight = Smooth-Step ($script:split2 - $script:blendWidth) ($script:split2 + $script:blendWidth) $Depth; Fade = 0.0; ShadowTaps = 8 }
+        return @{ Cascades = @(1, 2); Weight = Smooth-Step ($script:split2 - $script:blendWidth) ($script:split2 + $script:blendWidth) $Depth; Fade = 0.0; ShadowSamples = 18 }
     }
     if ($Depth -le $script:splitEnd) {
-        return @{ Cascades = @(2); Weight = 0.0; Fade = Smooth-Step $script:fadeStart $script:splitEnd $Depth; ShadowTaps = 4 }
+        return @{ Cascades = @(2); Weight = 0.0; Fade = Smooth-Step $script:fadeStart $script:splitEnd $Depth; ShadowSamples = 9 }
     }
-    return @{ Cascades = @(); Weight = 0.0; Fade = 1.0; ShadowTaps = 0 }
+    return @{ Cascades = @(); Weight = 0.0; Fade = 1.0; ShadowSamples = 0 }
 }
 
 function Evaluate-Shadow([double]$Depth) {
@@ -99,25 +101,71 @@ function Evaluate-Shadow([double]$Depth) {
     return $shadow + (1.0 - $shadow) * $state.Fade
 }
 
-# Cascade selection, bounded weights and lookup cost.
+# The reduced kernel should equal the four bilinear comparison taps for every
+# possible binary 3x3 visibility pattern and representative sub-texel phases.
+function Get-ReferencePcf3x3([int[]]$Samples, [double]$Fx, [double]$Fy) {
+    $result = 0.0
+    for ($y = 0; $y -lt 2; ++$y) {
+        for ($x = 0; $x -lt 2; ++$x) {
+            $i = $y * 3 + $x
+            $top = $Samples[$i] + ($Samples[$i + 1] - $Samples[$i]) * $Fx
+            $bottom = $Samples[$i + 3] + ($Samples[$i + 4] - $Samples[$i + 3]) * $Fx
+            $result += $top + ($bottom - $top) * $Fy
+        }
+    }
+    return $result * 0.25
+}
+
+function Get-SharedTapPcf3x3([int[]]$Samples, [double]$Fx, [double]$Fy) {
+    $sum00 = 0.0
+    $sum10 = 0.0
+    $sum01 = 0.0
+    $sum11 = 0.0
+    for ($y = 0; $y -lt 2; ++$y) {
+        for ($x = 0; $x -lt 2; ++$x) {
+            $i = $y * 3 + $x
+            $sum00 += $Samples[$i]
+            $sum10 += $Samples[$i + 1]
+            $sum01 += $Samples[$i + 3]
+            $sum11 += $Samples[$i + 4]
+        }
+    }
+    $top = $sum00 + ($sum10 - $sum00) * $Fx
+    $bottom = $sum01 + ($sum11 - $sum01) * $Fx
+    return ($top + ($bottom - $top) * $Fy) * 0.25
+}
+
+foreach ($mask in 0..511) {
+    $samples = [int[]]::new(9)
+    for ($i = 0; $i -lt 9; ++$i) { $samples[$i] = ($mask -shr $i) -band 1 }
+    foreach ($fx in @(0.0, 0.17, 0.5, 0.83, 0.999999)) {
+        foreach ($fy in @(0.0, 0.17, 0.5, 0.83, 0.999999)) {
+            $reference = Get-ReferencePcf3x3 $samples $fx $fy
+            $sharedTaps = Get-SharedTapPcf3x3 $samples $fx $fy
+            Assert-True ([Math]::Abs($reference - $sharedTaps) -lt 1e-12) "Shared-tap PCF differs from four bilinear comparisons for mask $mask at ($fx,$fy)."
+        }
+    }
+}
+
+# Cascade selection, bounded weights and depth-read cost.
 $expected = @(
-    @{ D = 0.0; C = '0'; T = 4 },
-    @{ D = 15.0; C = '0,1'; T = 8 },
-    @{ D = 16.0; C = '0,1'; T = 8 },
-    @{ D = 17.0; C = '0,1'; T = 8 },
-    @{ D = 18.0; C = '1'; T = 4 },
-    @{ D = 63.0; C = '1,2'; T = 8 },
-    @{ D = 64.0; C = '1,2'; T = 8 },
-    @{ D = 65.0; C = '1,2'; T = 8 },
-    @{ D = 66.0; C = '2'; T = 4 },
-    @{ D = 232.0; C = '2'; T = 4 },
-    @{ D = 256.0; C = '2'; T = 4 },
+    @{ D = 0.0; C = '0'; T = 9 },
+    @{ D = 15.0; C = '0,1'; T = 18 },
+    @{ D = 16.0; C = '0,1'; T = 18 },
+    @{ D = 17.0; C = '0,1'; T = 18 },
+    @{ D = 18.0; C = '1'; T = 9 },
+    @{ D = 63.0; C = '1,2'; T = 18 },
+    @{ D = 64.0; C = '1,2'; T = 18 },
+    @{ D = 65.0; C = '1,2'; T = 18 },
+    @{ D = 66.0; C = '2'; T = 9 },
+    @{ D = 232.0; C = '2'; T = 9 },
+    @{ D = 256.0; C = '2'; T = 9 },
     @{ D = 257.0; C = ''; T = 0 }
 )
 foreach ($item in $expected) {
     $state = Get-PssmState $item.D
     Assert-True (($state.Cascades -join ',') -eq $item.C) "Depth $($item.D) selected cascades '$($state.Cascades -join ',')'; expected '$($item.C)'."
-    Assert-True ($state.ShadowTaps -eq $item.T) "Depth $($item.D) uses $($state.ShadowTaps) taps; expected $($item.T)."
+    Assert-True ($state.ShadowSamples -eq $item.T) "Depth $($item.D) uses $($state.ShadowSamples) depth reads; expected $($item.T)."
     Assert-True ($state.Weight -ge 0.0 -and $state.Weight -le 1.0) "Depth $($item.D) produced out-of-range blend weight $($state.Weight)."
     Assert-True ($state.Fade -ge 0.0 -and $state.Fade -le 1.0) "Depth $($item.D) produced out-of-range fade $($state.Fade)."
 }
@@ -170,14 +218,21 @@ foreach ($depth in @(-1.0, 0.0, 16.0, 64.0, 256.0, 1e9)) {
 
 $baseSource = Get-Content $baseShader -Raw
 $terrainSource = Get-Content $terrainShader -Raw
+$baseProgramSource = Get-Content $baseProgram -Raw
+$terrainProgramSource = Get-Content $terrainProgram -Raw
 foreach ($source in @($baseSource, $terrainSource)) {
     Assert-True ($source -match '#define\s+OSE_ENHANCED_PSSM_V2\s+0') 'PSSM v2 does not default off.'
     Assert-True ($source -match 'defined\(ENHANCED_MODE\)[\s\S]{0,80}defined\(SHADOWRECEIVER\)') 'PSSM v2 activation is not gated by Enhanced + shadow receiver.'
     # Hardware comparison samplers returned lit everywhere through these passes
     # (Enhanced receivers lost every shadow), so v2 compares by hand.
     Assert-True ($source -notmatch 'SamplerComparisonState|SampleCmpLevelZero\(') 'PSSM v2 must not use hardware comparison sampling.'
-    Assert-True ([regex]::Matches($source, 'PCF_CompareBilinear\(map,').Count -eq 4) 'PSSM v2 must contain exactly four bilinear comparison taps in each shader source.'
+    Assert-True ($source -match '#elif defined\(PCF_SIZE\) && PCF_SIZE < 4[\s\S]{0,1200}float kernel\[PCF_SIZE \* PCF_SIZE\]') 'PSSM v2 is missing the reduced PCF_SIZE kernel.'
+    Assert-True ([regex]::Matches($source, 'PCF_CompareBilinear\(map,').Count -eq 4) 'The full-footprint PCF reference path must retain four bilinear comparisons.'
 }
+Assert-True ([regex]::Matches($baseProgramSource, 'PCF_SIZE=3[^\r\n]*OSE_ENHANCED_PSSM_V2=1').Count -eq 2) 'Both High base PSSM-v2 programs must use the 3x3 filter.'
+Assert-True ([regex]::Matches($terrainProgramSource, 'PCF_SIZE=3[^\r\n]*OSE_ENHANCED_PSSM_V2=1').Count -eq 1) 'The High terrain PSSM-v2 program must use the 3x3 filter.'
+Assert-True ($baseProgramSource -notmatch 'PCF_SIZE=4[^\r\n]*OSE_ENHANCED_PSSM_V2=1') 'A High base PSSM-v2 program still uses the 4x4 filter.'
+Assert-True ($terrainProgramSource -notmatch 'PCF_SIZE=4[^\r\n]*OSE_ENHANCED_PSSM_V2=1') 'The High terrain PSSM-v2 program still uses the 4x4 filter.'
 
 # The SM3 path is the DX9 backend and must stay untouched by any of this: a
 # comparison sampler there does not degrade, it fails to compile.
@@ -196,21 +251,24 @@ Assert-True ($FxcPath -and (Test-Path $FxcPath)) 'fxc.exe was not found.'
 
 $costRows = @()
 if ($FxcPath -and (Test-Path $FxcPath)) {
-    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) 'openshim-enhanced-pssm-v2'
-    if (Test-Path $tempRoot) { Remove-Item $tempRoot -Recurse -Force }
+    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) "openshim-enhanced-pssm-v2-$([guid]::NewGuid().ToString('N'))"
     New-Item $tempRoot -ItemType Directory | Out-Null
 
     $commonBase = @('MAX_LIGHTS=24','NORMALMAP_ENABLED=1','SPECULARMAP_ENABLED=1','EMISSIVEMAP_ENABLED=1','ENHANCED_MODE=1','SHADOWRECEIVER=1','PSSM_ENABLED=1','PCF_SIZE=4','CR_LINEAR_LIGHT=1','CR_RADIAL_FOG=1')
+    $commonBasePcf3 = $commonBase -replace 'PCF_SIZE=4','PCF_SIZE=3'
     $commonTerrain = $commonBase + @('DETAILMAP_ENABLED=1')
+    $commonTerrainPcf3 = $commonBasePcf3 + @('DETAILMAP_ENABLED=1')
     $compileCases = @(
         @{ Name='base-vs-v2'; File=$baseShader; Entry='base_vertex'; Target='vs_4_0'; Defines=@('MAX_LIGHTS=24','NORMALMAP_ENABLED=1','ENHANCED_MODE=1','SHADOWRECEIVER=1','PSSM_ENABLED=1','OSE_ENHANCED_PSSM_V2=1') },
         @{ Name='terrain-vs-v2'; File=$terrainShader; Entry='terrain_vertex'; Target='vs_4_0'; Defines=@('MAX_LIGHTS=24','ENHANCED_MODE=1','SHADOWRECEIVER=1','PSSM_ENABLED=1','OSE_ENHANCED_PSSM_V2=1') },
         @{ Name='base-ps-v1'; File=$baseShader; Entry='base_fragment'; Target='ps_4_0'; Defines=$commonBase },
-        @{ Name='base-ps-v2'; File=$baseShader; Entry='base_fragment'; Target='ps_4_0'; Defines=$commonBase + @('OSE_ENHANCED_PSSM_V2=1') },
-        @{ Name='base-ibl-ps-v2'; File=$baseShader; Entry='base_fragment'; Target='ps_4_0'; Defines=$commonBase + @('IBL_ENABLED=1','OSE_ENHANCED_PSSM_V2=1') },
+        @{ Name='base-ps-v2-pcf3'; File=$baseShader; Entry='base_fragment'; Target='ps_4_0'; Defines=$commonBasePcf3 + @('OSE_ENHANCED_PSSM_V2=1') },
+        @{ Name='base-ps-v2-pcf4-reference'; File=$baseShader; Entry='base_fragment'; Target='ps_4_0'; Defines=$commonBase + @('OSE_ENHANCED_PSSM_V2=1') },
+        @{ Name='base-ibl-ps-v2'; File=$baseShader; Entry='base_fragment'; Target='ps_4_0'; Defines=$commonBasePcf3 + @('IBL_ENABLED=1','OSE_ENHANCED_PSSM_V2=1') },
         @{ Name='terrain-ps-v1'; File=$terrainShader; Entry='terrain_fragment'; Target='ps_4_0'; Defines=$commonTerrain },
-        @{ Name='terrain-ps-v2'; File=$terrainShader; Entry='terrain_fragment'; Target='ps_4_0'; Defines=$commonTerrain + @('OSE_ENHANCED_PSSM_V2=1') },
-        @{ Name='terrain-ibl-ps-v2'; File=$terrainShader; Entry='terrain_fragment'; Target='ps_4_0'; Defines=$commonTerrain + @('IBL_ENABLED=1','OSE_ENHANCED_PSSM_V2=1') }
+        @{ Name='terrain-ps-v2-pcf3'; File=$terrainShader; Entry='terrain_fragment'; Target='ps_4_0'; Defines=$commonTerrainPcf3 + @('OSE_ENHANCED_PSSM_V2=1') },
+        @{ Name='terrain-ps-v2-pcf4-reference'; File=$terrainShader; Entry='terrain_fragment'; Target='ps_4_0'; Defines=$commonTerrain + @('OSE_ENHANCED_PSSM_V2=1') },
+        @{ Name='terrain-ibl-ps-v2'; File=$terrainShader; Entry='terrain_fragment'; Target='ps_4_0'; Defines=$commonTerrainPcf3 + @('IBL_ENABLED=1','OSE_ENHANCED_PSSM_V2=1') }
     )
     foreach ($case in $compileCases) {
         $output = Join-Path $tempRoot "$($case.Name).cso"
@@ -226,10 +284,18 @@ if ($FxcPath -and (Test-Path $FxcPath)) {
         $comparisonSamples = [regex]::Matches($assembly, '(?m)^\s*sample_c_lz\s').Count
         $branches = [regex]::Matches($assembly, '(?m)^\s*if_(?:nz|z)\s').Count
         $costRows += [pscustomobject]@{ Variant=$case.Name; Slots=$slots; Sample=$regularSamples; SampleCmp=$comparisonSamples; Branches=$branches }
-        if ($case.Name -like '*-ps-v2' -or $case.Name -like '*-ibl-ps-v2') {
+        if ($case.Defines -contains 'OSE_ENHANCED_PSSM_V2=1') {
             Assert-True ($assembly -notmatch 'sampler_c') "$($case.Name) compiled comparison samplers."
             Assert-True ($comparisonSamples -eq 0) "$($case.Name) emitted sample_c_lz instructions."
         }
+    }
+    foreach ($pair in @(
+        @{ Optimized='base-ps-v2-pcf3'; Reference='base-ps-v2-pcf4-reference' },
+        @{ Optimized='terrain-ps-v2-pcf3'; Reference='terrain-ps-v2-pcf4-reference' }
+    )) {
+        $optimized = $costRows | Where-Object Variant -eq $pair.Optimized
+        $reference = $costRows | Where-Object Variant -eq $pair.Reference
+        Assert-True ($optimized.Sample -lt $reference.Sample) "$($pair.Optimized) did not compile to fewer sample instructions than $($pair.Reference)."
     }
 }
 
@@ -238,6 +304,9 @@ if ($failures.Count -gt 0) {
     throw "Enhanced PSSM v2 validation failed with $($failures.Count) error(s)."
 }
 
-Write-Host 'Enhanced PSSM v2 mathematical, isolation and HLSL validation: PASS'
-Write-Host 'Runtime shadow taps: 4 normally, 8 only in two 2-unit blend bands, 0 beyond 256.'
+Write-Host 'Enhanced PSSM v2 filter, cascade, isolation and HLSL validation: PASS'
+Write-Host 'Runtime shadow depth reads: 9 normally, 18 only in two 2-unit blend bands, 0 beyond 256.'
 $costRows | Format-Table -AutoSize
+if ($tempRoot -and (Test-Path -LiteralPath $tempRoot)) {
+    Remove-Item -LiteralPath $tempRoot -Recurse -Force
+}
