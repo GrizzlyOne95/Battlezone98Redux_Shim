@@ -1924,6 +1924,13 @@ CrashMinidumps = 1
 ; Legacy env alias: OPENSHIM_TRACE_SKINNED_GIBS
 TraceSkinnedGibs = 0
 
+; Low-overhead, once-per-second timing/count summaries for gib simulation and
+; manual render-queue submission. TraceSkinnedGibs adds per-gib logs and should
+; stay off during profiling.
+; Accepted: boolean. Default: OFF.
+; Env alias: OPENSHIM_PROFILE_SKINNED_GIBS
+ProfileSkinnedGibs = 0
+
 ; ShellCasings diagnostics: one [SHELLCASINGS] line per spawned casing and a
 ; once-a-second stats line (spawned, filtered, culled, active, hits, submits).
 ; Accepted: boolean. Default: OFF.

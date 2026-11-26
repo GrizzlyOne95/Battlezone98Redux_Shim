@@ -211,6 +211,8 @@ namespace
             return ini(IniFile::Main, "General", "SkinnedGibsDrawDistance", out);
         if (Equals(name, "OPENSHIM_TRACE_SKINNED_GIBS"))
             return TryReadMappedBool(ini, "Diagnostics", "TraceSkinnedGibs", false, out);
+        if (Equals(name, "OPENSHIM_PROFILE_SKINNED_GIBS"))
+            return TryReadMappedBool(ini, "Diagnostics", "ProfileSkinnedGibs", false, out);
         // FractureOnePiece: one-piece craft and buildings cut into capped pieces on death
         // (shares the gib pool; the trace flag above also covers its log lines).
         if (Equals(name, "OPENSHIM_DISABLE_FRACTURE"))

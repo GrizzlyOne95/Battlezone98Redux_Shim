@@ -268,6 +268,25 @@ that spawns the four stock pilots and kills them one by one. It needs
 `SkinnedGibs = 0` restores exactly the previous behaviour. Set
 `[Diagnostics] TraceSkinnedGibs = 1` for one log line per gib.
 
+### Low-overhead gib profiling
+
+Set `[Diagnostics] ProfileSkinnedGibs = 1` (or
+`OPENSHIM_PROFILE_SKINNED_GIBS=1`) before launching the game. The profiler is
+off by default and writes aggregated `[SKINNEDGIBS] profile` lines about once
+per second to `logs/openshim.log`; no per-gib trace is emitted by the profiler.
+Keep `TraceSkinnedGibs = 0` while profiling, since its detailed logging adds
+work to the measured paths.
+
+- `phase=tick`: average and maximum tick time, active/pool high-water counts,
+  simulation steps, camera-frustum tests and transform updates.
+- `phase=submit`: average and maximum time in the render-queue hook, active/pool
+  high-water counts, and attempted entity submissions. `manualCalls` and
+  `autoCalls` distinguish OpenShim's manual submission from Ogre's automatic
+  scene traversal. In automatic mode this only measures the hook's early-out;
+  it does not measure Ogre's traversal or draw time. The first sample can also
+  include one-time payload resource-group setup; the preceding `payload
+  resources ready` line identifies that call.
+
 ---
 
 ### Multi-part pieces are capped

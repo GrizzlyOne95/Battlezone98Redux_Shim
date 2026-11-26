@@ -138,6 +138,7 @@ namespace BZROpenShim
                 bool enabled = true;
                 bool fractureEnabled = true;
                 bool trace = false;
+                bool profile = false;
                 // Lowered from 160 for the main-thread cost of big co-op
                 // battles: a person death throws about a dozen limb gibs and a
                 // fracture 4-8 pieces, so 96 still holds the last six or more
@@ -181,6 +182,7 @@ namespace BZROpenShim
                 // [General] FractureOnePiece (default ON), inverted the same way.
                 g_Config.fractureEnabled = !EnvFlagEnabled("OPENSHIM_DISABLE_FRACTURE");
                 g_Config.trace = EnvFlagEnabled("OPENSHIM_TRACE_SKINNED_GIBS");
+                g_Config.profile = EnvFlagEnabled("OPENSHIM_PROFILE_SKINNED_GIBS");
                 double value = 0.0;
                 if (ReadEnvNumber("OPENSHIM_SKINNED_GIBS_MAX", value))
                     g_Config.maxGibs = static_cast<size_t>(std::clamp(value, 12.0, 1024.0));
@@ -192,15 +194,126 @@ namespace BZROpenShim
                     g_Config.drawDistance = PoolDrawDistance::ClampDrawDistanceMetres(value);
                 LogChunkDiagnostic(
                     "skinnedgibs",
-                    L"[SKINNEDGIBS] config enabled=%u fracture=%u max=%zu linger=%.2f force=%.2f drawDistance=%d trace=%u\n",
+                    L"[SKINNEDGIBS] config enabled=%u fracture=%u max=%zu linger=%.2f force=%.2f drawDistance=%d trace=%u profile=%u\n",
                     g_Config.enabled ? 1u : 0u,
                     g_Config.fractureEnabled ? 1u : 0u,
                     g_Config.maxGibs,
                     static_cast<double>(g_Config.linger),
                     static_cast<double>(g_Config.force),
                     g_Config.drawDistance,
-                    g_Config.trace ? 1u : 0u);
+                    g_Config.trace ? 1u : 0u,
+                    g_Config.profile ? 1u : 0u);
             }
+
+            using GibProfileClock = std::chrono::steady_clock;
+            struct GibProfileWindow
+            {
+                GibProfileClock::time_point started{};
+                uint64_t calls = 0;
+                double totalMicroseconds = 0.0;
+                double maxMicroseconds = 0.0;
+                uint64_t activeMax = 0;
+                uint64_t poolMax = 0;
+                uint64_t stepCalls = 0;
+                uint64_t cameraTests = 0;
+                uint64_t transformCalls = 0;
+                uint64_t entityAttempts = 0;
+                uint64_t manualCalls = 0;
+                uint64_t autoCalls = 0;
+            };
+            GibProfileWindow g_TickProfileWindow;
+            GibProfileWindow g_SubmitProfileWindow;
+
+            class GibProfileScope
+            {
+            public:
+                GibProfileScope(bool enabled, const wchar_t* phase, GibProfileWindow& window)
+                    : m_enabled(enabled), m_phase(phase), m_window(window),
+                      m_started(enabled ? GibProfileClock::now() : GibProfileClock::time_point{})
+                {
+                }
+
+                ~GibProfileScope()
+                {
+                    if (!m_enabled)
+                        return;
+                    const GibProfileClock::time_point finished = GibProfileClock::now();
+                    const double elapsedMicroseconds =
+                        std::chrono::duration<double, std::micro>(finished - m_started).count();
+                    if (!m_window.calls)
+                        m_window.started = finished;
+                    ++m_window.calls;
+                    m_window.totalMicroseconds += elapsedMicroseconds;
+                    m_window.maxMicroseconds = std::max(m_window.maxMicroseconds, elapsedMicroseconds);
+                    m_window.activeMax = std::max<uint64_t>(m_window.activeMax, m_active);
+                    m_window.poolMax = std::max<uint64_t>(m_window.poolMax, m_pool);
+                    m_window.stepCalls += m_stepCalls;
+                    m_window.cameraTests += m_cameraTests;
+                    m_window.transformCalls += m_transformCalls;
+                    m_window.entityAttempts += m_entityAttempts;
+                    if (m_hasSubmitMode)
+                    {
+                        if (m_manualSubmit)
+                            ++m_window.manualCalls;
+                        else
+                            ++m_window.autoCalls;
+                    }
+
+                    if (finished - m_window.started < std::chrono::seconds(1))
+                        return;
+                    const double windowMilliseconds =
+                        std::chrono::duration<double, std::milli>(finished - m_window.started).count();
+                    LogChunkDiagnostic(
+                        "skinnedgibs",
+                        L"[SKINNEDGIBS] profile phase=%ls windowMs=%.1f calls=%llu avgUs=%.1f maxUs=%.1f "
+                        L"activeMax=%llu poolMax=%llu stepCalls=%llu cameraTests=%llu transformCalls=%llu "
+                        L"entityAttempts=%llu manualCalls=%llu autoCalls=%llu\n",
+                        m_phase, windowMilliseconds, static_cast<unsigned long long>(m_window.calls),
+                        m_window.totalMicroseconds / static_cast<double>(m_window.calls), m_window.maxMicroseconds,
+                        static_cast<unsigned long long>(m_window.activeMax),
+                        static_cast<unsigned long long>(m_window.poolMax),
+                        static_cast<unsigned long long>(m_window.stepCalls),
+                        static_cast<unsigned long long>(m_window.cameraTests),
+                        static_cast<unsigned long long>(m_window.transformCalls),
+                        static_cast<unsigned long long>(m_window.entityAttempts),
+                        static_cast<unsigned long long>(m_window.manualCalls),
+                        static_cast<unsigned long long>(m_window.autoCalls));
+                    m_window = GibProfileWindow{};
+                }
+
+                void SetPoolCounts(size_t active, size_t pool)
+                {
+                    m_active = active;
+                    m_pool = pool;
+                }
+
+                void SetSubmitMode(bool manual)
+                {
+                    m_hasSubmitMode = true;
+                    m_manualSubmit = manual;
+                }
+
+                void CountStep() { ++m_stepCalls; }
+                void CountCameraTest() { ++m_cameraTests; }
+                void CountTransform() { ++m_transformCalls; }
+                void CountEntityAttempt() { ++m_entityAttempts; }
+
+                bool Enabled() const { return m_enabled; }
+
+            private:
+                bool m_enabled = false;
+                const wchar_t* m_phase;
+                GibProfileWindow& m_window;
+                GibProfileClock::time_point m_started;
+                size_t m_active = 0;
+                size_t m_pool = 0;
+                uint64_t m_stepCalls = 0;
+                uint64_t m_cameraTests = 0;
+                uint64_t m_transformCalls = 0;
+                uint64_t m_entityAttempts = 0;
+                bool m_hasSubmitMode = false;
+                bool m_manualSubmit = false;
+            };
 
             // Budgeted: a battle can kill dozens of pilots.
             volatile LONG g_LogBudget = 96;
@@ -1874,9 +1987,11 @@ namespace BZROpenShim
         {
             if (!IsSkinnedGibsEnabled() && !IsFractureEnabled())
                 return;
+            GibProfileScope profile(g_Config.profile, L"tick", g_TickProfileWindow);
             PruneSuppressed(chunkEffect);
             // Same thread and context as the fracture spawn it prepares for.
             TickFracturePrewarm();
+            profile.SetPoolCounts(g_ActiveCount, g_Slots.size());
             // Dust outlives the piece that threw it: keep ticking until it is gone.
             if (!g_ActiveCount && !g_Dust.count && !g_Dust.drawn)
                 return;
@@ -1919,12 +2034,16 @@ namespace BZROpenShim
                     // Padded: a piece at the screen edge, or one whose mesh
                     // sits off its node origin, still counts as in view.
                     const float padded = std::max(slot.radius * scale, 0.05f) * 1.5f + 1.0f;
+                    if (profile.Enabled())
+                        profile.CountCameraTest();
                     if (!IsSphereInCameraView(viewCamera, center, padded, visible))
                         visible = true;
                 }
                 slot.inView = visible;
                 slot.seen = slot.seen || visible;
                 const bool wasResting = slot.settled && !slot.sinking;
+                if (profile.Enabled())
+                    profile.CountStep();
                 if (!StepGib(slot, dt, terrain))
                 {
                     ++g_ExitCounts[g_LastExit];
@@ -1958,6 +2077,8 @@ namespace BZROpenShim
                 // Only a sinking piece changes scale; others keep the spawn scale.
                 const float crumble = CrumbleFactor(slot);
                 const float scale[3] = {slot.scale.x * crumble, slot.scale.y * crumble, slot.scale.z * crumble};
+                if (profile.Enabled())
+                    profile.CountTransform();
                 if (!SetShimOwnedObjectTransform(slot.node, slot.entity, position, quat, slot.sinking ? scale : nullptr))
                     ForgetSlot(slot);
                 else if (show)
@@ -2207,6 +2328,8 @@ namespace BZROpenShim
         {
             if (!renderQueue || (!IsSkinnedGibsEnabled() && !IsFractureEnabled()))
                 return;
+            GibProfileScope profile(g_Config.profile, L"submit", g_SubmitProfileWindow);
+            profile.SetPoolCounts(g_ActiveCount, g_Slots.size());
             if (!g_ResourcePrimeAttempted)
             {
                 // Register the payload group before the first death so that
@@ -2215,7 +2338,9 @@ namespace BZROpenShim
                 const bool ready = EnsureSkinnedGibResourceLocations();
                 LogChunkDiagnostic("skinnedgibs", L"[SKINNEDGIBS] payload resources ready=%u\n", ready ? 1u : 0u);
             }
-            if (!ShimPoolManualSubmitEnabled())
+            const bool manualSubmit = ShimPoolManualSubmitEnabled();
+            profile.SetSubmitMode(manualSubmit);
+            if (!manualSubmit)
                 return; // Ogre's scene traversal already queues every active gib.
             if (!g_ActiveCount)
                 return;
@@ -2229,6 +2354,8 @@ namespace BZROpenShim
                 if (g_PoolSubmitCensusEnabled)
                     NotePoolManualSubmit(false);
                 ++g_SubmitEntities;
+                if (profile.Enabled())
+                    profile.CountEntityAttempt();
                 if (g_Config.trace && !probed)
                 {
                     probed = true;
