@@ -196,6 +196,11 @@ namespace
         Check(Mapped(ini, "OPENSHIM_SHELL_CASINGS_CLASSES") == "cannon,-gquake", "casing class list passes through raw");
         ini.Set("Diagnostics", "TraceShellCasings", "1");
         Check(Mapped(ini, "OPENSHIM_TRACE_SHELL_CASINGS") == "1", "TraceShellCasings maps from [Diagnostics]");
+        Check(Mapped(ini, "OPENSHIM_PROFILE_SKINNED_GIBS") == "<none>",
+              "unset ProfileSkinnedGibs keeps the profiler disabled");
+        ini.Set("Diagnostics", "ProfileSkinnedGibs", "1");
+        Check(Mapped(ini, "OPENSHIM_PROFILE_SKINNED_GIBS") == "1",
+              "ProfileSkinnedGibs maps from [Diagnostics]");
 
         ini.Set("General", "ChunkCacheMaxMB", "128");
         Check(Mapped(ini, "OPENSHIM_CHUNK_CACHE_MAX_MB") == "128", "chunk cache size cap passes through raw");
