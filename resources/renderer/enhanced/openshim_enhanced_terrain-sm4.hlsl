@@ -437,27 +437,22 @@ static const float OSE_TERRAIN_DETAIL_NORMAL_STRENGTH = 2.2;
 // ground turning to gravel.
 static const float OSE_TERRAIN_DETAIL_NORMAL_NEAR_SCALE = 0.55;
 
-float3 detail_normal_from_luminance(Texture2D tex, SamplerState sam,
-                                    float2 uv, float strength)
+float2 detail_gradient_from_luminance(Texture2D tex, SamplerState sam,
+                                      float2 uv, float strength)
 {
     float2 e = float2(OSE_TERRAIN_DETAIL_TEXEL, 0.0);
     float hl = luminance_legacy(tex.Sample(sam, uv - e.xy).xyz);
     float hr = luminance_legacy(tex.Sample(sam, uv + e.xy).xyz);
     float hd = luminance_legacy(tex.Sample(sam, uv - e.yx).xyz);
     float hu = luminance_legacy(tex.Sample(sam, uv + e.yx).xyz);
-    // Central differences give the surface gradient. Scaling xy rather than the
-    // whole vector scales the SLOPE and keeps the result a unit normal, the same
-    // reason sharpen_terrain_normal divides z instead of multiplying xy.
-    return safe_normalize(float3((hl - hr) * strength, (hd - hu) * strength, 1.0));
+    return float2((hl - hr) * strength, (hd - hu) * strength);
 }
 
-// Whiteout blend: sums surface gradients rather than the vectors themselves, so
-// the base shape survives instead of being averaged toward flat. Adding and
-// renormalising two normals destroys exactly the relief this is meant to add.
-float3 blend_detail_normal(float3 base, float3 detail)
+// Whiteout blending adds slopes (xy / z), so accumulate detail gradients and
+// normalize only once instead of normalizing each detail layer and blend.
+float3 blend_detail_gradients(float3 base, float2 gradient)
 {
-    return safe_normalize(float3(base.xy * detail.z + detail.xy * base.z,
-                                 base.z * detail.z));
+    return safe_normalize(float3(base.xy + gradient * base.z, base.z));
 }
 
 #if OSE_LINEAR_LIGHT_ACTIVE
@@ -1639,15 +1634,13 @@ void terrain_fragment(
     // to the detail gradient as well would steepen normals the calibration never
     // accounted for and re-manufacture the terminator shadow it was tuned to
     // avoid.
-    shapedNormalTex = blend_detail_normal(
-        shapedNormalTex,
-        detail_normal_from_luminance(detailMap, detailSam, vTexCoord * 8.0,
-                                     OSE_TERRAIN_DETAIL_NORMAL_STRENGTH));
-    shapedNormalTex = blend_detail_normal(
-        shapedNormalTex,
-        detail_normal_from_luminance(detailMap, detailSam, vTexCoord * 32.0,
-                                     OSE_TERRAIN_DETAIL_NORMAL_STRENGTH
-                                         * OSE_TERRAIN_DETAIL_NORMAL_NEAR_SCALE));
+    float2 detailGradient =
+        detail_gradient_from_luminance(detailMap, detailSam, vTexCoord * 8.0,
+                                       OSE_TERRAIN_DETAIL_NORMAL_STRENGTH)
+        + detail_gradient_from_luminance(
+            detailMap, detailSam, vTexCoord * 32.0,
+            OSE_TERRAIN_DETAIL_NORMAL_STRENGTH * OSE_TERRAIN_DETAIL_NORMAL_NEAR_SCALE);
+    shapedNormalTex = blend_detail_gradients(shapedNormalTex, detailGradient);
 #endif
 #endif
 
