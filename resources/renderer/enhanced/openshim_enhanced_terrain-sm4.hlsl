@@ -240,6 +240,43 @@ float PCF_Filter(
     uv.z = min(uv.z - depthBias, 1.0);
     invMapSize = max(invMapSize, float2(1e-8, 1e-8));
 
+#if defined(PCF_SIZE) && PCF_SIZE == 1
+    return step(uv.z, map.SampleLevel(sam, uv.xy, 0).x);
+#elif defined(PCF_SIZE) && PCF_SIZE < 4
+    // At PCF_SIZE=3, these nine depths are shared by the four bilinear taps.
+    // Loading the union once preserves their weighting without duplicate reads.
+    float2 pixel = uv.xy / invMapSize - float2(float(PCF_SIZE - 1) * 0.5, float(PCF_SIZE - 1) * 0.5);
+    float2 c = floor(pixel);
+    float2 f = frac(pixel);
+
+    float kernel[PCF_SIZE * PCF_SIZE];
+    {
+        [unroll] for (int y = 0; y < PCF_SIZE; ++y)
+        {
+            [unroll] for (int x = 0; x < PCF_SIZE; ++x)
+            {
+                int i = y * PCF_SIZE + x;
+                float2 sampleUv = (c + float2(x, y) + 0.5) * invMapSize;
+                kernel[i] = step(uv.z, map.SampleLevel(sam, sampleUv, 0).x);
+            }
+        }
+    }
+
+    float4 sum = float4(0.0, 0.0, 0.0, 0.0);
+    {
+        [unroll] for (int y = 0; y < PCF_SIZE - 1; ++y)
+        {
+            [unroll] for (int x = 0; x < PCF_SIZE - 1; ++x)
+            {
+                int i = y * PCF_SIZE + x;
+                sum += float4(kernel[i], kernel[i + 1], kernel[i + PCF_SIZE], kernel[i + PCF_SIZE + 1]);
+            }
+        }
+    }
+
+    return lerp(lerp(sum.x, sum.y, f.x), lerp(sum.z, sum.w, f.x), f.y)
+        / float((PCF_SIZE - 1) * (PCF_SIZE - 1));
+#else
     float2 halfTexel = invMapSize * 0.5;
     float result = 0.0;
     result += PCF_CompareBilinear(map, sam, uv.xy + float2(-halfTexel.x, -halfTexel.y), uv.z, invMapSize);
@@ -247,6 +284,7 @@ float PCF_Filter(
     result += PCF_CompareBilinear(map, sam, uv.xy + float2(-halfTexel.x,  halfTexel.y), uv.z, invMapSize);
     result += PCF_CompareBilinear(map, sam, uv.xy + float2( halfTexel.x,  halfTexel.y), uv.z, invMapSize);
     return result * 0.25;
+#endif
 }
 #else
 float PCF_Filter(
