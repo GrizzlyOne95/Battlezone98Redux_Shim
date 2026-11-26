@@ -485,7 +485,7 @@ bool InstallNativeTerrainTessellationTest()
             specialized, g_proxy.semanticProgramNames.size(), GetTickCount64() - compileStart, static_cast<unsigned>(level),
             g_proxy.materialName.c_str(), g_proxy.semanticMaterialName.c_str());
         if (g_config.tessellationAdaptive)
-            LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] adaptive hull installed passes=%u viewportAuto=111 partition=fractional_even minFactor=2 maxFactor=%d targetPixels=%.3f; shared-endpoint policy, fixed relief phase", specialized, g_config.tessellationFactor, g_config.tessellationTargetPixels);
+            LogShimA(LogLevel::Info, "terrain-tess", "[TERRAIN-TESS] adaptive hull installed passes=%u viewportAuto=111 partition=fractional_odd minSegments=1 maxSegments=%d targetPixels=%.3f; shared-endpoint policy, fixed relief phase", specialized, g_config.tessellationFactor - 1, g_config.tessellationTargetPixels);
         return true;
     }
     catch (const std::exception& error)

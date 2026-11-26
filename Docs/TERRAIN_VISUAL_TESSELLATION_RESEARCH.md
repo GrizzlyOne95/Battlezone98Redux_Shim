@@ -249,9 +249,12 @@ with OGRE state ownership and restore all touched state after the terrain draw.
 - Establish geometric adjacency from the real indices and transforms. If a
   future coarser patch mesh introduces different edge segmentation, shared
   endpoint factors alone cannot fix its T-junctions; it needs stitching rules.
-- For adaptive LOD, begin with uniform integer factors, then evaluate
-  `fractional_odd` for continuous transitions down to factor 1. `fractional_even`
-  has a minimum factor of 2 and is not a free distant-terrain baseline.
+- The adaptive micro-relief path uses `fractional_odd` for continuous
+  transitions down to one segment. Its even factor-4 cap is rounded down to
+  three segments, and the 24-pixel edge target avoids increasing tessellation
+  in the former two-segment range. The WARP test checks the one-segment floor
+  against fixed factor 2 and confirms shared-diagonal raster coverage; it does
+  not establish whole-mission GPU-time or visual parity.
 - Clamp near-plane/projected-edge calculations, avoid independent patch culling
   that discards crossing geometry, and test rapid motion for edge cracks and
   subdivision popping.

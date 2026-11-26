@@ -17,10 +17,12 @@ struct Vec { float x,y,z,w; };
 struct Edge { Vec a,b,viewport; };
 static void check(bool value,const char* message) { if(!value) throw std::runtime_error(message); }
 static void ok(HRESULT result) { check(SUCCEEDED(result),"D3D11 adaptive test failed"); }
-static ComPtr<ID3DBlob> compile(const std::string& source,const char* entry,const char* profile,const char* pixels="12")
+static ComPtr<ID3DBlob> compile(const std::string& source,const char* entry,const char* profile,const char* pixels="24",bool adaptive=true,const char* fixedFactor="2")
 {
-    const D3D_SHADER_MACRO macros[]={{"OPENSHIM_TESS_ADAPTIVE","1"},{"OPENSHIM_TESS_FACTOR","4"},
+    const D3D_SHADER_MACRO adaptiveMacros[]={{"OPENSHIM_TESS_ADAPTIVE","1"},{"OPENSHIM_TESS_FACTOR","4"},
         {"OPENSHIM_TESS_TARGET_PIXELS",pixels},{nullptr,nullptr}};
+    const D3D_SHADER_MACRO fixedMacros[]={{"OPENSHIM_TESS_FACTOR",fixedFactor},{nullptr,nullptr}};
+    const D3D_SHADER_MACRO* macros=adaptive?adaptiveMacros:fixedMacros;
     ComPtr<ID3DBlob> code,errors;
     const auto hr=D3DCompile(source.data(),source.size(),nullptr,macros,nullptr,entry,profile,
         D3DCOMPILE_OPTIMIZATION_LEVEL3|D3DCOMPILE_IEEE_STRICTNESS,0,&code,&errors);
@@ -38,11 +40,13 @@ int main()
 struct EdgeTest { float4 a,b,viewport; };
 StructuredBuffer<EdgeTest> edges : register(t0);
 RWStructuredBuffer<float4> results : register(u0);
+#if defined(OPENSHIM_TESS_ADAPTIVE)
 [numthreads(1,1,1)] void TestEdges(uint3 id:SV_DispatchThreadID) {
     EdgeTest e=edges[id.x];
     results[id.x]=float4(TerrainAdaptiveEdge(e.a,e.b,e.viewport.xy,1),
         TerrainAdaptiveEdge(e.b,e.a,e.viewport.xy,1),TerrainAdaptiveEdge(e.a,e.b,e.viewport.xy,.4),0);
 }
+#endif
 TerrainTessVertex TestVertex(uint id:SV_VertexID) {
     const float2 points[6]={float2(-.25,-.25),float2(-.25,.25),float2(.25,.25),
         float2(-.25,-.25),float2(.25,.25),float2(.25,-.25)};
@@ -57,9 +61,9 @@ float4 TestPixel(TerrainTessVertex v):SV_Target { return float4(1,1,1,1); }
         check(level>=D3D_FEATURE_LEVEL_11_0,"WARP feature level 11 required");
         const float nan=std::numeric_limits<float>::quiet_NaN(),inf=std::numeric_limits<float>::infinity();
         std::vector<Edge> edges={
-            {{-.25f,0,.5f,1},{.25f,0,.5f,1},{128,128,0,0}}, // fractional 32/12
-            {{-.25f,0,.5f,2},{.25f,0,.5f,2},{128,128,0,0}}, // farther, floor 2
-            {{-.25f,0,.5f,1},{.25f,0,.5f,1},{256,128,0,0}}, // higher resolution, cap 4
+            {{-.25f,0,.5f,1},{.25f,0,.5f,1},{128,128,0,0}}, // fractional 32/24
+            {{-.25f,0,.5f,2},{.25f,0,.5f,2},{128,128,0,0}}, // farther, floor 1
+            {{-.25f,0,.5f,1},{.25f,0,.5f,1},{512,128,0,0}}, // higher resolution, cap 3
             {{-.25f,0,.5f,0},{.25f,0,.5f,1},{128,128,0,0}},
             {{-.25f,0,.5f,-1},{.25f,0,.5f,1},{128,128,0,0}},
             {{nan,0,.5f,1},{.25f,0,.5f,1},{128,128,0,0}},
@@ -71,6 +75,7 @@ float4 TestPixel(TerrainTessVertex v):SV_Target { return float4(1,1,1,1); }
             {{.25f,0,.5f,1},{.25f,0,.5f,1},{128,128,0,0}}, // degenerate edge, no cull
             {{-.25f,0,.5f,1},{.25f,0,.5f,1},{127.999f,128,0,0}},
             {{-.25f,0,.5f,1},{.25f,0,.5f,1},{128.001f,128,0,0}},
+            {{-.01f,0,.5f,1},{.01f,0,.5f,1},{128,128,0,0}}, // sub-target edge, one segment
         };
         D3D11_BUFFER_DESC desc{}; desc.ByteWidth=static_cast<UINT>(edges.size()*sizeof(Edge));
         desc.Usage=D3D11_USAGE_IMMUTABLE; desc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
@@ -95,15 +100,17 @@ float4 TestPixel(TerrainTessVertex v):SV_Target { return float4(1,1,1,1); }
         const auto* values=static_cast<const Vec*>(mapped.pData);
         for(size_t i=0;i<edges.size();++i)
         {
-            check(std::isfinite(values[i].x)&&values[i].x>=2&&values[i].x<=4,"invalid/culling adaptive factor");
+            check(std::isfinite(values[i].x)&&values[i].x>=1&&values[i].x<=3,"invalid/culling adaptive factor");
             check(values[i].x==values[i].y,"reversed shared edge requests disagree");
         }
-        check(std::abs(values[0].x-32.0f/12.0f)<1e-5f&&values[1].x==2&&values[2].x==4,"distance/viewport response wrong");
-        for(size_t i=3;i<=10;++i) check(values[i].x==4,"unsafe edge did not retain conservative cap");
-        check(values[11].x==2,"degenerate edge was culled");
+        check(std::abs(values[0].x-32.0f/24.0f)<1e-5f&&values[1].x==1&&values[2].x==3,"distance/viewport response wrong");
+        for(size_t i=3;i<=10;++i) check(values[i].x==3,"unsafe edge did not retain conservative cap");
+        check(values[11].x==1&&values[14].x==1,"small or degenerate edge did not reach one segment");
         check(values[13].x>values[12].x&&values[13].x-values[12].x<.001f,"factor request snapped under small view change");
-        // Flat paint relief scales the request down, still floored at two.
-        check(values[0].z==2&&std::abs(values[2].z-64.0f/12.0f*.4f)<1e-5f&&values[3].z==4,"relief scale response wrong");
+        // Flat paint relief scales the request down, still floored at one.
+        check(values[0].z==1,"flat paint relief did not use the one-segment floor");
+        check(std::abs(values[2].z-128.0f/24.0f*.4f)<1e-5f,"high-resolution paint relief scale wrong");
+        check(values[3].z==3,"invalid paint edge did not retain the cap");
         context->Unmap(staging.Get(),0);
 
         code=compile(source,"TestVertex","vs_5_0"); ComPtr<ID3D11VertexShader> vertex;
@@ -128,7 +135,7 @@ float4 TestPixel(TerrainTessVertex v):SV_Target { return float4(1,1,1,1); }
         context->VSSetShader(vertex.Get(),nullptr,0); context->PSSetShader(pixel.Get(),nullptr,0);
         context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_3_CONTROL_POINT_PATCHLIST);
         UINT64 low=0,high=0;
-        for(const char* targetPixels:{"64","12","4"})
+        for(const char* targetPixels:{"64","24","4"})
         {
             code=compile(source,"TerrainHull","hs_5_0",targetPixels); ComPtr<ID3D11HullShader> hull;
             ok(device->CreateHullShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&hull));
@@ -148,8 +155,30 @@ float4 TestPixel(TerrainTessVertex v):SV_Target { return float4(1,1,1,1); }
             if(std::string(targetPixels)=="64") low=stats.DSInvocations;
             if(std::string(targetPixels)=="4") high=stats.DSInvocations;
         }
-        check(low<high,"adaptive distant cap did not reduce generated domain samples");
-        std::cout<<"PASS: GPU shared edges, finite bounds, view response, fractional raster coverage; DS "<<low<<" < "<<high<<'\n';
+        code=compile(source,"TerrainHull","hs_5_0","24",false); ComPtr<ID3D11HullShader> fixedHull;
+        ok(device->CreateHullShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&fixedHull));
+        code=compile(source,"TerrainDomain","ds_5_0","24",false); ComPtr<ID3D11DomainShader> fixedDomain;
+        ok(device->CreateDomainShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&fixedDomain));
+        context->HSSetShader(fixedHull.Get(),nullptr,0); context->DSSetShader(fixedDomain.Get(),nullptr,0);
+        D3D11_QUERY_DESC queryDesc{D3D11_QUERY_PIPELINE_STATISTICS,0}; ComPtr<ID3D11Query> query;
+        ok(device->CreateQuery(&queryDesc,&query)); context->Begin(query.Get()); context->Draw(6,0); context->End(query.Get());
+        context->CopyResource(pixels.Get(),target.Get()); ok(context->Map(pixels.Get(),0,D3D11_MAP_READ,0,&mapped));
+        context->Unmap(pixels.Get(),0);
+        D3D11_QUERY_DATA_PIPELINE_STATISTICS fixedStats{};
+        ok(context->GetData(query.Get(),&fixedStats,sizeof(fixedStats),0));
+        check(low<fixedStats.DSInvocations&&low<high,"distant one-segment LOD did not reduce domain samples");
+        code=compile(source,"TerrainHull","hs_5_0","24",false,"4"); ComPtr<ID3D11HullShader> fixedFourHull;
+        ok(device->CreateHullShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&fixedFourHull));
+        code=compile(source,"TerrainDomain","ds_5_0","24",false,"4"); ComPtr<ID3D11DomainShader> fixedFourDomain;
+        ok(device->CreateDomainShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&fixedFourDomain));
+        context->HSSetShader(fixedFourHull.Get(),nullptr,0); context->DSSetShader(fixedFourDomain.Get(),nullptr,0);
+        ok(device->CreateQuery(&queryDesc,&query)); context->Begin(query.Get()); context->Draw(6,0); context->End(query.Get());
+        context->CopyResource(pixels.Get(),target.Get()); ok(context->Map(pixels.Get(),0,D3D11_MAP_READ,0,&mapped));
+        context->Unmap(pixels.Get(),0);
+        D3D11_QUERY_DATA_PIPELINE_STATISTICS fixedFourStats{};
+        ok(context->GetData(query.Get(),&fixedFourStats,sizeof(fixedFourStats),0));
+        check(high<fixedFourStats.DSInvocations,"adaptive maximum did not reduce samples below fixed factor 4");
+        std::cout<<"PASS: GPU shared edges, one-segment floor, view response, fractional raster coverage; DS "<<low<<" < fixed-2 "<<fixedStats.DSInvocations<<", adaptive max "<<high<<" < fixed-4 "<<fixedFourStats.DSInvocations<<'\n';
         return 0;
     }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
