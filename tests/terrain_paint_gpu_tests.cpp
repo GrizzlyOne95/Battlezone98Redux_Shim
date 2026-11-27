@@ -239,6 +239,62 @@ float4 PixelMain(float2 openShimHdUV : TEXCOORD9, float openShimTileSlice : TEXC
         const std::string tessDefines = "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
             "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(0,0,4,4)\n#define OPENSHIM_PAINT_HEIGHT_SCALE 1\n";
         TerrainPaint::Config detiledHeight = detiled; detiledHeight.heightMeters = {1, 0, 0, 0};
+        const std::string mipDimensionsSource = tessDefines + TerrainPaint::LayerHlsl(detiledHeight) +
+            TerrainPaint::DetileHlsl() + tessRaw + R"(
+RWStructuredBuffer<float4> testResults : register(u0);
+[numthreads(1,1,1)] void TestMipDimensions(uint3 id : SV_DispatchThreadID)
+{
+    uint mip = id.x % 4, width, height, elements, levels;
+    terrainPaintArray.GetDimensions(mip, width, height, elements, levels);
+    uint baseWidth, baseHeight, baseElements, baseLevels;
+    terrainPaintArray.GetDimensions(0, baseWidth, baseHeight, baseElements, baseLevels);
+    uint2 dimensions = max(uint2(baseWidth, baseHeight) >> mip, 1);
+    float2 uv = float2(0.17 + id.x * 0.31, 0.83 - id.x * 0.19);
+    TerrainPaintTap reference = TerrainPaintBilinearGrad(terrainPaintArray, uv, 0, mip, true);
+    TerrainPaintTap cached = TerrainPaintBilinearGradSized(terrainPaintArray, uv, 0, mip, true, dimensions);
+    testResults[id.x] = float4(reference.v.a - cached.v.a,
+        reference.du.a - cached.du.a, reference.dv.a - cached.dv.a,
+        any(dimensions != uint2(width, height)) ? 1.0 : 0.0);
+}
+)";
+        compiled = D3DCompile(mipDimensionsSource.data(),mipDimensionsSource.size(),nullptr,nullptr,nullptr,
+            "TestMipDimensions","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> mipDimensionsShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&mipDimensionsShader));
+        constexpr UINT mipWidth = 10, mipHeight = 6, mipLevels = 4;
+        std::vector<std::vector<Pixel>> mipPixels(mipLevels);
+        D3D11_SUBRESOURCE_DATA mipData[mipLevels] = {};
+        for (UINT mip = 0; mip < mipLevels; ++mip)
+        {
+            const UINT mipWidthAtLevel = mipWidth >> mip, mipHeightAtLevel = mipHeight >> mip;
+            const UINT width = mipWidthAtLevel ? mipWidthAtLevel : 1;
+            const UINT height = mipHeightAtLevel ? mipHeightAtLevel : 1;
+            mipPixels[mip].resize(width * height);
+            for (UINT y = 0; y < height; ++y) for (UINT x = 0; x < width; ++x)
+                mipPixels[mip][y * width + x] = {float(x), float(y), float(mip), float(x * 3 + y * 5 + mip)};
+            mipData[mip] = {mipPixels[mip].data(), width * sizeof(Pixel), 0};
+        }
+        D3D11_TEXTURE2D_DESC mipDesc = {};
+        mipDesc.Width = mipWidth; mipDesc.Height = mipHeight; mipDesc.MipLevels = mipLevels; mipDesc.ArraySize = 1;
+        mipDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT; mipDesc.SampleDesc.Count = 1;
+        mipDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+        ComPtr<ID3D11Texture2D> mipTexture; ok(device->CreateTexture2D(&mipDesc, mipData, &mipTexture));
+        D3D11_SHADER_RESOURCE_VIEW_DESC mipViewDesc = {};
+        mipViewDesc.Format = mipDesc.Format; mipViewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+        mipViewDesc.Texture2DArray.MostDetailedMip = 0; mipViewDesc.Texture2DArray.MipLevels = mipLevels;
+        mipViewDesc.Texture2DArray.FirstArraySlice = 0; mipViewDesc.Texture2DArray.ArraySize = 1;
+        ComPtr<ID3D11ShaderResourceView> mipView; ok(device->CreateShaderResourceView(mipTexture.Get(), &mipViewDesc, &mipView));
+        context->CSSetShader(mipDimensionsShader.Get(),nullptr,0);
+        ID3D11ShaderResourceView* mipViews[] = {mipView.Get()};
+        context->CSSetShaderResources(127,1,mipViews);
+        dispatch(); ok(context->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped));
+        values = static_cast<const Pixel*>(mapped.pData);
+        for (UINT mip = 0; mip < mipLevels; ++mip)
+            for (unsigned c = 0; c < 4; ++c)
+                check(std::abs((&values[mip].r)[c]) < 1e-5f, "cached mip dimensions changed paint relief sampling");
+        context->Unmap(staging.Get(),0);
         tessSource = tessDefines + TerrainPaint::LayerHlsl(detiledHeight) + TerrainPaint::DetileHlsl() + tessSource + R"(
 RWStructuredBuffer<float4> testResults : register(u0);
 [numthreads(1,1,1)] void TestDetile(uint3 id : SV_DispatchThreadID)

@@ -44,6 +44,11 @@ It preserves the original VS/PS, atlas UV, COLOR0, native receiver bias, and
 texture bindings. Ogre owns the domain-stage auto constants; no new native
 address or competing D3D draw hook is introduced.
 
+For authored HD paint relief, the domain shader reads control/height-array
+dimensions once per evaluation and reuses the derived mip dimensions across
+all layer taps. The existing mip choice, bilinear heights, and analytic slopes
+are unchanged.
+
 ## Render bounds and lifetime
 
 Before attaching nonzero relief, the test pads finite native mesh AABBs and
