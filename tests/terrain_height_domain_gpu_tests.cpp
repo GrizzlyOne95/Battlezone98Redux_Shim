@@ -7,6 +7,7 @@
 #include <wrl/client.h>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -186,6 +187,121 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
             ID3D11ShaderResourceView* none=nullptr; context->DSSetShaderResources(126,1,&none); context->HSSetShaderResources(126,1,&none);
             context->DSSetShader(domain.Get(),nullptr,0);
         }
+        {
+            // The relief bake rides slot 125 under the same rules: bound to
+            // DS and HS, restored only while still ours, foreign SRVs kept.
+            BZROpenShim::TerrainHeight::DomainBinding binding;
+            auto baked=height_texture(device.Get(),3), previousBaked=height_texture(device.Get(),5), foreign=height_texture(device.Get(),4);
+            auto* previousBakedRaw=previousBaked.Get();
+            context->DSSetShaderResources(125,1,&previousBakedRaw); context->HSSetShaderResources(125,1,&previousBakedRaw);
+            binding.view=sentinel; binding.bakedView=baked; binding.domains.emplace_back(domain.Get());
+            context->DSSetShader(domain.Get(),nullptr,0); binding.Select(context.Get(),domain.Get());
+            check(binding.Bound(context.Get()),"relief bake not bound with the height array");
+            ComPtr<ID3D11ShaderResourceView> slot; context->HSGetShaderResources(125,1,&slot);
+            check(slot.Get()==baked.Get(),"relief bake not bound to the hull");
+            context->DSSetShaderResources(125,1,&previousBakedRaw);
+            check(!binding.Bound(context.Get()),"lost relief bake slot still reported bound");
+            auto* bakedRaw=baked.Get(); context->DSSetShaderResources(125,1,&bakedRaw);
+            context->DSSetShader(nullptr,nullptr,0); binding.Select(context.Get(),nullptr);
+            slot.Reset(); context->DSGetShaderResources(125,1,&slot);
+            check(slot.Get()==previousBaked.Get(),"foreign domain did not restore the DS relief bake slot");
+            slot.Reset(); context->HSGetShaderResources(125,1,&slot);
+            check(slot.Get()==previousBaked.Get(),"foreign domain did not restore the HS relief bake slot");
+            context->DSSetShader(domain.Get(),nullptr,0); binding.Select(context.Get(),domain.Get());
+            auto* foreignRaw=foreign.Get(); context->DSSetShaderResources(125,1,&foreignRaw); context->HSSetShaderResources(125,1,&foreignRaw);
+            context->DSSetShader(nullptr,nullptr,0); binding.Select(context.Get(),nullptr);
+            slot.Reset(); context->DSGetShaderResources(125,1,&slot);
+            check(slot.Get()==foreign.Get(),"relief bake restore overwrote a foreign DS writer");
+            slot.Reset(); context->HSGetShaderResources(125,1,&slot);
+            check(slot.Get()==foreign.Get(),"relief bake restore overwrote a foreign HS writer");
+            context->DSSetShader(domain.Get(),nullptr,0); binding.Select(context.Get(),domain.Get());
+            binding.Reset();
+            check(!binding.bakedView,"reset kept the relief bake view");
+            slot.Reset(); context->DSGetShaderResources(125,1,&slot);
+            check(slot.Get()==foreign.Get(),"mission cleanup failed to restore the prior relief bake slot");
+            ID3D11ShaderResourceView* none=nullptr; context->DSSetShaderResources(125,1,&none); context->HSSetShaderResources(125,1,&none);
+            context->DSSetShader(domain.Get(),nullptr,0);
+        }
+        {
+            // The native relief bake dispatch (TerrainHeight::DispatchReliefBake, the code
+            // the shim runs): it must put back a foreign compute shader, its t126/t127
+            // SRVs and its u0 UAV untouched, clear the dirty flag on the immediate
+            // context only, and do nothing on a deferred one.
+            using namespace BZROpenShim::TerrainHeight;
+            const auto refs=[](IUnknown* object){ object->AddRef(); return object->Release(); };
+            const auto computeShader=[&](const char* text){
+                ComPtr<ID3DBlob> code,errors;
+                HRESULT result=D3DCompile(text,std::strlen(text),nullptr,nullptr,nullptr,"main","cs_5_0",0,0,&code,&errors);
+                if (FAILED(result)&&errors) std::cerr<<static_cast<const char*>(errors->GetBufferPointer());
+                ok(result); ComPtr<ID3D11ComputeShader> shader;
+                ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader)); return shader;
+            };
+            const auto uavTexture=[&](UINT size,ComPtr<ID3D11Texture2D>& texture,ComPtr<ID3D11UnorderedAccessView>& uav){
+                D3D11_TEXTURE2D_DESC desc{}; desc.Width=desc.Height=size; desc.MipLevels=desc.ArraySize=desc.SampleDesc.Count=1;
+                desc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT; desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
+                ok(device->CreateTexture2D(&desc,nullptr,&texture)); ok(device->CreateUnorderedAccessView(texture.Get(),nullptr,&uav));
+            };
+            ReliefBake bake; DomainBinding binding; std::atomic<bool> dirty{true};
+            bake.shader=computeShader("RWTexture2D<float4> o:register(u0); Texture2D<float4> c:register(t126); Texture2D<float4> p:register(t127);"
+                "[numthreads(8,8,1)] void main(uint3 id:SV_DispatchThreadID){ o[id.xy]=float4(c.Load(int3(0,0,0)).r,p.Load(int3(0,0,0)).r,0,1); }");
+            uavTexture(16,bake.texture,bake.target); bake.width=bake.height=16;
+            binding.view=height_texture(device.Get(),1); binding.controlView=height_texture(device.Get(),3);
+            binding.domains.emplace_back(domain.Get());
+            auto foreignShader=computeShader("[numthreads(1,1,1)] void main(){}");
+            auto foreignControl=height_texture(device.Get(),4), foreignPaint=height_texture(device.Get(),5);
+            ComPtr<ID3D11Texture2D> foreignTexture; ComPtr<ID3D11UnorderedAccessView> foreignTarget; uavTexture(4,foreignTexture,foreignTarget);
+            ID3D11ShaderResourceView* foreignViews[2]={foreignControl.Get(),foreignPaint.Get()};
+            ID3D11UnorderedAccessView* foreignUav=foreignTarget.Get();
+            context->CSSetShader(foreignShader.Get(),nullptr,0); context->CSSetShaderResources(126,2,foreignViews);
+            context->CSSetUnorderedAccessViews(0,1,&foreignUav,nullptr);
+            const ULONG before[]={refs(foreignShader.Get()),refs(foreignControl.Get()),refs(foreignPaint.Get()),refs(foreignTarget.Get())};
+            // A deferred context never bakes, and keeps the work pending.
+            ComPtr<ID3D11DeviceContext> deferred; ok(device->CreateDeferredContext(0,&deferred));
+            check(!DispatchReliefBake(bake,binding,dirty,deferred.Get(),domain.Get())&&dirty.load()&&bake.dispatches==0,
+                "deferred context baked or cleared the dirty flag");
+            binding.Select(context.Get(),domain.Get());
+            check(binding.context.Get()==context.Get(),"bake test could not bind the owned domain first");
+            check(DispatchReliefBake(bake,binding,dirty,context.Get(),domain.Get()),"relief bake did not dispatch on the immediate context");
+            check(!dirty.load()&&bake.dispatches==1,"relief bake left the dirty flag set or did not count");
+            check(!binding.context&&binding.restores==1,"relief bake kept the domain binding while its UAV was bound");
+            {
+                // The kernel wrote (t126.r, t127.r, 0, 1): control (field 3, 1.5) then
+                // paint (field 1, texel 0,0), so swapped views or a missing UAV fail.
+                D3D11_TEXTURE2D_DESC bakeDesc{}; bake.texture->GetDesc(&bakeDesc);
+                bakeDesc.Usage=D3D11_USAGE_STAGING; bakeDesc.BindFlags=0; bakeDesc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+                ComPtr<ID3D11Texture2D> readback; ok(device->CreateTexture2D(&bakeDesc,nullptr,&readback));
+                context->CopyResource(readback.Get(),bake.texture.Get());
+                D3D11_MAPPED_SUBRESOURCE bakeMap{}; ok(context->Map(readback.Get(),0,D3D11_MAP_READ,0,&bakeMap));
+                uint16_t texel[4]; std::memcpy(texel,bakeMap.pData,sizeof(texel)); context->Unmap(readback.Get(),0);
+                const auto half=[](uint16_t h){
+                    const int exponent=(h>>10)&31; const float mantissa=float(h&1023);
+                    float value=exponent==0?std::ldexp(mantissa,-24):std::ldexp(1024+mantissa,exponent-25);
+                    return (h&0x8000)?-value:value; };
+                const float expectedPaint=.3f*.5f/64+.2f*.5f/64-.25f;
+                check(std::abs(half(texel[0])-1.5f)<1e-3f&&std::abs(half(texel[1])-expectedPaint)<1e-3f&&
+                    half(texel[2])==0&&half(texel[3])==1,"relief bake did not write control (t126) then paint (t127) into its target");
+            }
+            check(!DispatchReliefBake(bake,binding,dirty,context.Get(),domain.Get())&&bake.dispatches==1,"clean relief bake dispatched again");
+            ComPtr<ID3D11ComputeShader> shaderAfter; context->CSGetShader(&shaderAfter,nullptr,nullptr);
+            ID3D11ShaderResourceView* rawViews[2]{}; context->CSGetShaderResources(126,2,rawViews);
+            ComPtr<ID3D11ShaderResourceView> keepControl,keepPaint; keepControl.Attach(rawViews[0]); keepPaint.Attach(rawViews[1]);
+            ComPtr<ID3D11UnorderedAccessView> uavAfter; context->CSGetUnorderedAccessViews(0,1,&uavAfter);
+            check(shaderAfter.Get()==foreignShader.Get(),"relief bake did not restore the foreign compute shader");
+            check(keepControl.Get()==foreignControl.Get()&&keepPaint.Get()==foreignPaint.Get(),"relief bake did not restore the foreign t126/t127 views");
+            check(uavAfter.Get()==foreignTarget.Get(),"relief bake did not restore the foreign u0 view");
+            shaderAfter.Reset(); keepControl.Reset(); keepPaint.Reset(); uavAfter.Reset();
+            const ULONG after[]={refs(foreignShader.Get()),refs(foreignControl.Get()),refs(foreignPaint.Get()),refs(foreignTarget.Get())};
+            for (int i=0;i<4;++i) check(before[i]==after[i],"relief bake leaked or dropped a reference on a foreign object");
+            ID3D11ShaderResourceView* noViews[2]={}; ID3D11UnorderedAccessView* noUav=nullptr;
+            context->CSSetShader(nullptr,nullptr,0); context->CSSetShaderResources(126,2,noViews); context->CSSetUnorderedAccessViews(0,1,&noUav,nullptr);
+            context->DSSetShader(domain.Get(),nullptr,0);
+            // Sizing: exact lattice below the 4096 cap, a coarser covering step above it.
+            const auto lattice=SizeReliefBake(93,55,5.0f/7);
+            check(!lattice.capped&&lattice.step==double(5.0f/7)&&lattice.width==132&&lattice.height==78,"relief bake lattice size changed");
+            const auto capped=SizeReliefBake(20000,100,1);
+            check(capped.capped&&capped.width==4096&&std::abs(capped.step-20000.0/4095)<1e-9&&
+                (capped.width-1)*capped.step>=20000-1e-6&&capped.height<=4096,"relief bake cap did not coarsen the spacing");
+        }
         unsigned runs=0;
         for (int orientation=0;orientation<4;++orientation)
         for (float eye:{0.f,320.f})
@@ -306,7 +422,7 @@ void Capture(triangle TerrainTessVertex input[3],inout TriangleStream<TerrainTes
         check(hullPrimitives(0,0,true)>2,"hull culled a patch on screen");
         check(hullPrimitives(0,-1.1f-amplitude*.5f,true)>2,"hull culled a patch relief can raise into view");
         check(hullPrimitives(0,-1.1f-amplitude*1.5f,true)==0,"hull kept a patch below its relief reach");
-        std::cout<<"PASS: "<<runs<<" actual height-domain/SO runs; signed geometry, UV rotation/reflection, camera translation, normals/tangents/depth/shadow receivers, zero seams, invalid/missing textures, PS retention, split control slot and hull off-screen cull\n";
+        std::cout<<"PASS: "<<runs<<" actual height-domain/SO runs; signed geometry, UV rotation/reflection, camera translation, normals/tangents/depth/shadow receivers, zero seams, invalid/missing textures, PS retention, split control and relief bake slots and hull off-screen cull\n";
         return 0;
     }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }

@@ -372,6 +372,54 @@ float TerrainPaintReliefScale(float2 worldXZ)
     return isfinite(span) ? lerp(OPENSHIM_TESS_RELIEF_FLAT, 1.0, saturate(span / OPENSHIM_TESS_RELIEF_FULL)) : 1.0;
 }
 #endif
+
+#if (defined(OPENSHIM_PAINT_BAKE) || defined(OPENSHIM_PAINT_BAKED)) && !defined(OPENSHIM_RELIEF_BAKE_SPACING)
+#error The relief bake needs its texel spacing
+#endif
+#if defined(OPENSHIM_PAINT_BAKE)
+// Both functions above are static in world XZ, so one dispatch per paint
+// change stores them on the finest vertex lattice: texel (i,j) sits at
+// bounds.xy + (i,j) * spacing, where native vertices (bounds.xy + k * 5 m)
+// and integer-partitioned tessellated vertices land. Relief in xyz, the
+// hull's relief scale in w.
+RWTexture2D<float4> terrainReliefBakeOut : register(u0);
+[numthreads(8,8,1)]
+void TerrainReliefBake(uint3 id : SV_DispatchThreadID)
+{
+    uint width, height;
+    terrainReliefBakeOut.GetDimensions(width, height);
+    if (id.x >= width || id.y >= height) return;
+    float2 xz = OPENSHIM_PAINT_BOUNDS.xy + float2(id.xy) * OPENSHIM_RELIEF_BAKE_SPACING;
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+    float scale = TerrainPaintReliefScale(xz);
+#else
+    float scale = 1.0;
+#endif
+    terrainReliefBakeOut[id.xy] = float4(TerrainPaintRelief(xz), scale);
+}
+#endif
+
+#if defined(OPENSHIM_PAINT_BAKED)
+Texture2D<float4> terrainReliefBaked : register(t125);
+// Manual bilinear of the bake on its vertex lattice, clamped at its edge.
+// No sampler: the DS and HS have none of their own.
+float4 TerrainReliefBakedSample(float2 worldXZ)
+{
+    uint width, height;
+    terrainReliefBaked.GetDimensions(width, height);
+    if (!all(isfinite(worldXZ)) || width < 1 || height < 1) return float4(0, 0, 0, 1);
+    float2 pixel = clamp((worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / OPENSHIM_RELIEF_BAKE_SPACING,
+        0.0, float2(width, height) - 1.0);
+    int2 lo = int2(floor(pixel));
+    int2 hi = min(lo + 1, int2(width - 1, height - 1));
+    float2 f = pixel - float2(lo);
+    float4 a = terrainReliefBaked.Load(int3(lo, 0));
+    float4 b = terrainReliefBaked.Load(int3(hi.x, lo.y, 0));
+    float4 c = terrainReliefBaked.Load(int3(lo.x, hi.y, 0));
+    float4 d = terrainReliefBaked.Load(int3(hi, 0));
+    return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+}
+#endif
 #endif
 #endif
 
@@ -442,7 +490,9 @@ TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
     TerrainTessFactors f;
 #if defined(OPENSHIM_TESS_ADAPTIVE)
     float relief[3] = { 1.0, 1.0, 1.0 };
-#if defined(OPENSHIM_PAINT_HEIGHT)
+#if defined(OPENSHIM_PAINT_BAKED)
+    [unroll] for (int i = 0; i < 3; ++i) relief[i] = TerrainReliefBakedSample(p[i].hdUV).w;
+#elif defined(OPENSHIM_PAINT_HEIGHT)
     [unroll] for (int i = 0; i < 3; ++i) relief[i] = TerrainPaintReliefScale(p[i].hdUV);
 #endif
     f.edge[0] = TerrainAdaptiveEdge(p[1].position,p[2].position,tessViewport.xy,max(relief[1],relief[2]));
@@ -514,7 +564,11 @@ TerrainTessVertex TerrainDomain(TerrainTessFactors f, float3 b : SV_DomainLocati
 #if defined(OPENSHIM_PAINT_HEIGHT)
     // hdUV is world XZ and object XZ differs only by translation, so the
     // world-space gradient is already the object-space one.
+#if defined(OPENSHIM_PAINT_BAKED)
+    float3 relief = TerrainReliefBakedSample(o.hdUV).xyz;
+#else
     float3 relief = TerrainPaintRelief(o.hdUV);
+#endif
 #elif defined(OPENSHIM_HEIGHT_TEST)
     float3 relief = TerrainHeightRelief(o.uv,
         TerrainReliefObjectXZ(p[0].viewPosition, reliefInverseWorldView),

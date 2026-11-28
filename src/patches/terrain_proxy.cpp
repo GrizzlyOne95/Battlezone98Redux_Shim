@@ -26,6 +26,7 @@
 #include <Windows.h>
 #include <bcrypt.h>
 #include <d3d11.h>
+#include <d3dcompiler.h>
 #include <wrl/client.h>
 #include "terrain_height_texture.h"
 #include "terrain_height_domain_binding.h"
@@ -258,6 +259,7 @@ namespace BZROpenShim
             bool proxyVisible = true;
             bool tessellationTest = false;
             bool tessellationAdaptive = false;
+            bool tessellationReliefBake = false;
             std::string surfaceManifest;
             std::string geometryExport;
             bool geometryLive=false;
@@ -1019,6 +1021,7 @@ namespace BZROpenShim
                 config.semanticFrameCaptureMinCoverage = 0.005f;
             config.tessellationTest = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_TEST");
             config.tessellationAdaptive = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE");
+            config.tessellationReliefBake = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_RELIEF_BAKE");
             float targetPixels = 24.0f;
             if (ReadEnvFloat("OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS", targetPixels) &&
                 std::isfinite(targetPixels) && targetPixels >= 4.0f && targetPixels <= 64.0f)
@@ -6451,6 +6454,7 @@ float3 OpenShimSemanticTileColor(uint tileIndex)
     {
         if (!g_heightActive.load(std::memory_order_relaxed)) return;
         std::lock_guard<std::mutex> lock(g_heightMutex);
+        DispatchTerrainReliefBake(context, shader);
         g_heightBinding.Select(context, shader);
     }
 
