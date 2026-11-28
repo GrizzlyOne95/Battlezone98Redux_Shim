@@ -9,6 +9,14 @@
 #ifndef OPENSHIM_TESS_TARGET_PIXELS
 #define OPENSHIM_TESS_TARGET_PIXELS 24
 #endif
+// Most segments one native 5 m edge can get. Adaptive fractional-odd stops
+// at the odd count below the even cap (see TerrainAdaptiveEdge).
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+#define OPENSHIM_TESS_MAX_SEGMENTS max(1.0, (float)OPENSHIM_TESS_FACTOR - 1.0)
+#else
+#define OPENSHIM_TESS_MAX_SEGMENTS ((float)OPENSHIM_TESS_FACTOR)
+#endif
+#define OPENSHIM_TESS_FINEST_SPACING (5.0 / OPENSHIM_TESS_MAX_SEGMENTS)
 // Paint relief scales the adaptive request: layers that displace less than
 // RELIEF_FULL metres get proportionally fewer segments, down to RELIEF_FLAT.
 #ifndef OPENSHIM_TESS_RELIEF_FLAT
@@ -35,7 +43,7 @@ float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport, float relief)
 {
     // Adaptive caps are even (4/8); fractional-odd must stop at the prior
     // odd segment count so it never exceeds the configured cap.
-    float maxFactor = max(1.0, (float)OPENSHIM_TESS_FACTOR - 1.0);
+    float maxFactor = OPENSHIM_TESS_MAX_SEGMENTS;
     if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(viewport)) ||
         any(viewport <= 0.0) || any(viewport > 16384.0) || min(a.w,b.w) <= 0.0001)
         return maxFactor;
@@ -213,8 +221,8 @@ float4 TerrainPaintBilinear(Texture2DArray<float4> tex, float2 uv, uint slice, u
 uint TerrainPaintMip(float repeat, uint width, uint levels)
 {
     // Sample at roughly the finest tessellated vertex spacing (5 m native
-    // grid / factor); finer texels would only alias between vertices.
-    float spacing = 5.0 / OPENSHIM_TESS_FACTOR;
+    // grid / segments); finer texels would only alias between vertices.
+    float spacing = OPENSHIM_TESS_FINEST_SPACING;
     return uint(clamp(ceil(log2(max(spacing * width / repeat, 1.0))), 0.0, float(levels - 1)));
 }
 
@@ -333,14 +341,14 @@ float3 TerrainPaintRelief(float2 worldXZ)
     // without crater layers, and so no crater slope either, skips it.
     [branch] if (any(craterMix != 0))
     {
-        OpenShimCrater crater = OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR);
+        OpenShimCrater crater = OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, OPENSHIM_TESS_FINEST_SPACING);
         value += float3(crater.h * craterMix.x, crater.slope * craterMix.x + crater.h * craterMix.yz);
     }
 #endif
 #if defined(OPENSHIM_PAINT_DETAIL)
     [branch] if (any(detailMix != 0))
     {
-        OpenShimCrater detail = OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, 5.0 / OPENSHIM_TESS_FACTOR);
+        OpenShimCrater detail = OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, OPENSHIM_TESS_FINEST_SPACING);
         value += float3(detail.h * detailMix.x, detail.slope * detailMix.x + detail.h * detailMix.yz);
     }
 #endif
