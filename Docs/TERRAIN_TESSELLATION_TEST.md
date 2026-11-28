@@ -63,6 +63,7 @@ The environment-only controls are:
 | `OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME` | off | truthy enables |
 | `OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE` | off (on for micro relief) | truthy enables |
 | `OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS` | 24 | 4 through 64 |
+| `OPENSHIM_TERRAIN_TESSELLATION_RELIEF_BAKE` | off | truthy enables (paint height only) |
 
 The test disables the separate terrain proxy/HD/semantic experiments for its
 process. No persistent INI setting is added.

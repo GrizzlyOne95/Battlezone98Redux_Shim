@@ -325,6 +325,25 @@ bool InstallNativeTerrainTessellationTest()
             defines << "};\n";
             source = defines.str() + TerrainPaint::LayerHlsl(g_HdPaint) + TerrainPaint::DetileHlsl() +
                 TerrainPaint::CraterHlsl() + source;
+            if (g_config.tessellationReliefBake)
+            {
+                // One texel per finest tessellated vertex (OPENSHIM_TESS_MAX_SEGMENTS);
+                // bounds.xy is a native vertex, so the lattice matches the mesh.
+                // The kernel has no pass, so it takes by hand the pass defines the
+                // paint code reads. Audit: the pass defines the DS keeps (RelevantDefines
+                // of the VS preprocessor_defines, limited to names the shader mentions) are
+                // OPENSHIM_TERRAIN_HD, SHADOWRECEIVER, PSSM_ENABLED, VERTEX_LIGHTING,
+                // SPECULAR_ENABLED, SPECULARMAP_ENABLED, NORMALMAP_ENABLED, VERTEX_TANGENTS.
+                // Only OPENSHIM_TERRAIN_HD reaches the paint functions (the #error guard);
+                // the rest shape DS interpolants, and VERTEX_LIGHTING passes are skipped
+                // above. The OPENSHIM_* defines built in this function are already in source.
+                // Revisit if a pass define is ever read by the paint functions.
+                const int segments = g_config.tessellationAdaptive ?
+                    (std::max)(1, g_config.tessellationFactor - 1) : g_config.tessellationFactor;
+                source = "#define OPENSHIM_PAINT_BAKED 1\n" + PrepareTerrainReliefBake(buffer,
+                    "#define OPENSHIM_TERRAIN_HD 1\n#define OPENSHIM_PAINT_BAKE 1\n" + source,
+                    g_HdPaint.bounds, 5.0f / float(segments)) + source;
+            }
         }
         const bool domainTexture = textureHeight || paintHeight;
         void* materialManager = g_ogre.getMaterialManager();

@@ -1,11 +1,15 @@
 #include "terrain_paint.h"
+#include "terrain_height_domain_binding.h"
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -766,7 +770,144 @@ RWStructuredBuffer<float4> testResults : register(u0);
             if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
             ok(compiled);
         }
-        std::cout<<"PASS: split control array (pixel and domain parity), eight-layer banks and adaptive hull, close-up parallax, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
+        // Relief bake: the kernel stores relief and the hull's relief scale on
+        // the finest vertex lattice, texel (i,j) at bounds.xy + (i,j) * 5/7 m
+        // (factor 8 adaptive, 7 segments), in an RGBA16F target; the BAKED
+        // DS/HS read it back bilinearly. Varied control and heights over the
+        // slope test's bounds, 8 m repeats so the layer texels (2 m) are
+        // coarser than the bake spacing. Sizing and the spacing define as native.
+        TerrainPaint::Config bakedHeight = eightHeight; bakedHeight.repeatMeters = {8,8,8,8,8,8,8,8};
+        const float bakeSpacing = 5.0f / 7.0f;
+        const auto bakeSize = BZROpenShim::TerrainHeight::SizeReliefBake(93, 55, bakeSpacing);
+        const UINT bakeWidth = bakeSize.width, bakeHeight = bakeSize.height;
+        std::ostringstream spacingDefine; spacingDefine.imbue(std::locale::classic());
+        spacingDefine << std::setprecision(9) << std::scientific << "#define OPENSHIM_RELIEF_BAKE_SPACING " << bakeSpacing << "\n";
+        const std::string bakeTess = spacingDefine.str() + "#define OPENSHIM_RELIEF_TEST 1\n#define OPENSHIM_RELIEF_AMPLITUDE 100\n#define OPENSHIM_TERRAIN_HD 1\n"
+            "#define OPENSHIM_PAINT_HEIGHT 1\n#define OPENSHIM_PAINT_BOUNDS float4(-3,-5,90,50)\n#define OPENSHIM_PAINT_HEIGHT_SCALE 1\n"
+            "#define OPENSHIM_PAINT_CONTROL_SPLIT 1\n#define OPENSHIM_TESS_ADAPTIVE 1\n#define OPENSHIM_TESS_FACTOR 8\n"
+            "static const float openShimPaintReliefMeters[8] = {1,0,0,0,0,2,0,0};\n" +
+            TerrainPaint::LayerHlsl(bakedHeight) + TerrainPaint::DetileHlsl() + TerrainPaint::CraterHlsl() + tessRaw;
+        const std::string bakeKernel = "#define OPENSHIM_PAINT_BAKE 1\n" + bakeTess;
+        compiled = D3DCompile(bakeKernel.data(),bakeKernel.size(),nullptr,nullptr,nullptr,"TerrainReliefBake","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> bakeShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&bakeShader));
+        const std::string bakedTess = "#define OPENSHIM_PAINT_BAKED 1\n" + bakeTess;
+        for (const char* stage : {"TerrainHull", "TerrainDomain"})
+        {
+            compiled = D3DCompile(bakedTess.data(),bakedTess.size(),nullptr,nullptr,nullptr,stage,
+                stage[7] == 'H' ? "hs_5_0" : "ds_5_0",0,0,&code,&errors);
+            if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+            ok(compiled);
+        }
+        // Direct relief + scale and the baked sample, side by side: the first
+        // 4096 points sit on the bake lattice (the finest integer-partitioned
+        // vertices), the rest anywhere in bounds (adaptive fractional vertices).
+        constexpr UINT parityPoints = 8192, centrePoints = 4096;
+        const std::string parityKernel = bakedTess + R"(
+RWStructuredBuffer<float4> parityResults : register(u0);
+[numthreads(64,1,1)] void TestBaked(uint3 id : SV_DispatchThreadID)
+{ uint width, height; terrainReliefBaked.GetDimensions(width, height);
+  float2 span = OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy, xz;
+  if (id.x < 4096) xz = OPENSHIM_PAINT_BOUNDS.xy + float2((id.x * 7) % width, (id.x * 13) % height) * OPENSHIM_RELIEF_BAKE_SPACING;
+  else { float k = float(id.x - 4096); xz = OPENSHIM_PAINT_BOUNDS.xy + frac(float2(k * 0.6180339887, k * 0.7548776662) + 0.1234) * span; }
+  parityResults[id.x * 2] = float4(TerrainPaintRelief(xz), TerrainPaintReliefScale(xz));
+  parityResults[id.x * 2 + 1] = TerrainReliefBakedSample(xz); }
+)";
+        compiled = D3DCompile(parityKernel.data(),parityKernel.size(),nullptr,nullptr,nullptr,"TestBaked","cs_5_0",0,0,&code,&errors);
+        if (FAILED(compiled) && errors) std::cerr << static_cast<const char*>(errors->GetBufferPointer());
+        ok(compiled);
+        ComPtr<ID3D11ComputeShader> parityShader;
+        ok(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&parityShader));
+        std::vector<Pixel> bakeBanks = colourOnly, bakeControl(2*16);
+        for (unsigned i=0;i<16;++i)
+        {
+            for (unsigned l=0;l<8;++l) bakeBanks[(l/4*9+5+l%4)*16+i].a = float((i*(l+3)+l)%16)/15;
+            const float t = float((i*5)%16)/15;
+            bakeControl[i] = {1-t, 0, 0, 0}; bakeControl[16+i] = {0, t, 0, 0}; // layers 0 and 5
+        }
+        for(unsigned i=0;i<18;++i)bankData[i]={bakeBanks.data()+16*i,4*sizeof(Pixel),0};
+        ComPtr<ID3D11Texture2D> bakePaintTexture;ok(device->CreateTexture2D(&td,bankData,&bakePaintTexture));
+        ComPtr<ID3D11ShaderResourceView> bakePaintView;ok(device->CreateShaderResourceView(bakePaintTexture.Get(),nullptr,&bakePaintView));
+        controlData[0]={bakeControl.data(),4*sizeof(Pixel),0}; controlData[1]={bakeControl.data()+16,4*sizeof(Pixel),0};
+        ComPtr<ID3D11Texture2D> bakeControlTexture;ok(device->CreateTexture2D(&cd,controlData,&bakeControlTexture));
+        ComPtr<ID3D11ShaderResourceView> bakeControlView;ok(device->CreateShaderResourceView(bakeControlTexture.Get(),nullptr,&bakeControlView));
+        D3D11_TEXTURE2D_DESC bd2={}; bd2.Width=bakeWidth; bd2.Height=bakeHeight; bd2.MipLevels=bd2.ArraySize=bd2.SampleDesc.Count=1;
+        bd2.Format=DXGI_FORMAT_R16G16B16A16_FLOAT; bd2.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
+        ComPtr<ID3D11Texture2D> bakeTexture;ok(device->CreateTexture2D(&bd2,nullptr,&bakeTexture));
+        ComPtr<ID3D11ShaderResourceView> bakeView;ok(device->CreateShaderResourceView(bakeTexture.Get(),nullptr,&bakeView));
+        ComPtr<ID3D11UnorderedAccessView> bakeTarget;ok(device->CreateUnorderedAccessView(bakeTexture.Get(),nullptr,&bakeTarget));
+        ID3D11ShaderResourceView* bakeInputs[]={bakeControlView.Get(),bakePaintView.Get()};context->CSSetShaderResources(126,2,bakeInputs);
+        context->CSSetShader(bakeShader.Get(),nullptr,0);
+        ID3D11UnorderedAccessView* bakeWrite=bakeTarget.Get();context->CSSetUnorderedAccessViews(0,1,&bakeWrite,nullptr);
+        context->Dispatch((bakeWidth+7)/8,(bakeHeight+7)/8,1);
+        bakeWrite=nullptr;context->CSSetUnorderedAccessViews(0,1,&bakeWrite,nullptr);
+        D3D11_BUFFER_DESC pd={};pd.ByteWidth=parityPoints*2*sizeof(Pixel);pd.StructureByteStride=sizeof(Pixel);
+        pd.Usage=D3D11_USAGE_DEFAULT;pd.BindFlags=D3D11_BIND_UNORDERED_ACCESS;pd.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+        ComPtr<ID3D11Buffer> parityOutput;ok(device->CreateBuffer(&pd,nullptr,&parityOutput));
+        ComPtr<ID3D11UnorderedAccessView> parityUav;ok(device->CreateUnorderedAccessView(parityOutput.Get(),nullptr,&parityUav));
+        pd.Usage=D3D11_USAGE_STAGING;pd.BindFlags=pd.MiscFlags=pd.StructureByteStride=0;pd.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        ComPtr<ID3D11Buffer> parityStaging;ok(device->CreateBuffer(&pd,nullptr,&parityStaging));
+        ID3D11ShaderResourceView* bakedRead[]={bakeView.Get()};context->CSSetShaderResources(125,1,bakedRead);
+        context->CSSetShader(parityShader.Get(),nullptr,0);
+        ID3D11UnorderedAccessView* parityWrite=parityUav.Get();context->CSSetUnorderedAccessViews(0,1,&parityWrite,nullptr);
+        context->Dispatch(parityPoints/64,1,1);
+        parityWrite=nullptr;context->CSSetUnorderedAccessViews(0,1,&parityWrite,nullptr);
+        context->CopyResource(parityStaging.Get(),parityOutput.Get());
+        ok(context->Map(parityStaging.Get(),0,D3D11_MAP_READ,0,&mapped));
+        std::vector<Pixel> parity(parityPoints*2); std::memcpy(parity.data(),mapped.pData,parity.size()*sizeof(Pixel));
+        context->Unmap(parityStaging.Get(),0);
+        ID3D11ShaderResourceView* noBake[3]={}; context->CSSetShaderResources(125,3,noBake);
+        // fp16 keeps 11 significant bits (relative step 2^-11 ~ 4.9e-4).
+        const auto halfTolerance = [](float v) { return std::abs(v) * 1e-3f + 1e-3f; };
+        float slopeMax = 0, centreH = 0, centreScale = 0, centreSlope = 0, offH = 0, offHSum = 0, offSlope = 0, offSlopeSum = 0, offDirectSlopeSum = 0, offScale = 0, heightRange = 0;
+        for (UINT i=0;i<parityPoints;++i)
+        {
+            const Pixel& direct = parity[i*2]; const Pixel& baked = parity[i*2+1];
+            slopeMax = (std::max)(slopeMax, std::hypot(direct.g, direct.b));
+            heightRange = (std::max)(heightRange, std::abs(direct.r));
+            const float dh = std::abs(baked.r - direct.r), ds = std::abs(baked.a - direct.a);
+            const float dslope = std::hypot(baked.g - direct.g, baked.b - direct.b);
+            if (i < centrePoints)
+            {
+                check(dh <= halfTolerance(direct.r), "baked relief differs from direct on the vertex lattice");
+                check(ds <= halfTolerance(direct.a), "baked relief scale differs from direct on the vertex lattice");
+                check(dslope <= halfTolerance(std::hypot(direct.g, direct.b)), "baked slope differs from direct on the vertex lattice");
+                centreH = (std::max)(centreH, dh); centreScale = (std::max)(centreScale, ds); centreSlope = (std::max)(centreSlope, dslope);
+            }
+            else
+            {
+                offH = (std::max)(offH, dh); offHSum += dh; offSlope = (std::max)(offSlope, dslope); offSlopeSum += dslope;
+                offDirectSlopeSum += std::hypot(direct.g, direct.b);
+                offScale = (std::max)(offScale, ds);
+            }
+        }
+        check(heightRange > 0.5f && slopeMax > 0.1f, "relief bake test ground is flat, so parity proves nothing");
+        // Off the lattice: bilinear is a convex mix of the four surrounding
+        // texels, each within sqrt(2) * spacing of the point, and the relief is
+        // continuous with slope at most slopeMax, so the mix errs by at most
+        // sqrt(2) * spacing * slopeMax plus fp16 rounding. slopeMax is sampled,
+        // so it carries a 25% margin for the slope peak between samples.
+        const float offBound = std::sqrt(2.0f) * bakeSpacing * slopeMax * 1.25f + halfTolerance(heightRange);
+        check(offH <= offBound, "baked relief error off texel centres exceeds the bilinear bound");
+        // Slope is interpolated separately from height, so it jumps across layer
+        // texel edges: measured max 1.93 (slopeMax 2.01), mean 0.114, scale max
+        // 0.0034. The max check is only a sanity check (it passes even for a
+        // zero-slope bake); the mean check is the real one, tied to the mean
+        // direct slope so a bake with no slope fails it.
+        const float slopeBound = slopeMax * 1.25f + halfTolerance(slopeMax);
+        check(offSlope <= slopeBound, "baked slope error off the lattice exceeds its sanity bound");
+        const float offSlopeMean = offSlopeSum / (parityPoints - centrePoints), offDirectSlopeMean = offDirectSlopeSum / (parityPoints - centrePoints);
+        check(offDirectSlopeMean > 0.25f, "relief bake test ground has too little slope for the mean slope check");
+        check(offSlopeMean <= 0.5f * offDirectSlopeMean, "baked slope error off the lattice drifted on average");
+        check(offScale <= 0.01f, "baked relief scale error off the lattice exceeds its bound");
+        std::cout << "relief bake " << bakeWidth << "x" << bakeHeight << " spacing=" << bakeSpacing << " m slopeMax=" << slopeMax
+            << " |h|max=" << heightRange << "\n  lattice max |dh|=" << centreH << " |dslope|=" << centreSlope << " |dscale|=" << centreScale
+            << "\n  off-lattice |dh| max=" << offH << " mean=" << offHSum / (parityPoints - centrePoints) << " bound=" << offBound
+            << "\n  off-lattice |dslope| max=" << offSlope << " mean=" << offSlopeMean << " (mean direct |slope|=" << offDirectSlopeMean << ")"
+            << " |dscale| max=" << offScale << "\n";
+        std::cout<<"PASS: relief bake (vertex-lattice parity, bilinear bound, adaptive scale, BAKED DS/HS), split control array (pixel and domain parity), eight-layer banks and adaptive hull, close-up parallax, distance scale, macro variation and crater variants, crater and detail slopes, detile pixel/domain parity, triplanar walls and flat ground, native PS4 compilation, material slices, height-aware blend, four GPU layers, soft blends, edge clamp, normalisation, opaque output and explicit repetition\n";
         return 0;
     }
     catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}

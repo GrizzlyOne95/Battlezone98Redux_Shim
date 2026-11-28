@@ -327,6 +327,18 @@ height array as the domain shader (HS `t127`, bound and restored in step).
 `OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE=0` restores fixed subdivision; with
 adaptive on, `OPENSHIM_TERRAIN_TESSELLATION_FACTOR=8` raises the cap.
 
+`OPENSHIM_TERRAIN_TESSELLATION_RELIEF_BAKE=1` (off by default) bakes the paint
+relief and the hull's relief scale once into an RGBA16F texture on the finest
+tessellated vertex lattice (texel i at the bounds origin + i x 5 m / max
+segments, so integer-partitioned vertices read their own texel; past 4096
+texels per axis the spacing coarsens and the log says so), and the DS/HS read
+it bilinearly at `t125` instead of
+evaluating every layer per vertex. A compute pass re-bakes lazily on the next
+owned domain bind after the paint arrays are prepared or live paint uploads a
+new control map. Off the lattice, slope is interpolated separately from
+height, so normals approximate the displaced surface. A compile or resource
+failure declines tessellation, as any other install failure does.
+
 Nine 2048-pixel RGBA8 slices with full mips cost about 192 MiB of video memory;
 eighteen cost about 384 MiB. The separate control array keeps level 0
 only: every control read is `SampleLevel` or

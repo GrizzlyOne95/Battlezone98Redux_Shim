@@ -536,6 +536,7 @@ void UploadLivePaint(const std::vector<std::vector<uint8_t>>& images, UINT size)
             level.swap(next); w = half;
         }
     }
+    g_reliefBakeDirty.store(true); // the next owned domain bind re-bakes
 }
 
 // Uniform control images from the recipe's outsideWeights (default: layer 0).
