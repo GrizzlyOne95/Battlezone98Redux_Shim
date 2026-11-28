@@ -184,11 +184,9 @@ Texture2DArray<float4> terrainPaintControlArray : register(t126);
 // A bilinear tap and its exact derivative per unit of uv (piecewise constant
 // per texel, like the filter), so the relief's slope needs no extra taps.
 struct TerrainPaintTap { float4 v; float4 du; float4 dv; };
-TerrainPaintTap TerrainPaintBilinearGrad(Texture2DArray<float4> tex, float2 uv, uint slice, uint mip, bool wrap)
+TerrainPaintTap TerrainPaintBilinearGradSized(Texture2DArray<float4> tex, float2 uv, uint slice, uint mip, bool wrap, uint2 dimensions)
 {
-    uint width, height, elements, levels;
-    tex.GetDimensions(mip, width, height, elements, levels);
-    int2 size = int2(width, height);
+    int2 size = int2(dimensions);
     float2 pixel = (wrap ? frac(uv) : uv) * float2(size) - 0.5;
     // A clamped axis is flat past the edge texels.
     float2 inside = wrap ? 1.0 : step(0.0, pixel) * step(pixel, float2(size - 1));
@@ -208,15 +206,20 @@ TerrainPaintTap TerrainPaintBilinearGrad(Texture2DArray<float4> tex, float2 uv, 
     return t;
 }
 
+TerrainPaintTap TerrainPaintBilinearGrad(Texture2DArray<float4> tex, float2 uv, uint slice, uint mip, bool wrap)
+{
+    uint width, height, elements, levels;
+    tex.GetDimensions(mip, width, height, elements, levels);
+    return TerrainPaintBilinearGradSized(tex, uv, slice, mip, wrap, uint2(width, height));
+}
+
 float4 TerrainPaintBilinear(Texture2DArray<float4> tex, float2 uv, uint slice, uint mip, bool wrap)
 {
     return TerrainPaintBilinearGrad(tex, uv, slice, mip, wrap).v;
 }
 
-uint TerrainPaintMip(float repeat)
+uint TerrainPaintMip(float repeat, uint width, uint levels)
 {
-    uint width, height, elements, levels;
-    terrainPaintArray.GetDimensions(0, width, height, elements, levels);
     // Sample at roughly the finest tessellated vertex spacing (5 m native
     // grid / segments); finer texels would only alias between vertices.
     float spacing = OPENSHIM_TESS_FINEST_SPACING;
@@ -224,13 +227,12 @@ uint TerrainPaintMip(float repeat)
 }
 
 // Layer height and its slope per world metre.
-float3 TerrainPaintLayerHeightGrad(float2 worldXZ, float repeat, uint slice, bool detile)
+float3 TerrainPaintLayerHeightGrad(float2 worldXZ, float repeat, uint slice, bool detile, uint mip, uint2 dimensions)
 {
     float2 uv = worldXZ / repeat;
-    uint mip = TerrainPaintMip(repeat);
     if (!detile)
     {
-        TerrainPaintTap t = TerrainPaintBilinearGrad(terrainPaintArray, uv, slice, mip, true);
+        TerrainPaintTap t = TerrainPaintBilinearGradSized(terrainPaintArray, uv, slice, mip, true, dimensions);
         return float3(t.v.a, float2(t.du.a, t.dv.a) / repeat);
     }
     // Same offsets as the pixel shader's top projection; outside the band
@@ -239,12 +241,12 @@ float3 TerrainPaintLayerHeightGrad(float2 worldXZ, float repeat, uint slice, boo
     float3 a = 0, b = 0;
     [branch] if (d.t < 1)
     {
-        TerrainPaintTap t = TerrainPaintBilinearGrad(terrainPaintArray, uv + d.a, slice, mip, true);
+        TerrainPaintTap t = TerrainPaintBilinearGradSized(terrainPaintArray, uv + d.a, slice, mip, true, dimensions);
         a = float3(t.v.a, t.du.a, t.dv.a);
     }
     [branch] if (d.t > 0)
     {
-        TerrainPaintTap t = TerrainPaintBilinearGrad(terrainPaintArray, uv + d.b, slice, mip, true);
+        TerrainPaintTap t = TerrainPaintBilinearGradSized(terrainPaintArray, uv + d.b, slice, mip, true, dimensions);
         b = float3(t.v.a, t.du.a, t.dv.a);
     }
     float3 h = lerp(a, b, d.t);
@@ -254,7 +256,11 @@ float3 TerrainPaintLayerHeightGrad(float2 worldXZ, float repeat, uint slice, boo
 
 float TerrainPaintLayerHeight(float2 worldXZ, float repeat, uint slice, bool detile)
 {
-    return TerrainPaintLayerHeightGrad(worldXZ, repeat, slice, detile).x;
+    uint width, height, elements, levels;
+    terrainPaintArray.GetDimensions(0, width, height, elements, levels);
+    uint mip = TerrainPaintMip(repeat, width, levels);
+    uint2 dimensions = max(uint2(width, height) >> mip, 1);
+    return TerrainPaintLayerHeightGrad(worldXZ, repeat, slice, detile, mip, dimensions).x;
 }
 
 // Height and its world XZ slope from one evaluation: every step (bilinear
@@ -264,13 +270,19 @@ float TerrainPaintLayerHeight(float2 worldXZ, float repeat, uint slice, bool det
 float3 TerrainPaintRelief(float2 worldXZ)
 {
     if (!all(isfinite(worldXZ))) return 0.0;
+    uint paintWidth, paintHeight, paintElements, paintLevels;
+    terrainPaintArray.GetDimensions(0, paintWidth, paintHeight, paintElements, paintLevels);
+    uint controlWidth, controlHeight, controlElements, controlLevels;
+    TERRAIN_PAINT_CONTROL_ARRAY.GetDimensions(0, controlWidth, controlHeight, controlElements, controlLevels);
+    uint2 controlDimensions = uint2(controlWidth, controlHeight);
     float2 span = OPENSHIM_PAINT_BOUNDS.zw - OPENSHIM_PAINT_BOUNDS.xy;
     float2 paintUV = (worldXZ - OPENSHIM_PAINT_BOUNDS.xy) / span;
     float3 control[OPENSHIM_PAINT_LAYERS];
     float3 total = 0;
     [unroll] for (int b = 0; b < OPENSHIM_PAINT_LAYERS / 4; ++b)
     {
-        TerrainPaintTap t = TerrainPaintBilinearGrad(TERRAIN_PAINT_CONTROL_ARRAY, paintUV, TERRAIN_PAINT_CONTROL_SLICE(b), 0, false);
+        TerrainPaintTap t = TerrainPaintBilinearGradSized(TERRAIN_PAINT_CONTROL_ARRAY, paintUV,
+            TERRAIN_PAINT_CONTROL_SLICE(b), 0, false, controlDimensions);
         [unroll] for (int c = 0; c < 4; ++c)
         {
             control[b * 4 + c] = t.v[c] > 0 ? float3(t.v[c], t.du[c] / span.x, t.dv[c] / span.y) : 0.0;
@@ -291,7 +303,12 @@ float3 TerrainPaintRelief(float2 worldXZ)
     {
         heights[i] = float3(0.5, 0, 0);
         [branch] if (OpenShimPaintPresent(weights, i))
-            heights[i] = TerrainPaintLayerHeightGrad(worldXZ, openShimPaintRepeats[i], uint(OpenShimPaintSlice(i, 5)), openShimPaintDetile[i] > 0);
+        {
+            uint mip = TerrainPaintMip(openShimPaintRepeats[i], paintWidth, paintLevels);
+            uint2 dimensions = max(uint2(paintWidth, paintHeight) >> mip, 1);
+            heights[i] = TerrainPaintLayerHeightGrad(worldXZ, openShimPaintRepeats[i],
+                uint(OpenShimPaintSlice(i, 5)), openShimPaintDetile[i] > 0, mip, dimensions);
+        }
     }
     // OpenShimPaintSelect, differentiated: it is piecewise linear.
     float3 lifted[OPENSHIM_PAINT_LAYERS];
