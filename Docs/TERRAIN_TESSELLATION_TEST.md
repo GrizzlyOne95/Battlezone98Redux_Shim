@@ -59,15 +59,17 @@ The environment-only controls are:
 | Variable | Default | Accepted values |
 |---|---|---|
 | `OPENSHIM_TERRAIN_TESSELLATION_TEST` | off | truthy enables |
-| `OPENSHIM_TERRAIN_TESSELLATION_FACTOR` | 2 | 1, 2, 4 |
+| `OPENSHIM_TERRAIN_TESSELLATION_FACTOR` | 2 | 1, 2, 4 (8 with adaptive) |
 | `OPENSHIM_TERRAIN_TESSELLATION_WIREFRAME` | off | truthy enables |
+| `OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE` | off (on for micro relief) | truthy enables |
+| `OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS` | 24 | 4 through 64 |
 
 The test disables the separate terrain proxy/HD/semantic experiments for its
 process. No persistent INI setting is added.
 
 ## Evidence and limits
 
-The shader check compiles 110 shaders: ten declared terrain permutations,
+The shader check compiles 160 shaders: ten declared terrain permutations,
 baseline factors 1/2/4 and micro relief factors 2/4. It checks semantic names, indices, types, registers and masks
 across VS -> HS -> DS using OGRE-compatible compiler flags. Runtime compilation
 is audited separately. `SV_POSITION`'s system-value tag is normalized only at
@@ -85,6 +87,13 @@ query covers a submission region, not a guaranteed single draw; auxiliary work
 between topology selections can contribute to the counters.
 Failed pixel/coverage samples advance through later terrain operations so
 the first occluded cluster is not repeatedly sampled on successive frames.
+
+The micro-relief preset uses the adaptive hull with `fractional_odd`
+partitioning: a one-segment minimum, 24-pixel projected-edge target, and at
+most three odd segments under its factor-4 cap. The Windows WARP adaptive test
+checks the distant one-segment case against fixed factor 2 and verifies
+coverage across a shared diagonal. This is a tessellation-work optimization,
+not evidence of a mission-level GPU-time improvement.
 
 The harness requires 12,800 IA patches, positive hull/domain activity, at least
 1,024 pixel invocations and 128 clipped primitives, material restoration and clean exit.
@@ -121,6 +130,6 @@ sweeps, deformation and full rebuilds, A -> B -> A,
 profile/quality changes, device recreation, and Steam/Proton/Wine coverage.
 The separate [micro relief test](TERRAIN_MICRO_RELIEF_TEST.md) now adds bounded
 static displacement and updates render bounds/normals; the user confirmed
-stable ground in the corrected local GOG camera-motion test. Adaptive factors,
-authored height art and broader qualification remain future work.
+stable ground in the corrected local GOG camera-motion test. Broad visual and
+performance qualification remains future work.
 See [the research](TERRAIN_VISUAL_TESSELLATION_RESEARCH.md).

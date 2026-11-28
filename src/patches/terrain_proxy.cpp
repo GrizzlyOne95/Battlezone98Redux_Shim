@@ -263,7 +263,7 @@ namespace BZROpenShim
             bool geometryLive=false;
             bool geometryEntities=false;
             bool geometryBuildings=false;
-            float tessellationTargetPixels = 12.0f;
+            float tessellationTargetPixels = 24.0f;
             bool tessellationWireframe = false;
             int tessellationFactor = 2;
             bool microReliefTest = false;
@@ -1019,7 +1019,7 @@ namespace BZROpenShim
                 config.semanticFrameCaptureMinCoverage = 0.005f;
             config.tessellationTest = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_TEST");
             config.tessellationAdaptive = IsEnvEnabled("OPENSHIM_TERRAIN_TESSELLATION_ADAPTIVE");
-            float targetPixels = 12.0f;
+            float targetPixels = 24.0f;
             if (ReadEnvFloat("OPENSHIM_TERRAIN_TESSELLATION_TARGET_PIXELS", targetPixels) &&
                 std::isfinite(targetPixels) && targetPixels >= 4.0f && targetPixels <= 64.0f)
                 config.tessellationTargetPixels = targetPixels;

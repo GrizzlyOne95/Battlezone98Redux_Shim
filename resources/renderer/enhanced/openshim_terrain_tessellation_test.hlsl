@@ -7,8 +7,16 @@
 #define OPENSHIM_RELIEF_AMPLITUDE 0
 #endif
 #ifndef OPENSHIM_TESS_TARGET_PIXELS
-#define OPENSHIM_TESS_TARGET_PIXELS 12
+#define OPENSHIM_TESS_TARGET_PIXELS 24
 #endif
+// Most segments one native 5 m edge can get. Adaptive fractional-odd stops
+// at the odd count below the even cap (see TerrainAdaptiveEdge).
+#if defined(OPENSHIM_TESS_ADAPTIVE)
+#define OPENSHIM_TESS_MAX_SEGMENTS max(1.0, (float)OPENSHIM_TESS_FACTOR - 1.0)
+#else
+#define OPENSHIM_TESS_MAX_SEGMENTS ((float)OPENSHIM_TESS_FACTOR)
+#endif
+#define OPENSHIM_TESS_FINEST_SPACING (5.0 / OPENSHIM_TESS_MAX_SEGMENTS)
 // Paint relief scales the adaptive request: layers that displace less than
 // RELIEF_FULL metres get proportionally fewer segments, down to RELIEF_FLAT.
 #ifndef OPENSHIM_TESS_RELIEF_FLAT
@@ -33,15 +41,18 @@ float4 tessViewport;
 // relief is the larger of the two endpoints' own paint relief scales.
 float TerrainAdaptiveEdge(float4 a, float4 b, float2 viewport, float relief)
 {
+    // Adaptive caps are even (4/8); fractional-odd must stop at the prior
+    // odd segment count so it never exceeds the configured cap.
+    float maxFactor = OPENSHIM_TESS_MAX_SEGMENTS;
     if (!all(isfinite(a)) || !all(isfinite(b)) || !all(isfinite(viewport)) ||
         any(viewport <= 0.0) || any(viewport > 16384.0) || min(a.w,b.w) <= 0.0001)
-        return OPENSHIM_TESS_FACTOR;
+        return maxFactor;
     float2 pixels = (a.xy / a.w - b.xy / b.w) * viewport * 0.5;
     float extent = length(pixels);
-    if (!isfinite(extent)) return OPENSHIM_TESS_FACTOR;
-    // Fractional-even retains at least two segments and moves new samples
-    // continuously between 2 and the configured cap. Never cull invalid edges.
-    return clamp(extent / OPENSHIM_TESS_TARGET_PIXELS * relief, 2.0, OPENSHIM_TESS_FACTOR);
+    if (!isfinite(extent)) return maxFactor;
+    // Fractional-odd allows distant edges to use one segment and transitions
+    // continuously up to the largest odd count under the configured cap.
+    return clamp(extent / OPENSHIM_TESS_TARGET_PIXELS * relief, 1.0, maxFactor);
 }
 #endif
 
@@ -207,8 +218,8 @@ uint TerrainPaintMip(float repeat)
     uint width, height, elements, levels;
     terrainPaintArray.GetDimensions(0, width, height, elements, levels);
     // Sample at roughly the finest tessellated vertex spacing (5 m native
-    // grid / factor); finer texels would only alias between vertices.
-    float spacing = 5.0 / OPENSHIM_TESS_FACTOR;
+    // grid / segments); finer texels would only alias between vertices.
+    float spacing = OPENSHIM_TESS_FINEST_SPACING;
     return uint(clamp(ceil(log2(max(spacing * width / repeat, 1.0))), 0.0, float(levels - 1)));
 }
 
@@ -313,14 +324,14 @@ float3 TerrainPaintRelief(float2 worldXZ)
     // without crater layers, and so no crater slope either, skips it.
     [branch] if (any(craterMix != 0))
     {
-        OpenShimCrater crater = OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, 5.0 / OPENSHIM_TESS_FACTOR);
+        OpenShimCrater crater = OpenShimCraterField(worldXZ, OPENSHIM_PAINT_CRATERS, OPENSHIM_TESS_FINEST_SPACING);
         value += float3(crater.h * craterMix.x, crater.slope * craterMix.x + crater.h * craterMix.yz);
     }
 #endif
 #if defined(OPENSHIM_PAINT_DETAIL)
     [branch] if (any(detailMix != 0))
     {
-        OpenShimCrater detail = OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, 5.0 / OPENSHIM_TESS_FACTOR);
+        OpenShimCrater detail = OpenShimDetailField(worldXZ, OPENSHIM_PAINT_DETAIL, OPENSHIM_TESS_FINEST_SPACING);
         value += float3(detail.h * detailMix.x, detail.slope * detailMix.x + detail.h * detailMix.yz);
     }
 #endif
@@ -434,7 +445,7 @@ TerrainTessFactors TerrainPatchConstants(InputPatch<TerrainTessVertex, 3> p)
 
 [domain("tri")]
 #if defined(OPENSHIM_TESS_ADAPTIVE)
-[partitioning("fractional_even")]
+[partitioning("fractional_odd")]
 #else
 [partitioning("integer")]
 #endif

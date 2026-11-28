@@ -4,7 +4,8 @@ Experimental, off by default. The OpenShim Options page exposes **Terrain
 Tessellation** (formerly labelled Micro Relief / Micro Detail) on page 1,
 beside the DX11 rendering controls. Its On/Off choice saves
 `[Terrain] TerrainMicroRelief = 0/1` in `openshim.ini` (the key keeps its old
-name) and takes effect after a game restart. On uses factor 4 and the
+name) and takes effect after a game restart. On uses adaptive screen-space
+tessellation with a factor-4 cap (up to 3 odd segments) and the
 0.25-world-unit relief preset. DX11 is required; unsupported
 renderer/build/terrain contracts retain native terrain.
 
@@ -72,7 +73,7 @@ factor/wireframe controls. An explicit process value for
 runs, including a flat control when the UI choice is On. Without an override,
 the saved setting applies. Amplitude/factor overrides remain developer controls.
 
-The shader linkage check compiles 110 shaders across ten native permutations,
+The shader linkage check compiles 160 shaders across ten native permutations,
 baseline factors 1/2/4 and relief factors 2/4. The Windows CTest
 `terrain_microrelief_gpu_tests` executes the shipped HLSL on Microsoft's WARP
 device and checks amplitude bounds, zero fallback, cluster phase agreement,
@@ -109,9 +110,16 @@ stale-config checks, but failed updater precedence: this branch's shim version
 1.0.0.34 is older than the installed mod's bundled 1.0.0.46. Use full redeployment
 before subsequent tests; this checkpoint does not bump a release version.
 
+The adaptive relief preset uses `fractional_odd` partitioning, a one-segment
+minimum and a 24-pixel projected-edge target. This reduces distant tessellation
+relative to the former two-segment floor; the even factor-4 cap maps to three
+segments. WARP coverage checks one-segment generation against fixed factor 2
+and verifies shared-diagonal raster coverage. Mission-level GPU impact remains
+unmeasured.
+
 Remaining qualification includes controlled moving-camera image comparisons, terrain
 overlaps/cluster edges, slopes and foundation/bridge/water contacts, height-only
 deformation, full rebuilds, mission hops, auxiliary passes, device recreation,
-GPU cost, and Steam/Proton/Wine. Fixed factor 4 is expensive; distance-based
-subdivision and material-specific art remain future work. The small amplitude
-limits visible gameplay-surface mismatch but cannot eliminate it.
+GPU timing, and Steam/Proton/Wine. The lower maximum odd segment count may
+reduce relief detail at close range. The small amplitude limits visible
+gameplay-surface mismatch but cannot eliminate it.
