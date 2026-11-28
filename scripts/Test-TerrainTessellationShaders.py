@@ -91,7 +91,7 @@ def main():
                     f"{index}-{factor}-{'relief' if relief else 'baseline'}-{'adaptive' if adaptive else 'fixed'}-{stage}",
                     ["/D", f"OPENSHIM_TESS_FACTOR={factor}"] +
                     (["/D", "OPENSHIM_RELIEF_TEST=1", "/D", "OPENSHIM_RELIEF_AMPLITUDE=0.25"] if relief else []) +
-                    (["/D", "OPENSHIM_TESS_ADAPTIVE=1", "/D", "OPENSHIM_TESS_TARGET_PIXELS=12"] if adaptive else []))
+                    (["/D", "OPENSHIM_TESS_ADAPTIVE=1", "/D", "OPENSHIM_TESS_TARGET_PIXELS=24"] if adaptive else []))
             for stage in ("hs", "ds"):
                 for tag in (b"ISGN", b"OSGN"):
                     actual = signature(stage_files[stage], tag,
